@@ -159,6 +159,28 @@ func childRunID(c Call) string {
 	return c.RunID + "/" + seg + "/" + c.CallID
 }
 
+// subagentKey marks the context Subagent hands its child run with the
+// call it serves (O11): the run started on it is that call's subagent
+// — weft.parent.run.id / weft.parent.call.id. Any other run started on
+// a tool call's context (a thread/pool child session's turn, another
+// agent's Generate inside a handler) carries the call, not this mark,
+// and records weft.caller.run.id / weft.caller.call.id instead: a link,
+// not parenthood (runLinkAttrs). The mark holds the Call itself, so a
+// run nested under the child's own tool calls — a new Call on ctx —
+// never reads as the subagent.
+type subagentKey struct{}
+
+func withSubagentCall(ctx context.Context, c Call) context.Context {
+	return context.WithValue(ctx, subagentKey{}, c)
+}
+
+// subagentOf reports whether the run started on ctx is a Subagent's
+// child: the call ctx carries is the one Subagent marked.
+func subagentOf(ctx context.Context, c Call) bool {
+	m, ok := ctx.Value(subagentKey{}).(Call)
+	return ok && m == c
+}
+
 // usageOf returns a finished (or failed) run's total usage: the partial
 // usage of a failed child counts toward its parent's bill, so the
 // RunError's result is consulted when the run returned no result.
@@ -237,7 +259,7 @@ func Subagent(name, description string, child *Agent, opts ...ToolOption) *ToolD
 		n := nestFromContext(ctx)
 		cfg := runConfig{id: childRunID(call), messages: []Message{User(in.Prompt)}}
 		cfg.finish()
-		res, err := child.execute(ctx, cfg, n.sink())
+		res, err := child.execute(withSubagentCall(ctx, call), cfg, n.sink())
 		n.record(usageOf(res, err))
 		switch {
 		case err != nil:

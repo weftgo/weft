@@ -569,10 +569,11 @@ func getUntil(t *testing.T, ts *httptest.Server, path string, v any, ok func() b
 }
 
 // TestCostPoolChild: a thread/pool child session's run carries
-// weft.parent.run.id = the parent run (obsdb lists it as a child), but
-// the core never rolled its usage into the parent's (rule 13's pool
-// exception). The parent's own figure is its own usage priced, nothing
-// is delegated, and the child's session is priced on its own run.
+// weft.caller.run.id = the parent run (O11: a caller link, listed in the
+// run page's caller_linked, never among its children), and the core
+// never rolled its usage into the parent's (rule 13's pool exception).
+// The parent's own figure is its own usage priced, nothing is
+// delegated, and the child's session is priced on its own run.
 func TestCostPoolChild(t *testing.T) {
 	srv, ts, p := pricedServer(t,
 		ModelPrice{Provider: "wefttest", ModelGlob: "parent-m", Input: 1000, Output: 2000},
@@ -617,27 +618,29 @@ func TestCostPoolChild(t *testing.T) {
 
 	var doc struct {
 		costRow
-		Children []costRow `json:"children"`
+		Children     []costRow `json:"children"`
+		CallerLinked []costRow `json:"caller_linked"`
 	}
-	getUntil(t, ts, "/api/runs/"+res.ID, &doc, func() bool { return len(doc.Children) == 1 && doc.CostKnown })
+	getUntil(t, ts, "/api/runs/"+res.ID, &doc, func() bool { return len(doc.CallerLinked) == 1 && doc.CostKnown })
+	if len(doc.Children) != 0 {
+		t.Errorf("pool parent children = %+v, want none: a pool child is no Subagent child", doc.Children)
+	}
 	// own: 20 × $1000 + 10 × $2000 = 40,000 ÷ 1M = $0.04 — not reduced by
 	// the pool child's 10/5; delegated: 0, the child is not a Subagent.
 	if usd(doc.CostUSD) != "0.04" || usd(doc.DelegatedCostUSD) != "0" || !doc.DelegatedCostKnown {
-		t.Errorf("pool parent: own %s delegated %s, want 0.04 and 0 (the pool child %s is listed, not subtracted)",
-			usd(doc.CostUSD), usd(doc.DelegatedCostUSD), doc.Children[0].ID)
+		t.Errorf("pool parent: own %s delegated %s, want 0.04 and 0 (the pool child %s is linked, not subtracted)",
+			usd(doc.CostUSD), usd(doc.DelegatedCostUSD), doc.CallerLinked[0].ID)
 	}
 	// The pool child's own row: 10 × $100 + 5 × $200 = 2,000 ÷ 1M = $0.002.
-	if usd(doc.Children[0].CostUSD) != "0.002" {
-		t.Errorf("pool child row: own %s, want 0.002", usd(doc.Children[0].CostUSD))
+	if usd(doc.CallerLinked[0].CostUSD) != "0.002" {
+		t.Errorf("pool child row: own %s, want 0.002", usd(doc.CallerLinked[0].CostUSD))
 	}
-	// The child's session is priced on that run: a turn of its session,
-	// its parent being in another session. (obsdb groups a session over
-	// top-level runs only, so /api/sessions/{child} is 404 today — the
-	// figure is read through sessionCost, the session routes' rule.)
+	// The child's session is priced on that run: a turn of its own
+	// session (TestPoolChildSession reads the session routes).
 	var childRow struct {
 		SessionID string `json:"session_id"`
 	}
-	getUntil(t, ts, "/api/runs/"+doc.Children[0].ID, &childRow, func() bool { return true })
+	getUntil(t, ts, "/api/runs/"+doc.CallerLinked[0].ID, &childRow, func() bool { return true })
 	if childRow.SessionID != childSession {
 		t.Fatalf("the pool child's run carries session %q, want the child session %s", childRow.SessionID, childSession)
 	}
@@ -653,8 +656,9 @@ func TestCostPoolChild(t *testing.T) {
 }
 
 // TestCostNestedGenerate: another agent's Generate inside a tool
-// handler is linked to the run (weft.parent.run.id) but never rolled
-// up: the parent's own figure is its own usage, nothing delegated.
+// handler is linked to the run (weft.caller.run.id, O11: caller_linked,
+// not children) but never rolled up: the parent's own figure is its own
+// usage, nothing delegated.
 func TestCostNestedGenerate(t *testing.T) {
 	_, ts, p := pricedServer(t,
 		ModelPrice{Provider: "wefttest", ModelGlob: "parent-m", Input: 1000, Output: 2000},
@@ -684,15 +688,16 @@ func TestCostNestedGenerate(t *testing.T) {
 	}
 	var doc struct {
 		costRow
-		Children []costRow `json:"children"`
+		Children     []costRow `json:"children"`
+		CallerLinked []costRow `json:"caller_linked"`
 	}
-	getUntil(t, ts, "/api/runs/"+res.ID, &doc, func() bool { return len(doc.Children) == 1 && doc.CostKnown })
-	if strings.HasPrefix(doc.Children[0].ID, res.ID+"/") {
-		t.Fatalf("the nested run %s carries the Subagent id shape", doc.Children[0].ID)
+	getUntil(t, ts, "/api/runs/"+res.ID, &doc, func() bool { return len(doc.CallerLinked) == 1 && doc.CostKnown })
+	if len(doc.Children) != 0 || strings.HasPrefix(doc.CallerLinked[0].ID, res.ID+"/") {
+		t.Fatalf("the nested run: children %+v, caller-linked %s — want it caller-linked, never a Subagent child", doc.Children, doc.CallerLinked[0].ID)
 	}
-	if usd(doc.CostUSD) != "0.04" || usd(doc.DelegatedCostUSD) != "0" || usd(doc.Children[0].CostUSD) != "0.002" {
+	if usd(doc.CostUSD) != "0.04" || usd(doc.DelegatedCostUSD) != "0" || usd(doc.CallerLinked[0].CostUSD) != "0.002" {
 		t.Errorf("nested Generate: own %s delegated %s nested %s, want 0.04, 0 and 0.002 on its own row",
-			usd(doc.CostUSD), usd(doc.DelegatedCostUSD), usd(doc.Children[0].CostUSD))
+			usd(doc.CostUSD), usd(doc.DelegatedCostUSD), usd(doc.CallerLinked[0].CostUSD))
 	}
 }
 

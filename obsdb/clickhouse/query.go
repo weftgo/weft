@@ -33,7 +33,7 @@ const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, 
 	CachedInputTokens, CacheWriteTokens, ReasoningTokens, DeltaCount,
 	InstructionsHash, CatalogHash, RequestCount, Derived, RootEnded,
 	StoppedBy, CancelCause, EventsEmitted, MessagesEmitted, ErrorType, Problems,
-	ResumedFrom`
+	ResumedFrom, CallerRunID, CallerCallID`
 
 // runAggregates is the same list as a GROUP BY RunId select: max for
 // identity strings, flags, usage and last-seen; min for started — the
@@ -54,7 +54,7 @@ const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID)
 	max(StoppedBy) AS StoppedBy, max(CancelCause) AS CancelCause,
 	max(EventsEmitted) AS EventsEmitted, max(MessagesEmitted) AS MessagesEmitted,
 	max(ErrorType) AS ErrorType, groupUniqArrayArray(Problems) AS Problems,
-	max(ResumedFrom) AS ResumedFrom`
+	max(ResumedFrom) AS ResumedFrom, max(CallerRunID) AS CallerRunID, max(CallerCallID) AS CallerCallID`
 
 // statusCase is the four-row table in SQL over weft_runs' columns: it
 // must agree with obsdb.DeriveStatus, whose test pins the boundaries —
@@ -183,9 +183,13 @@ func runsInner(q obsdb.RunQuery) (string, []any) {
 	if q.PublicID != "" {
 		eq("PublicID", q.PublicID)
 	}
+	if q.CallerRunID != "" {
+		eq("CallerRunID", q.CallerRunID)
+	}
 	switch q.ParentRunID {
 	case "":
-		conds = append(conds, "ParentRunID = ''")
+		// Top-level: no Subagent parent, no caller link (O11).
+		conds = append(conds, "ParentRunID = '' AND CallerRunID = ''")
 	case "*":
 	default:
 		eq("ParentRunID", q.ParentRunID)
@@ -304,7 +308,7 @@ func (d *DB) queryRunRows(ctx context.Context, now time.Time, sql string, args .
 			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
 			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &s.Derived, &s.RootEnded,
 			&s.StoppedBy, &s.CancelCause, &s.EventsEmitted, &s.MessagesEmitted,
-			&s.ErrorType, &s.Problems, &s.ResumedFrom); err != nil {
+			&s.ErrorType, &s.Problems, &s.ResumedFrom, &s.CallerRunID, &s.CallerCallID); err != nil {
 			return nil, err
 		}
 		row, err := s.row(now)
@@ -338,6 +342,7 @@ type runScan struct {
 	ErrorType                                          string
 	Problems                                           []string
 	ResumedFrom                                        string
+	CallerRunID, CallerCallID                          string
 }
 
 func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
@@ -347,8 +352,8 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		ManifestHash: s.ManifestHash, WeftVersion: s.WeftVersion, Service: s.Service,
 		SessionID: s.SessionID, PublicID: s.PublicID, Turn: int(s.Turn),
 		Playground: s.Playground, ExperimentID: s.ExperimentID, ForkedFrom: s.ForkedFrom,
-		ResumedFrom: s.ResumedFrom,
-		Started:     s.Started.UTC(), LastSeen: s.LastSeen.UTC(),
+		ResumedFrom: s.ResumedFrom, CallerRunID: s.CallerRunID, CallerCallID: s.CallerCallID,
+		Started: s.Started.UTC(), LastSeen: s.LastSeen.UTC(),
 		Err: s.Err, Steps: int(s.Steps), Pending: int(s.Pending), StopReason: s.StopReason,
 		Usage: core.Usage{
 			InputTokens: s.InTok, OutputTokens: s.OutTok,
@@ -1418,18 +1423,26 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		return obsdb.SessionPage{}, err
 	}
 	defer d.closedErr(&err)
-	runs := sessionRuns("", "")
 	var having []string
-	var hargs []any
+	var hargs, runArgs []any // runArgs: the runs subquery's parameters
+	narrow, cond := "", ""
 	if q.PublicID != "" {
 		// The scope is on the runs, before the GROUP BY (the SQLite
 		// backend's rule, RunQuery.PublicID's): every aggregate, the
 		// order, Total and the cursor are the public id's runs alone.
 		// The narrow prunes the collapse by primary key, the cond keeps
 		// the collapsed rows whose public id is it.
-		runs = sessionRuns(" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.PublicID = ?)", " AND PublicID = ?")
-		hargs = append(hargs, q.PublicID, q.PublicID)
+		narrow, cond = " WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.PublicID = ?)", " AND PublicID = ?"
+		runArgs = append(runArgs, q.PublicID, q.PublicID)
 	}
+	if q.Parent != "" {
+		// A delegated session's every turn carries its lineage (thread's
+		// identityMetadata): the cond keeps those turns.
+		cond += " AND SessionParent = ?"
+		runArgs = append(runArgs, q.Parent)
+	}
+	runs := sessionRuns(narrow, cond)
+	hargs = append(hargs, runArgs...)
 	if q.Agent != "" {
 		having = append(having, "max(Agent) = ?")
 		hargs = append(hargs, q.Agent)
@@ -1438,10 +1451,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		// The first turn's whole prompt, derived as Search derives it,
 		// for the scoped sessions' first turns only; one derivation per
 		// term (a term may match another field instead).
-		var pubArgs []any // the runs subquery's parameters, as the FROM's
-		if q.PublicID != "" {
-			pubArgs = []any{q.PublicID, q.PublicID}
-		}
+		pubArgs := runArgs // the runs subquery's parameters, as the FROM's
 		cand := " AND RunId IN (SELECT argMin(RunId, (Turn, Started, RunId)) FROM " + runs + " GROUP BY SessionID)"
 		for _, t := range strings.Fields(q.Q) {
 			having = append(having, "(positionCaseInsensitiveUTF8(sTitle, ?) > 0"+
@@ -1499,8 +1509,11 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		var first firstTurn
 		if err := rs.Scan(append([]any{&row.ID, &row.PublicID, &row.Agent, &turns,
 			&row.FirstSeen, &row.LastSeen, &inTok, &outTok, &cached, &cacheW, &reason,
-			&ok, &failed, &newestSeen, &row.Title}, first.dest()...)...); err != nil {
+			&ok, &failed, &newestSeen, &row.Title}, append(first.dest(), &row.ParentSession, &row.ParentCall, &row.ParentRun)...)...); err != nil {
 			return obsdb.SessionPage{}, err
+		}
+		if row.ParentSession == "" { // lineage is a delegated session's alone
+			row.ParentCall, row.ParentRun = "", ""
 		}
 		firstRuns = append(firstRuns, first.row(now)) // fillFirstPrompts reads the counts
 		row.Turns = int(turns)
@@ -1545,7 +1558,9 @@ const sessionAggs = `max(PublicID) AS sPublicID, max(Agent) AS sAgent,
 		argMin(Failed, (Turn, Started, RunId)) AS sFirstFailed,
 		argMin(FinishedOK, (Turn, Started, RunId)) AS sFirstFinishedOK,
 		argMin(RootEnded, (Turn, Started, RunId)) AS sFirstRootEnded,
-		argMin(LastSeen, (Turn, Started, RunId)) AS sFirstLastSeen`
+		argMin(LastSeen, (Turn, Started, RunId)) AS sFirstLastSeen,
+		max(SessionParent) AS sParent, max(SessionParentCall) AS sParentCall,
+		argMin(if(CallerRunID != '', CallerRunID, ParentRunID), (Turn, Started, RunId)) AS sParentRun`
 
 // firstTurn is a session row's first-turn aggregates (sessionAggs'
 // sFirst* columns, in order).
@@ -1599,7 +1614,7 @@ func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firs
 
 // sessionRuns builds the per-run subquery both Sessions and Session
 // group over: each run collapsed to its aggregates first, then scoped
-// to top-level, non-playground runs that carry a session. The scope
+// to the non-playground own turns of a session (D3, U14; ownTurnCH). The scope
 // reads the collapsed row for the reason runsInner's filters do — a
 // subagent run inherits its parent's session metadata and names its
 // parent on run_start only, so a row-level top-level filter counted
@@ -1608,17 +1623,28 @@ func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firs
 // scan to the one session's runs), cond onto the collapsed rows.
 func sessionRuns(narrow, cond string) string {
 	return `(SELECT * FROM (SELECT RunId, max(SessionID) AS SessionID, max(PublicID) AS PublicID,
-				max(Agent) AS Agent, max(ParentRunID) AS ParentRunID, max(Playground) AS Playground,
+				max(Agent) AS Agent, max(ParentRunID) AS ParentRunID, max(CallerRunID) AS CallerRunID,
+				max(Playground) AS Playground,
 				max(Turn) AS Turn, min(Started) AS Started, max(LastSeen) AS LastSeen,
 				max(FinishedOK) AS FinishedOK, max(Failed) AS Failed, max(RootEnded) AS RootEnded,
 				max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
 				max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
 				max(ReasoningTokens) AS ReasoningTokens, max(Derived) AS Derived,
-				max(JSONExtractString(Meta, '` + obsdb.SessionTitleKey + `')) AS Title
+				max(JSONExtractString(Meta, '` + obsdb.SessionTitleKey + `')) AS Title,
+				max(JSONExtractString(Meta, 'weft.session.parent')) AS SessionParent,
+				max(JSONExtractString(Meta, 'weft.session.parent_call')) AS SessionParentCall
 			FROM weft_runs` + narrow + `
 			GROUP BY RunId)
-		WHERE ParentRunID = '' AND Playground = 0 AND SessionID != ''` + cond + `)`
+		WHERE ` + ownTurnCH + ` AND Playground = 0 AND SessionID != ''` + cond + `)`
 }
+
+// ownTurnCH is the own-turn rule over a collapsed run row (D3; the
+// SQLite backend's ownTurn): its id is <SessionID>-t<Turn> — thread's
+// id rule, so a turn a tool handler started (a thread/pool child
+// session's turn) counts and a Subagent child never does — or it is
+// linked to no run at all (no parent, no caller). A Generate inside a
+// handler inherits the session id through ctx metadata and is neither.
+const ownTurnCH = `(RunId = concat(SessionID, '-t', toString(Turn)) OR (ParentRunID = '' AND CallerRunID = ''))`
 
 func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err error) {
 	if err := d.checkOpen(); err != nil {
@@ -1651,8 +1677,11 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	var first firstTurn
 	if err := rs.Scan(append([]any{&row.ID, &row.PublicID, &row.Agent, &turns,
 		&row.FirstSeen, &row.LastSeen, &inTok, &outTok, &cached, &cacheW, &reason,
-		&ok, &failed, &newestSeen, &row.Title}, first.dest()...)...); err != nil {
+		&ok, &failed, &newestSeen, &row.Title}, append(first.dest(), &row.ParentSession, &row.ParentCall, &row.ParentRun)...)...); err != nil {
 		return obsdb.SessionDetail{}, err
+	}
+	if row.ParentSession == "" { // lineage is a delegated session's alone
+		row.ParentCall, row.ParentRun = "", ""
 	}
 	if err := rs.Err(); err != nil {
 		return obsdb.SessionDetail{}, err
@@ -1672,7 +1701,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	runs, err := d.queryRunRows(ctx, now,
 		`SELECT `+runColumns+` FROM weft_runs FINAL
 		WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID = ?)
-			AND SessionID = ? AND ParentRunID = '' AND Playground = 0
+			AND SessionID = ? AND `+ownTurnCH+` AND Playground = 0
 		ORDER BY Turn, Started, RunId`, id, id)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
@@ -1788,6 +1817,10 @@ var contractKeys = []string{
 	// (migration 0022's restatement of both views).
 	"weft.attempt.wait_ms", "http.response.status_code", "weft.tool.pending.source",
 	"weft.tool.timeout_ms", "weft.tool.queue_ms", "weft.subagent.pending", "weft.output.submitted",
+	// U14 (O11): the caller link of a run started on a tool call that is
+	// no Subagent child — the run row's CallerRunID / CallerCallID
+	// (migration 0023's restatement of both views).
+	"weft.caller.run.id", "weft.caller.call.id",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

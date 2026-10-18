@@ -111,9 +111,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		runExtra = append(runExtra, attrResumedFrom.String(cfg.resumedFrom))
 	}
 	runExtra = append(runExtra, attrInstructionsHash.String(instructionsHash))
-	if c, ok := CallFromContext(ctx); ok {
-		runExtra = append(runExtra, attrParentRunID.String(c.RunID), attrParentCallID.String(c.CallID))
-	}
+	runExtra = append(runExtra, runLinkAttrs(ctx)...)
 	if a.manifestHash != "" {
 		runExtra = append(runExtra, attrManifestHash.String(a.manifestHash))
 	}

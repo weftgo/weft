@@ -413,6 +413,16 @@ not the numbers themselves.
   session's `Usage().Delegated` — not in the parent run's
   `RunResult.Usage`. A budget that must cover delegated work reads
   `Delegated`.
+- **What the recorder sees.** A child session's turn is a session of
+  its own in the records: its own `weft.session.id`, its lineage in
+  `weft.session.parent` / `weft.session.parent_call`, and — under a
+  `Wrap`ped call — `weft.caller.run.id` / `weft.caller.call.id` naming
+  the delegating turn and call, never `weft.parent.*` (that names a
+  `core.Subagent` child alone; record contract §2). Studio lists the
+  child session with its lineage, opens it from the child's run page,
+  and lists it under the parent's session page with the delegated
+  usage and cost beside the parent's own (`GET /api/sessions/{id}`'s
+  `delegated`, `delegated_usage`).
 - **Depth.** `pool.MaxDepth(n)` (default 8) bounds a delegation chain;
   the model reads `SUBAGENT_DEPTH` past it.
 - **Default-deny reaches every child.** A parent turn sent with

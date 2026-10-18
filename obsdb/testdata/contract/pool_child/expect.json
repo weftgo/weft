@@ -1,0 +1,135 @@
+{
+  "case": "pool_child",
+  "description": "a thread session's turn delegating through thread/pool (pool.Wrap, ADR 0022): the child session's turn <child>-t1 carries its own weft.session.id, its lineage weft.session.parent / weft.session.parent_call in meta and weft.caller.run.id / weft.caller.call.id naming the delegating call — never weft.parent.* (O11); both sessions are listed, each over its own turns, the child's with its lineage (D3)",
+  "runs": [
+    {
+      "id": "01K00000000000000000000001-t1",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "investment-lead",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "public_id": "pub_pool",
+      "turn": 1,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:29:00Z",
+      "finished": "2026-10-01T09:29:00.025Z",
+      "last_seen": "2026-10-01T09:29:00.025Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "aa35f511d4a143544335a0308501b355d7f74c9f6b0ac810b9db223a59dce92d",
+      "catalog_hash": "f385ebc427fee6e897db3bd9090479e8c5ef8be3212547e06520e3916185343a",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "market_analyst",
+          "call_id": "d1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000002-t1",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "market-analyst",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000002",
+      "turn": 1,
+      "caller_run_id": "01K00000000000000000000001-t1",
+      "caller_call_id": "d1",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000002",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.session.parent": "01K00000000000000000000001",
+        "weft.session.parent_call": "d1"
+      },
+      "started": "2026-10-01T09:29:00.004Z",
+      "finished": "2026-10-01T09:29:00.016Z",
+      "last_seen": "2026-10-01T09:29:00.016Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "ae3add3bbfc7abf8ea26282b1f904504f255f78826f2d466d435ff975f85f014",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    }
+  ],
+  "sessions": [
+    {
+      "id": "01K00000000000000000000001",
+      "public_id": "pub_pool",
+      "agent": "investment-lead",
+      "turns": 1,
+      "first_prompt": "Get a market analysis of ACME and give me a one-line recommendation."
+    },
+    {
+      "id": "01K00000000000000000000002",
+      "agent": "market-analyst",
+      "turns": 1,
+      "first_prompt": "Analyse ACME",
+      "parent_session": "01K00000000000000000000001",
+      "parent_call": "d1",
+      "parent_run": "01K00000000000000000000001-t1"
+    }
+  ]
+}

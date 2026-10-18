@@ -37,7 +37,14 @@ import {
   RequestSection,
   useRunRequests,
 } from "@/components/studio/step-request"
-import { runLink } from "@/lib/links"
+import { runLink, sessionLink } from "@/lib/links"
+import {
+  CHILD_EYEBROW,
+  CHILD_TITLES,
+  childKind,
+  OPEN_RUN,
+  OPEN_SESSION,
+} from "@/lib/delegation"
 import { statusOf } from "@/lib/status"
 import { statusClass } from "@/lib/status-class"
 
@@ -77,6 +84,10 @@ export function SubagentBlock({
   defaultOpen?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  // A subagent run, a delegated session's turn or a run the call
+  // started (U14, UX-B-06): each in its own words.
+  const kind = childKind(child)
+  const eyebrow = CHILD_EYEBROW[kind]
   // The child's own document and stream, fetched on expand only: the
   // parent's pages never carried them (S4.3's lazy rule).
   const doc = useQuery({ ...runQuery(child.id), enabled: open })
@@ -161,13 +172,15 @@ export function SubagentBlock({
           className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-left"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          aria-label={`subagent ${child.agent || UNNAMED_AGENT}: ${open ? "close" : "open"} the child run`}
+          aria-label={`${eyebrow} ${child.agent || UNNAMED_AGENT}: ${open ? "close" : "open"} the child run`}
         >
           <ChevronRight
             data-slot="icon"
             className={`size-3.5 text-faint transition-transform ${open ? "rotate-90" : ""}`}
           />
-          <span className="eyebrow">subagent</span>{" "}
+          <span className="eyebrow" title={CHILD_TITLES[kind]}>
+            {eyebrow}
+          </span>{" "}
           <span
             className={`font-mono text-xs ${child.agent ? "" : "text-muted-foreground"}`}
             title={child.agent ? undefined : UNNAMED_AGENT_HINT}
@@ -196,7 +209,11 @@ export function SubagentBlock({
         <span
           className="font-mono text-[11px] text-muted-foreground"
           data-child-usage
-          title="the child's own tokens: delegated usage, rolled into the parent's"
+          title={
+            kind === "subagent"
+              ? "the child's own tokens: delegated usage, rolled into the parent's"
+              : "its own tokens: never rolled into the parent's"
+          }
         >
           {usageKnown(childStatus)
             ? usageSummary(child.usage)
@@ -211,11 +228,22 @@ export function SubagentBlock({
         <span className="ml-auto flex items-center">
           <ChildVerb runID={child.id} agent={child.agent} />
         </span>
+        {/* A delegated session opens its session first (UX-B-06). */}
+        {kind === "delegated" && child.session_id ? (
+          <Link
+            {...sessionLink(child.session_id)}
+            className="flex items-center gap-0.5 font-mono text-[11px] text-thread-ink hover:underline"
+            data-child-session={child.session_id}
+          >
+            {OPEN_SESSION}
+            <ArrowUpRight className="size-3" data-slot="icon" />
+          </Link>
+        ) : null}
         <Link
           {...runLink(child.id)}
-          className="flex items-center gap-0.5 font-mono text-[11px] text-thread-ink hover:underline"
+          className={`flex items-center gap-0.5 font-mono text-[11px] hover:underline ${kind === "delegated" ? "text-faint" : "text-thread-ink"}`}
         >
-          open run
+          {OPEN_RUN}
           <ArrowUpRight className="size-3" data-slot="icon" />
         </Link>
       </div>

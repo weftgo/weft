@@ -114,17 +114,20 @@ import (
 // this figure; the step route prices it at the answering model), and
 // delegated_cost_usd is the sum of its Subagent descendants' own costs —
 // two numbers, never folded (null and known false when any is unpriced
-// or running). Other runs linked to it by weft.parent.run.id — a
+// or running). The runs linked to it by weft.caller.run.id (O11) — a
 // thread/pool child session's run, another agent's Generate inside a
-// tool handler — were never rolled up: they are neither subtracted nor
-// delegated, and carry their own figures on their own rows.
+// tool handler; before weft 0.18 linked by weft.parent.run.id too —
+// were never rolled up: they are neither subtracted nor delegated, and
+// carry their own figures on their own rows.
 //
 // A session row's cost_usd is its turns' own + delegated (sessionCost:
 // every run of the session that is not a Subagent child of another of
 // its runs — a pool child session's run is a turn of the child
-// session). The pool child's cost is on its own session, not on the
-// parent session's row (thread's Usage.Delegated is in the session
-// file, not in obsdb). A step's cost_usd prices its own model call
+// session). The pool child's cost is on its own session, never folded
+// into the parent session's row; the parent's session document carries
+// its delegated sessions' figures beside its own
+// (delegated_sessions_cost_usd, U14 — thread's Usage().Delegated, read
+// from obsdb's sessions). A step's cost_usd prices its own model call
 // (step_finish's usage) at the model that answered it, else the model
 // it requested, else the run's.
 
@@ -917,9 +920,11 @@ func scopeCutDelegated(del cost, n int) cost {
 // subagents is the core Subagent children among a run's parent-linked
 // runs: those whose id is <parent>/<step>/<call> (core's childRunID) —
 // the only ones whose usage the core rolled into the parent's (rule
-// 13). A thread/pool child session's run, or another agent's Generate
-// called inside a tool handler, is linked by weft.parent.run.id too but
-// was never rolled up: neither subtracted nor counted as delegated.
+// 13). Since O11 the core links nothing else by weft.parent.run.id; a
+// thread/pool child session's run or a nested Generate recorded before
+// weft 0.18 is linked so too but was never rolled up: neither
+// subtracted nor counted as delegated — the id rule keeps old records
+// right.
 func subagents(id string, kids []obsdb.RunRow) []obsdb.RunRow {
 	var out []obsdb.RunRow
 	for _, k := range kids {

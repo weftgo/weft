@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest"
 
 import {
   CHILDREN_COUNT_UNKNOWN,
+  childKind,
+  lineageOfRun,
+  lineageOfSession,
+  storyChildren,
   childrenChip,
   moreChildren,
   nest,
@@ -66,5 +70,93 @@ describe("nest", () => {
   it("places every row once, a cycle included", () => {
     const out = nest([r("a", "b"), r("b", "a"), r("c")])
     expect(out.map((n) => n.row.id).sort()).toEqual(["a", "b", "c"])
+  })
+})
+
+describe("childKind (U14, UX-B-06)", () => {
+  it("tells a subagent run, a delegated session's turn and a run a call started apart", () => {
+    expect(childKind({ id: "p/0/c1", parent_run_id: "p" })).toBe("subagent")
+    expect(
+      childKind({
+        id: "s_c-t1",
+        session_id: "s_c",
+        caller_run_id: "s_p-t1",
+        meta: { "weft.session.parent": "s_p" },
+      } as never)
+    ).toBe("delegated")
+    // Recorded before weft 0.18: the pool child named its caller as parent.
+    expect(
+      childKind({
+        id: "s_c-t1",
+        session_id: "s_c",
+        parent_run_id: "s_p-t1",
+        meta: { "weft.session.parent": "s_p" },
+      })
+    ).toBe("delegated")
+    // A Generate under a pool child's turn inherits weft.session.parent:
+    // not its own session's turn.
+    expect(
+      childKind({
+        id: "r_9",
+        session_id: "s_c",
+        meta: { "weft.session.parent": "s_p" },
+      })
+    ).toBe("started")
+    expect(childKind({ id: "r_9" })).toBe("started")
+  })
+})
+
+describe("lineage (U14, UX-B-05)", () => {
+  it("reads a run's lineage from its meta and caller link", () => {
+    expect(lineageOfRun({ meta: {} })).toBeNull()
+    expect(
+      lineageOfRun({
+        caller_run_id: "s_p-t3",
+        meta: {
+          "weft.session.parent": "s_p",
+          "weft.session.parent_call": "d1",
+        },
+      })
+    ).toEqual({ session: "s_p", turn: 3, call: "d1", run: "s_p-t3" })
+    expect(
+      lineageOfRun({
+        parent_run_id: "s_p-t1",
+        meta: { "weft.session.parent": "s_p" },
+      })
+    ).toEqual({ session: "s_p", turn: 1, call: undefined, run: "s_p-t1" })
+    // p.Submit outside a run: no caller, no turn.
+    expect(lineageOfRun({ meta: { "weft.session.parent": "s_p" } })).toEqual({
+      session: "s_p",
+      turn: undefined,
+      call: undefined,
+      run: undefined,
+    })
+  })
+  it("reads a session row's lineage", () => {
+    expect(lineageOfSession({})).toBeNull()
+    expect(
+      lineageOfSession({
+        parent_session: "s_p",
+        parent_turn: 1,
+        parent_call: "d1",
+        parent_run: "s_p-t1",
+      })
+    ).toEqual({ session: "s_p", turn: 1, call: "d1", run: "s_p-t1" })
+  })
+})
+
+describe("storyChildren", () => {
+  it("joins the caller-linked runs on their call", () => {
+    const kids = storyChildren({
+      children: [{ id: "p/0/c1", parent_call_id: "c1" }],
+      caller_linked: [
+        { id: "s_c-t1", parent_call_id: "", caller_call_id: "d1" },
+      ],
+    })
+    expect(kids.map((k) => [k.id, k.parent_call_id])).toEqual([
+      ["p/0/c1", "c1"],
+      ["s_c-t1", "d1"],
+    ])
+    expect(storyChildren({ children: [] })).toEqual([])
   })
 })

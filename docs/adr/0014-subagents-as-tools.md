@@ -200,3 +200,20 @@ consumer pattern — the parent summarizes into the delegating prompt —
 until hmm's first real takeover need forces the `ForwardContext`
 question; no core change until then, and when it comes it reopens this
 ADR rather than riding in as an option.
+
+## Note (2026-10-19 — the parent link is a Subagent's alone, U14 / O11)
+
+The child's linkage attributes (`weft.parent.run.id`,
+`weft.parent.call.id`) name a parent only for the run `Subagent`
+starts: the tool marks the context it hands the child with the call it
+serves, and the loop stamps the parent link when the call on the run's
+context is that marked one. Every other run started on a tool call's
+context — another agent's `Generate` inside a handler, a `thread/pool`
+child session's turn (ADR 0022), a run under the child's own tool
+call — records `weft.caller.run.id` / `weft.caller.call.id` instead: a
+link, not parenthood. Its usage was never rolled up (rule 13's
+exception), and its id never had this ADR's `<parent>/<step>/<call>`
+shape, so the attributes now say what the usage and the id already
+did. `TestRunLinkSubagentVsCaller` pins it; the record contract's §2
+documents both links.
+

@@ -436,6 +436,8 @@ type runUpdate struct {
 	experimentID string
 	forkedFrom   string
 	resumedFrom  string // weft.resumed_from (contract §6, U13.1)
+	callerRunID  string // weft.caller.run.id (contract §2, U14)
+	callerCallID string // weft.caller.call.id
 	meta         map[string]string
 	usage        core.Usage
 	setUsage     bool
@@ -651,6 +653,12 @@ func (u *runUpdate) applyIdentity(w obsdb.Weft, r obsdb.Record) {
 	if w.ResumedFrom != "" {
 		u.resumedFrom = w.ResumedFrom
 	}
+	if w.CallerRunID != "" {
+		u.callerRunID = w.CallerRunID
+	}
+	if w.CallerCallID != "" {
+		u.callerCallID = w.CallerCallID
+	}
 	if r.Attrs != nil {
 		if v, ok := r.Attrs["weft.manifest.hash"].(string); ok && v != "" {
 			u.manifestHash = v
@@ -811,6 +819,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		playground                  bool
 		experiment, forked, meta    string
 		resumedFrom                 string
+		callerRun, callerC          string
 		err, stopReason             string
 		stoppedBy, cancelCause      string
 		errorType, problems         string
@@ -821,14 +830,14 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 	}
 	err := tx.QueryRowContext(ctx, `SELECT started_ns, last_seen_ns, finished_ns, finished_ok, failed, root_ended,
 		parent_run_id, parent_call_id, trace_id, agent, provider, model, manifest_hash, weft_version,
-		service, session_id, public_id, turn, playground, experiment_id, forked_from, resumed_from, meta, err,
+		service, session_id, public_id, turn, playground, experiment_id, forked_from, resumed_from, caller_run_id, caller_call_id, meta, err,
 		steps, pending, stop_reason, stopped_by, cancel_cause, error_type, problems,
 		input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens
 		FROM runs WHERE run_id = ?`, runID).
 		Scan(&ex.started, &ex.lastSeen, &ex.finished, &ex.finishedOK, &ex.failed, &ex.rootEnded,
 			&ex.parentRun, &ex.parentC, &ex.traceID, &ex.agent, &ex.provider, &ex.model,
 			&ex.manifest, &ex.version, &ex.service, &ex.sessionID, &ex.publicID, &ex.turn,
-			&ex.playground, &ex.experiment, &ex.forked, &ex.resumedFrom, &ex.meta, &ex.err,
+			&ex.playground, &ex.experiment, &ex.forked, &ex.resumedFrom, &ex.callerRun, &ex.callerC, &ex.meta, &ex.err,
 			&ex.steps, &ex.pending, &ex.stopReason, &ex.stoppedBy, &ex.cancelCause,
 			&ex.errorType, &ex.problems,
 			&ex.inTok, &ex.outTok, &ex.cachedTok, &ex.cacheWrite, &ex.reasoningTok)
@@ -851,17 +860,17 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		_, err := tx.ExecContext(ctx, `INSERT INTO runs
 			(run_id, parent_run_id, parent_call_id, trace_id, agent, provider, model,
 			 manifest_hash, weft_version, service, session_id, public_id, turn,
-			 playground, experiment_id, forked_from, resumed_from, meta,
+			 playground, experiment_id, forked_from, resumed_from, caller_run_id, caller_call_id, meta,
 			 started_ns, finished_ns, last_seen_ns, finished_ok, failed, root_ended, err,
 			 steps, pending, stop_reason, stopped_by, cancel_cause,
 			 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
 			 event_count, delta_count, message_count,
 			 instructions_hash, catalog_hash, request_count, events_emitted, messages_emitted,
 			 error_type, problems)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			runID, u.parentRunID, u.parentCallID, u.traceID, u.agent, u.provider, u.model,
 			u.manifestHash, u.weftVersion, u.service, u.sessionID, u.publicID, u.turn,
-			boolInt(u.playground), u.experimentID, u.forkedFrom, u.resumedFrom, meta,
+			boolInt(u.playground), u.experimentID, u.forkedFrom, u.resumedFrom, u.callerRunID, u.callerCallID, meta,
 			started, finished, lastSeen, boolInt(u.finishedOK), boolInt(u.failed), boolInt(u.rootEnded), u.errText,
 			u.steps, u.pending, u.stopReason, u.stoppedBy, u.cancelCause,
 			u.usage.InputTokens, u.usage.OutputTokens, u.usage.CachedInputTokens,
@@ -908,7 +917,8 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 	_, err = tx.ExecContext(ctx, `UPDATE runs SET
 		parent_run_id = ?, parent_call_id = ?, trace_id = ?, agent = ?, provider = ?, model = ?,
 		manifest_hash = ?, weft_version = ?, service = ?, session_id = ?, public_id = ?, turn = ?,
-		playground = ?, experiment_id = ?, forked_from = ?, resumed_from = ?, meta = ?,
+		playground = ?, experiment_id = ?, forked_from = ?, resumed_from = ?,
+		caller_run_id = ?, caller_call_id = ?, meta = ?,
 		started_ns = ?, finished_ns = ?, last_seen_ns = ?, finished_ok = ?, failed = ?, root_ended = ?, err = ?,
 		steps = ?, pending = ?, stop_reason = ?, stopped_by = ?, cancel_cause = ?,
 		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, cache_write_tokens = ?, reasoning_tokens = ?,
@@ -928,6 +938,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		boolInt(ex.playground || u.playground),
 		coalesce(ex.experiment, u.experimentID), coalesce(ex.forked, u.forkedFrom),
 		maxString(ex.resumedFrom, u.resumedFrom),
+		coalesce(ex.callerRun, u.callerRunID), coalesce(ex.callerC, u.callerCallID),
 		mergeMetaJSON(ex.meta, u.meta),
 		started, finished, lastSeen, boolInt(finishedOK), boolInt(failed), boolInt(rootEnded), coalesce(ex.err, u.errText),
 		steps, pending, stopReason, maxString(ex.stoppedBy, u.stoppedBy), maxString(ex.cancelCause, u.cancelCause),

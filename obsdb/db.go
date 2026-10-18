@@ -204,7 +204,7 @@ func DedupBatches(batches []TranscriptBatch) []TranscriptBatch {
 // RunQuery selects runs for Runs. The zero value lists top-level runs,
 // newest first, 50 at a time.
 type RunQuery struct {
-	Agent, SessionID, PublicID, ParentRunID string            // ParentRunID: "" top-level only, "*" all
+	Agent, SessionID, PublicID, ParentRunID string            // ParentRunID: "" top-level only (no parent, no caller link), "*" all
 	Status                                  Status            // "" any; a StatusWords word (parked, cancelled read time)
 	Playground                              *bool             // nil any
 	ExperimentID                            string            // the runs of one experiment
@@ -229,6 +229,12 @@ type RunQuery struct {
 	// IDPrefix keeps the runs whose ID starts with it, byte for byte
 	// ("" any; no wildcard, no case folding): a pasted short id.
 	IDPrefix string
+	// CallerRunID keeps the runs started from one of that run's tool
+	// calls without being its Subagent children (RunRow.CallerRunID;
+	// "" any): a delegating turn's thread/pool child turns, its nested
+	// Generates. Pair it with ParentRunID "*" — a caller-linked run is
+	// top-level by ParentRunID.
+	CallerRunID string
 }
 
 // TraceQuery selects traces for Traces. The zero value lists every
@@ -427,18 +433,27 @@ type RunRow struct {
 	// ResumedFrom names this run (a tie: the larger id), derived at read time on both backends, so a resumer
 	// stored before or after the parked run links it alike (record
 	// contract §6, UX-E-17). "" when none.
-	ResumedFrom, ResumedBy   string
-	Meta                     map[string]string
-	Started                  time.Time
-	Finished                 *time.Time
-	LastSeen                 time.Time
-	Status                   Status
-	Err                      string
-	Steps, Pending           int
-	StopReason               string
-	Usage                    core.Usage
-	EventCount, MessageCount int64
-	DeltaCount               int64 // deltas are counted, never stored (Q4)
+	ResumedFrom, ResumedBy string
+	// CallerRunID / CallerCallID are the tool call this run was started
+	// from when it is no core Subagent child (weft.caller.run.id /
+	// weft.caller.call.id, O11; record contract §2): a thread/pool child
+	// session's turn, another agent's Generate inside a handler. A link,
+	// never parenthood: ParentRunID names a Subagent's parent alone, the
+	// run whose usage includes this one's (rule 13). "" when none, and
+	// on every run recorded before weft 0.18 (which named such a run's
+	// caller in ParentRunID instead).
+	CallerRunID, CallerCallID string
+	Meta                      map[string]string
+	Started                   time.Time
+	Finished                  *time.Time
+	LastSeen                  time.Time
+	Status                    Status
+	Err                       string
+	Steps, Pending            int
+	StopReason                string
+	Usage                     core.Usage
+	EventCount, MessageCount  int64
+	DeltaCount                int64 // deltas are counted, never stored (Q4)
 	// ADR 0028 §10: run_start's weft.instructions.hash ("" on a run
 	// written before the request record — RequestsHole reads the
 	// table), request index 0's weft.catalog.hash ("" when it offered
@@ -607,16 +622,27 @@ const MaxGaps = 1000
 // public id or its agent — terms AND, fields OR. Case folding is
 // ASCII-only on SQLite (lower()), Unicode on ClickHouse
 // (positionCaseInsensitiveUTF8).
+//
+// Parent keeps the sessions delegated by that session (SessionRow's
+// ParentSession: thread/pool child sessions, ADR 0022), "" any.
 type SessionQuery struct {
 	Agent, PublicID string
 	Q               string
+	Parent          string
 	Before          time.Time // cursor on LastSeen; zero = newest
 	BeforeID        string    // with Before: the (LastSeen, ID) pair, as RunQuery.BeforeID
 	Limit           int       // 0 = 50, max 500
 }
 
-// SessionRow is one session (a GROUP BY over its top-level,
-// non-playground runs).
+// SessionRow is one session: a GROUP BY over its own turns (D3; record
+// contract §6) — the non-playground runs carrying its weft.session.id
+// that are turns of it: a run whose id is <session>-t<turn> (thread's
+// own id rule, a turn started inside a tool handler included), or one
+// linked to no run at all (neither ParentRunID nor CallerRunID: a run
+// that set weft.session.id itself). A Subagent child or a Generate
+// inside a handler inherits the session id through ctx metadata and is
+// no turn; a thread/pool child session is a session of its own, its
+// lineage on ParentSession.
 type SessionRow struct {
 	ID, PublicID, Agent string
 	Turns               int
@@ -638,6 +664,14 @@ type SessionRow struct {
 	// (SessionContentOff). The list says "(content not captured)" for it
 	// instead of the id.
 	ContentOff bool
+	// ParentSession, ParentCall and ParentRun are a delegated session's
+	// lineage (thread/pool, ADR 0022): the session that delegated it
+	// (its turns' weft.session.parent), the delegating tool call
+	// (weft.session.parent_call) and the parent's run that call
+	// belonged to (its first turn's CallerRunID, else — recorded before
+	// weft 0.18 — its ParentRunID). "" for a session nothing delegated,
+	// and ParentRun "" for a child submitted outside a run (p.Submit).
+	ParentSession, ParentCall, ParentRun string
 }
 
 // SessionContentOff is SessionRow.ContentOff's rule over the session's

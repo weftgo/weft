@@ -24,6 +24,7 @@
 // the lane (S4.5) — one stream per page: deltas stream, run frames
 // refresh the document, a lost stream falls back to the paged poll. The document and transcript
 // refresh every 2 s while running as the poll-shaped fallback.
+import { storyChildren } from "@/lib/delegation"
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -847,7 +848,10 @@ function RunPage() {
   // The calls carry their child's id (linkView, as the story's do):
   // the call detail's subagent block and the tree's child row join on
   // it — never on the bare call id, which may repeat across steps (A10).
-  const children = run.data?.children
+  const children = useMemo(
+    () => (run.data ? storyChildren(run.data) : undefined),
+    [run.data]
+  )
   const linkedFold = useMemo(
     () => (children ? linkView(atPlayhead, children) : atPlayhead),
     [atPlayhead, children]

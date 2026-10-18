@@ -460,8 +460,8 @@ describe("no panel-only badge strings", () => {
     "element.ts|request could not be read", // a read error, not a hole
     "element.ts|prompt changed at this step",
     "element.ts|catalog changed at this step",
-    'element.ts|"subagent"', // the child run's link
-    'element.ts|"subagent"',
+    'element.ts|weft-info", word, {', // the child run's link, in its kind's word (U14)
+    'element.ts|weft-info", word, {',
     "element.ts|depthWord", // a child nested past the indent (UX-D-13)
     "element.ts|, ex)", // the call's execution facts (lib/cards.ts execLine)
     "element.ts|childOutcome(", // a tool error result (data, rule 1), a Subagent call's typed outcome

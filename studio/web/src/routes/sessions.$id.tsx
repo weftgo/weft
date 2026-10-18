@@ -7,7 +7,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 
 import { sessionQuery } from "@/lib/api"
 import { fetchSessionForks, nestExperiments } from "@/lib/experiments"
-import { absoluteTime, relativeTime, tokens } from "@/lib/format"
+import { absoluteTime, relativeTime, tokens, UNNAMED_AGENT } from "@/lib/format"
 import { IdChip, StatusChip, TitleText } from "@/components/studio/runs-table"
 import { SessionTurns } from "@/components/studio/session-turns"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,18 @@ import { isNotFound } from "@/lib/not-found"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { sessionTitle } from "@/lib/title"
+import {
+  CHILD_TITLES,
+  DELEGATED_BLOCK,
+  LINEAGE,
+  lineageOfSession,
+  OPEN_SESSION,
+  turnsWord,
+} from "@/lib/delegation"
+import type { SessionDoc, SessionRow } from "@/lib/api"
+import { runLink, sessionLink } from "@/lib/links"
+import { LineageLine } from "@/components/studio/lineage"
+import { Cost, useCostCapable } from "@/components/studio/cost"
 
 export const Route = createFileRoute("/sessions/$id")({
   component: SessionPage,
@@ -70,6 +82,9 @@ function SessionPage() {
   }
   const s = q.data
   const turns = s.runs
+  const lineage = lineageOfSession(s)
+  const delegated = s.delegated ?? []
+  const du = s.delegated_usage
   const experiments = nestExperiments(turns, forks.data?.runs ?? [])
   const forked = [...experiments.values()].reduce((n, l) => n + l.length, 0)
 
@@ -81,6 +96,12 @@ function SessionPage() {
             <TitleText t={sessionTitle(s, turns[0])} />
           </h1>
           <IdChip id={s.id} noun="session id" />
+          {lineage ? (
+            <LineageLine
+              lineage={lineage}
+              className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-faint"
+            />
+          ) : null}
         </div>
         {/* The session's status is its newest turn's word (U1): parked
             while that turn's calls await a decision. */}
@@ -91,6 +112,18 @@ function SessionPage() {
           {tokens(s.usage.input_tokens)} in / {tokens(s.usage.output_tokens)}{" "}
           out
         </span>
+        {du && (du.input_tokens > 0 || du.output_tokens > 0) ? (
+          <span
+            className="font-mono text-[11px] text-faint"
+            title={DELEGATED_BLOCK.usageTitle}
+            data-delegated-usage
+          >
+            {DELEGATED_BLOCK.usage(
+              tokens(du.input_tokens),
+              tokens(du.output_tokens)
+            )}
+          </span>
+        ) : null}
         {s.public_id ? (
           <span
             className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-faint"
@@ -110,9 +143,12 @@ function SessionPage() {
       <div className="overflow-x-auto rounded-lg border bg-background">
         <SessionTurns turns={turns} experiments={experiments} />
       </div>
+      {delegated.length > 0 || s.delegated_unknown ? (
+        <DelegatedSessions doc={s} rows={delegated} />
+      ) : null}
       {turns.length === 0 ? (
         <p className="py-8 text-center font-mono text-xs text-faint">
-          no top-level turns recorded
+          no turns of this session recorded
         </p>
       ) : null}
       {s.turns > turns.length ? (
@@ -134,5 +170,90 @@ function SessionPage() {
               }`}
       </p>
     </div>
+  )
+}
+
+/** DelegatedSessions is the session page's delegated block (U14,
+ * UX-B-05, UX-B-35): each session this one delegated, with the turn
+ * and call that started it, its own turns, tokens and cost, and the
+ * whole delegated tree's cost beside the session's own. */
+function DelegatedSessions({
+  doc,
+  rows,
+}: {
+  doc: SessionDoc
+  rows: SessionRow[]
+}) {
+  const costCapable = useCostCapable()
+  return (
+    <section className="space-y-1.5" data-delegated-sessions>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="eyebrow" title={CHILD_TITLES.delegated}>
+          {DELEGATED_BLOCK.eyebrow}
+        </span>
+        {costCapable && rows.length > 0 ? (
+          <Cost
+            fields={{
+              cost_usd: doc.delegated_sessions_cost_usd ?? null,
+              cost_known: doc.delegated_sessions_cost_known ?? false,
+              cost_badge: doc.delegated_sessions_cost_known
+                ? undefined
+                : "unknown",
+              cost_reason: doc.delegated_sessions_cost_reason,
+              cache: "exact",
+            }}
+            chip={false}
+          />
+        ) : null}
+      </div>
+      {doc.delegated_unknown ? (
+        <p className="font-mono text-[11px] text-status-int">
+          {DELEGATED_BLOCK.unknown}
+        </p>
+      ) : null}
+      <ul className="divide-y rounded-lg border bg-background">
+        {rows.map((d) => (
+          <li
+            key={d.id}
+            className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-xs"
+            data-delegated-session={d.id}
+          >
+            <StatusChip row={d} />
+            <Link
+              {...sessionLink(d.id)}
+              className="flex min-w-0 items-center gap-1 text-thread-ink hover:underline"
+              title={`${OPEN_SESSION} ${d.id}`}
+            >
+              <span aria-hidden>↳</span>
+              <span>{d.agent || UNNAMED_AGENT}</span>
+              <span className="truncate font-mono text-faint">{d.id}</span>
+            </Link>
+            {d.parent_turn && d.parent_run ? (
+              <Link
+                {...runLink(d.parent_run)}
+                className="font-mono text-faint hover:text-foreground hover:underline"
+              >
+                {LINEAGE.turn(d.parent_turn)}
+              </Link>
+            ) : null}
+            {d.parent_call ? (
+              <span className="font-mono text-faint">
+                {LINEAGE.call(d.parent_call)}
+              </span>
+            ) : null}
+            <span className="font-mono text-[11px] text-faint">
+              {turnsWord(d.turns)} · {tokens(d.usage.input_tokens)} in /{" "}
+              {tokens(d.usage.output_tokens)} out
+            </span>
+            {costCapable ? <Cost fields={d} chip={false} /> : null}
+          </li>
+        ))}
+      </ul>
+      {doc.delegated_more ? (
+        <p className="text-center font-mono text-[11px] text-faint">
+          {DELEGATED_BLOCK.more}
+        </p>
+      ) : null}
+    </section>
   )
 }

@@ -73,6 +73,8 @@ metadata rides every span and record verbatim):
 | run | `weft.run.id` | string | the core | 32 lowercase hex digits for a plain run; `<session>-t<n>` for a `thread` turn; `<parent>/<step>/<call id>` for a Subagent child (below); or the caller's own, through `core.RunID` (any string — it must not start with `otel-`, the derived-run prefix of §9; nothing enforces that — the core accepts any id, and obsdb does not guard it either: a weft run whose id has the exact derived shape, `otel-<32 hex>-<16 hex>`, would have its spans read as a derived run's, by trace — `obsdb.ParseStockRunID`) |
 | parent run | `weft.parent.run.id` | string | the core | on a Subagent child's `invoke_agent` span and its `run_start` record only |
 | parent call | `weft.parent.call.id` | string | the core | the parent's tool call the child ran under (its `gen_ai.tool.call.id`) |
+| caller run | `weft.caller.run.id` | string | the core | on the `invoke_agent` span and `run_start` record of any other run started on a tool call's context — a `thread/pool` child session's turn, another agent's `Generate` inside a handler — never with `weft.parent.*` (O11, U14): a link, not parenthood |
+| caller call | `weft.caller.call.id` | string | the core | the tool call that run was started from (its `gen_ai.tool.call.id`) |
 | session | `weft.session.id` | string | `thread`, or the app via `Metadata` | mirrored as `gen_ai.conversation.id` and `session.id` on every span and record the core emits for the run (and so on the heartbeat, which copies `run_start`'s attributes) — not on `thread`'s session compaction marker, which carries `weft.session.id` alone (§4) |
 | turn | `weft.turn` | int (as a string) | `thread` | the turn number the run id was minted from (`-t<n>`) |
 | public id | `weft.public_id` | string | `thread.PublicID`, or the app via `Metadata` | the browser-facing id a panel token is scoped to |
@@ -92,9 +94,25 @@ those children's usage from the parent's (the parent's own usage figure
 includes every child's). The link is still carried explicitly
 (`weft.parent.run.id`, `weft.parent.call.id`); a reader never parses an
 id to find a parent. The child's `invoke_agent` span is a child of the
-parent's `execute_tool` span. A `thread/pool` child is a separate session,
-not a Subagent child: no `/`, no parent attributes, its link is the
-session metadata below.
+parent's `execute_tool` span.
+
+**Caller links** (O11, U14). Only a `core.Subagent` child is a child: the
+core stamps `weft.parent.*` on the run that tool starts (its usage is in
+the parent's, rule 13) and on nothing else. Every other run started on a
+tool call's context — a `thread/pool` child session's turn, another
+agent's `Generate` inside a handler, a run nested under a Subagent
+child's own tool call — carries `weft.caller.run.id` /
+`weft.caller.call.id` instead: the run and call it was started from, a
+link a reader may draw as an edge, never a parent (its usage is its own;
+no `/` in its id names it). A `thread/pool` child is a separate session
+with its own id (`<child session>-t<n>`): its caller link names the
+delegating turn and call when the delegation ran under one (`pool.Wrap`),
+none when `p.Submit` was called outside a run, and its lineage is the
+session metadata below either way (the `pool_child` fixture). Before
+weft 0.18 the core stamped `weft.parent.*` on every run started on a
+tool call's context; a reader of older records tells a Subagent child by
+its id (`<parent>/…`) and a pool child session's turn by its own
+`<session>-t<n>` id.
 
 **Session lineage and playground marks** — run metadata, so on every span
 and record of the run, all strings. The last column is where a reader
@@ -147,7 +165,7 @@ out of `meta`; only that list does. It is, exactly:
 
 | Never in `meta` | Keys |
 |---|---|
-| identity (§2) | `weft.run.id`, `weft.parent.run.id`, `weft.parent.call.id`, `weft.session.id`, `weft.public_id`, `weft.turn`, `gen_ai.agent.name` |
+| identity (§2) | `weft.run.id`, `weft.parent.run.id`, `weft.parent.call.id`, `weft.caller.run.id`, `weft.caller.call.id`, `weft.session.id`, `weft.public_id`, `weft.turn`, `gen_ai.agent.name` |
 | run-row columns | `weft.playground`, `weft.experiment.id`, `weft.forked_from`, `weft.resumed_from`, `weft.version`, `weft.manifest.hash`, `weft.instructions.hash` |
 | record keys (§4) | `weft.record`, `weft.event.type`, `weft.event.pos`, `weft.delta.pos`, `weft.messages.index`, `weft.messages.count`, `weft.messages.input`, `weft.messages.reason`, `weft.messages.from_seq`, `weft.messages.to_seq`, `weft.request.index`, `weft.prompt.index`, `weft.tools.index`, `weft.raw.index`, `weft.system.hash`, `weft.catalog.hash`, `weft.compaction.hash`, `weft.compaction.scope`, `weft.content`, `weft.content.truncated_bytes`, `weft.step.index`, `weft.tool.seq`, `weft.attempt.index`, `weft.latency_ms` |
 | span keys (§3) | `weft.run.steps`, `weft.run.pending`, `weft.run.denied`, `weft.run.stop_reason`, `weft.stop.raw`, `weft.model.tool_calls`, `weft.stream`, `weft.ttft_ms`, `weft.attempt.retry_after_ms`, `weft.tool.approved`, `weft.tool.pending`, `weft.tool.result_bytes`, `weft.tool.truncated_bytes`, `weft.tool.input_error`, `weft.tool.retry`, `weft.tool.retry_budget`, `weft.panic.layer`, `weft.metadata.dropped`, `weft.tap.panics`, `weft.resume.calls`, `weft.tool.denied`, `weft.tool.denied_kind`, `weft.override.hash` and every `weft.override.*` key of §3 |
@@ -195,6 +213,7 @@ child). It ends when the run does, however the run ends.
 | `gen_ai.request.model` | string | the model reports a name |
 | `weft.instructions.hash` | string, sha256 hex | always (on runs written since ADR 0028; the empty string's hash for no instructions) |
 | `weft.parent.run.id`, `weft.parent.call.id` | string | Subagent children |
+| `weft.caller.run.id`, `weft.caller.call.id` | string | any other run started on a tool call's context (§2's caller link) |
 | `weft.manifest.hash` | string | named agents |
 | `weft.version` | string | always |
 | `weft.logs.bridged` | int | at start, while the pipeline has a live slog bridge (a `Pipeline.SlogHandler`, `otel.Slog`'s wrap while it is still `slog.Default`'s handler, or any handler that has teed a line into this pipeline; set by `weft/otel`'s span processor, not the core), and only on the copy a destination that takes app logs (`otel.AppLogs`) exports — a content-off sink, an `AppLogs(false)` one or a third party not opted in receives the span without it: the lines the bridge had emitted so far. Its presence is the mark — "this store holds the run's bridged lines"; a stored root without it ran with no bridge reaching this store, which the logs route's hint reads (§7); not caller metadata (`obsdb.MetaOf` skips it) |
@@ -360,7 +379,7 @@ The body is the core's event wire (ADR 0004), discriminated by `type`;
 
 | `weft.event.type` | Body fields | Extra attributes |
 |---|---|---|
-| `run_start` | `id`, `model {provider, name}`, `agent`, `instructions_hash` (informational: readers take the `weft.instructions.hash` attribute, never this field) | `weft.parent.run.id`, `weft.parent.call.id` (children), `weft.manifest.hash` (named agents), `weft.instructions.hash` (always, since ADR 0028), `weft.version`, `weft.resumed_from` and `weft.resume.calls` (a resume, as on the span) |
+| `run_start` | `id`, `model {provider, name}`, `agent`, `instructions_hash` (informational: readers take the `weft.instructions.hash` attribute, never this field) | `weft.parent.run.id`, `weft.parent.call.id` (Subagent children), `weft.caller.run.id`, `weft.caller.call.id` (any other run started on a tool call, §2), `weft.manifest.hash` (named agents), `weft.instructions.hash` (always, since ADR 0028), `weft.version`, `weft.resumed_from` and `weft.resume.calls` (a resume, as on the span) |
 | `step_start` | `run_id`, `index` | `weft.step.index` |
 | `tool_start` | `run_id`, `seq`, `call_id`, `name`, `args` | `weft.tool.seq`, `gen_ai.tool.call.id`, `gen_ai.tool.name` |
 | `tool_finish` | `run_id`, `seq`, `call_id`, `name`, `content`, `is_error` | same as `tool_start`; `weft.tool.truncated_bytes` (int) when the result cap cut the content (`weft.tool.retry` / `weft.tool.retry_budget` are on the span only, §3) |
@@ -658,6 +677,7 @@ backends' own tests' to pin.
 |---|---|
 | `id` | `weft.run.id` |
 | `parent_run_id`, `parent_call_id` | `weft.parent.run.id`, `weft.parent.call.id` |
+| `caller_run_id`, `caller_call_id` | `weft.caller.run.id`, `weft.caller.call.id` (§2's caller link; fill-if-empty like every identity column). Columns `runs.caller_run_id` / `caller_call_id` (SQLite 0021, index `runs_caller`) and `weft_runs.CallerRunID` / `CallerCallID` (ClickHouse 0023, both run views restated); `RunRow.CallerRunID` / `CallerCallID`, `RunQuery.CallerRunID` (the runs started from one run's calls); served on Studio's run row as `caller_run_id` / `caller_call_id` (omitted when empty). No backfill: `""` on a run recorded before weft 0.18 |
 | `trace_id` | the `invoke_agent` span's trace id (else any record's) |
 | `service` | the resource's `service.name` |
 | `agent` | `gen_ai.agent.name` |
@@ -687,7 +707,7 @@ backends' own tests' to pin.
 | `events_emitted`, `messages_emitted` | the `invoke_agent` span's `weft.run.events` / `weft.run.messages` (the larger when several roots carry them); 0 when the root carried neither — not stored yet, or written before U5 — and when the run emitted none. Columns `runs.events_emitted` / `messages_emitted` (SQLite 0012) and `weft_runs.EventsEmitted` / `MessagesEmitted` (ClickHouse 0013, the traces view restated), backfilled from the stored roots; `RunRow.EventsEmitted` / `MessagesEmitted`; served on Studio's run row as `events_emitted` / `messages_emitted` (omitted when 0). Fewer events stored than emitted is `gap`/`events_lost` (§7); fewer messages stored than emitted, with at least one stored, is `gap`/`messages_lost` (§7) — none stored is never called lost, since a content-off destination stores no messages record by design (§5) and the row carries no flag that says a destination was content-off |
 | `error_type` | a failed run's kind: the `invoke_agent` span's `error.type` (§3), with `context.Canceled` and `context.DeadlineExceeded` read as `cancelled` (`obsdb.RunErrorType`; the cancel cause, `cancel_cause`, says which); `""` for a run that did not fail. The larger when several roots differ, both backends. Columns `runs.error_type` (SQLite 0013) / `weft_runs.ErrorType` (ClickHouse 0015), backfilled from the stored roots; `RunRow.ErrorType`; served as `error_type` (omitted when empty) and filtered by `?error_type=` on `/api/runs` and `/api/search` (exact). The status stays `failed`: `cancelled` is a kind, not a status |
 | `problems` | the run's problem counters (`RunRow.Problems`), derived at ingest from its spans as a set of tokens (`obsdb.SpanProblems`, each keyed by its span id, so a span stored twice counts once; `runs.problems` a JSON array on SQLite 0013, `weft_runs.Problems` a `groupUniqArrayArray` on ClickHouse 0015; the rules below since SQLite 0016 / ClickHouse 0017, which re-derive the set from the stored spans — U4's first tokens `retried:`, `fallback:`, `tool_error:` and the count-keyed `denied_approval:<n>` count nowhere) and folded at read (`obsdb.CountProblems`): `attempts_retried` — `attempt` spans with status `Error` that a later attempt of the same model call followed (their `weft.attempt.index` below the highest among their `chat` span's attempts: `mw.Retry`'s retries, `mw.Fallback`'s fallen-back-from tries); the last attempt of a call never counts — failed, it failed the call (an exhausted `Retry` of three tries counts 2, a non-retryable failure 0); `fallbacks` — `attempt` spans that succeeded carrying `weft.attempt.layer` `fallback` (§3), never a comparison of model names; `tool_errors` — `execute_tool` spans with status `Error`, except `error.type` `DENIED`, `RETRY` (`core.ModelRetry`: the intended repair loop) and the context errors (the run's cancellation reaching a call is the run's `error_type`, not a tool failure); `NO_SUCH_TOOL` counts; `denied` — `execute_tool` spans with `error.type` `DENIED` (a policy middleware) plus each `invoke_agent` span's `weft.run.denied` (calls a resume denied, whose zero-length `weft.tool.denied` span is skipped — the root's count is their carrier; token `denied_approval:<span id>:<n>`, so two roots of one run id with the same count both count); `truncated` — `execute_tool` spans with `weft.tool.truncated_bytes` > 0; `repaired` — 0 until the core reports repaired arguments (U23.1); `tap_panics` — each `invoke_agent` span's `weft.tap.panics` (token `tap_panics:<span id>:<n>`, SQLite 0017 / ClickHouse 0018). The same fold carries `metadata_dropped` — each `invoke_agent` span's `weft.metadata.dropped` (token `metadata_dropped:<span id>:<n>`, backfilled by SQLite 0017 / ClickHouse 0018) — not a problem badge and never on the wire as a counter: the run document's `truncated` hole, cause `metadata_cap` (§7). Served on Studio's run row and document as those keys (each omitted when 0). Parked calls are `pending`, not a counter. `log_warn` / `log_error` — the app's own log records under the run's spans at WARN (13–16) and ERROR or above — are read time, on Studio's run document only (`DB.CountLogs`: `DB.OtherLogs`' attribution in one scan the backend narrows to WARN and above): an app log carries trace and span ids, not the run id. Past `obsdb.MaxLogCandidates` such lines the scan stops and the document says `logs_capped: true` — both counts are floors, drawn "≥" |
-| `children_count`, `children_failed` | Studio's run row only, read time (H9, UX-A-19), never stored: the rows whose `parent_run_id` is this run, one level deep (core Subagent children, a `thread/pool` child session's run, a nested `Generate` — every parent-linked run), and those of them whose `status` is `failed` — counted from the children read the cost already makes (`obsdb.TreeReader.ChildRuns`, one read per level of a page, else `Runs(ParentRunID)` per row); each omitted when 0. Pinned by Studio's goldens (`runs.golden.json`, `run-sub.golden.json`), not by a fixture: no record carries it |
+| `children_count`, `children_failed` | Studio's run row only, read time (H9, UX-A-19), never stored: the rows whose `parent_run_id` is this run, one level deep — its core Subagent children (and, on runs recorded before weft 0.18, the pool child turns and nested `Generate`s the core then linked as children; since O11 those carry `caller_run_id` and are not counted) — and those of them whose `status` is `failed` — counted from the children read the cost already makes (`obsdb.TreeReader.ChildRuns`, one read per level of a page, else `Runs(ParentRunID)` per row); each omitted when 0. Pinned by Studio's goldens (`runs.golden.json`, `run-sub.golden.json`), not by a fixture: no record carries it |
 | `catalog_hash` | `weft.catalog.hash` of request index 0 (`""` when it offered no tools) |
 | `request_count` | max `weft.request.index` + 1 |
 
@@ -732,8 +752,8 @@ cap).
 Each span belongs to the run its `weft.run.id` names, else to the
 derived run whose subtree holds it; a span of no run (an app's own) and
 a run outside the chain and the id rule (a sibling under one app-level
-trace) are not in it, nor is a `thread/pool` child session (it runs on
-the pool's own context: its runs name no parent run). The tree is ordered by start, then span id,
+trace) are not in it, nor is a caller-linked run (§2: a `thread/pool`
+child session's turn, a nested `Generate` — it names no parent run). The tree is ordered by start, then span id,
 keyed by run id + span id (`obsdb.TreeSpan`: the span, its `RunID`,
 that run's `ParentRunID`), and capped at `obsdb.TreeSpanCap` (10,000)
 spans, the first in start order: `obsdb.RunTree.Truncated` says the tree
@@ -788,10 +808,23 @@ models are the run document's. The fixtures' `subagent` case pins the
 parent's tree (`tree` in `expect.json`); every other case's tree is the
 run's own spans alone, `RunSpans`' count.
 
-**A session** is the runs sharing `weft.session.id` that are top-level
-(no parent) and not playground runs, ordered by `weft.turn`, then
-`started`; the public id resolves to its session through
-`weft.public_id`. Its row's `title` is the newest turn's (by
+**A session** is its own turns (D3, U14): the non-playground runs
+sharing `weft.session.id` that are turns of it — a run whose id is
+`<weft.session.id>-t<weft.turn>` (thread's id rule: a turn started inside
+another run's tool handler, a `thread/pool` child session's turn
+included), or one linked to no run (no `parent_run_id`, no
+`caller_run_id`: a run that set `weft.session.id` itself) — ordered by
+`weft.turn`, then `started`. A Subagent child or a nested `Generate`
+inherits the session id through ctx metadata and is no turn: its usage
+is in its parent's or its own, never a turn's. The public id resolves to
+its session through `weft.public_id`. A delegated session's row carries
+its lineage (`obsdb.SessionRow.ParentSession` / `ParentCall` /
+`ParentRun`): its turns' `weft.session.parent` and
+`weft.session.parent_call`, and its first turn's `caller_run_id` (else,
+recorded before weft 0.18, its `parent_run_id`) — `""` for a session
+nothing delegated. `SessionQuery.Parent` lists the sessions one session
+delegated (SQLite reads `weft.session.parent` through the expression
+index `runs_session_parent`, 0021; ClickHouse from `Meta` at read time). Its row's `title` is the newest turn's (by
 `weft.turn`, then `started`) non-empty `weft.session.title`, `""` when
 no turn carried one; its `first_prompt` is the first turn's
 `prompt_preview` — `""` when that turn stored no content, never a later
@@ -1092,20 +1125,19 @@ cost, as the server token's is.
 
 A session a panel token lists is one it may open: the session view (and
 the live stream's `session=` selector) admits the token when **any** of
-the session's top-level turns carries its public id — the list's
+the session's own turns carries its public id — the list's
 `WHERE` — and serves those turns alone, so a session whose turns carry
 two public ids (hand-set session metadata, a colliding app) is each
 public id's own view of it. The server token's `/api/sessions?public_id=`
 row is the same one scope throughout: its turns, usage and cost are that
 public id's runs.
 
-A known gap, left for a later decision: a session's turn sent from
-inside another run's tool handler is recorded as a child run of the
-enclosing run (`parent_run_id` is that run, through the core's
-parent-run linkage, as every run started under a run's context is), and
-the session views list top-level turns only — so that turn appears in no
-session view (its session has no page of its own); the enclosing run's
-page reaches it.
+A session's turn sent from inside another run's tool handler — a
+`thread/pool` child session's turn is one — is a turn of its own session
+(the own-turn rule above): since weft 0.18 it carries the caller link,
+not `parent_run_id`, and on older records its `<session>-t<n>` id still
+makes it a turn; its session has a page of its own and, delegated by
+`thread/pool`, is listed under the parent session's.
 
 ## 10. The conformance fixtures
 
@@ -1142,6 +1174,7 @@ page reaches it.
 | `queue_breakpoints` | the phase 8 facts `run_cards` does not hold: a step's two calls under `Parallelism(1)`, the first holding the one slot 30 ms — the second's `execute_tool` span carries `weft.tool.queue_ms` (int, the generator sets it to 1), the first's none; and a playground run's breakpoint park — the runtime's metadata `weft.playground` `true` and `weft.playground.breakpoints` `refund_order` on every record and span, the call parked through `ParkOn` (`pending_source` `park_on`): what Studio and the panel read as a breakpoint (lib/cards.ts `parkWord`), not an approval gate. (`run_cards` holds the request record's `prepared` and `thinking.wire`.) |
 | `bridge_overrides` | a run whose `Params` replace the agent's (`temperature` 0.2, `top_p` 0.9) with `temperature` 0.4 alone and whose `ToolChoice` forces any tool: the root's `weft.override.params` `{"temperature":0.4,"top_p":null}` (`null`: an agent knob the replacement leaves unset) and `weft.override.tool_choice` `any`, beside `weft.override.hash` (span attributes, no row field); and a bridged WARN under its `execute_tool` span (`otel.AppLogs(true)`, content on, a `Redact` over `otel.ContentLog`) with 125 attributes: the message redacted (`card [redacted]`), the first 120 kept, `weft.log.attrs_dropped` 5 (int) |
 | `bridge_stripped` | a bridged WARN on a content-off destination that opted in (`otel.NoContent()`, `otel.AppLogs(true)`): stored stripped — its message and string attribute values emptied, `weft.content` `stripped`, severity, span and the int attribute kept; the run itself content-off (`stripped`) |
+| `pool_child` | thread.analysts-pool's shape: a `thread` turn of investment-lead delegating through `pool.Wrap` (call `d1`) to market-analyst: the child session's turn `<child>-t1` carries its own `weft.session.id`, `weft.caller.run.id` (the lead's turn) and `weft.caller.call.id` `d1` as `caller_run_id` / `caller_call_id`, no `parent_run_id`, and the lineage `weft.session.parent` / `weft.session.parent_call` in `meta`; two sessions, each one turn of its own — the child's with `parent_session`, `parent_call` `d1` and `parent_run` (§6) |
 | `messages_lost` | the `tool_calls` run with its middle transcript batch dropped (the growth `messages` record at index 1, the assistant's tool call), every event and span kept: `message_count` 3 below `messages_emitted` 4 — `gap` (cause `messages_lost`, "1 of 4 transcript batches were lost"); every event stored, so no `events_lost` |
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...]}`;

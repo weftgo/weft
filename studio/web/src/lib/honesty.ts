@@ -541,6 +541,9 @@ interface AppRow {
   public_id?: string
   service?: string
   parent_run_id?: string
+  /** The tool call's run that started it, when no Subagent did
+   * (weft.caller.run.id, U14): a pool child's turn, a nested Generate. */
+  caller_run_id?: string
   /** The run row's meta (api.go's runRow: obsdb.MetaOf's pairs). */
   meta?: Record<string, string>
 }
@@ -619,21 +622,34 @@ export function parkedKind(
     return "child"
   // weft.session.parent rides ctx like any run metadata (core's
   // mergeMetadata): a run that merely inherited it under a pool child's
-  // turn has a parent run id and an id that is not its own session's turn.
-  if (poolParent(row) && (!row?.parent_run_id || ownTurn(row)))
-    return "pool-child"
-  if (row?.parent_run_id && !ownTurn(row)) return "plain"
+  // turn is linked to a run (its caller since U14, its parent before)
+  // and its id is not its own session's turn.
+  const linked = linkedRun(row)
+  if (poolParent(row) && (!linked || ownTurn(row))) return "pool-child"
+  if (linked && !ownTurn(row)) return "plain"
   if (!row?.session_id) return "plain"
   if (!row.public_id) return "no-public-id"
   if (next) return "resumed"
   return live(runtimes, row.service, true) ? "decide" : "read-only"
 }
 
+/** linkedRun is the run a row was started from: its Subagent parent,
+ * else its caller (weft.caller.run.id, U14), "" for neither. */
+const linkedRun = (
+  row: { parent_run_id?: string; caller_run_id?: string } | null | undefined
+) => row?.parent_run_id || row?.caller_run_id || ""
+
 /** nextTurn is the turn after row in its session (the smallest later
  * turn number among runs): a parked turn with one was resumed. */
 export function nextTurn(
   row:
-    | { id: string; session_id?: string; turn?: number; parent_run_id?: string }
+    | {
+        id: string
+        session_id?: string
+        turn?: number
+        parent_run_id?: string
+        caller_run_id?: string
+      }
     | null
     | undefined,
   runs:
@@ -642,20 +658,21 @@ export function nextTurn(
         session_id?: string
         turn?: number
         parent_run_id?: string
+        caller_run_id?: string
       } | null)[]
     | null
     | undefined
 ): string | undefined {
   let best: { id: string; turn?: number } | undefined
-  // A child run (a parent run id that is not its own session's turn —
-  // a Subagent child, a nested Generate) is no turn of the session.
-  if (!row?.session_id || (row.parent_run_id && !ownTurn(row)) || runs == null)
+  // A child run (linked to a run, and not its own session's turn — a
+  // Subagent child, a nested Generate) is no turn of the session.
+  if (!row?.session_id || (linkedRun(row) && !ownTurn(row)) || runs == null)
     return undefined
   for (const r of runs)
     if (
       r &&
       r.session_id === row.session_id &&
-      (!r.parent_run_id || ownTurn(r)) &&
+      (!linkedRun(r) || ownTurn(r)) &&
       (r.turn ?? 0) > (row.turn ?? 0) &&
       (!best || (r.turn ?? 0) < (best.turn ?? 0))
     )
@@ -689,7 +706,7 @@ export const appTurn = (row: AppRow) => {
  * POOL_CHILD alone: the kind is weft.session.parent's, so a session id
  * always follows. */
 export const poolChildWords = (row: AppRow) =>
-  `${POOL_CHILD} ${poolParent(row)}${row.parent_run_id ? ` ${POOL_CHILD_TURN} ${row.parent_run_id}` : ""}`
+  `${POOL_CHILD} ${poolParent(row)}${linkedRun(row) ? ` ${POOL_CHILD_TURN} ${linkedRun(row)}` : ""}`
 
 /** refusalWords is the read-only line's message and fix in the
  * server's words: a 403 already answered (refused), a plain Generate,

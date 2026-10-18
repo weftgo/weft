@@ -112,6 +112,14 @@ export interface RunRow extends CostFields, DelegatedCostFields {
    * lib/status.ts reads it before looking for a later turn. Absent when
    * none is recorded. */
   resumed_by?: string
+  /** The tool call this run was started from when it is no core
+   * Subagent child (weft.caller.run.id / weft.caller.call.id, O11; U14):
+   * a thread/pool child session's turn, another agent's Generate inside
+   * a handler — a link, never parenthood (parent_run_id names a
+   * Subagent's parent alone). Absent when none, and on every run
+   * recorded before weft 0.18. */
+  caller_run_id?: string
+  caller_call_id?: string
   /** A canceled run's weft.cancel.cause (studio.cancel,
    * thread.interrupted, deadline, …). Absent otherwise. */
   cancel_cause?: string
@@ -233,6 +241,17 @@ export interface RunDoc extends RunRow {
   /** The run's manifest_hash resolves in Studio's manifest store (U27):
    * GET /api/manifests/{hash} answers the configuration it ran with. */
   manifest_available?: boolean
+  /** The runs started from this run's tool calls that are not its
+   * Subagent children (U14): a thread/pool child session's turn
+   * (its own session_id, meta weft.session.parent — a delegated
+   * session) or a nested Generate. Oldest first, at most 100
+   * (caller_linked_more past it); a panel token's public id's alone,
+   * the rest counted in caller_linked_hidden. Absent when none;
+   * caller_linked_unknown says the read failed. */
+  caller_linked?: RunRow[]
+  caller_linked_more?: boolean
+  caller_linked_hidden?: number
+  caller_linked_unknown?: boolean
 }
 
 /** GET /api/manifests/{hash}: one stored one-agent manifest (U27). */
@@ -414,6 +433,14 @@ export interface SessionRow extends CostFields {
    * record, not derived): sessionTitle says NO_CONTENT for an untitled
    * row. Absent when false. */
   content_off?: boolean
+  /** A delegated session's lineage (thread/pool, U14): the session that
+   * delegated it, the delegating turn's number, the tool call and the
+   * parent's run. Each absent when unknown — all of them for a session
+   * nothing delegated. */
+  parent_session?: string
+  parent_turn?: number
+  parent_call?: string
+  parent_run?: string
 }
 
 /** GET /api/sessions → SessionsPage. */
@@ -429,6 +456,20 @@ export interface SessionsPage {
  * experiments hang off runs via forked_from. */
 export interface SessionDoc extends SessionRow {
   runs: RunRow[]
+  /** The sessions it delegated (thread/pool children, U14), newest
+   * first, each with its lineage and its own cost; [] when none (absent
+   * from an older Studio). delegated_more: more than the 100 listed;
+   * delegated_unknown: the read failed. */
+  delegated?: SessionRow[]
+  delegated_more?: boolean
+  delegated_unknown?: boolean
+  /** Every session delegated under it, any depth: their usage and
+   * cost, beside the session's own — never folded into usage or
+   * cost_usd. */
+  delegated_usage?: Usage
+  delegated_sessions_cost_usd?: number | null
+  delegated_sessions_cost_known?: boolean
+  delegated_sessions_cost_reason?: string
 }
 
 /** GET /api/public/{public_id}. */

@@ -43,6 +43,7 @@ import (
 	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/thread/pool"
 )
 
 // The record contract's conformance set (docs/record-contract.md):
@@ -95,6 +96,11 @@ type contractSession struct {
 	Title       string `json:"title,omitempty"`
 	FirstPrompt string `json:"first_prompt,omitempty"`
 	ContentOff  bool   `json:"content_off,omitempty"`
+	// ParentSession / ParentCall / ParentRun are a delegated session's
+	// lineage (§6, U14): omitted for a session nothing delegated.
+	ParentSession string `json:"parent_session,omitempty"`
+	ParentCall    string `json:"parent_call,omitempty"`
+	ParentRun     string `json:"parent_run,omitempty"`
 }
 
 // contractRun is one run row as the contract states it: the run row's
@@ -122,8 +128,13 @@ type contractRun struct {
 	// ResumedFrom / ResumedBy are the approval link (§6, U13.1): the
 	// run a resume names (weft.resumed_from) and, on the parked run,
 	// the run that resumed it (read time).
-	ResumedFrom      string            `json:"resumed_from,omitempty"`
-	ResumedBy        string            `json:"resumed_by,omitempty"`
+	ResumedFrom string `json:"resumed_from,omitempty"`
+	ResumedBy   string `json:"resumed_by,omitempty"`
+	// CallerRunID / CallerCallID are the caller link (§2, U14; O11): the
+	// tool call a run that is no Subagent child was started from (a
+	// thread/pool child session's turn, a Generate inside a handler).
+	CallerRunID      string            `json:"caller_run_id,omitempty"`
+	CallerCallID     string            `json:"caller_call_id,omitempty"`
 	ManifestHash     string            `json:"manifest_hash,omitempty"`
 	WeftVersion      string            `json:"weft_version,omitempty"`
 	Meta             map[string]string `json:"meta,omitempty"`
@@ -371,6 +382,7 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			SessionID: r.SessionID, PublicID: r.PublicID, Turn: r.Turn,
 			Playground: r.Playground, ExperimentID: r.ExperimentID, ForkedFrom: r.ForkedFrom,
 			ResumedFrom: r.ResumedFrom, ResumedBy: r.ResumedBy,
+			CallerRunID: r.CallerRunID, CallerCallID: r.CallerCallID,
 			ManifestHash: r.ManifestHash, WeftVersion: r.WeftVersion, Meta: r.Meta,
 			Started: stamp(r.Started), LastSeen: stamp(r.LastSeen), Status: r.Status, Error: r.Err,
 			Steps: r.Steps, Pending: r.Pending, StopReason: r.StopReason,
@@ -482,7 +494,8 @@ func observeSessions(t *testing.T, db obsdb.DB) []contractSession {
 	var out []contractSession
 	for _, s := range page.Sessions {
 		out = append(out, contractSession{ID: s.ID, PublicID: s.PublicID, Agent: s.Agent, Turns: s.Turns,
-			Title: s.Title, FirstPrompt: s.FirstPrompt, ContentOff: s.ContentOff})
+			Title: s.Title, FirstPrompt: s.FirstPrompt, ContentOff: s.ContentOff,
+			ParentSession: s.ParentSession, ParentCall: s.ParentCall, ParentRun: s.ParentRun})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -2081,6 +2094,44 @@ func genCases() []genCase {
 			desc: "a bridged WARN on a content-off destination that opted in (otel.NoContent, otel.AppLogs(true)): the line stored stripped — its message and string attribute values emptied, weft.content stripped, severity, span and the int attribute kept (the run itself content-off: the stripped hole)",
 			dest: []otel.DestOption{otel.NoContent(), otel.AppLogs(true)},
 			run:  runBridgeStripped,
+		},
+		{
+			name: "pool_child",
+			desc: "a thread session's turn delegating through thread/pool (pool.Wrap, ADR 0022): the child session's turn <child>-t1 carries its own weft.session.id, its lineage weft.session.parent / weft.session.parent_call in meta and weft.caller.run.id / weft.caller.call.id naming the delegating call — never weft.parent.* (O11); both sessions are listed, each over its own turns, the child's with its lineage (D3)",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				analyst := pipelineAgent(p, "market-analyst", wefttest.Script(wefttest.Say("ACME: P/E 18.2, momentum +12% — strong.")),
+					core.Instructions("You analyse markets."))
+				pl := pool.New(1)
+				lead := pipelineAgent(p, "investment-lead", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "market_analyst", ID: "d1", Args: `{"prompt":"Analyse ACME"}`}),
+					wefttest.Say("Recommend ACME.")),
+					core.Instructions("You lead investments."),
+					pl.MustWrap("market_analyst", "Delegate a market analysis.", analyst))
+				s, err := thread.Create(ctx, thread.Memory(), lead, thread.PublicID("pub_pool"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				turn, err := s.Send(ctx, core.User("Get a market analysis of ACME and give me a one-line recommendation."))
+				if err != nil {
+					t.Fatal(err)
+				}
+				res, err := turn.Wait()
+				if err != nil {
+					t.Fatal(err)
+				}
+				rs := pool.Receipts(s)
+				if len(rs) != 1 || rs[0].Child == "" {
+					t.Fatalf("receipts = %+v, want one delegation", rs)
+				}
+				if err := s.Close(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err := pl.Close(ctx); err != nil {
+					t.Fatal(err)
+				}
+				return []string{res.ID, rs[0].Child + "-t1"}
+			},
 		},
 	}
 }

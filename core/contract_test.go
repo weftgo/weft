@@ -5871,3 +5871,107 @@ func TestResumeCallsIsCapped(t *testing.T) {
 		t.Errorf("weft.resume.calls = %q\nwant %q", got, want.String())
 	}
 }
+
+// TestRunLinkSubagentVsCaller (O11, record contract §2): weft.parent.*
+// names a core Subagent's child alone; every other run started on a
+// tool call's context — another agent's Generate inside a handler (a
+// thread/pool child session's turn is one) — names the call it was
+// started from with weft.caller.run.id / weft.caller.call.id, on its
+// invoke_agent span and its run_start record, and carries no
+// weft.parent.*. A run nested under the Subagent child's own tool call
+// is a caller-linked run of the child, never a second subagent of the
+// parent. The Subagent's usage roll-up is unchanged (rule 13); the
+// caller-linked run's usage stays its own.
+func TestRunLinkSubagentVsCaller(t *testing.T) {
+	tp, lp := newRecProvider(), newRecLogProvider()
+	obs := []core.Option{core.TracerProvider(tp), core.LoggerProvider(lp)}
+	nested := core.New(wefttest.Script(wefttest.Say("nested answer"), wefttest.Say("nested again")), append(obs, core.Name("nested"))...)
+	ask := core.Tool("ask_nested", "Ask another agent.", func(ctx context.Context, _ struct{}) (string, error) {
+		res, err := nested.Generate(ctx, core.Prompt("inner"))
+		if err != nil {
+			return "", err
+		}
+		return res.Text(), nil
+	})
+	child := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "ask_nested", ID: "c_in"}),
+		wefttest.Say("child done"),
+	), append(obs, core.Name("child"), ask)...)
+	parent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"x"}`, ID: "c_r"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "ask_nested", ID: "c_n"}),
+		wefttest.Say("final"),
+	), append(obs, core.Name("lead"), core.Subagent("research", "Research.", child), ask)...)
+	res, err := parent.Generate(context.Background(), core.RunID("p1"), core.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tp.mu.Lock()
+	spans := append([]*recSpan(nil), tp.spans...)
+	tp.mu.Unlock()
+	runs := map[string]map[string]string{} // run id → its invoke_agent span's attrs
+	for _, s := range spans {
+		if a := s.attrsMap(); strings.HasPrefix(s.name, "invoke_agent ") {
+			runs[a["weft.run.id"]] = a
+		}
+	}
+	lp.mu.Lock()
+	all := append([]recLogRecord(nil), lp.records...)
+	lp.mu.Unlock()
+	starts := map[string]recLogRecord{}
+	for _, r := range all {
+		if r.attr("weft.event.type") == "run_start" {
+			starts[r.attr("weft.run.id")] = r
+		}
+	}
+	keys := []string{"weft.parent.run.id", "weft.parent.call.id", "weft.caller.run.id", "weft.caller.call.id"}
+	check := func(id string, want map[string]string) {
+		t.Helper()
+		span, ok := runs[id]
+		if !ok {
+			t.Fatalf("no invoke_agent span for run %q; have %v", id, slices.Collect(maps.Keys(runs)))
+		}
+		rs, ok := starts[id]
+		if !ok {
+			t.Fatalf("no run_start record for run %q", id)
+		}
+		for _, k := range keys {
+			if span[k] != want[k] {
+				t.Errorf("run %s span %s = %q, want %q", id, k, span[k], want[k])
+			}
+			if rs.attr(k) != want[k] {
+				t.Errorf("run %s run_start %s = %q, want %q", id, k, rs.attr(k), want[k])
+			}
+		}
+	}
+	check("p1", nil)
+	check("p1/0/c_r", map[string]string{"weft.parent.run.id": "p1", "weft.parent.call.id": "c_r"})
+	var callerOfParent, callerOfChild string
+	for id, a := range runs {
+		if a["gen_ai.agent.name"] != "nested" {
+			continue
+		}
+		switch a["weft.caller.run.id"] {
+		case "p1":
+			callerOfParent = id
+		case "p1/0/c_r":
+			callerOfChild = id
+		}
+	}
+	if callerOfParent == "" || callerOfChild == "" {
+		t.Fatalf("nested runs: want one called from p1 and one from p1/0/c_r; spans %v", runs)
+	}
+	check(callerOfParent, map[string]string{"weft.caller.run.id": "p1", "weft.caller.call.id": "c_n"})
+	check(callerOfChild, map[string]string{"weft.caller.run.id": "p1/0/c_r", "weft.caller.call.id": "c_in"})
+	// Rule 13 unchanged: the Subagent child's usage rolls into the
+	// parent's step; a caller-linked run's never does.
+	if got := len(res.Steps); got != 3 {
+		t.Fatalf("parent steps = %d, want 3", got)
+	}
+	if len(res.Steps[0].SubagentUsage) == 0 {
+		t.Error("the Subagent step recorded no SubagentUsage")
+	}
+	if len(res.Steps[1].SubagentUsage) != 0 {
+		t.Errorf("the nested Generate's step recorded SubagentUsage %v: a caller-linked run is not rolled up", res.Steps[1].SubagentUsage)
+	}
+}

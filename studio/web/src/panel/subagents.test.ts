@@ -337,3 +337,40 @@ describe("the panel's subagent badge (A10)", () => {
     expect(studio.gets(`runs/${CHILD}/requests`).length).toBe(reads + 1)
   })
 })
+
+// U14 (UX-B-06): a thread/pool delegation is a session of its own, not a
+// subagent — the caller-linked turn (caller_linked, weft.caller.*) is
+// joined to its call and worded "delegated session" on both the badge
+// and the nested row.
+describe("a delegated session in the panel's story (U14)", () => {
+  it("joins the caller-linked turn to its call and words it a delegated session", async () => {
+    const r = routes()
+    const POOL = "s_02"
+    const poolRow = runRow({
+      id: `${POOL}-t1`,
+      parent_run_id: "",
+      parent_call_id: "",
+      caller_run_id: RUN,
+      caller_call_id: "d1",
+      agent: "market-analyst",
+      session_id: POOL,
+      meta: { "weft.session.parent": "s_01", "weft.session.parent_call": "d1" },
+      usage: U,
+    })
+    r[`runs/${RUN}`] = { ...runRow({}), children: [], caller_linked: [poolRow] }
+    r[`runs/${RUN}/events?after=0&limit=500`] = page(
+      delegating(RUN, "d1", "market_analyst")
+    )
+    fakeStudio(r, metaWithRequests)
+    const el = await mount({ ...ATTRS, "data-token": claims("playground") })
+    const row = $(el, `[data-weft-child="${CSS.escape(`${POOL}-t1`)}"]`)!
+    expect(row).toBeTruthy()
+    expect(row.querySelector("summary")?.textContent).toBe(
+      "delegated session market-analyst · succeeded · 10→5 tok"
+    )
+    expect(
+      $(el, `[data-weft-subagent-link="${CSS.escape(`${POOL}-t1`)}"]`)
+        ?.textContent
+    ).toBe("delegated session")
+  })
+})

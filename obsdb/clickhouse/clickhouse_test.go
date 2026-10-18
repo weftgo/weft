@@ -369,7 +369,7 @@ func TestRunsInnerMetaFilter(t *testing.T) {
 	for _, want := range []string{
 		"JSONHas(Meta, ?)",
 		"JSONExtractString(Meta, ?) = ?",
-		"FROM weft_runs WHERE 1=1 GROUP BY RunId) WHERE ParentRunID = '' AND JSONHas(Meta, ?)",
+		"FROM weft_runs WHERE 1=1 GROUP BY RunId) WHERE ParentRunID = '' AND CallerRunID = '' AND JSONHas(Meta, ?)",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("runsInner missing %q:\n%s", want, sql)
@@ -443,7 +443,8 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // appended; 0021 (U11.1) both views with the whole set, the slog
 // bridge's weft.logs.bridged (u11Keys) appended; 0022 (U25) both views
 // with the whole set, the run cards' seven span facts (u25Keys)
-// appended.
+// appended; 0023 (U14) both views with the whole set, the caller link's
+// two keys (u14Keys) appended.
 const (
 	adr0028Keys   = 12 + 4 + 1 + 10
 	rawKeys       = 1
@@ -456,10 +457,12 @@ const (
 	u13Keys       = 4
 	u11Keys       = 1
 	u25Keys       = 7
+	u14Keys       = 2
 )
 
 func TestMigrationContractTuple(t *testing.T) {
-	at0021 := contractKeys[:len(contractKeys)-u25Keys]
+	at0022 := contractKeys[:len(contractKeys)-u14Keys]
+	at0021 := at0022[:len(at0022)-u25Keys]
 	at0019 := at0021[:len(at0021)-u11Keys]
 	at0018 := at0019[:len(at0019)-u13Keys]
 	at0017 := at0018[:len(at0018)-u32Keys]
@@ -473,7 +476,7 @@ func TestMigrationContractTuple(t *testing.T) {
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, at0015}, {17, 1, at0017}, {18, 2, at0018}, {19, 2, at0019}, {21, 2, at0021}, {22, 2, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, at0015}, {17, 1, at0017}, {18, 2, at0018}, {19, 2, at0019}, {21, 2, at0021}, {22, 2, at0022}, {23, 2, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)

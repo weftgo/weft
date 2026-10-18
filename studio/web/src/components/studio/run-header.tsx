@@ -4,7 +4,7 @@
 // prompt, did it succeed, and what did it say.
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { ArrowUpRight, Check, ChevronRight, Link2 } from "lucide-react"
+import { ArrowUpRight, Check, Link2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { sessionQuery, storedManifestQuery } from "@/lib/api"
@@ -85,6 +85,13 @@ import {
 } from "@/lib/stopped-by"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { KindChip, ProblemStrip } from "@/components/studio/problem-badges"
+import {
+  ChildChips,
+  groupChildren,
+  LineageLine,
+  StartedBy,
+} from "@/components/studio/lineage"
+import { DELEGATED_BLOCK, LINEAGE_KEYS, lineageOfRun } from "@/lib/delegation"
 import type { ToolFactsMap } from "@/lib/error-kind"
 
 /** StoppedByChip is what ended the run (U3.2), in lib/stopped-by.ts's
@@ -430,6 +437,8 @@ export function RunHeader({
     manifest: stored.data?.manifest.agents[0]?.policy.parallelism,
   })
   useDocumentTitle(runPlace(doc))
+  // A delegated session's turn names its parent session (U14).
+  const lineage = lineageOfRun(doc)
   // The words this run was asked: the last user message it was fed
   // (in a thread the first one is an earlier turn's).
   const prompt = turnPrompt(transcript?.batches ?? [])
@@ -765,6 +774,14 @@ export function RunHeader({
             {doc.turn ? ` · turn ${doc.turn}` : ""}
           </Link>
         ) : null}
+        {/* A delegated session's turn (U14, UX-B-05): its lineage as
+            links, never as raw weft.session.parent chips; a run a tool
+            call started names its caller (weft.caller.run.id). */}
+        {lineage ? (
+          <LineageLine lineage={lineage} />
+        ) : doc.caller_run_id ? (
+          <StartedBy run={doc.caller_run_id} call={doc.caller_call_id} />
+        ) : null}
         {/* The public id and the metadata pairs filter the runs list
             on click (UX-S4-14): the list's own URL chips. */}
         {doc.public_id ? (
@@ -777,17 +794,19 @@ export function RunHeader({
             {doc.public_id}
           </Link>
         ) : null}
-        {Object.entries(doc.meta).map(([k, v]) => (
-          <Link
-            key={k}
-            {...runsLink({ tag: `${k}=${v}` })}
-            className="font-mono hover:text-foreground hover:underline"
-            title={`metadata ${k} — list the runs with ${k}=${v}`}
-            data-meta-chip={k}
-          >
-            {k}={v}
-          </Link>
-        ))}
+        {Object.entries(doc.meta)
+          .filter(([k]) => !lineage || !LINEAGE_KEYS.includes(k))
+          .map(([k, v]) => (
+            <Link
+              key={k}
+              {...runsLink({ tag: `${k}=${v}` })}
+              className="font-mono hover:text-foreground hover:underline"
+              title={`metadata ${k} — list the runs with ${k}=${v}`}
+              data-meta-chip={k}
+            >
+              {k}={v}
+            </Link>
+          ))}
         {doc.trace_id ? (
           <Link
             {...traceLink(doc.trace_id)}
@@ -799,28 +818,30 @@ export function RunHeader({
         ) : null}
       </div>
 
-      {doc.children.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="eyebrow">
-            {doc.children.length === 1 ? "child run" : "child runs"}
-          </span>
-          {doc.children.map((c) => (
-            <Link
-              key={c.id}
-              {...runLink(c.id)}
-              className="flex max-w-full min-w-0 items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-thread-ink hover:bg-secondary"
-              title={`open the child run ${c.id} (${c.status})`}
-            >
-              <StatusChip row={c} dotOnly />
-              {c.agent}
-              <ChevronRight className="size-3 shrink-0 text-faint" />
-              {/* A long child id ellipsizes (H9, UX-A-21): never wider than the page. */}
-              <span className="min-w-0 truncate">{c.id}</span>
-              <ArrowUpRight className="size-3" data-slot="icon" />
-            </Link>
-          ))}
-        </div>
+      {/* The runs its tool calls started, each kind in its own words
+          (U14, UX-B-06): subagent runs (children), delegated sessions
+          and runs a call started (caller_linked; a pool child recorded
+          before weft 0.18 is among the children, worded by its kind). */}
+      {groupChildren([...doc.children, ...(doc.caller_linked ?? [])]).map(
+        ([kind, rows]) => (
+          <ChildChips key={kind} kind={kind} rows={rows} />
+        )
       )}
+      {doc.caller_linked_more ? (
+        <p className="font-mono text-[11px] text-faint">
+          {DELEGATED_BLOCK.linkedMore}
+        </p>
+      ) : null}
+      {doc.caller_linked_hidden ? (
+        <p className="font-mono text-[11px] text-faint">
+          {DELEGATED_BLOCK.linkedHidden(doc.caller_linked_hidden)}
+        </p>
+      ) : null}
+      {doc.caller_linked_unknown ? (
+        <p className="font-mono text-[11px] text-status-int">
+          {DELEGATED_BLOCK.linkedUnknown}
+        </p>
+      ) : null}
     </div>
   )
 }

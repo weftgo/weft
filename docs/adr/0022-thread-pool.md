@@ -478,3 +478,21 @@ sync or async, keeps the rule on every step.
   plumbing, with `AppendPoolReceipt`, `AppendApprovalRequests` and
   `ResolveDelegation` in one file, `thread/poolplumbing.go`);
   `ResolveDelegation` takes the child id; `PoolParked`.
+
+## Note (2026-10-19 — a pool child's records name a caller, not a parent, U14 / O11, D3)
+
+A child session's turn ran on the delegating call's context, so the
+core stamped it with that call's `weft.parent.run.id` like a Subagent
+child — and every reader that took the attribute for a child (obsdb's
+session scope, Studio's children and cost) treated a separate session
+as a run inside the parent's turn: its session page 404'd and the
+parent session never listed it. Since U14 the core keeps
+`weft.parent.*` for `core.Subagent` children (ADR 0014's note) and the
+child's turn carries `weft.caller.run.id` / `weft.caller.call.id`; obsdb
+groups a session over its own turns (`<session>-t<n>`, or a run linked
+to no run) and lists a session's delegated sessions by their
+`weft.session.parent` (`SessionQuery.Parent`). The store treats a pool
+child as the separate session with lineage this ADR decided; its usage
+stays on the receipt and in the parent session's `Usage().Delegated`,
+which Studio now shows beside the parent session's own.
+

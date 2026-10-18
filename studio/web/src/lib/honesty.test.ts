@@ -229,6 +229,37 @@ describe("the app turn's kinds and refusal words", () => {
     expect(go("../thread/turn.go")).toMatch(/"weft\.session\.parent"/)
   })
 
+  it("since U14 (O11) a pool child's turn names its caller, not a parent: still pool-child, its turn named; a Generate under it is plain", () => {
+    const meta = { "weft.session.parent": "s" }
+    const child = {
+      id: "s_pool-t1",
+      session_id: "s_pool",
+      public_id: "",
+      service: "app",
+      caller_run_id: "s-t1",
+      meta,
+    }
+    expect(parkedKind(child, [rt()])).toBe("pool-child")
+    expect(refusalWords("pool-child", child, [rt()], false).words).toBe(
+      `${POOL_CHILD} s ${POOL_CHILD_TURN} s-t1`
+    )
+    // A Generate inside the pool child's tool handler inherits its
+    // session id and weft.session.parent, and names its caller.
+    const nested = {
+      id: "r_nested",
+      session_id: "s_pool",
+      public_id: "",
+      service: "app",
+      caller_run_id: "s_pool-t1",
+      meta,
+    }
+    expect(parkedKind(nested, [rt()])).toBe("plain")
+    expect(nextTurn(nested, [child])).toBeUndefined()
+    expect(
+      nextTurn({ ...child, turn: 1 }, [{ ...nested, turn: 2 }])
+    ).toBeUndefined()
+  })
+
   it("a pool child p.Submit started outside a run (no parent run id — core stamps it only from a running call's ctx): still pool-child, the parent session named", () => {
     const sub = {
       id: "s_sub-t1",

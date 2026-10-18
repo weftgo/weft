@@ -34,6 +34,7 @@ import { promptNotRecorded, promptNotServed, promptReadError } from "./badges"
 import { rerun as rerunDraft } from "../lib/replay"
 import type { ReplayDraft } from "../lib/replay"
 import { applyTranscript, linkView, newFold } from "../lib/events"
+import { storyChildren } from "../lib/delegation"
 import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { LiveRecord, LiveRun } from "../lib/live"
 import {
@@ -1514,7 +1515,7 @@ export class PanelModel {
     )
     if (view.doc && Array.isArray(view.doc.children)) {
       try {
-        linkView(view.folded, view.doc.children)
+        linkView(view.folded, storyChildren(view.doc))
       } catch {
         // children that do not read as rows: no expanders
       }
@@ -1641,7 +1642,7 @@ export class PanelModel {
     // them and hands off to Studio).
     if (doc && Array.isArray(doc.children)) {
       try {
-        linkView(folded, doc.children)
+        linkView(folded, storyChildren(doc))
       } catch {
         // children that do not read as rows: no badges
       }

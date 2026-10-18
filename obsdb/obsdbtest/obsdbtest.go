@@ -38,6 +38,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("ResumeLink", resumeLink(open))
 	t.Run("StatusWords", statusWords(open))
 	t.Run("Sessions", sessions(open))
+	t.Run("PoolChild", poolChild(open))
 	t.Run("Children", children(open))
 	t.Run("IDPrefix", idPrefix(open))
 	t.Run("Paging", paging(open))

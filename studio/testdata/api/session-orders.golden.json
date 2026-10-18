@@ -163,6 +163,13 @@
       "catalog_hash": "",
       "request_count": 0
     }
-  ]
+  ],
+  "delegated": [],
+  "delegated_usage": {
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "delegated_sessions_cost_usd": 0,
+  "delegated_sessions_cost_known": true
 }
 

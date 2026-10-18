@@ -1053,6 +1053,8 @@ func (x *runExport) eventAttrs(pe obsdb.PosEvent) (map[string]any, bool) {
 		}
 		set("weft.parent.run.id", r.ParentRunID)
 		set("weft.parent.call.id", r.ParentCallID)
+		set("weft.caller.run.id", r.CallerRunID)
+		set("weft.caller.call.id", r.CallerCallID)
 		set("weft.manifest.hash", r.ManifestHash)
 		set("weft.instructions.hash", r.InstructionsHash)
 		set("weft.version", r.WeftVersion)

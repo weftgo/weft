@@ -21,7 +21,7 @@ import (
 
 const runColumns = `run_id, parent_run_id, parent_call_id, trace_id, agent, provider, model,
 	manifest_hash, weft_version, service, session_id, public_id, turn,
-	playground, experiment_id, forked_from, resumed_from, meta,
+	playground, experiment_id, forked_from, resumed_from, caller_run_id, caller_call_id, meta,
 	started_ns, finished_ns, last_seen_ns, finished_ok, failed, err,
 	steps, pending, stop_reason,
 	input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
@@ -214,9 +214,17 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		conds = append(conds, cond)
 		args = append(args, cargs...)
 	}
+	if q.CallerRunID != "" {
+		conds = append(conds, "caller_run_id = ? AND caller_run_id <> ''") // runs_caller (0021)
+		args = append(args, q.CallerRunID)
+	}
 	switch q.ParentRunID {
 	case "":
-		conds = append(conds, "parent_run_id = ''")
+		// Top-level: started from no run — no Subagent parent, no
+		// caller link (O11: a pool child turn, a nested Generate is on
+		// its caller's page, as it was when the core linked it as a
+		// child). runs_started still leads on parent_run_id.
+		conds = append(conds, "parent_run_id = '' AND caller_run_id = ''")
 	case "*":
 	default:
 		conds = append(conds, "parent_run_id = ?")
@@ -304,7 +312,7 @@ func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runR
 		var r runRowScan
 		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.ParentCallID, &r.TraceID, &r.Agent, &r.Provider,
 			&r.Model, &r.ManifestHash, &r.WeftVersion, &r.Service, &r.SessionID, &r.PublicID, &r.Turn,
-			&r.Playground, &r.ExperimentID, &r.ForkedFrom, &r.ResumedFrom, &r.Meta,
+			&r.Playground, &r.ExperimentID, &r.ForkedFrom, &r.ResumedFrom, &r.CallerRunID, &r.CallerCallID, &r.Meta,
 			&r.Started, &r.Finished, &r.LastSeen, &r.FinishedOK, &r.Failed, &r.Err,
 			&r.Steps, &r.Pending, &r.StopReason,
 			&r.InTok, &r.OutTok, &r.CachedTok, &r.CacheWrite, &r.ReasonTok,
@@ -327,6 +335,7 @@ type runRowScan struct {
 	Playground                                        bool
 	ExperimentID, ForkedFrom, Meta                    string
 	ResumedFrom, ResumedBy                            string
+	CallerRunID, CallerCallID                         string
 	Started, LastSeen                                 int64
 	Finished                                          sql.NullInt64
 	FinishedOK, Failed                                bool
@@ -351,6 +360,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		SessionID: r.SessionID, PublicID: r.PublicID, Turn: r.Turn,
 		Playground: r.Playground, ExperimentID: r.ExperimentID, ForkedFrom: r.ForkedFrom,
 		ResumedFrom: r.ResumedFrom, ResumedBy: r.ResumedBy,
+		CallerRunID: r.CallerRunID, CallerCallID: r.CallerCallID,
 		Started:  time.Unix(0, r.Started).UTC(),
 		LastSeen: time.Unix(0, r.LastSeen).UTC(),
 		Err:      r.Err, Steps: r.Steps, Pending: r.Pending, StopReason: r.StopReason,
@@ -1134,9 +1144,28 @@ func (d *DB) runExists(ctx context.Context, runID string) error {
 	return err
 }
 
-// sessionScope is what a session is grouped over (S3.4): its
-// top-level, non-playground runs.
-const sessionScope = `parent_run_id = '' AND playground = 0 AND session_id <> ''`
+// sessionScope is what a session is grouped over (D3, U14): its own
+// turns, non-playground (ownTurn), on the partial index runs_session.
+var sessionScope = `playground = 0 AND session_id <> '' AND ` + ownTurn("runs")
+
+// ownTurn is a run that is a turn of its own session (D3, obsdb's
+// SessionRow): its id is <session_id>-t<turn> — thread's id rule, so a
+// turn a tool handler started (a thread/pool child session's turn, a
+// Send inside a handler) counts, and a Subagent child (<turn>/<step>/
+// <call>) never does — or it is linked to no run at all (no parent, no
+// caller: a run that set weft.session.id itself). A Generate inside a
+// handler inherits the session id through ctx metadata and is neither.
+// alias names the runs table in the statement.
+func ownTurn(alias string) string {
+	return `(` + alias + `.run_id = ` + alias + `.session_id || '-t' || ` + alias + `.turn
+		OR (` + alias + `.parent_run_id = '' AND ` + alias + `.caller_run_id = ''))`
+}
+
+// sessionParentExpr is a run's weft.session.parent (the thread/pool
+// lineage), the expression runs_session_parent (0021) indexes.
+func sessionParentExpr(alias string) string {
+	return `json_extract(` + alias + `.meta, '$."weft.session.parent"')`
+}
 
 // Sessions is a GROUP BY session_id over top-level, non-playground
 // runs (S3.4): turns, first/last seen, summed usage, and the newest
@@ -1171,6 +1200,12 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	if q.PublicID != "" {
 		scope += ` AND public_id = ? AND public_id <> ''`
 		sargs = []any{q.PublicID}
+	}
+	if q.Parent != "" {
+		// Every turn of a delegated session carries its lineage
+		// (thread's identityMetadata), so the scope is the turns'.
+		scope += ` AND ` + sessionParentExpr("runs") + ` = ?`
+		sargs = append(sargs, q.Parent)
 	}
 	// Total is the whole match, as Runs' is: the cursor pages through
 	// it and never narrows it.
@@ -1228,7 +1263,7 @@ func sessionTitleExpr(pub string) (string, []any) {
 	}
 	const title = `json_extract(r3.meta, '$."` + obsdb.SessionTitleKey + `"')`
 	return `COALESCE((SELECT ` + title + ` FROM runs r3
-		WHERE r3.session_id = runs.session_id AND r3.session_id <> '' AND r3.parent_run_id = '' AND r3.playground = 0` + scope + `
+		WHERE r3.session_id = runs.session_id AND r3.session_id <> '' AND ` + ownTurn("r3") + ` AND r3.playground = 0` + scope + `
 		AND COALESCE(` + title + `, '') <> ''
 		ORDER BY r3.turn DESC, r3.started_ns DESC LIMIT 1), '')`, args
 }
@@ -1243,7 +1278,7 @@ func sessionPromptExpr(pub string) (string, []any) {
 		scope, args = ` AND r4.public_id = ? AND r4.public_id <> ''`, []any{pub}
 	}
 	return `COALESCE((SELECT rs.prompt FROM run_search rs WHERE rs.run_id = (SELECT r4.run_id FROM runs r4
-		WHERE r4.session_id = runs.session_id AND r4.session_id <> '' AND r4.parent_run_id = '' AND r4.playground = 0` + scope + `
+		WHERE r4.session_id = runs.session_id AND r4.session_id <> '' AND ` + ownTurn("r4") + ` AND r4.playground = 0` + scope + `
 		ORDER BY r4.turn, r4.started_ns, r4.run_id LIMIT 1)), '')`, args
 }
 
@@ -1261,7 +1296,7 @@ func sessionFirstTurnExpr(pub string) (string, []any) {
 	return `COALESCE((SELECT json_object('derived', r5.derived, 'messages', r5.message_count, 'events', r5.event_count,
 			'failed', r5.failed, 'finished_ok', r5.finished_ok, 'root_ended', r5.root_ended, 'last_seen', r5.last_seen_ns)
 		FROM runs r5
-		WHERE r5.session_id = runs.session_id AND r5.session_id <> '' AND r5.parent_run_id = '' AND r5.playground = 0` + scope + `
+		WHERE r5.session_id = runs.session_id AND r5.session_id <> '' AND ` + ownTurn("r5") + ` AND r5.playground = 0` + scope + `
 		ORDER BY r5.turn, r5.started_ns, r5.run_id LIMIT 1), '')`, args
 }
 
@@ -1325,8 +1360,12 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 		var status, firstStored string
 		if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &row.Turns,
 			&first, &last, &inTok, &outTok, &cached, &cacheW, &reason, &status,
-			&row.Title, &row.FirstPrompt, &firstStored); err != nil {
+			&row.Title, &row.FirstPrompt, &firstStored,
+			&row.ParentSession, &row.ParentCall, &row.ParentRun); err != nil {
 			return nil, err
+		}
+		if row.ParentSession == "" { // lineage is a delegated session's alone
+			row.ParentCall, row.ParentRun = "", ""
 		}
 		var ft firstTurn
 		if row.ContentOff, err = ft.contentOff(firstStored, now); err != nil {
@@ -1354,23 +1393,32 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 func sessionRowsSQL(cutoff int64, pub, where string, wargs []any,
 	having []string, hargs []any, tail string) (string, []any) {
 	args := []any{cutoff}
-	statusScope := ""
+	statusScope, statusScope6 := "", ""
 	if pub != "" {
 		statusScope = ` AND r2.public_id = ? AND r2.public_id <> ''`
+		statusScope6 = ` AND r6.public_id = ? AND r6.public_id <> ''`
 		args = append(args, pub)
 	}
 	title, targs := sessionTitleExpr(pub)
 	prompt, pargs := sessionPromptExpr(pub)
 	off, oargs := sessionFirstTurnExpr(pub)
 	args = append(append(append(args, targs...), pargs...), oargs...)
+	if pub != "" {
+		args = append(args, pub) // the first turn's caller (r6)
+	}
 	args = append(append(args, wargs...), hargs...)
 	return `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),
 		MIN(started_ns), MAX(last_seen_ns),
 		SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens),
 		(SELECT ` + statusExpr + ` FROM runs r2 WHERE r2.session_id = runs.session_id AND r2.session_id <> ''
-		 AND r2.parent_run_id = '' AND r2.playground = 0` + statusScope + `
+		 AND ` + ownTurn("r2") + ` AND r2.playground = 0` + statusScope + `
 		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1),
-		` + title + `, substr(` + prompt + `, 1, ` + fmt.Sprint(obsdb.PromptPreviewRunes) + `), ` + off + `
+		` + title + `, substr(` + prompt + `, 1, ` + fmt.Sprint(obsdb.PromptPreviewRunes) + `), ` + off + `,
+		COALESCE(MAX(` + sessionParentExpr("runs") + `), ''),
+		COALESCE(MAX(json_extract(runs.meta, '$."weft.session.parent_call"')), ''),
+		COALESCE((SELECT CASE WHEN r6.caller_run_id <> '' THEN r6.caller_run_id ELSE r6.parent_run_id END FROM runs r6
+		 WHERE r6.session_id = runs.session_id AND r6.session_id <> '' AND ` + ownTurn("r6") + ` AND r6.playground = 0` + statusScope6 + `
+		 ORDER BY r6.turn, r6.started_ns, r6.run_id LIMIT 1), '')
 		FROM runs WHERE ` + where + ` GROUP BY session_id` + havingSQL(having) + tail, args
 }
 
@@ -1396,7 +1444,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	// the newest — the ones a session view is opened for. A caller that
 	// wants pages reads Runs with RunQuery.SessionID.
 	runs, err := d.queryRunRows(ctx,
-		`session_id = ? AND session_id <> '' AND parent_run_id = '' AND playground = 0 ORDER BY turn, started_ns, run_id`,
+		`session_id = ? AND session_id <> '' AND `+ownTurn("runs")+` AND playground = 0 ORDER BY turn, started_ns, run_id`,
 		[]any{id}, now)
 	if err != nil {
 		return obsdb.SessionDetail{}, err

@@ -15,6 +15,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import { storyChildren } from "@/lib/delegation"
 import { shared } from "@/lib/virtual"
 import { ChevronRight, Play } from "lucide-react"
 import {
@@ -1185,15 +1186,16 @@ export function StepList({
   const compactions = compactionsOf(doc)
   const sessionMarkers = compactions.filter(isSessionMarker)
   const replaying = upTo != null && upTo < events.length
+  // The rows its calls started: subagent runs and, since U14, the
+  // caller-linked runs (a delegated session's turn) on their call.
+  const kids = storyChildren(doc)
   const view = linkView(
     upTo == null ? folded : (atPlayhead ?? fold(events, upTo)),
-    doc.children
+    kids
   )
   // A child row per child id; linkView stamped each call with its
   // child's id (S4.3). The block expands lazily.
-  const childLinks = new Map<string, ChildRow>(
-    doc.children.map((c) => [c.id, c])
-  )
+  const childLinks = new Map<string, ChildRow>(kids.map((c) => [c.id, c]))
   // While scrubbing, the run reads as running: calls past the
   // playhead are "running", not "never completed".
   const runStatus = replaying ? "running" : doc.status

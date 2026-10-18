@@ -6,6 +6,16 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Changed
+
+- **Breaking:** core, obsdb, Studio: pool-child identity (U14; audit rows O11, D3; UX-E-21, UX-B-05). The core stamps `weft.parent.run.id` / `weft.parent.call.id` on a `core.Subagent` child alone; every other run started on a tool call's context — a `thread/pool` child session's turn, another agent's `Generate` inside a handler, a run under a Subagent child's own tool call — carries `weft.caller.run.id` / `weft.caller.call.id` instead, on its `invoke_agent` span and `run_start` record: a link, never parenthood (record contract §2, the `pool_child` fixture). Breaking for readers that took every `weft.parent.run.id` for a child: such a run has no `parent_run_id` now, so it is no longer among a run's `children`, its `children_count` or its run tree, and `/api/runs` (top-level: no parent and no caller link, `obsdb.RunQuery.ParentRunID ""`) still leaves it out; read it from the new `caller_run_id` / `caller_call_id` row columns (SQLite 0021, ClickHouse 0023; `obsdb.RunRow.CallerRunID`, `RunQuery.CallerRunID`) and the run page's `caller_linked`. Subagent cost roll-ups are unchanged. A session is now grouped over its own turns (`<session>-t<turn>`, or a run linked to no run), not over `parent_run_id = ''`: a pool child session exists — `GET /api/sessions` lists it (its `total` counts it) and `GET /api/sessions/{id}` answers it instead of 404 — while a Subagent child or a nested `Generate` that inherited the session id is no turn. Records written before this version keep their `weft.parent.*` links; the own-turn rule still reads an old pool child's turn by its id.
+
+### Added
+
+- obsdb, Studio, panel: delegated sessions (U14; UX-B-05, UX-B-06, UX-B-35). A session row carries its lineage — `parent_session`, `parent_turn`, `parent_call`, `parent_run` (`obsdb.SessionRow.ParentSession` / `ParentCall` / `ParentRun`) — and `obsdb.SessionQuery.Parent` lists the sessions one session delegated (SQLite's expression index `runs_session_parent`). `GET /api/sessions/{id}` adds `delegated` (its delegated sessions, each with its own cost), `delegated_more` / `delegated_unknown`, and the whole delegated tree's `delegated_usage` and `delegated_sessions_cost_usd` / `_known` / `_reason`, beside — never folded into — the session's own usage and cost. `GET /api/runs/{id}` adds `caller_linked` (the runs its calls started that are no Subagent children, at most 100; `caller_linked_more`, `caller_linked_hidden` for a panel token, `caller_linked_unknown`). Studio's sessions list draws a lineage cell ("↳ delegated by s_… · turn 1 · call d1"), the session page lists its delegated sessions, a delegated turn's run header names its lineage as links instead of raw `weft.session.parent=` chips, and both surfaces word a pool child "delegated session" (open session first, open run second), never "subagent" (`src/lib/delegation.ts`: `childKind`, `CHILD_EYEBROW`, `lineageOfRun`, `storyChildren`); the panel's story joins the caller-linked turn to its call (+230 B gzip, the ledger's "U14 pool-child identity").
+
 ## 0.17.0 — 2026-10-17
 
 ### Added

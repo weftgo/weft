@@ -67,6 +67,13 @@ type Weft struct {
 	// UX-E-17): the parked run it resumes. On its invoke_agent span and
 	// run_start record only.
 	ResumedFrom string
+	// CallerRunID / CallerCallID are a run's weft.caller.run.id /
+	// weft.caller.call.id (O11, U14): the tool call another run was
+	// started from when it is no core Subagent child — a thread/pool
+	// child session's turn, a Generate inside a handler. A link, never
+	// parenthood (ParentRunID is the Subagent child's alone). On the
+	// invoke_agent span and run_start record only.
+	CallerRunID, CallerCallID string
 	// Reason is a messages record's weft.messages.reason: "" for
 	// transcript growth, "compacted" for a compaction view (ADR 0028
 	// §8), which is never counted or concatenated as transcript. A
@@ -104,6 +111,8 @@ const (
 	attrExperimentID = "weft.experiment.id"
 	attrForkedFrom   = "weft.forked_from"
 	attrResumedFrom  = "weft.resumed_from"
+	attrCallerRunID  = "weft.caller.run.id"
+	attrCallerCallID = "weft.caller.call.id"
 
 	// ADR 0028 §8: the compaction view and the session marker.
 	attrMessagesReason  = "weft.messages.reason"
@@ -133,6 +142,8 @@ func DeriveSpan(s Span) Weft {
 		ExperimentID: attr(s.Attrs, attrExperimentID),
 		ForkedFrom:   attr(s.Attrs, attrForkedFrom),
 		ResumedFrom:  attr(s.Attrs, attrResumedFrom),
+		CallerRunID:  attr(s.Attrs, attrCallerRunID),
+		CallerCallID: attr(s.Attrs, attrCallerCallID),
 	}
 }
 
@@ -159,6 +170,8 @@ func DeriveRecord(r Record) Weft {
 		ExperimentID: attr(r.Attrs, attrExperimentID),
 		ForkedFrom:   attr(r.Attrs, attrForkedFrom),
 		ResumedFrom:  attr(r.Attrs, attrResumedFrom),
+		CallerRunID:  attr(r.Attrs, attrCallerRunID),
+		CallerCallID: attr(r.Attrs, attrCallerCallID),
 		Reason:       attrReason(r.Attrs),
 		Input:        attrBool(r.Attrs, attrMessagesInput),
 	}
@@ -311,6 +324,8 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.resume.calls":            {}, // U13.1: a resume's decisions per parked call (on the spans)
 	"weft.tool.denied":             {}, // U13.1: a denied call's execute_tool span
 	"weft.tool.denied_kind":        {}, // U13.1: denied | no_decision
+	attrCallerRunID:                {}, // U14 (O11): the run row's caller_run_id column
+	attrCallerCallID:               {}, // U14 (O11): the run row's caller_call_id column
 	"weft.messages.count":          {},
 	"weft.messages.input":          {},
 	"weft.content":                 {},

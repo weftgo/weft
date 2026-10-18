@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"strings"
@@ -142,13 +144,21 @@ type runRow struct {
 	// the run that resumed it (obsdb.RunRow; docs/record-contract.md
 	// §6, UX-E-17). Absent when none: the status word reads
 	// "parked → <resumer>" from resumed_by (lib/status.ts).
-	ResumedFrom string            `json:"resumed_from,omitempty"`
-	ResumedBy   string            `json:"resumed_by,omitempty"`
-	Meta        map[string]string `json:"meta"`
-	Started     time.Time         `json:"started"`
-	Finished    *time.Time        `json:"finished"`
-	LastSeen    time.Time         `json:"last_seen"`
-	Status      string            `json:"status"` // derived: a stale running row reads "interrupted"
+	ResumedFrom string `json:"resumed_from,omitempty"`
+	ResumedBy   string `json:"resumed_by,omitempty"`
+	// CallerRunID / CallerCallID are the tool call this run was started
+	// from when it is no core Subagent child (obsdb.RunRow.CallerRunID;
+	// weft.caller.*, docs/record-contract.md §2, U14): a thread/pool
+	// child session's turn, another agent's Generate inside a handler —
+	// a link, not parenthood (parent_run_id names a Subagent's parent
+	// alone). Absent when none.
+	CallerRunID  string            `json:"caller_run_id,omitempty"`
+	CallerCallID string            `json:"caller_call_id,omitempty"`
+	Meta         map[string]string `json:"meta"`
+	Started      time.Time         `json:"started"`
+	Finished     *time.Time        `json:"finished"`
+	LastSeen     time.Time         `json:"last_seen"`
+	Status       string            `json:"status"` // derived: a stale running row reads "interrupted"
 	// Settling marks a run whose root span is stored (status already
 	// succeeded or failed from it) but whose run_finish record is not,
 	// heard from within 30 s by its own timestamps (obsdb.RunRow.Settling,
@@ -222,10 +232,11 @@ type runRow struct {
 	// stores no messages, and the stripped / not_recorded holes the run
 	// document already reports say why — no badge of its own.
 	PromptPreview string `json:"prompt_preview,omitempty"`
-	// ChildrenCount is the runs whose parent_run_id names this one (its
-	// core Subagent children, a thread/pool child session's run, another
-	// agent's Generate inside a tool handler — every parent-linked run,
-	// one level deep) and ChildrenFailed those of them whose status is
+	// ChildrenCount is the runs whose parent_run_id names this one, one
+	// level deep: its core Subagent children (on runs recorded before
+	// weft 0.18 also the pool child turns and nested Generates the core
+	// then linked as children — since O11 they carry caller_run_id and
+	// are listed in the run page's caller_linked instead) and ChildrenFailed those of them whose status is
 	// failed (H9, UX-A-19: the runs list's "⑂ n" chip). Read time, from
 	// the children read the cost already makes (coster.primeTrees: one
 	// obsdb.TreeReader.ChildRuns read per level of a page, never one per
@@ -265,6 +276,8 @@ func row(rec obsdb.RunRow) runRow {
 		ForkedFrom:    rec.ForkedFrom,
 		ResumedFrom:   rec.ResumedFrom,
 		ResumedBy:     rec.ResumedBy,
+		CallerRunID:   rec.CallerRunID,
+		CallerCallID:  rec.CallerCallID,
 		Meta:          rec.Meta,
 		Started:       rec.Started,
 		LastSeen:      rec.LastSeen,
@@ -371,7 +384,25 @@ type runPage struct {
 	// manifest store — GET /api/manifests/{manifest_hash} answers the
 	// configuration it ran with (U27). Absent when it does not.
 	ManifestAvailable bool `json:"manifest_available,omitempty"`
+	// CallerLinked is the runs started from this run's tool calls that
+	// are not its Subagent children (RunQuery.CallerRunID, U14): each a
+	// thread/pool child session's turn (its own session_id and
+	// meta weft.session.parent: "delegated session") or another agent's
+	// Generate inside a handler — links, never parenthood: their usage
+	// is their own, in no figure of this run. In start order, the first
+	// callerLinkedCap (CallerLinkedMore: more were not listed); under a
+	// panel token its public id's alone, the rest counted in
+	// CallerLinkedHidden, never named. Absent when none;
+	// CallerLinkedUnknown says the read failed (absent, the list would
+	// read as "none").
+	CallerLinked        []runRow `json:"caller_linked,omitempty"`
+	CallerLinkedMore    bool     `json:"caller_linked_more,omitempty"`
+	CallerLinkedHidden  int      `json:"caller_linked_hidden,omitempty"`
+	CallerLinkedUnknown bool     `json:"caller_linked_unknown,omitempty"`
 }
+
+// callerLinkedCap bounds a run page's caller_linked rows.
+const callerLinkedCap = 100
 
 // runCompaction is one compaction a run's records name, counts and
 // hash only: a run-scope view (scope "run": the PrepareStep rewrite of
@@ -712,10 +743,23 @@ type sessionRow struct {
 	// captured)" for an untitled row instead of its id. Absent when
 	// false.
 	ContentOff bool `json:"content_off,omitempty"`
+	// ParentSession, ParentTurn, ParentCall and ParentRun are a
+	// delegated session's lineage (thread/pool, ADR 0022;
+	// obsdb.SessionRow, U14): the session that delegated it, the
+	// delegating turn's number (from parent_run when it is that
+	// session's <session>-t<n>), the tool call and the run it belonged
+	// to. Each absent when unknown — every one for a session nothing
+	// delegated; parent_run and parent_turn for a child submitted
+	// outside a run (p.Submit).
+	ParentSession string `json:"parent_session,omitempty"`
+	ParentTurn    int    `json:"parent_turn,omitempty"`
+	ParentCall    string `json:"parent_call,omitempty"`
+	ParentRun     string `json:"parent_run,omitempty"`
 	// The session's cost (plan A5): its turns' own + delegated — the
 	// session's usage already includes their subagents. A thread/pool
-	// child is another session, which this row does not link: no
-	// delegated figure here.
+	// child is another session, with its own row: its cost is on the
+	// parent's session document (delegated_sessions_*), never folded in
+	// here.
 	costFields
 }
 
@@ -725,7 +769,23 @@ func sessRow(r obsdb.SessionRow) sessionRow {
 		FirstSeen: r.FirstSeen, LastSeen: r.LastSeen,
 		Status: string(r.Status), Usage: r.Usage,
 		Title: r.Title, FirstPrompt: r.FirstPrompt, ContentOff: r.ContentOff,
+		ParentSession: r.ParentSession, ParentTurn: turnOf(r.ParentSession, r.ParentRun),
+		ParentCall: r.ParentCall, ParentRun: r.ParentRun,
 	}
+}
+
+// turnOf is n when run is session's <session>-t<n> (thread's id rule),
+// else 0.
+func turnOf(session, run string) int {
+	rest, ok := strings.CutPrefix(run, session+"-t")
+	if !ok || session == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 type sessionsPage struct {
@@ -736,12 +796,39 @@ type sessionsPage struct {
 	NextBeforeID *string `json:"next_before_id"`
 }
 
-// sessionDoc is GET /api/sessions/{id}: the row and its top-level
-// turns in order; experiments hang off runs via forked_from.
+// sessionDoc is GET /api/sessions/{id}: the row and its own turns in
+// order; experiments hang off runs via forked_from. Delegated is the
+// sessions it delegated (thread/pool children, SessionQuery.Parent,
+// U14): each a row with its lineage and its own cost, newest first, at
+// most delegatedCap (DelegatedMore past it), [] when none;
+// DelegatedUnknown says the read failed. DelegatedUsage and the
+// delegated_sessions_cost_* figures are their whole tree's — every
+// session delegated under this one, at any depth, own + their
+// subagents — beside the session's own usage and cost, never folded
+// into them (thread's Usage().Delegated, docs/thread-operations.md).
 type sessionDoc struct {
 	sessionRow
-	Runs []runRow `json:"runs"`
+	Runs             []runRow     `json:"runs"`
+	Delegated        []sessionRow `json:"delegated"`
+	DelegatedMore    bool         `json:"delegated_more,omitempty"`
+	DelegatedUnknown bool         `json:"delegated_unknown,omitempty"`
+	DelegatedUsage   core.Usage   `json:"delegated_usage"`
+	delegatedSessionsFields
 }
+
+// delegatedSessionsFields is a session's delegated sessions' bill.
+type delegatedSessionsFields struct {
+	CostUSD    *float64 `json:"delegated_sessions_cost_usd"`
+	CostKnown  bool     `json:"delegated_sessions_cost_known"`
+	CostReason string   `json:"delegated_sessions_cost_reason,omitempty"`
+}
+
+// delegatedCap bounds a session document's delegated rows, and
+// delegatedTreeCap the sessions its delegated figures walk.
+const (
+	delegatedCap     = 100
+	delegatedTreeCap = 500
+)
 
 // publicResolution is GET /api/public/{public_id}: the public id is
 // the browser-safe handle; this is where it becomes a session.
@@ -1003,8 +1090,42 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 		dbError(w, r, "compactions of run", id, err)
 		return
 	}
-	writeJSON(w, r, http.StatusOK, runPage{runDoc: doc, Compactions: runCompactions(comps),
-		ManifestAvailable: s.manifestAvailable(r.Context(), det.ManifestHash)})
+	page := runPage{runDoc: doc, Compactions: runCompactions(comps),
+		ManifestAvailable: s.manifestAvailable(r.Context(), det.ManifestHash)}
+	s.callerLinked(r.Context(), c, id, &page)
+	writeJSON(w, r, http.StatusOK, page)
+}
+
+// callerLinked fills a run page's caller_linked rows (U14): the runs
+// whose weft.caller.run.id names the run, oldest first, at most
+// callerLinkedCap; a panel token's public id's alone (inScope), the
+// rest counted.
+func (s *Server) callerLinked(ctx context.Context, c *coster, id string, out *runPage) {
+	page, err := s.db.Runs(ctx, obsdb.RunQuery{CallerRunID: id, ParentRunID: "*", Limit: callerLinkedCap})
+	if err != nil {
+		slog.DebugContext(ctx, "studio: a run's caller-linked runs could not be read", "run", id, "err", err)
+		out.CallerLinkedUnknown = true
+		return
+	}
+	pub := scopeOf(ctx)
+	recs := page.Runs
+	if len(recs) > callerLinkedCap { // the ties a page carries past its limit
+		recs = recs[:callerLinkedCap]
+	}
+	out.CallerLinkedMore = page.Total > len(recs)
+	slices.SortFunc(recs, func(a, b obsdb.RunRow) int {
+		if d := a.Started.Compare(b.Started); d != 0 {
+			return d
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	for _, rec := range recs {
+		if !inScope(pub, rec) {
+			out.CallerLinkedHidden++
+			continue
+		}
+		out.CallerLinked = append(out.CallerLinked, c.row(rec))
+	}
 }
 
 // childRows is a run document's children[] rows, each with its own
@@ -1200,11 +1321,13 @@ const attrReplayView = "weft.replay.view"
 // prefix that may not be what the source's model saw.
 //
 // A child run is never one: core's metadata is inherited, so a
-// Subagent child of a replay carries the parent's weft.replay.view and
-// weft.forked_from, but its input is its tool call's arguments, not a
-// cut prefix — the hole is the parent's alone.
+// Subagent child of a replay — or a run its tool call started (a pool
+// child session's turn, a nested Generate: caller_run_id) — carries the
+// parent's weft.replay.view and weft.forked_from, but its input is its
+// tool call's arguments, not a cut prefix — the hole is the parent's
+// alone.
 func replayViewHole(rec obsdb.RunRow) (reason, fix string) {
-	if rec.ParentRunID != "" {
+	if rec.ParentRunID != "" || rec.CallerRunID != "" {
 		return "", ""
 	}
 	at := "its source step"
@@ -1688,7 +1811,88 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	for _, rr := range det.Runs {
 		doc.Runs = append(doc.Runs, c.row(rr))
 	}
+	s.delegatedSessions(r.Context(), id, pub, &doc)
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// delegatedSessions fills a session document's delegated block (U14):
+// its direct delegated sessions as rows (SessionQuery.Parent, the
+// panel token's public id's alone — the list's scope), and the usage
+// and cost of every session delegated under it, walked breadth first
+// up to delegatedTreeCap sessions: past it, or when a read fails, the
+// delegated cost is not known and the reason says why (the usage then
+// a floor, said in the same reason).
+func (s *Server) delegatedSessions(ctx context.Context, id, pub string, doc *sessionDoc) {
+	doc.Delegated = []sessionRow{}
+	seen := map[string]bool{id: true}
+	queue := []string{id}
+	var parts []runCost
+	var why string
+	walked := 0
+	for depth := 0; len(queue) > 0; depth++ {
+		parent := queue[0]
+		queue = queue[1:]
+		limit := delegatedCap
+		if depth > 0 {
+			limit = 500
+		}
+		page, err := s.db.Sessions(ctx, obsdb.SessionQuery{Parent: parent, PublicID: pub, Limit: limit})
+		if err != nil {
+			slog.DebugContext(ctx, "studio: a session's delegated sessions could not be read", "session", parent, "err", err)
+			if parent == id {
+				doc.DelegatedUnknown = true
+			}
+			why = "the delegated sessions of " + parent + " could not be read"
+			break
+		}
+		if parent == id {
+			doc.DelegatedMore = page.Total > len(page.Sessions)
+		} else if page.Total > len(page.Sessions) && why == "" {
+			why = fmt.Sprintf("%s delegated %d sessions: more than one read lists", parent, page.Total)
+		}
+		for _, sr := range page.Sessions {
+			if seen[sr.ID] {
+				continue
+			}
+			seen[sr.ID] = true
+			if walked == delegatedTreeCap {
+				if why == "" {
+					why = fmt.Sprintf("more than %d sessions are delegated under this one: too many to price at read time", delegatedTreeCap)
+				}
+				queue = nil
+				break
+			}
+			walked++
+			sc, _, _ := s.sessionCost(ctx, sr.ID, pub)
+			doc.DelegatedUsage = doc.DelegatedUsage.Add(sr.Usage)
+			parts = append(parts, runCost{id: sr.ID, own: sc, delegated: cost{known: true}})
+			if parent == id {
+				row := sessRow(sr)
+				row.costFields = sc.fields()
+				doc.Delegated = append(doc.Delegated, row)
+			}
+			queue = append(queue, sr.ID)
+		}
+	}
+	if len(parts) == 0 && why == "" {
+		zero := 0.0
+		doc.delegatedSessionsFields = delegatedSessionsFields{CostUSD: &zero, CostKnown: true}
+		return
+	}
+	total := tally(parts, "delegated session", false)
+	if why != "" {
+		total.known, total.usd = false, 0
+		if total.reason != "" {
+			why += "; " + total.reason
+		}
+		total.reason = why
+	}
+	out := delegatedSessionsFields{CostKnown: total.known, CostReason: total.reason}
+	if total.known {
+		v := round6(total.usd)
+		out.CostUSD = &v
+	}
+	doc.delegatedSessionsFields = out
 }
 
 // panelPublicID is the request's panel token's public id, "" for any

@@ -40,6 +40,8 @@ import {
 } from "@/components/ui/table"
 import { sessionLink } from "@/lib/links"
 import { sessionTitle } from "@/lib/title"
+import { lineageOfSession } from "@/lib/delegation"
+import { LineageLine } from "@/components/studio/lineage"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 
 interface SessionsSearch {
@@ -243,6 +245,7 @@ function SessionsPage() {
               <TableBody>
                 {sessions.map((s) => {
                   const t = sessionTitle(s)
+                  const lin = lineageOfSession(s)
                   return (
                     <TableRow key={s.id} className="group h-9">
                       <TableCell>
@@ -273,6 +276,15 @@ function SessionsPage() {
                             noun="session id"
                           />
                         )}
+                        {/* A delegated session's lineage cell (U14,
+                            UX-B-05): the session, turn and call that
+                            delegated it. */}
+                        {lin ? (
+                          <LineageLine
+                            lineage={lin}
+                            className="flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-faint"
+                          />
+                        ) : null}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {s.agent || <span className="text-faint">—</span>}

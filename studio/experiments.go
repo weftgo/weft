@@ -343,8 +343,8 @@ func (s *Server) experimentSummary(ctx context.Context, c *coster, id string) (e
 	n, ok := 0, 0
 	var last *time.Time
 	for _, r := range runs {
-		if r.ParentRunID != "" {
-			continue
+		if r.ParentRunID != "" || r.CallerRunID != "" {
+			continue // a Subagent child, or a run a tool call started (O11)
 		}
 		n++
 		if r.Status == obsdb.StatusSucceeded {

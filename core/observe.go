@@ -109,6 +109,8 @@ const (
 	attrContent         = attribute.Key("weft.content")
 	attrParentRunID     = attribute.Key("weft.parent.run.id")
 	attrParentCallID    = attribute.Key("weft.parent.call.id")
+	attrCallerRunID     = attribute.Key("weft.caller.run.id")
+	attrCallerCallID    = attribute.Key("weft.caller.call.id")
 	attrManifestHash    = attribute.Key("weft.manifest.hash")
 	attrVersion         = attribute.Key("weft.version")
 	attrMetadataDropped = attribute.Key("weft.metadata.dropped")
@@ -229,6 +231,26 @@ func usageSplits(u Usage) []attribute.KeyValue {
 	return attrs
 }
 
+// runLinkAttrs is the linkage of a run started on ctx (O11, record
+// contract §2): a core Subagent's child — the call Subagent marked
+// (subagentOf) — names its parent, weft.parent.run.id /
+// weft.parent.call.id, the run whose usage includes its own (rule 13);
+// any other run started on a tool call's context — a thread/pool child
+// session's turn, another agent's Generate inside a handler — names the
+// call it was started from, weft.caller.run.id / weft.caller.call.id: a
+// link, never parenthood (its usage is its own). Nil outside a tool
+// call.
+func runLinkAttrs(ctx context.Context) []attribute.KeyValue {
+	c, ok := CallFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	if subagentOf(ctx, c) {
+		return []attribute.KeyValue{attrParentRunID.String(c.RunID), attrParentCallID.String(c.CallID)}
+	}
+	return []attribute.KeyValue{attrCallerRunID.String(c.RunID), attrCallerCallID.String(c.CallID)}
+}
+
 // run brackets one execute: the span starts before RunStart is emitted
 // and the returned end function is called with the outcome execute
 // decided — the result on success, the *RunError on failure — including
@@ -239,7 +261,8 @@ func usageSplits(u Usage) []attribute.KeyValue {
 // exactly as Nested events hang inside ToolStart..ToolFinish.
 //
 // extra carries the run-level attributes only the caller knows: the
-// subagent linkage (weft.parent.run.id / weft.parent.call.id), the
+// subagent linkage (weft.parent.run.id / weft.parent.call.id) or the
+// caller link (weft.caller.run.id / weft.caller.call.id), the
 // manifest hash, weft.version, weft.metadata.dropped when the limits
 // dropped pairs. The metadata in force on ctx lands on every span of
 // the run — this one and the model and tool spans below — verbatim,
@@ -1063,12 +1086,10 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 			attrs = append(attrs, attrToolTruncated.Int(cut))
 		}
 	case RunStart:
-		// The linkage a child run reports: the parent's ids from the call
-		// its context carries (CallFromContext is the parent's tool call
-		// the child executes under). Absent on a top-level run.
-		if c, ok := CallFromContext(ctx); ok {
-			attrs = append(attrs, attrParentRunID.String(c.RunID), attrParentCallID.String(c.CallID))
-		}
+		// The linkage a run started on a tool call reports (runLinkAttrs):
+		// weft.parent.* for a Subagent's child, weft.caller.* for any
+		// other. Absent on a top-level run.
+		attrs = append(attrs, runLinkAttrs(ctx)...)
 		if r.manifestHash != "" {
 			attrs = append(attrs, attrManifestHash.String(r.manifestHash))
 		}

@@ -108,7 +108,8 @@ func TestChildrenPrimeCapped(t *testing.T) {
 // TestSessionTurnChildren (P8-fix-b #8): /api/sessions/{id}'s turn rows
 // count every parent-linked run, as the runs list's do — a run under a
 // turn that carries another session id (a thread/pool child session's
-// run) included, which the session's own walk does not hold.
+// run as weft recorded it before 0.18, linked by weft.parent.run.id)
+// included, which the session's own walk does not hold.
 func TestSessionTurnChildren(t *testing.T) {
 	db, err := sqlite.Open(":memory:")
 	if err != nil {

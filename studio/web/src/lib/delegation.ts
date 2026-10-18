@@ -111,3 +111,172 @@ export const RUNS_TREE = {
   offTitle:
     "top-level runs only: child runs are on their parent's page — list them too",
 } as const
+
+// ── Delegated sessions (U14; UX-B-05, UX-B-06, UX-E-21) ────────────
+// Two words, never one for both (the glossary's): a subagent is a run
+// inside this turn — core.Subagent, its id <parent>/<step>/<call>, its
+// usage in the parent's; a delegation is a child session — thread/pool,
+// a session of its own (its own turns, history and approvals), linked
+// to the delegating turn by weft.session.parent and the caller link
+// (caller_run_id, record contract §2). A Generate inside a handler is a
+// run a call started: linked, neither.
+
+/** The two kinds of child, and the plain caller-linked run. */
+export type ChildKind = "subagent" | "delegated" | "started"
+
+/** childKind names a run a tool call started: a core Subagent child
+ * (its id under its parent's), a thread/pool child session's turn
+ * (weft.session.parent and an id that is its own session's
+ * <session>-t<n>), else a run the call started. */
+export function childKind(row: {
+  id: string
+  session_id?: string
+  parent_run_id?: string
+  meta?: Record<string, string>
+}): ChildKind {
+  if (row.parent_run_id && row.id.startsWith(`${row.parent_run_id}/`))
+    return "subagent"
+  const s = row.session_id
+  if (row.meta?.["weft.session.parent"] && s && row.id.startsWith(`${s}-t`))
+    return /^\d+$/.test(row.id.slice(s.length + 2)) ? "delegated" : "started"
+  return "started"
+}
+
+/** The chip and eyebrow words per kind, singular and plural. */
+export const CHILD_WORDS: Record<ChildKind, { one: string; many: string }> = {
+  subagent: { one: "child run", many: "child runs" }, // UX-F-15: subagent = the agent, child run = its run
+  delegated: { one: "delegated session", many: "delegated sessions" },
+  started: { one: "run started by a call", many: "runs started by its calls" },
+}
+
+/** The story block's eyebrow per kind (subagent-block.tsx, the
+ * panel's call badge). */
+export const CHILD_EYEBROW: Record<ChildKind, string> = {
+  subagent: "subagent",
+  delegated: "delegated session",
+  started: "run started by a call",
+}
+
+/** The verbs on a delegated session: its session first, its run second. */
+export const OPEN_SESSION = "open session"
+export const OPEN_RUN = "open run"
+
+/** What a kind means, for a title. */
+export const CHILD_TITLES: Record<ChildKind, string> = {
+  subagent:
+    "a subagent run: core.Subagent ran this agent inside the parent's turn — same session, its usage in the parent's",
+  delegated:
+    "a delegated session: thread/pool ran this agent as a session of its own — its own turns, history and approvals; its cost is its own",
+  started:
+    "a run a tool call started (weft.caller.run.id): linked, not a child — its usage is its own",
+}
+
+/** A delegated session's lineage, as a session row or a run carries it. */
+export interface Lineage {
+  session: string
+  turn?: number
+  call?: string
+  run?: string
+}
+
+/** lineageOfSession is a session row's lineage (api.go's sessionRow),
+ * null for a session nothing delegated. */
+export function lineageOfSession(s: {
+  parent_session?: string
+  parent_turn?: number
+  parent_call?: string
+  parent_run?: string
+}): Lineage | null {
+  if (!s.parent_session) return null
+  return {
+    session: s.parent_session,
+    turn: s.parent_turn || undefined,
+    call: s.parent_call || undefined,
+    run: s.parent_run || undefined,
+  }
+}
+
+/** lineageOfRun is a run's delegation lineage — thread's
+ * weft.session.parent / parent_call and the run its call belonged to
+ * (caller_run_id; on a run recorded before weft 0.18, parent_run_id) —
+ * null for a run no thread/pool session delegated. */
+export function lineageOfRun(r: {
+  parent_run_id?: string
+  caller_run_id?: string
+  meta?: Record<string, string>
+}): Lineage | null {
+  const session = r.meta?.["weft.session.parent"]
+  if (!session) return null
+  const run = r.caller_run_id || r.parent_run_id || undefined
+  let turn: number | undefined
+  if (run?.startsWith(`${session}-t`)) {
+    const n = run.slice(session.length + 2)
+    if (/^\d+$/.test(n)) turn = Number(n)
+  }
+  return {
+    session,
+    turn,
+    call: r.meta?.["weft.session.parent_call"] || undefined,
+    run,
+  }
+}
+
+/** The lineage line's words, before and between its links. */
+export const LINEAGE = {
+  by: "↳ delegated by",
+  turn: (n: number) => `turn ${n}`,
+  call: (c: string) => `call ${c}`,
+  title:
+    "thread/pool delegated this session from that session's turn (weft.session.parent)",
+} as const
+
+/** The caller link's words on a run a call started (not delegated). */
+export const STARTED_BY = {
+  by: "started by",
+  call: (c: string) => `call ${c}`,
+  title:
+    "the run whose tool call started this one (weft.caller.run.id): a link, not a parent",
+} as const
+
+/** The session page's delegated block. */
+export const DELEGATED_BLOCK = {
+  eyebrow: "delegated sessions",
+  usage: (inTok: string, outTok: string) =>
+    `delegated ${inTok} in / ${outTok} out`,
+  usageTitle:
+    "every session delegated under this one, any depth — beside the session's own usage, never folded into it",
+  more: "more delegated sessions than are listed here",
+  unknown: "the delegated sessions could not be read",
+  linkedMore: "more runs were started by its calls than are listed here",
+  linkedHidden: (n: number) =>
+    `${n} more ${n === 1 ? "run" : "runs"} started by its calls carry another public id`,
+  linkedUnknown: "the runs its calls started could not be read",
+} as const
+
+/** The meta keys a lineage line draws (never repeated as raw chips). */
+export const LINEAGE_KEYS: readonly string[] = [
+  "weft.session.parent",
+  "weft.session.parent_call",
+]
+
+/** A session's turn count in words. */
+export const turnsWord = (n: number) => `${n} ${n === 1 ? "turn" : "turns"}`
+
+/** storyChildren is the rows a run's story links to its tool calls
+ * (linkView): its children (subagent runs) and the runs its calls
+ * started (caller_linked, U14 — a delegated session's turn, a nested
+ * Generate), each joined on its call id (caller_call_id as the
+ * parent_call_id linkView reads); the block words each by childKind. */
+export function storyChildren<
+  TRow extends {
+    id: string
+    parent_call_id: string
+    caller_call_id?: string
+  },
+>(doc: { children: readonly TRow[]; caller_linked?: readonly TRow[] }): TRow[] {
+  const linked = (doc.caller_linked ?? []).map((r) => ({
+    ...r,
+    parent_call_id: r.caller_call_id ?? "",
+  }))
+  return [...doc.children, ...linked]
+}

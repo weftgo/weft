@@ -187,6 +187,7 @@ import type { HeaderRung } from "./detect"
 import { installMarkerRung, markerOf } from "./markers"
 import type { Marker, MarkerRung } from "./markers"
 import { parseScope, serializeScope } from "../lib/scope"
+import { CHILD_EYEBROW, childKind } from "../lib/delegation"
 import { clip as clipTitle, turnLabel, turnTitle } from "../lib/title"
 import type { Scope } from "../lib/scope"
 import { el, fmtJSON, on, patch } from "./render"
@@ -6919,17 +6920,20 @@ function renderCall(
   if (argsEd !== args) box.appendChild(argsEd)
   const replay = ctx?.replay
   if (call.childRunId && (t || ctx?.child)) {
-    // The badge is the child's run page too.
+    // The badge is the child's run page too, in its kind's word (U14:
+    // a subagent, a delegated session, a run the call started).
+    const kid = t && childRow(t, call.childRunId)
+    const word = kid ? CHILD_EYEBROW[childKind(kid)] : CHILD_EYEBROW.subagent
     head.appendChild(
       ctx?.endpoint
-        ? el("a", "weft-badge weft-info", "subagent", {
+        ? el("a", "weft-badge weft-info", word, {
             href: studioLink(ctx.endpoint, call.childRunId),
             target: "_blank",
             rel: "noopener",
             title: call.childRunId,
             "data-weft-subagent-link": call.childRunId,
           })
-        : el("span", "weft-badge weft-info", "subagent", {
+        : el("span", "weft-badge weft-info", word, {
             title: call.childRunId,
           })
     )
@@ -7050,7 +7054,7 @@ function childBlock(
     "summary",
     undefined,
     row
-      ? `subagent ${row.agent || shortId(childId)} · ${statusOf(row).word} · ${
+      ? `${CHILD_EYEBROW[childKind(row)]} ${row.agent || shortId(childId)} · ${statusOf(row).word} · ${
           usageKnown(row.status)
             ? usageLine(row.usage)
             : row.status === "running"
@@ -7117,7 +7121,7 @@ function childBlock(
  * loaded child's (a grandchild at any depth). */
 function childRow(t: TurnView, id: string) {
   return [t.doc, ...[...t.children.values()].map((c) => c.doc)]
-    .flatMap((d) => d?.children ?? [])
+    .flatMap((d) => (d ? [...d.children, ...(d.caller_linked ?? [])] : []))
     .find((c) => c.id === id)
 }
 

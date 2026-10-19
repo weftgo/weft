@@ -396,7 +396,7 @@ type Session struct {
 	// Session saw report (id, span and merged metadata; the newest
 	// last, at most maxSights), and pendingMarkers the markers of
 	// compactions no run had produced the context of yet — emitted
-	// under the next run when it reports, dropped at Close. Neither is
+	// under the next run when it reports, held under no run at Close. Neither is
 	// persisted.
 	sights         []runSight
 	pendingMarkers []*compactionMarker
@@ -1738,8 +1738,14 @@ func (s *Session) Close(ctx context.Context) error {
 // Close waits for that release through closeDone.
 func (s *Session) sealLocked(ctx context.Context) error {
 	closed := fmt.Errorf("%w: session %s", ErrClosed, s.header.ID)
-	unreported := len(s.pendingMarkers)
+	// The markers still waiting for a run go out below, held, under no
+	// run (compactmarker.go), as the thread records held for none do.
+	heldMarkers := s.pendingMarkers
 	s.pendingMarkers = nil
+	var markerMD map[string]string
+	if len(heldMarkers) > 0 {
+		markerMD = s.heldMarkerMetadataLocked()
+	}
 	// The thread records still held go out now, as held records, and
 	// Close waits for the emitter below (threadout.go).
 	heldSums, heldDropped := s.sealHeldLocked()
@@ -1753,11 +1759,10 @@ func (s *Session) sealLocked(ctx context.Context) error {
 	s.closeDone = done
 	s.mu.Unlock()
 
-	if unreported > 0 {
+	for _, m := range heldMarkers {
 		// Compactions of a context no run produced, and no run started
-		// on before the close: there is no run id to file them under.
-		s.agent.Logger().Debug("thread: compaction markers dropped at close: no run to report them under",
-			"session", s.header.ID, "markers", unreported)
+		// on before the close: filed under no run, marked held.
+		s.emitHeldMarker(markerMD, m)
 	}
 	if heldDropped > 0 {
 		s.agent.Logger().Debug("thread: session records dropped at close: no run to report them under",

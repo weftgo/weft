@@ -205,9 +205,12 @@ describe("a hidden children hole hides no system prompt (P8-pre-web #7)", () => 
     // Its prompt null for another reason: still not "hidden".
     expect(systemHidden({ ...side, system: null })).toBe(false)
   })
-  it("the read token's hidden hole (no count) still hides it", () => {
+  it("the read token's side says system_hidden: it hides it", () => {
     const side = golden("diff-hidden").steps[0].a!
-    expect(side.holes.every((h) => !("count" in h))).toBe(true)
+    expect(side.system_hidden).toBe(true)
     expect(systemHidden(side)).toBe(true)
+    // The explicit fact, never the hole's count: a counted hidden hole
+    // beside it still hides the prompt.
+    expect(systemHidden({ ...side, holes: [kids] })).toBe(true)
   })
 })

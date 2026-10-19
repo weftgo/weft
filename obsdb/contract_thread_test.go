@@ -405,10 +405,17 @@ func runThreadSummarizer(t *testing.T, ctx context.Context, p *otel.Pipeline, _ 
 
 // runThreadHeld: a grant minted on a session no run ever reports
 // under, then Close — the held grant.mint goes out filed under no run
-// (weft.run.id absent), marked held, keyed by the session.
+// (weft.run.id absent), marked held, keyed by the session. Then the
+// session reopened over messages appended to the store by hand (a
+// context no run produced) is compacted and closed with no run: its
+// compaction marker goes out the same way (U31.1) — no weft.run.id,
+// body held true, keyed by the session.
 func runThreadHeld(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
-	agt := pipelineAgent(p, "sre", wefttest.Script(), core.Instructions("You are an SRE shell."))
-	s, err := thread.Create(ctx, thread.Memory(), agt, append(fixtureSession("thread_held"), thread.PublicID("pub_thread_held"))...)
+	agt := pipelineAgent(p, "sre", wefttest.Script(wefttest.Say("The operator listed pods three times.")),
+		core.Instructions("You are an SRE shell."))
+	st := thread.Memory()
+	opts := append(fixtureSession("thread_held"), thread.PublicID("pub_thread_held"))
+	s, err := thread.Create(ctx, st, agt, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,6 +423,27 @@ func runThreadHeld(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpC
 		t.Fatal(err)
 	}
 	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	parent := s.Leaf()
+	var entries []thread.Entry
+	for i, text := range []string{"kubectl get pods", "kubectl get pods -A", "kubectl get pods -n prod"} {
+		id := fmt.Sprintf("e_thread_held_m%d", i+1)
+		entries = append(entries, thread.MessageEntry{ID: id, ParentID: parent, Created: fixtureEpoch, Message: core.User(text)})
+		parent = id
+	}
+	if err := st.Append(ctx, s.ID(), entries...); err != nil {
+		t.Fatal(err)
+	}
+	base := opts[: len(opts)-1 : len(opts)-1] // the ids and clock; PublicID is Create's alone
+	re, err := thread.Open(ctx, st, s.ID(), agt, append(base, thread.KeepRecent(1), thread.NoAutoCompact())...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := re.Compact(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := re.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
 	return nil
@@ -516,7 +544,7 @@ func threadGenCases() []genCase {
 		},
 		{
 			name: "thread_held",
-			desc: "a grant minted on a session no run reports under, then Close: the held grant.mint is emitted filed under no run (weft.run.id absent), held true, keyed by weft.session.id and the public id; indexed by its session alone (session_events; SQLite stores it nowhere else, ClickHouse in otel_logs), read back through SessionEvents; no run row",
+			desc: "a grant minted on a session no run reports under, then Close: the held grant.mint is emitted filed under no run (weft.run.id absent), held true, keyed by weft.session.id and the public id; indexed by its session alone (session_events; SQLite stores it nowhere else, ClickHouse in otel_logs), read back through SessionEvents; then the session reopened over hand-appended messages, compacted and closed with no run: its compaction marker emitted the same way (no weft.run.id, held true in its body, keyed by the session); no run row",
 			dest: content,
 			run:  runThreadHeld,
 		},

@@ -145,7 +145,7 @@ reads them from:
 | `weft.replay.view` | `weft/runtime` | a replay from step N > 0: `transcript`, `compacted:<index>`, `derived` or `unknown` | `meta` |
 | `weft.edits` | `weft/runtime` | the transcript edits a replay applied | `meta` |
 | `weft.page_url` | `weft/scope` | the app page the run was started from (sanitised) | `meta` |
-| `weft.approval.actor` | `thread` (a resume turn: each decision's signing key id, else its `Who`), `weft/runtime` (the decide command's actor: `panel:<public id>`, `server`, `local`), the app via `Metadata` | who decided the calls this run resumes — distinct actors in call order, comma-joined; absent when the decisions name nobody. Metadata, so it survives content-off like every metadata pair — verbatim on every span and record, to every destination (§2's caller pairs: no content policy strips metadata); put an opaque id in `Who` / `KeyID`, not an email or a name. `thread` owns it: set on every run that applies recorded decisions (a resume turn), `""` on every other turn | `meta` |
+| `weft.approval.actor` | `thread` (a resume turn: each decision's signing key id, else its `Who`), `weft/runtime` (the decide command's actor: `panel:<public id>`, `server`, `local`), the app via `Metadata` | who decided the calls this run resumes — distinct actors in call order, comma-joined (a `Quorum(n > 1)` approval names every approving key or `Who`, sorted within its call, never the last signer alone); absent when the decisions name nobody. Metadata, so it survives content-off like every metadata pair — verbatim on every span and record, to every destination (§2's caller pairs: no content policy strips metadata); put an opaque id in `Who` / `KeyID`, not an email or a name. `thread` owns it: set on every run that applies recorded decisions (a resume turn), `""` on every other turn | `meta` |
 | `enduser.id` | the app via `Metadata` | the end user (§2's table) | `meta` (its mirror `user.id` is not) |
 
 **A session stamps its own identity, empty = none.** Run metadata
@@ -357,7 +357,7 @@ Name `execute_tool <tool>`, kind Internal, child of `invoke_agent`.
 | `gen_ai.tool.name`, `gen_ai.tool.call.id` | string | always |
 | `weft.run.id`, `weft.step.index`, `weft.tool.seq` | string, int, int | always |
 | `weft.tool.approved` | bool `true` | a call resumed by `Approve` |
-| `weft.tool.approved_by`, `weft.grant.id` | string, string | an approved call's provenance, as `core.ApproveBy` named it — absent for a plain `Approve`: who or what approved it — `thread` passes `user` (`Decide`, `DecideSigned`), `grant` (a standing grant matched; `weft.grant.id` its grant entry id), `approver` (the `WithApprover` step), `quorum` (a `Quorum(n > 1)` of approvals) or `policy` (another session path: a pool parent's or child's record) on every resume it runs (UX-B-14). Ids and enums, never who by name (that is the `thread` record's `content.who`, §4); span attributes, never `meta` (ClickHouse 0024) |
+| `weft.tool.approved_by`, `weft.grant.id` | string, string | an approved call's provenance, as `core.ApproveBy` named it — absent for a plain `Approve`: who or what approved it — `thread` passes `user` (`Decide`, `DecideSigned`), `grant` (a standing grant matched; `weft.grant.id` its grant entry id), `approver` (the `WithApprover` step), `quorum` (a `Quorum(n > 1)` of approvals) or `policy` (another session path: a pool parent's or child's record) on every resume it runs (UX-B-14); `weft/runtime` passes `runtime` on a playground approval of a runtime-started run (a fork's resume goes through its session: `policy`). Ids and enums, never who by name (that is the `thread` record's `content.who`, §4); span attributes, never `meta` (ClickHouse 0024) |
 | `weft.tool.denied`, `weft.tool.denied_kind` | bool `true`, string | a parked call the resume denied: `denied` (`Deny`) or `no_decision` (left undecided). The span is zero-length (start = end, the moment the resume decided it), carries `weft.step.index` 0 and no `weft.tool.seq` (no `tool_start`: the call never ran), `error.type` `DENIED`, status `Error` — never the reason |
 | `weft.tool.result_bytes` | int | at end, a successful result only (not an error result, not a parked call): the length of the result the model sees (after the result cap) |
 | `weft.tool.pending` | bool `true` | at end: the call was parked for approval |
@@ -591,10 +591,21 @@ included, not re-canonicalised), `weft.content = none`,
 `weft.turn`, `weft.public_id`, …) — but **not** the
 `gen_ai.conversation.id` / `session.id` mirrors the core adds to a run's
 spans and records.
+A compaction of a context no run of the session produced (entries
+appended by hand, a fork's copied path) waits for the next run the
+Session drives and goes out under it; **held at `Close`** — no run
+reported before the session closed — it goes out then, as the `thread`
+records held for no run do (below): on a context carrying no span, its
+body `held: true`, filed under no run (no `weft.run.id`), keyed by
+`weft.session.id` and the session's other metadata (no `weft.turn`). A
+store indexes it by session (`session_events`, §6: run id empty) and
+files it under no run row: no run's `Compactions` reads it, and it makes
+no row (the `HeldMarker` conformance case, both backends).
 No position attribute: a store derives the position from the hash. Body
 `{scope, hash, entry, reason, replaced, entries, messages_before,
 messages_after, tokens_before, tokens_after, summarizer_model?,
-summarizer_usage?}` — the last two the compaction's summary cost
+summarizer_usage?, held?}` — `held` true only on a marker emitted at
+`Close` for want of a run; `summarizer_model` and `summarizer_usage` the compaction's summary cost
 (`{provider, name}` and a usage object; absent for a trim or a summarizer
 that ran no model; counts and a model id, never content). The call itself
 is a summarizer `chat` span (§3).
@@ -1582,7 +1593,7 @@ makes it a turn; its session has a page of its own and, delegated by
 | `thread_busy` | the busy policies: a steer `queued` (its `minted_run` / `turn` the number it took — t2, t4: no run carries them) and `delivered` (under the run that drained it), a steer `dropped` by `ClearQueue` (under the busy turn), queued sends `accepted` (their minted turns), an `interrupt` (under the felled run, `by_turn` the follow-up) and a rollback (`interrupt`, then `rewind` `rollback` under the run taken off the path; the turn after it carries `weft.turn.parent` and `weft.session.branch`, §2); the interrupted runs read `failed` |
 | `thread_compaction` | a `pin`, a manual compaction whose summary is a model call — a summarizer `chat` span (§3; 1800 in, 60 out, step -1) under the run it concerns and the marker's `summarizer_usage` — an `uncompact`, a `SummarizeLeft` `branch` (`summarized`, its own summarizer span), a `label` and a `fork` |
 | `thread_summarizer` | a summarizer of its own (`thread.SummaryModel` reporting `xai` / `summary-mini`) compacting before the second turn runs (the pre-run trigger): its `chat` span (`role` `summarizer`, 1200 in, 40 out) waits for that turn's run and opens under its `invoke_agent` span, in its trace; both run rows keep `wefttest` / `script` and no summarizer `meta` on both backends (§3); the session row's `summarizer_usage` (§6) |
-| `thread_held` | a grant minted on a session no run ever reports under, then `Close`: the held `grant.mint` filed under no run (`weft.run.id` absent, an empty run id in `thread_records`), `held` true, keyed by `weft.session.id` and the public id; no run row (§4) |
+| `thread_held` | a grant minted on a session no run ever reports under, then `Close`: the held `grant.mint` filed under no run (`weft.run.id` absent, an empty run id in `thread_records`), `held` true, keyed by `weft.session.id` and the public id; then the session reopened over messages appended by hand (a context no run produced), compacted and closed with no run: its compaction marker emitted the same way — no `weft.run.id`, body `held` true, keyed by the session (§4); no run row |
 | `thread_branches` | two turns, a `Branch` back to the first turn's line, a `label` on the entry branched to, two turns on it: the first carries `weft.turn.parent` `1` and both `weft.session.branch` `via-spain` (the label) in `meta`; the turns before it neither (§2) |
 | `thread_pool` | a sync `thread/pool` delegation from a turn: `pool.delegate` and `pool.retire` (`done`, the child's usage) under the delegating run; the child session's own run, its `weft.session.parent` in `meta` |
 | `thread_content_off` | `thread_approvals` through a content-off destination: every thread record's `content` gone (`weft.content` `none` — no destination asked for content, so `thread` captured none), the ids, enums, the label's `name` and the session title kept |

@@ -60,6 +60,59 @@
               "observedTimeUnixNano": "1790847300000000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "timeUnixNano": "1790847300000000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "compaction"
+                  }
+                },
+                {
+                  "key": "weft.compaction.scope",
+                  "value": {
+                    "stringValue": "session"
+                  }
+                },
+                {
+                  "key": "weft.compaction.hash",
+                  "value": {
+                    "stringValue": "397038eecb248b216a9b1cd00b02246c6c34c90e6afd5be83251694615dccefc"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "sre"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_held"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"scope\":\"session\",\"hash\":\"397038eecb248b216a9b1cd00b02246c6c34c90e6afd5be83251694615dccefc\",\"entry\":\"e_thread_held_0003\",\"reason\":\"manual\",\"replaced\":2,\"entries\":1,\"messages_before\":3,\"messages_after\":2,\"tokens_before\":56,\"tokens_after\":56,\"summarizer_model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"summarizer_usage\":{\"input_tokens\":10,\"output_tokens\":5},\"held\":true}"
+              },
+              "eventName": "weft.compaction",
+              "observedTimeUnixNano": "1790847300001000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "timeUnixNano": "1790847300001000000"
             }
           ],
           "scope": {

@@ -1,6 +1,6 @@
 {
   "case": "thread_held",
-  "description": "a grant minted on a session no run reports under, then Close: the held grant.mint is emitted filed under no run (weft.run.id absent), held true, keyed by weft.session.id and the public id; indexed by its session alone (session_events; SQLite stores it nowhere else, ClickHouse in otel_logs), read back through SessionEvents; no run row",
+  "description": "a grant minted on a session no run reports under, then Close: the held grant.mint is emitted filed under no run (weft.run.id absent), held true, keyed by weft.session.id and the public id; indexed by its session alone (session_events; SQLite stores it nowhere else, ClickHouse in otel_logs), read back through SessionEvents; then the session reopened over hand-appended messages, compacted and closed with no run: its compaction marker emitted the same way (no weft.run.id, held true in its body, keyed by the session); no run row",
   "runs": [],
   "thread_records": [
     " grant.mint none {\"args\":1,\"entry\":\"e_thread_held_0002\",\"grant_id\":\"e_thread_held_0002\",\"held\":true,\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"tool\":\"run_command\"}"

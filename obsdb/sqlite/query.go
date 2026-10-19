@@ -711,9 +711,12 @@ const runSpansWhere = `run_id = ? AND run_id <> '' ORDER BY start_ns, span_id`
 //     down runs.parent_run_id (runs_started, 0014: parent_run_id leads
 //     it) from the run, with the ids core's id rule names its
 //     descendants (?2 < run_id < ?3: the run's id + "/" and + "0", the
-//     byte after "/"; runs' primary key — a superset: treeRows keeps
-//     the rows of it that name no parent only in core's child shape,
-//     obsdb.TreeChildID) — in RunRow order, each row
+//     byte after "/"; runs' primary key — a superset, narrowed in the
+//     statement itself, before the LIMIT: a row of it that names no
+//     parent is kept only in core's child shape, obsdb.TreeChildID
+//     spelled in SQL, so the row cap counts members and app-shaped ids
+//     under the run never push a real descendant past it, U31.1) — in
+//     RunRow order, each row
 //     looked up by key (CROSS JOIN keeps the walk outermost: without
 //     it sqlite scans runs in started order to skip the sort);
 //   - treeSpansSQL: the members' spans by run id (spans_run, its
@@ -726,7 +729,10 @@ const runSpansWhere = `run_id = ? AND run_id <> '' ORDER BY start_ns, span_id`
 const (
 	treeRowsSQL = `WITH RECURSIVE tree(id) AS (
 		SELECT ?1
-		UNION SELECT run_id FROM runs WHERE run_id > ?2 AND run_id < ?3
+		UNION SELECT run_id FROM (SELECT run_id, parent_run_id, substr(run_id, length(?2) + 1) AS rest
+			FROM runs WHERE run_id > ?2 AND run_id < ?3)
+			WHERE parent_run_id <> '' OR (instr(rest, '/') > 1 AND length(rest) > instr(rest, '/')
+				AND (substr(rest, 1, instr(rest, '/') - 1) = 'resume' OR substr(rest, 1, instr(rest, '/') - 1) NOT GLOB '*[^0-9]*'))
 		UNION SELECT r.run_id FROM runs AS r JOIN tree AS t ON r.parent_run_id = t.id
 	)
 	SELECT r.run_id, r.parent_run_id, r.public_id, r.started_ns, r.failed, r.finished_ok, r.root_ended, r.last_seen_ns
@@ -817,7 +823,9 @@ func (d *DB) treeRows(ctx context.Context, runID string) ([]obsdb.TreeRun, error
 		// The id range is a superset: a row it found that names no
 		// parent is kept only in core's child shape (obsdb.TreeChildID),
 		// the rows ClickHouse's treeIDCondition reads — so both backends
-		// hand obsdb.TreeMembers the same runs.
+		// hand obsdb.TreeMembers the same runs. treeRowsSQL applies the
+		// shape before its LIMIT; this is the Go rule held beside it, so
+		// the two can never disagree silently.
 		if r.ID != runID && r.ParentRunID == "" && !obsdb.TreeChildID(runID, r.ID) {
 			continue
 		}

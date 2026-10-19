@@ -378,6 +378,34 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("RunTreeSpans(wide) = truncated %v, missing %d, %v; want truncated, no missing", wt.Truncated, wt.MissingCount, err)
 		}
 
+		// The row cap counts members, never the id range's superset
+		// (U31.1): obsdb.TreeRowCap + 5 app-shaped rows under a run's
+		// id ("<run>/job/N": hierarchical ids of the app's own, no
+		// parent, never in its tree), started before its one real
+		// descendant — a Subagent child whose run_start named no parent,
+		// placed by core's id rule alone — leave that child in the tree,
+		// uncut.
+		const shaped = "tree_shaped"
+		shapedChild := shaped + "/0/call_1"
+		shapedRecs := []obsdb.Record{start(shaped, "")}
+		shapedRecs[0].Time = at(time.Minute)
+		for i := range caps.TreeRow + 5 {
+			r := start(fmt.Sprintf("%s/job/%05d", shaped, i), "")
+			r.Time = at(time.Minute + time.Duration(i+1)*time.Millisecond)
+			shapedRecs = append(shapedRecs, r)
+		}
+		child := start(shapedChild, "")
+		child.Time = at(2 * time.Minute)
+		shapedRecs = append(shapedRecs, child)
+		childSpan := treeSpan("0b000000000000a1", "", "chat", shapedChild, "", 120_000)
+		if err := db.Write(ctx(), obsdb.Batch{Records: shapedRecs, Spans: []obsdb.Span{childSpan}}); err != nil {
+			t.Fatal(err)
+		}
+		if st, err := tr.RunTreeSpans(ctx(), obsdb.TreeQuery{RunID: shaped}); err != nil || st.Truncated ||
+			len(st.Spans) != 1 || st.Spans[0].RunID != shapedChild || st.Spans[0].ParentRunID != shaped {
+			t.Errorf("RunTreeSpans(shaped) = truncated %v, spans %v, %v; want the id-shaped child's span alone, uncut (app-shaped ids are no members)", st.Truncated, keys(st.Spans), err)
+		}
+
 		dead, cancel := context.WithCancel(ctx())
 		cancel()
 		if _, err := tr.RunTreeSpans(dead, obsdb.TreeQuery{RunID: director}); err == nil || errors.Is(err, obsdb.ErrNotFound) {

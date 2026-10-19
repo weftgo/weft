@@ -45,7 +45,8 @@
             "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
             "fix": "use a playground-scoped token"
           }
-        ]
+        ],
+        "system_hidden": true
       },
       "b": {
         "status": "ok",
@@ -79,7 +80,8 @@
             "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
             "fix": "use a playground-scoped token"
           }
-        ]
+        ],
+        "system_hidden": true
       },
       "changes": [],
       "unknown": []
@@ -119,7 +121,8 @@
             "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
             "fix": "use a playground-scoped token"
           }
-        ]
+        ],
+        "system_hidden": true
       },
       "b": {
         "status": "ok",
@@ -153,7 +156,8 @@
             "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
             "fix": "use a playground-scoped token"
           }
-        ]
+        ],
+        "system_hidden": true
       },
       "changes": [],
       "unknown": []
@@ -193,7 +197,8 @@
             "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
             "fix": "use a playground-scoped token"
           }
-        ]
+        ],
+        "system_hidden": true
       },
       "b": {
         "status": "ok",
@@ -227,7 +232,8 @@
             "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
             "fix": "use a playground-scoped token"
           }
-        ]
+        ],
+        "system_hidden": true
       },
       "changes": [],
       "unknown": []
@@ -267,7 +273,8 @@
             "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
             "fix": "use a playground-scoped token"
           }
-        ]
+        ],
+        "system_hidden": true
       },
       "b": {
         "status": "ok",
@@ -301,7 +308,8 @@
             "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
             "fix": "use a playground-scoped token"
           }
-        ]
+        ],
+        "system_hidden": true
       },
       "changes": [
         "tool_results"
@@ -329,7 +337,8 @@
             "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
             "fix": "use a playground-scoped token"
           }
-        ]
+        ],
+        "system_hidden": true
       },
       "b": {
         "status": "ok",
@@ -349,7 +358,8 @@
             "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
             "fix": "use a playground-scoped token"
           }
-        ]
+        ],
+        "system_hidden": true
       },
       "changes": [],
       "unknown": []

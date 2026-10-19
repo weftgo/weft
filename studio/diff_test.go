@@ -40,7 +40,7 @@ type diffDocT struct {
 		ChangedSteps []int `json:"changed_steps"`
 		FirstChanged *int  `json:"first_changed"`
 	} `json:"summary"`
-	Holes []struct{ Hole, Reason, Fix string } `json:"holes"`
+	Holes []struct{ Hole, Cause, Reason, Fix string } `json:"holes"`
 }
 
 type diffSideT struct {
@@ -565,7 +565,7 @@ func TestDiffStepCap(t *testing.T) {
 		t.Fatal("the response cap has no reason of its own in the table")
 	}
 	if len(d.Steps) != 2 || d.A.Steps != 5 || d.B.Steps != 5 || len(d.Summary.ChangedSteps) != 0 ||
-		len(d.Holes) != 1 || d.Holes[0].Hole != "truncated" || d.Holes[0].Reason != reason || d.Holes[0].Fix != fix {
+		len(d.Holes) != 1 || d.Holes[0].Hole != "truncated" || d.Holes[0].Cause != "response_cap" || d.Holes[0].Reason != reason || d.Holes[0].Fix != fix {
 		t.Errorf("capped diff = %d rows, steps %d/%d, changed %v, holes %+v; want 2 rows, 5/5, none, the response-cap truncated", len(d.Steps), d.A.Steps, d.B.Steps, d.Summary.ChangedSteps, d.Holes)
 	}
 	maxDiffSteps = 5 // exactly the run's count: nothing cut
@@ -787,20 +787,24 @@ func TestDiffWalkResumesPastLostStepStart(t *testing.T) {
 	}
 }
 
-// TestDiffSideHiddenChildrenCount (P8-pre-web #7): a step's hidden hole
-// with a count is its child runs' alone and stays counted on the diff
-// side (the client's systemHidden reads it as no hidden prompt); with
-// the request block hidden too (a read token) the one hidden hole is the
-// prompt's as well, and its count goes.
+// TestDiffSideHiddenChildrenCount (P8-pre-web #7, U31.1): a step's
+// hidden hole with a count is its child runs' alone and stays counted on
+// the diff side; the system prompt is hidden only when the request block
+// is (a read token), said by the side's explicit system_hidden — never by
+// the hole's count, which stays.
 func TestDiffSideHiddenChildrenCount(t *testing.T) {
 	kids := hiddenChildrenHole(2)
 	text := "be brief"
 	open := diffSideOf(stepDoc{Status: stepOK, sysText: &text, Holes: []stepHole{kids}}, &text, true)
-	if len(open.Holes) == 0 || open.Holes[0].Hole != string(obsdb.HoleHidden) || open.Holes[0].Count != 2 {
-		t.Errorf("children only: holes %+v, want hidden with count 2", open.Holes)
+	if len(open.Holes) == 0 || open.Holes[0].Hole != string(obsdb.HoleHidden) || open.Holes[0].Count != 2 || open.SystemHidden {
+		t.Errorf("children only: holes %+v, system_hidden %v; want hidden with count 2, the prompt not hidden", open.Holes, open.SystemHidden)
 	}
 	read := diffSideOf(stepDoc{Status: stepOK, Request: badgeOf(obsdb.HoleHidden), Holes: []stepHole{kids}}, &text, true)
-	if len(read.Holes) == 0 || read.Holes[0].Hole != string(obsdb.HoleHidden) || read.Holes[0].Count != 0 {
-		t.Errorf("request hidden too: holes %+v, want hidden without a count", read.Holes)
+	if len(read.Holes) == 0 || read.Holes[0].Hole != string(obsdb.HoleHidden) || read.Holes[0].Count != 2 || !read.SystemHidden {
+		t.Errorf("request hidden too: holes %+v, system_hidden %v; want hidden with count 2 and system_hidden", read.Holes, read.SystemHidden)
+	}
+	b, _ := json.Marshal(read)
+	if !strings.Contains(string(b), `"system_hidden":true`) {
+		t.Errorf("the side's JSON carries no system_hidden: %s", b)
 	}
 }

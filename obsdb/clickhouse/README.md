@@ -39,7 +39,12 @@ maintained by materialized views:
 Options: `TTL(content, meta)` overrides the retention windows (content
 30 days, spans and runs 90 by default; values ≤ 0 keep a class's
 default), `KeepDeltas()` stores delta rows in `weft_deltas` for
-debugging (counted, never stored by default).
+debugging (counted, never stored by default). A TTL drops an expired
+row only when ClickHouse merges its part, so `Sessions` and `Session`
+cut at `weft_runs`' own window themselves (the table's
+`TTL LastSeen + toIntervalSecond(n)` clause, read from `system.tables`
+at most once a minute): a session past it is neither counted nor paged
+nor found, merged away or not, and `Total` always matches the rows.
 
 Deletion (`DeleteRun`, `DeleteSession`, `Sweep` — Studio's `DELETE`
 verbs and `studio.Retain`) is a lightweight `DELETE FROM … WHERE` on

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/weftgo/weft/internal/discovery"
 	"github.com/weftgo/weft/internal/listen"
 	"github.com/weftgo/weft/studio"
 )
@@ -287,9 +288,13 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	if srv.tok.rotated {
 		_, _ = fmt.Fprintf(out, "studio: token rotated: a new one in %s\n", srv.tok.path)
 	}
-	disc, derr := writeDiscovery(r.url, srv.token, dbPath)
-	if derr != nil {
+	var disc *discovery.Written
+	if discovery.Off(os.Getenv) {
+		_, _ = fmt.Fprintln(out, discoveryOffLine+"; the app gets WEFT_STUDIO_URL regardless")
+	} else if w, derr := writeDiscovery(r.url, srv.token, dbPath); derr != nil {
 		_, _ = fmt.Fprintf(out, "studio: no discovery file (%v); the app gets WEFT_STUDIO_URL regardless\n", derr)
+	} else {
+		disc = w
 	}
 	stopCh := make(chan os.Signal, 1)
 	done := make(chan error, 1)

@@ -528,7 +528,9 @@ compaction entry's hash, and a body with the reason, the messages
 replaced → summary entries and the estimated tokens before → after; no
 messages. A compaction of a context no run produced (entries appended
 directly to the store) is emitted under the next run the Session
-drives, or dropped at `Close` with a Debug line. `obsdb`'s
+drives, or at `Close` as the state log's records held for no run are:
+on a context carrying no span, its body `held: true`, filed under no
+run (no `weft.run.id`), keyed by the session's metadata alone. `obsdb`'s
 `DB.Compactions` reads it back for Studio. Its body also names the
 summary's cost (`summarizer_model`, `summarizer_usage`), and the
 summarizer's model call itself — every compaction's and every

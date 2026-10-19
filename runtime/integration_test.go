@@ -665,6 +665,18 @@ func TestPlaygroundApprovalVerbs(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	// The approval names its provenance: the resumed call's
+	// execute_tool span reads weft.tool.approved_by "runtime".
+	for {
+		_, spans := e.api(t, http.MethodGet, "/api/runs/"+resumed.RunID+"/spans", "")
+		if strings.Contains(spans, `"weft.tool.approved_by":"runtime"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the resumed call's span names no approved_by runtime:\n%s", spans)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // TestPlaygroundContinueFromStepWithEdits is §10.6's P2 gate: continue

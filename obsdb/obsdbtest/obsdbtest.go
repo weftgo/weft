@@ -98,6 +98,8 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("SessionEvents", sessionEvents(open))
 	t.Run("ThreadRecordsAreNotRunFacts", threadRecordsAreNotRunFacts(open))
 	t.Run("SessionIDsFilter", sessionIDsFilter(open))
+	t.Run("SessionsOldDated", sessionsOldDated(open))
+	t.Run("HeldMarker", heldMarker(open))
 }
 
 func ctx() context.Context { return context.Background() }

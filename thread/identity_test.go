@@ -976,3 +976,73 @@ func TestReportingPanicKeepsPerStepPersistence(t *testing.T) {
 		t.Errorf("the path's messages under a panicking tracer differ from a run with none:\n got %s\nwant %s", gj, wj)
 	}
 }
+
+// A quorum resume names every key that approved (record contract §2,
+// U31.1): under Quorum(2) with two signing keys the resume run's
+// weft.approval.actor is both key ids, sorted, comma-joined, deduped —
+// never the last signer alone — whichever key signed first, and a key
+// signing twice is one actor.
+func TestQuorumResumeNamesEveryKey(t *testing.T) {
+	for _, order := range [][]string{{"treasury-2026", "treasury-2025"}, {"treasury-2025", "treasury-2026"}} {
+		t.Run(order[0]+"_first", func(t *testing.T) {
+			tp := &idTracerProvider{}
+			ctx := context.Background()
+			keys := map[string]thread.Key{
+				"treasury-2026": {ID: "treasury-2026", Secret: []byte("the active secret"), Active: true},
+				"treasury-2025": {ID: "treasury-2025", Secret: []byte("the retired secret")},
+			}
+			ring, err := thread.NewKeyring(keys["treasury-2026"], keys["treasury-2025"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent := linkedRefundAgent(tp,
+				wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "rf1", Args: `{}`}),
+				wefttest.Say("done"),
+			)
+			s, err := thread.Create(ctx, thread.Memory(), agent,
+				thread.WithKeyring(ring), thread.RequireSigned(), thread.Quorum(2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = s.Close(ctx) }()
+			t1, err := s.Send(ctx, core.User("refund it"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res, err := t1.Wait(); err != nil || len(res.Pending) != 1 {
+				t.Fatalf("parked turn: %v, %v", res, err)
+			}
+			var resume *thread.Turn
+			for _, id := range []string{order[0], order[0], order[1]} {
+				challenge, err := s.Request("rf1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				signed, err := keys[id].Sign(challenge, thread.Approve("rf1"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				turn, err := s.DecideSigned(ctx, signed)
+				if err != nil {
+					t.Fatalf("DecideSigned(%s): %v", id, err)
+				}
+				if turn != nil {
+					resume = turn
+				}
+			}
+			if resume == nil {
+				t.Fatal("the quorum never resumed")
+			}
+			if _, err := resume.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			invokes := tp.named("invoke_agent")
+			if len(invokes) != 2 {
+				t.Fatalf("invoke_agent spans = %d, want 2", len(invokes))
+			}
+			if got, want := invokes[1].attr("weft.approval.actor"), "treasury-2025,treasury-2026"; got != want {
+				t.Errorf("weft.approval.actor = %q, want %q (every approving key, sorted)", got, want)
+			}
+		})
+	}
+}

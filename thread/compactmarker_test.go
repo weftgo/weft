@@ -377,8 +377,11 @@ func TestCompactionMarkerAtCompactionTime(t *testing.T) {
 }
 
 // A compaction of a context no run produced, then Close with no run:
-// no run id to file the marker under — dropped, with a Debug line.
-func TestCompactionMarkerDroppedAtCloseWithoutARun(t *testing.T) {
+// the marker goes out at Close as the thread records held for no run
+// do (U31.1) — on a context carrying no span, its body held: true,
+// filed under no run (weft.run.id absent), keyed by the session's
+// metadata alone (weft.session.id, no weft.turn).
+func TestCompactionMarkerHeldAtCloseWithoutARun(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
 	lp := &markerLogs{}
@@ -394,11 +397,24 @@ func TestCompactionMarkerDroppedAtCloseWithoutARun(t *testing.T) {
 	if err := s.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(lp.kind("compaction")); n != 0 {
-		t.Errorf("markers = %d, want 0", n)
+	ms := lp.kind("compaction")
+	if len(ms) != 1 {
+		t.Fatalf("markers = %d, want the one held, emitted at Close", len(ms))
 	}
-	if !strings.Contains(logs.String(), "compaction markers dropped at close") {
-		t.Errorf("no Debug line for the dropped marker:\n%s", logs.String())
+	m := ms[0]
+	if _, ok := m.attrs["weft.run.id"]; ok || m.span.IsValid() || m.attrs["weft.session.id"] != s.ID() ||
+		m.attrs["weft.turn"] != "" || m.attrs["weft.compaction.scope"] != "session" || m.attrs["weft.compaction.hash"] == "" {
+		t.Errorf("held marker = span %v, attrs %v; want no run id, no span, weft.session.id %s, no weft.turn", m.span, m.attrs, s.ID())
+	}
+	var body struct {
+		Held  bool   `json:"held"`
+		Entry string `json:"entry"`
+	}
+	if err := json.Unmarshal([]byte(m.body), &body); err != nil || !body.Held || body.Entry == "" {
+		t.Errorf("held marker body = %s (%v), want held: true and its entry", m.body, err)
+	}
+	if strings.Contains(logs.String(), "compaction markers dropped") {
+		t.Errorf("a Debug line says the marker was dropped:\n%s", logs.String())
 	}
 }
 

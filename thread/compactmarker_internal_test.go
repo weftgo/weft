@@ -35,9 +35,9 @@ func (countLogger) Enabled(context.Context, log.EnabledParameters) bool {
 // A compaction of a context no run produced whose marker is held after
 // a Close sealed the session (ApplyCompaction drops the lock before it
 // reports, so a Close can seal in between): no run will report under
-// this Session again, so the marker is dropped there, with the Debug
-// line the Close would have logged — never left in pendingMarkers.
-func TestCompactionMarkerHeldAfterSealIsDropped(t *testing.T) {
+// this Session again, so the marker goes out there, held, as the Close
+// would have emitted it (U31.1) — never left in pendingMarkers.
+func TestCompactionMarkerHeldAfterSealIsEmittedHeld(t *testing.T) {
 	ctx := context.Background()
 	lp := &countLogs{}
 	var logs bytes.Buffer
@@ -57,10 +57,10 @@ func TestCompactionMarkerHeldAfterSealIsDropped(t *testing.T) {
 	if held != 0 {
 		t.Errorf("pendingMarkers = %d after the seal, want 0", held)
 	}
-	if !strings.Contains(logs.String(), "compaction markers dropped at close") {
-		t.Errorf("no Debug line for the dropped marker:\n%s", logs.String())
+	if strings.Contains(logs.String(), "compaction markers dropped") {
+		t.Errorf("a Debug line says the marker was dropped:\n%s", logs.String())
 	}
-	if n := lp.n.Load(); n != 0 {
-		t.Errorf("records = %d, want none", n)
+	if n := lp.n.Load(); n != 1 {
+		t.Errorf("records = %d, want the held marker", n)
 	}
 }

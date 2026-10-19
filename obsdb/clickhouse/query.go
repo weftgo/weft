@@ -1532,7 +1532,9 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		narrow = " WHERE " + strings.Join(narrows, " AND ")
 	}
 	runArgs = append(narrowArgs, condArgs...)
-	runs := sessionRuns(narrow, cond)
+	// Cut at the table's TTL (retention.go): Total and the page agree
+	// whether a merge has dropped an expired run yet or not.
+	runs := sessionRuns(narrow, cond+d.retentionCond(ctx))
 	hargs = append(hargs, runArgs...)
 	if q.Agent != "" {
 		having = append(having, "max(Agent) = ?")
@@ -1963,7 +1965,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	rs, err := d.conn.Query(ctx, `SELECT SessionID, `+sessionAggs+`
 		FROM `+sessionRuns(
 		" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID = ?)",
-		" AND SessionID = ?")+` GROUP BY SessionID`, id, id)
+		" AND SessionID = ?"+d.retentionCond(ctx))+` GROUP BY SessionID`, id, id)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
 	}

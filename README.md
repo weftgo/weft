@@ -446,7 +446,8 @@ the file.
 
 The file is a convenience, never a requirement: `WEFT_STUDIO_URL`
 always wins (the file is not read), `WEFT_DISCOVERY=off` turns the read
-off, `otel.NoEnv()` ignores it with the rest of the environment, and a
+off (and the write: `weft studio` and `weft dev` started under it write
+no file and say so in one line), `otel.NoEnv()` ignores it with the rest of the environment, and a
 Studio named in code — `otel.Studio(url, tok)` (which switches the read
 off: explicit > environment > file) or `runtime.Studio(url, tok)` —
 needs no file.

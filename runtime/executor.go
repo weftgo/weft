@@ -1281,7 +1281,10 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, parkedRunID, runID, co
 	for _, d := range decisions {
 		switch d.Decision {
 		case "approve":
-			opts = append(opts, core.Approve(d.CallID))
+			// The approval names its provenance (core.ApproveBy): the
+			// resumed call's execute_tool span carries
+			// weft.tool.approved_by "runtime" (record contract §3).
+			opts = append(opts, core.ApproveBy(d.CallID, approvedByRuntime, ""))
 		case "deny":
 			opts = append(opts, core.Deny(d.CallID, orDefault(d.Reason, skippedReason)))
 		default: // resolve
@@ -1305,6 +1308,10 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, parkedRunID, runID, co
 	status, errText = l.outcome(pr.cmd, runID, res, err, usageOf(res, err), nil)
 	return status, runID, errText
 }
+
+// approvedByRuntime is weft.tool.approved_by on a call the playground
+// approved on a runtime-started run (record contract §3).
+const approvedByRuntime = "runtime"
 
 // runOptions composes the run exactly as §5.2's snippet does: the
 // overrides as plain weft RunOptions (dual Option/RunOption knobs, no

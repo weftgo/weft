@@ -29,6 +29,7 @@ type DB struct {
 	keepDeltas bool
 	contentTTL time.Duration
 	metaTTL    time.Duration
+	retention  retention // the session reads' cut at weft_runs' TTL (retention.go)
 	mu         sync.Mutex
 	closed     bool
 	closeErr   error

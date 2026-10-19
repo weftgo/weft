@@ -31,7 +31,8 @@
 //
 // The file is a convenience, never a requirement: WEFT_STUDIO_URL
 // always wins (the reader does not look), WEFT_DISCOVERY=off turns the
-// read off, and runtime.Studio(url, tok) / otel.Studio(url, tok) name a
+// read off and the write too (Off: weft studio / weft dev write no
+// file), and runtime.Studio(url, tok) / otel.Studio(url, tok) name a
 // Studio in code (otel.Studio also switches the read off). The core
 // never imports this package.
 package discovery
@@ -314,6 +315,13 @@ func Find(url string) string {
 	return ""
 }
 
+// Off reports whether getenv("WEFT_DISCOVERY") is "off" (any case,
+// spaces trimmed): the file is then neither read (Lookup) nor written —
+// `weft studio` and `weft dev` call Write only when Off is false.
+func Off(getenv func(string) string) bool {
+	return strings.EqualFold(strings.TrimSpace(getenv("WEFT_DISCOVERY")), "off")
+}
+
 // Lookup is the reader the app side uses: the first trusted file of the
 // location order, with its path. It does not look when
 // getenv("WEFT_STUDIO_URL") is set (the explicit Studio always wins) or
@@ -323,7 +331,7 @@ func Find(url string) string {
 // never changes behaviour, and a leftover file is no news. ok is false
 // when nothing trusted was found.
 func Lookup(getenv func(string) string, log *slog.Logger) (info Info, path string, ok bool) {
-	if getenv("WEFT_STUDIO_URL") != "" || strings.EqualFold(strings.TrimSpace(getenv("WEFT_DISCOVERY")), "off") {
+	if getenv("WEFT_STUDIO_URL") != "" || Off(getenv) {
 		return Info{}, "", false
 	}
 	if log == nil {

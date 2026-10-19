@@ -167,7 +167,7 @@ res2, err := agt.Generate(ctx, weft.Messages(res.Messages...), weft.Prompt("And 
 //     weft.ResumeOf(res.ID) links the resume to the parked run (weft.resumed_from; Studio's
 //     parked row reads resumed_by) — the core cannot infer it; thread and runtime pass it.
 //     weft.ApproveBy(id, by, grantID) is Approve naming its provenance (reporting only): the call's
-//     execute_tool span carries weft.tool.approved_by (thread: user|grant|approver|quorum|policy) + weft.grant.id.
+//     execute_tool span carries weft.tool.approved_by (thread: user|grant|approver|quorum|policy; runtime: runtime) + weft.grant.id.
 //     weft.Metadata(map[string]string{"weft.approval.actor": who}) names the decider. A denied call's
 //     execute_tool span is zero-length, weft.tool.denied (+ denied_kind denied|no_decision).
 //     Middleware parks any call by returning an error wrapping ErrApprovalRequired.
@@ -320,7 +320,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    sessions/{id} (capability "delete": a run with its subagent children, or a session's runs —
 //    //    rows, records, search index, spans, app logs — from obsdb's tables only, the app's
 //    //    conversation store and a shared file's thread tables untouched; the dev token or setup A's
-//    //    loopback Host, every panel token 403; obsdb.DB.DeleteRun/DeleteSession/Sweep/Vacuum; stored manifests stay), /api/live (SSE; kinds event|delta|messages|run|attempt — attempt (H9, O17) a live-only frame from each `attempt` span as it lands {run_id, step, attempt, layer, status, error_type, wait_ms (weft.attempt.wait_ms, the wait before the next try — the step route's), retry_after_ms (the provider's ask)}, never backfilled; ?all=1 every run, dev token/loopback only — meta live_all; its resume
+//    //    loopback Host, every panel token 403; obsdb.DB.DeleteRun/DeleteSession/Sweep/Vacuum; stored manifests stay), /api/live (SSE; kinds event|delta|messages|run|attempt — attempt (H9, O17) a live-only frame from each `attempt` span as it lands {run_id, step, attempt, layer, status, error_type, wait_ms (weft.attempt.wait_ms, the wait slept before this attempt was sent — the step route's), retry_after_ms (the provider's ask)}, never backfilled; ?all=1 every run, dev token/loopback only — meta live_all; its resume
 //    //    backfills the last hour / running runs, ≤ 500 — obsdb.RunQuery.LastSeenAfter), /api/panel-tokens (with a Token), /api/panel-handoff?to= (setup C hand-off, capability handoff, with a Token only:
 //    //    a playground panel token → 303 <base><to>#token= with a 5-minute read token for its public id (capped at its own exp;
 //    //    Accept: application/json → {location, exp}); the server token → 303 with no fragment; a read token 403, it cannot widen;
@@ -393,8 +393,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    OTLP ingest + the playground on 127.0.0.1:7331. The dev token is stable per DB
 //    //    (<db>.token beside the file, 0600, never printed; --rotate-token renews it,
 //    //    --token / WEFT_STUDIO_TOKEN override; a fileless DB gets a printed per-process
-//    //    one); studio.json {url, token, db, pid, started, version} (0600, removed on exit)
-//    //    is the discovery file apps find it through (block 6). The API over a terminal (--url
+//    //    one); studio.json {url, token, db, pid, started, version} (0600, removed on exit;
+//    //    none written under WEFT_DISCOVERY=off, said in one start line) is the discovery file apps find it through (block 6). The API over a terminal (--url
 //    //    WEFT_STUDIO_URL, --token WEFT_STUDIO_TOKEN): weft doctor checks one; weft runs
 //    //    [--agent --since --failed --status running|succeeded|failed|interrupted|parked|cancelled --limit --json] (PROMPT and STOPPED BY columns — every cell's control characters as spaces; --json carries prompt_preview/stopped_by/cancel_cause); weft open <run id> [--open --with-token]
 //    //    (prints the bare <url>/runs/<id>; the token only to the browser or on --with-token);
@@ -536,7 +536,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    ClearOldToolResults(n), BeforeCompact (thread.Proceed() | Cancel() | Replace(c)); overflow re-runs once.
 //    Each compaction emits a session marker record (kind compaction, informational, no messages) at
 //    ApplyCompaction, under the last run of this session that produced the context (held for the next run
-//    when none did); obsdb.DB.Compactions and the run page read it back. Its body names summarizer_model /
+//    when none did; still held at Close → emitted held:true, under no run, as the state log's records); obsdb.DB.Compactions and the run page read it back. Its body names summarizer_model /
 //    summarizer_usage, and every summarizer model call (compaction, SummarizeLeft) is a chat span with
 //    weft.chat.role summarizer + its usage, under the turn in flight or the last run (never in the run's own usage, nor its
 //    provider/model/meta; obsdb.SessionRow.SummarizerUsage sums it per session, apart from Usage).

@@ -106,6 +106,12 @@ type diffSide struct {
 	Usage       core.Usage       `json:"usage"`
 	Marks       []string         `json:"marks"`
 	Holes       []stepHole       `json:"holes"`
+	// SystemHidden is true when the step's request block is withheld
+	// from this token (a read-scoped panel token: System null under the
+	// hidden hole) — the explicit fact lib/stepdiff.ts's systemHidden
+	// reads, never inferred from the hidden hole's count (a hidden hole
+	// with a count is child runs left out, and may stand beside it).
+	SystemHidden bool `json:"system_hidden,omitempty"`
 
 	// What the side could not record, for compareSides (never served:
 	// each is a hole in Holes). derived: the side's run was built from
@@ -160,7 +166,7 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	if ra.truncated || rb.truncated {
 		reason, fix := obsdb.HoleNoteFor(obsdb.HoleTruncated, obsdb.CauseResponseCap)
-		doc.Holes = []stepHole{{Hole: string(obsdb.HoleTruncated), Reason: reason, Fix: fix}}
+		doc.Holes = []stepHole{{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap), Reason: reason, Fix: fix}}
 	}
 	for n := range max(len(ra.sides), len(rb.sides)) {
 		row := diffRow{Step: n, Changes: []string{}, Unknown: []string{}}
@@ -291,16 +297,11 @@ func diffSideOf(doc stepDoc, text *string, readable bool) *diffSide {
 	for _, h := range doc.Holes {
 		holes[obsdb.Hole(h.Hole)] = h
 	}
-	// A hidden hole with a count is the child runs' alone
-	// (hiddenChildrenHole): the system prompt stays readable. When the
-	// request block is hidden too (a read token) the one hidden hole is
-	// the prompt's as well: its count goes, so the client's systemHidden
-	// (lib/stepdiff.ts) keys on a hidden hole without one (P8-pre-web #7).
+	// The request block hidden (a read token) withholds the system
+	// prompt: said by SystemHidden, so a hidden hole with a count (the
+	// child runs' alone, hiddenChildrenHole) keeps its count beside it.
 	if b, ok := doc.Request.(badgeFields); ok && b.Badge == string(obsdb.HoleHidden) {
-		if h, ok := holes[obsdb.HoleHidden]; ok {
-			h.Count = 0
-			holes[obsdb.HoleHidden] = h
-		}
+		side.SystemHidden = true
 	}
 	for _, c := range doc.ToolCalls {
 		side.ToolCalls = append(side.ToolCalls, diffToolCall{Name: c.Name, Args: canonicalJSON(c.Args)})

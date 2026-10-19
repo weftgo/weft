@@ -66,8 +66,8 @@ func TestSessionTimelineForks(t *testing.T) {
 }
 
 func timelineForks(t *testing.T, base obsdb.DB) {
-	// A recent clock: on ClickHouse a session list of fixtureT0-dated
-	// (2020) turns counts them in Total but pages no row.
+	// A recent clock: fixtureT0-dated (2020) turns are past ClickHouse's
+	// weft_runs TTL, so its session reads list none of them.
 	t0 := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
 	at := func(d time.Duration) time.Time { return t0.Add(d) }
 	turn := func(sid, id string, n int, start time.Duration, meta map[string]any) []obsdb.Record {

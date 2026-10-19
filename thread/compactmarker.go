@@ -30,7 +30,10 @@ import (
 // compaction of a context no run of this session produced (entries
 // appended by hand, or a fork's copied path) waits for the next run
 // this Session drives and is emitted under it; a Close before that
-// drops it with a Debug line. It is informational: counts and the
+// emits it then, as Close emits the thread records still held: on a
+// context carrying no span, its body marked held: true, filed under no
+// run (weft.run.id absent) and keyed by the session's metadata alone
+// (no weft.turn). It is informational: counts and the
 // compaction's hash, never messages, and no reader applies it.
 const (
 	markerEventName = "weft.compaction"
@@ -64,6 +67,9 @@ type compactionMarker struct {
 	// with weft.chat.role = summarizer (threadrec.go).
 	SummarizerModel *core.ModelInfo `json:"summarizer_model,omitempty"`
 	SummarizerUsage *core.Usage     `json:"summarizer_usage,omitempty"`
+	// Held marks a marker emitted at Close for want of a run to file it
+	// under (emitHeldMarker): the thread records' held: true.
+	Held bool `json:"held,omitempty"`
 }
 
 // runSight is what the Session saw of a run it drove: its id, the
@@ -201,20 +207,20 @@ func (s *Session) reportCompaction(ctx context.Context, e CompactionEntry, befor
 		m.SummarizerUsage = &u
 	}
 	if runID == "" {
-		held := true
+		var md map[string]string
 		s.locked(func() {
 			// A Close that sealed the session since the compaction
-			// landed has already counted what it drops: no run will
-			// report under this Session again.
+			// landed has emitted what was held: no run will report under
+			// this Session again, so this one goes out now, held, as
+			// Close's did.
 			if s.closing == stateSealed {
-				held = false
+				md = s.heldMarkerMetadataLocked()
 				return
 			}
 			s.pendingMarkers = append(s.pendingMarkers, m)
 		})
-		if !held {
-			s.agent.Logger().Debug("thread: compaction markers dropped at close: no run to report them under",
-				"session", s.header.ID, "markers", 1)
+		if md != nil {
+			s.emitHeldMarker(md, m)
 		}
 		return
 	}
@@ -257,7 +263,26 @@ func (s *Session) markerLogger() log.Logger {
 	return lp.Logger(markerScopeName)
 }
 
-// emitMarker writes one marker record under runID on ctx. md is the
+// heldMarkerMetadataLocked is the metadata a marker held at Close is
+// keyed by: the session's identity and run metadata, no weft.turn —
+// closeItemLocked's rule for a thread record held for no run. Callers
+// hold s.mu.
+func (s *Session) heldMarkerMetadataLocked() map[string]string {
+	md := s.unseenRunMetadataLocked(0)
+	delete(md, "weft.turn")
+	return md
+}
+
+// emitHeldMarker emits m as Close does for want of a run: held: true,
+// on a context carrying no span, filed under no run, keyed by md
+// (heldMarkerMetadataLocked). Callers must not hold s.mu.
+func (s *Session) emitHeldMarker(md map[string]string, m *compactionMarker) {
+	m.Held = true
+	s.emitMarker(context.Background(), "", md, m)
+}
+
+// emitMarker writes one marker record under runID on ctx — under no
+// run ("": weft.run.id absent) for a marker held at Close. md is the
 // metadata to stamp; nil reads the run's own from ctx (a run's
 // observer context).
 func (s *Session) emitMarker(ctx context.Context, runID string, md map[string]string, m *compactionMarker) {
@@ -284,11 +309,15 @@ func (s *Session) emitMarker(ctx context.Context, runID string, md map[string]st
 	rec.SetBody(attribute.StringValue(string(b)))
 	attrs := []attribute.KeyValue{
 		attribute.String("weft.record", markerRecord),
-		attribute.String("weft.run.id", runID),
+	}
+	if runID != "" {
+		attrs = append(attrs, attribute.String("weft.run.id", runID))
+	}
+	attrs = append(attrs,
 		attribute.String("weft.compaction.scope", m.Scope),
 		attribute.String("weft.compaction.hash", m.Hash),
 		attribute.String("weft.content", "none"),
-	}
+	)
 	if name := s.agent.Name(); name != "" {
 		attrs = append(attrs, attribute.String("gen_ai.agent.name", name))
 	}

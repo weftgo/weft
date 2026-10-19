@@ -255,9 +255,13 @@ type slogHandler struct {
 	pipe   *Pipeline // nil: the installed pipeline, per record
 	prefix string    // the open groups, "a.b."
 	attrs  []attribute.KeyValue
-	// viaSlog marks Slog's wrap of the default (and its WithAttrs /
-	// WithGroup copies): its lines mark contact only when the default's
-	// handler is no longer that wrap.
+	// viaSlog marks Slog's wrap of the default; WithAttrs / WithGroup
+	// copy it with the struct, so a logger derived from the default
+	// (slog.With, Logger.WithGroup) carries it too. A line through a
+	// handler so marked skips contact only while the default's handler
+	// is still the wrap Slog installed (the comparison is against that
+	// wrap, not against the copy itself); once the program replaced the
+	// default, every line — the wrap's, a derived logger's — marks it.
 	viaSlog bool
 }
 
@@ -324,11 +328,13 @@ func (h *slogHandler) Handle(ctx context.Context, r slog.Record) error {
 		rec.AddAttributes(kvs...)
 		p.bridge.logger.Emit(ctx, rec)
 		p.bridge.count.Add(1)
-		// A line through Slog's own wrap while it is still the default's
-		// handler is that wrap's liveness, which bridged reads directly:
-		// marking contact would keep the pipeline bridged after the
-		// program replaced the default. Any other path — a bound or
-		// package-level handler, a program's wrap of Slog's — is contact.
+		// While Slog's wrap is still the default's handler, bridged
+		// reads that fact directly, so a line through the wrap or a
+		// copy derived from it (viaSlog) does not mark contact: marking
+		// it would keep the pipeline bridged after the program replaced
+		// the default. Any other handler — SlogHandler's, a program's
+		// wrap of Slog's — marks contact, as does a viaSlog line once
+		// the default is no longer the installed wrap.
 		if !h.viaSlog || slog.Default().Handler() != slog.Handler(p.bridge.installed.Load()) {
 			p.bridge.contact.Store(true)
 		}

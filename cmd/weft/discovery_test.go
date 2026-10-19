@@ -423,3 +423,41 @@ func TestDiscoveryRefreshedWhileServing(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// TestDiscoveryOffWritesNone: under WEFT_DISCOVERY=off neither `weft
+// studio` nor `weft dev`'s in-process Studio writes the discovery file
+// — the switch that turns the read off turns the write off too — and
+// each start says so in one line.
+func TestDiscoveryOffWritesNone(t *testing.T) {
+	t.Setenv("WEFT_DISCOVERY", "off")
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Run("studio", func(t *testing.T) {
+		dir := discoveryDir(t)
+		base := freeBase(t, 2)
+		var out syncBuffer
+		stop := bareStudio(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 2, loop(base), "", false, &out)
+		defer stop()
+		if _, err := os.Stat(filepath.Join(dir, discovery.FileName)); !os.IsNotExist(err) {
+			t.Errorf("weft studio wrote a discovery file under WEFT_DISCOVERY=off: %v", err)
+		}
+		if want := discoveryOffLine + "; apps need WEFT_STUDIO_URL=http://" + loop(base) + "\n"; !strings.Contains(out.String(), want) {
+			t.Errorf("start output %q, want the line %q", out.String(), want)
+		}
+	})
+	t.Run("dev", func(t *testing.T) {
+		dir := discoveryDir(t)
+		base := freeBase(t, 2)
+		var out syncBuffer
+		r, err := devStudio("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), want{addr: loop(base), span: 2}, "", false, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.stop(syscall.SIGTERM)
+		if _, err := os.Stat(filepath.Join(dir, discovery.FileName)); !os.IsNotExist(err) {
+			t.Errorf("weft dev wrote a discovery file under WEFT_DISCOVERY=off: %v", err)
+		}
+		if want := discoveryOffLine + "; the app gets WEFT_STUDIO_URL regardless\n"; !strings.Contains(out.String(), want) {
+			t.Errorf("dev output %q, want the line %q", out.String(), want)
+		}
+	})
+}

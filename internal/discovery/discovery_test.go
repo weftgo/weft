@@ -544,3 +544,18 @@ func TestCleanupErrorClasses(t *testing.T) {
 		})
 	}
 }
+
+// TestOff: WEFT_DISCOVERY=off in any case, spaces trimmed, is Off; any
+// other value (or none) is not.
+func TestOff(t *testing.T) {
+	for v, want := range map[string]bool{"off": true, " OFF ": true, "Off": true, "": false, "on": false, "0": false} {
+		if got := Off(func(k string) string {
+			if k == "WEFT_DISCOVERY" {
+				return v
+			}
+			return ""
+		}); got != want {
+			t.Errorf("Off(%q) = %v, want %v", v, got, want)
+		}
+	}
+}

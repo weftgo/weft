@@ -16,7 +16,12 @@ import (
 // port in it — and remove it on a clean exit; otel.Install and
 // runtime.Install read it when WEFT_STUDIO_URL is unset, so an app
 // joins the running Studio with no configuration. A reuse writes
-// nothing: the running Studio owns the file.
+// nothing: the running Studio owns the file. Under WEFT_DISCOVERY=off
+// (discovery.Off) neither command writes one, and the start says so in
+// one line.
+
+// discoveryOffLine is the start line under WEFT_DISCOVERY=off.
+const discoveryOffLine = "studio: no discovery file written (WEFT_DISCOVERY=off)"
 
 // writeDiscovery writes the file for the Studio at url. dbPath is the
 // SQLite file, "" for a database with no file.
@@ -36,6 +41,10 @@ func writeDiscovery(url, token, dbPath string) (*discovery.Written, error) {
 // failure is said too: the Studio serves regardless — apps then need
 // WEFT_STUDIO_URL).
 func announce(out io.Writer, url, token, dbPath string) *discovery.Written {
+	if discovery.Off(os.Getenv) {
+		_, _ = fmt.Fprintf(out, "%s; apps need WEFT_STUDIO_URL=%s\n", discoveryOffLine, url)
+		return nil
+	}
 	w, err := writeDiscovery(url, token, dbPath)
 	if err != nil {
 		_, _ = fmt.Fprintf(out, "studio: no discovery file (%v); apps need WEFT_STUDIO_URL=%s\n", err, url)

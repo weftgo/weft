@@ -144,8 +144,10 @@ type recordFrameDTO struct {
 // weft.attempt.index (1-based per model call), Layer weft.attempt.layer
 // ("fallback" on a backup's request, else absent), Status "error" (the
 // span's status Error; ErrorType its error.type) or "ok", WaitMS the
-// wait before the next try (weft.attempt.wait_ms: mw.Retry's backoff,
-// the provider's ask honoured — the step route's attempts[].wait_ms)
+// wait the reporting layer slept before it sent this attempt
+// (weft.attempt.wait_ms: mw.Retry's backoff, the provider's ask
+// honoured; absent on an attempt sent at once — the step route's
+// attempts[].wait_ms)
 // and RetryAfterMS the provider's retry-after ask itself
 // (weft.attempt.retry_after_ms), each absent when not recorded. Live
 // only: never a stored frame, never backfilled (the span itself is

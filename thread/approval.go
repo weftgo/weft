@@ -1617,7 +1617,8 @@ func (s *Session) expiredPendingLocked(now time.Time) []Request {
 // approvalActorKey is the run metadata naming who decided the calls a
 // resume run resolves (record contract §2, UX-E-17): a signed
 // decision's key id, else the decision's Who; distinct actors in call
-// order, comma-joined. A session owns it: every run of the session
+// order — a quorum's approvers every one, sorted within their call —
+// comma-joined. A session owns it: every run of the session
 // sets it, "" (none) on a run that applies no decision or whose
 // decisions name nobody, so no enclosing run's actor is inherited.
 // Metadata survives content-off (Decision.Who): an opaque id, never a
@@ -1647,15 +1648,45 @@ func (s *Session) resumeLinkLocked() (parkedRun, actor string) {
 		if !ok {
 			continue
 		}
-		who := d.KeyID
-		if who == "" {
-			who = d.Who
-		}
-		if who != "" && !slices.Contains(actors, who) {
-			actors = append(actors, who)
+		for _, who := range decisionActors(d, ds) {
+			if !slices.Contains(actors, who) {
+				actors = append(actors, who)
+			}
 		}
 	}
 	return parkedRun, strings.Join(actors, ",")
+}
+
+// decisionActors names who decided one call, as approvalActorKey reads
+// it: each decision's signing key id, else its Who. An approval is every
+// approval recorded for the call — under a Quorum(n > 1) each approver
+// who counted toward it, sorted and deduped (the decisions are in
+// arrival order, which says nothing about who decided) — any other
+// effective decision its own actor. "" names nobody and is left out.
+func decisionActors(d ApprovalDecisionEntry, ds []ApprovalDecisionEntry) []string {
+	actorOf := func(d ApprovalDecisionEntry) string {
+		if d.KeyID != "" {
+			return d.KeyID
+		}
+		return d.Who
+	}
+	if d.Outcome != OutcomeApprove {
+		if who := actorOf(d); who != "" {
+			return []string{who}
+		}
+		return nil
+	}
+	var out []string
+	for _, a := range ds {
+		if a.Outcome != OutcomeApprove {
+			continue
+		}
+		if who := actorOf(a); who != "" && !slices.Contains(out, who) {
+			out = append(out, who)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // danglingDecisionsLocked maps the boundary's calls to the core

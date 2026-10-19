@@ -176,9 +176,10 @@ func TestSessionTimelineFromARealRun(t *testing.T) {
 	}{
 		// The fixture holds what this session does not: a stripped
 		// receipt (the stripped hole), a compaction marker (no fact_at),
-		// a session-level mark (run_id/turn null), a parked turn; a mark's
+		// a session-level mark (run_id/turn null), a parked turn, a priced summarizer
+		// call (a turn's and the session's summarizer, U15.1); a mark's
 		// fields are its kind's (data, not shape: the field set is §4's table).
-		{"session-timeline.golden.json", doc, []string{".marks[].run_id=<nil>", ".marks[].turn=<nil>", ".holes[]", ".marks[].fields."}},
+		{"session-timeline.golden.json", doc, []string{".marks[].run_id=<nil>", ".marks[].turn=<nil>", ".holes[]", ".marks[].fields.", ".summarizer", ".turns[].summarizer"}},
 		{"session-entries.golden.json", entries, []string{".holes[]", ".entries[].fields."}},
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", "api", c.golden))

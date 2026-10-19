@@ -66,7 +66,17 @@
         "input_tokens": 10,
         "output_tokens": 3
       },
-      "marks": 1
+      "marks": 1,
+      "summarizer": {
+        "usage": {
+          "input_tokens": 1800,
+          "output_tokens": 60
+        },
+        "cost_usd": 0.000306,
+        "cost_known": true,
+        "cost_reason": "no cache split reported; a cached prompt may be overstated",
+        "cache": "not_reported"
+      }
     },
     {
       "run_id": "s_acme-t5",
@@ -214,6 +224,14 @@
         "reason": "threshold",
         "replaced": 8,
         "scope": "session",
+        "summarizer_model": {
+          "name": "gpt-4o-mini",
+          "provider": "openai"
+        },
+        "summarizer_usage": {
+          "input_tokens": 1800,
+          "output_tokens": 60
+        },
         "tokens_after": 300,
         "tokens_before": 900
       }
@@ -360,6 +378,16 @@
       "fix": "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
       "count": 1
     }
-  ]
+  ],
+  "summarizer": {
+    "usage": {
+      "input_tokens": 1800,
+      "output_tokens": 60
+    },
+    "cost_usd": 0.000306,
+    "cost_known": true,
+    "cost_reason": "no cache split reported; a cached prompt may be overstated",
+    "cache": "not_reported"
+  }
 }
 

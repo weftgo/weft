@@ -266,7 +266,8 @@ describe("a session page (S4.7)", () => {
         }),
       ])
     })
-    const { container } = renderApp(`/sessions/${session.id}`)
+    // The table view nests them (U15.1: the timeline is the default).
+    const { container } = renderApp(`/sessions/${session.id}?view=table`)
     expect(await screen.findByText("pg_exp_1")).toBeTruthy()
     const nested = container.querySelector(`[data-experiment-of="${turn.id}"]`)
     expect(nested?.previousElementSibling?.getAttribute("data-turn")).toBe(

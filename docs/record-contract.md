@@ -1051,7 +1051,17 @@ offset). A
 panel token reads its public id's session only (`sessions/{id}`'s
 scope); a session of session-level marks alone (no turn stored)
 answers with no turns. The exported state log is an index, not
-evidence (ADR 0021 §5).
+evidence (ADR 0021 §5). The timeline also prices the summarizer at
+read time (U15.1, UX-B-13; never stored): a turn carries `summarizer`
+(`usage` + the cost block) when marks filed under it — a compaction
+marker, a `SummarizeLeft` branch record — name `summarizer_usage`, each
+priced at its `summarizer_model`'s rates when recorded, else at the
+turn's model's; the document's `summarizer` is the marks' sum plus
+what of the session's `summarizer_usage` no mark names (a call past the
+cap, a summary without a marker) at the newest turn's model's rates;
+an unpriced part makes the figure not known, its model named. Absent
+when the session summarized nothing; never folded into a turn's usage
+or `cost_usd`.
 Its `usage` is its turns' own; `summarizer_usage`
 (`obsdb.SessionRow.SummarizerUsage`, audit O15) is apart: the summed
 `gen_ai.usage.*` of the summarizer `chat` spans (`weft.chat.role`

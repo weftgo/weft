@@ -200,10 +200,24 @@ export interface RunLink {
   search: RunSearch
 }
 
+/** The session page's views (U15.1): the timeline (turns × time with
+ * the state log's marks, the default), the tree (branches and forks,
+ * U15.2) and the table of turns. */
+export type SessionView = "timeline" | "tree" | "table"
+
+/** The session page's search, as sessions/$id validates it. */
+export interface SessionSearch {
+  /** Absent: the timeline. */
+  view?: Exclude<SessionView, "timeline">
+  /** The mark whose drawer is open: its thread entry id, else m<n>
+   * (its index among the timeline's marks — lib/timeline.ts's markKey). */
+  mark?: string
+}
+
 export interface SessionLink {
   to: "/sessions/$id"
   params: { id: string }
-  search: Record<string, never>
+  search: SessionSearch
 }
 
 export interface TraceSearch {
@@ -472,9 +486,34 @@ export function rawFromSearch(search: Record<string, unknown>): RawLinkState {
   return { q, hide, ev: ordinal(search.ev as number | undefined) }
 }
 
-/** sessionLink is a session's page (its turns). */
+/** sessionLink is a session's page (its timeline). */
 export function sessionLink(id: string): SessionLink {
   return { to: "/sessions/$id", params: { id }, search: {} }
+}
+
+/** sessionViewLink is a session's page in a view, optionally with one
+ * mark's drawer open (U15.1). Apart from sessionLink so the devtools
+ * panel, which links the page alone, carries none of it. */
+export function sessionViewLink(
+  id: string,
+  opts: { view?: SessionView; mark?: string }
+): SessionLink {
+  const search: SessionSearch = {}
+  if (opts.view === "tree" || opts.view === "table") search.view = opts.view
+  if (opts.mark) search.mark = opts.mark
+  return { to: "/sessions/$id", params: { id }, search }
+}
+
+/** sessionSearch reads the session page's search back (sessions/$id's
+ * validateSearch): an unknown view is the timeline, a mark any
+ * non-empty string (a number-looking entry id parses as a number). */
+export function sessionSearch(search: Record<string, unknown>): SessionSearch {
+  const out: SessionSearch = {}
+  if (search.view === "tree" || search.view === "table") out.view = search.view
+  const m = search.mark
+  if (typeof m === "string" && m) out.mark = m
+  else if (typeof m === "number") out.mark = String(m)
+  return out
 }
 
 /** traceLink is a trace's page, optionally with a span selected and

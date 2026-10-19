@@ -93,7 +93,7 @@ func timelineDB(t *testing.T) obsdb.DB {
 		thread(sid, pub, "", 70*time.Second, "grant.revoke", "none", map[string]any{"entry": "e40", "grant_id": "e32", "tool": "send_email", "uses": 1}),
 		thread("s_held", pub, "", 5*time.Second, "grant.mint", "none", map[string]any{"entry": "h1", "grant_id": "h1", "tool": "lookup_order", "scope": "session"}),
 		obsdb.Record{Time: at(41 * time.Second), EventName: "weft.compaction", Severity: 9, Service: "svc",
-			Body: `{"scope":"session","hash":"sha256:acme","entry":"e24","reason":"threshold","replaced":8,"entries":1,"messages_before":9,"messages_after":2,"tokens_before":900,"tokens_after":300}`,
+			Body: `{"scope":"session","hash":"sha256:acme","entry":"e24","reason":"threshold","replaced":8,"entries":1,"messages_before":9,"messages_after":2,"tokens_before":900,"tokens_after":300,"summarizer_model":{"provider":"openai","name":"gpt-4o-mini"},"summarizer_usage":{"input_tokens":1800,"output_tokens":60}}`,
 			Attrs: map[string]any{"weft.record": obsdb.RecordCompaction, "weft.run.id": sid + "-t4", "weft.compaction.hash": "sha256:acme",
 				"weft.compaction.scope": "session", "weft.content": "none", "weft.session.id": sid, "weft.public_id": pub, "gen_ai.agent.name": "acme-support"}},
 	)

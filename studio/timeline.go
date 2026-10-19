@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -128,6 +129,19 @@ type timelineTurn struct {
 	ErrorType     string     `json:"error_type,omitempty"`
 	Usage         core.Usage `json:"usage"`
 	Marks         int        `json:"marks"`
+	// Summarizer is what the summarizer calls the marks filed under the
+	// turn name cost (a compaction marker's or a SummarizeLeft branch
+	// record's summarizer_usage / summarizer_model; UX-B-13): never in
+	// usage. Absent when no mark under it names one.
+	Summarizer *summarizerCost `json:"summarizer,omitempty"`
+}
+
+// summarizerCost is a summarizer figure: its usage and its price at
+// read time (plan A5's rule: never stored) — each mark's at its
+// summarizer_model's rates when recorded, else at its turn's model's.
+type summarizerCost struct {
+	Usage core.Usage `json:"usage"`
+	costFields
 }
 
 // timelineLane is one lane's count of the marks read.
@@ -154,6 +168,13 @@ type timelineDoc struct {
 	Lanes      []timelineLane `json:"lanes"`
 	MarksTotal int            `json:"marks_total"`
 	Holes      []stepHole     `json:"holes"`
+	// Summarizer is the session's whole summarizer bill (UX-B-13):
+	// obsdb.SessionRow.SummarizerUsage — every summarizer chat span
+	// under the session's runs — priced as the turns' figures are, the
+	// part no mark read here names (past the cap, a call without a
+	// marker) at the newest turn's model's rates. Absent when the
+	// session summarized nothing. Never folded into a turn's usage.
+	Summarizer *summarizerCost `json:"summarizer,omitempty"`
 }
 
 // entriesDoc is GET /api/sessions/{id}/entries: one page of the
@@ -452,6 +473,7 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 		}
 		doc.Turns = append(doc.Turns, t)
 	}
+	s.priceSummarizer(&doc, det)
 	for _, l := range timelineLanes {
 		doc.Lanes = append(doc.Lanes, timelineLane{Lane: l, Marks: lanes[l]})
 	}
@@ -506,4 +528,118 @@ func (s *Server) serveSessionEntries(w http.ResponseWriter, r *http.Request, id 
 	}
 	doc.Holes = mb.holes(det.Runs, all, 0, true)
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// markSummarizer is the summarizer usage and model a mark's fields
+// name (a compaction marker's or a branch record's summarizer_usage /
+// summarizer_model, record contract §4), ok false when it names none.
+func markSummarizer(m sessionEntry) (u core.Usage, model core.ModelInfo, ok bool) {
+	raw, has := m.Fields["summarizer_usage"]
+	if !has {
+		return u, model, false
+	}
+	if b, err := json.Marshal(raw); err != nil || json.Unmarshal(b, &u) != nil || u == (core.Usage{}) {
+		return core.Usage{}, model, false
+	}
+	if raw, has := m.Fields["summarizer_model"]; has {
+		if b, err := json.Marshal(raw); err == nil {
+			_ = json.Unmarshal(b, &model)
+		}
+	}
+	return u, model, true
+}
+
+// summarizerSum folds priced summarizer calls into one figure: known
+// when every part is, the first unknown part's badge and reason, the
+// unpriced models of all, a scripted badge only when every part is
+// scripted, the cache not_reported when any part's is.
+type summarizerSum struct {
+	u core.Usage
+	c cost
+	n int
+}
+
+func (s *summarizerSum) add(u core.Usage, c cost) {
+	s.u = s.u.Add(u)
+	if s.n == 0 {
+		s.c = c
+		s.c.models = slices.Clone(c.models)
+		s.n = 1
+		return
+	}
+	s.n++
+	out := cost{usd: s.c.usd + c.usd, known: s.c.known && c.known, cache: s.c.cache,
+		models: addModels(s.c.models, c.models...)}
+	if c.cache == cacheNotReported {
+		out.cache = cacheNotReported
+	}
+	switch {
+	case !s.c.known:
+		out.badge, out.reason = s.c.badge, s.c.reason
+	case !c.known:
+		out.badge, out.reason = c.badge, c.reason
+	case s.c.badge == costScripted && c.badge == costScripted:
+		out.badge, out.reason = costScripted, scriptedReason
+	}
+	s.c = out
+}
+
+func (s *summarizerSum) figure() *summarizerCost {
+	return &summarizerCost{Usage: s.u, costFields: s.c.fields()}
+}
+
+// priceSummarizer fills the turns' and the session's summarizer
+// figures (UX-B-13): each mark naming a summarizer call priced at its
+// summarizer_model's rates, else at its turn's model's (the newest
+// turn's for a session-level mark); the session's whole figure is the
+// marks' plus what of SummarizerUsage no mark names (a call past the
+// cap, a summary without a marker), that part at the newest turn's
+// model's rates.
+func (s *Server) priceSummarizer(doc *timelineDoc, det obsdb.SessionDetail) {
+	models := map[string]core.ModelInfo{}
+	var newest core.ModelInfo
+	for _, rr := range det.Runs {
+		mi := core.ModelInfo{Provider: rr.Provider, Name: rr.Model}
+		models[rr.ID] = mi
+		if mi != (core.ModelInfo{}) {
+			newest = mi
+		}
+	}
+	perTurn := map[string]*summarizerSum{}
+	var marked summarizerSum
+	for _, m := range doc.Marks {
+		u, mi, ok := markSummarizer(m)
+		if !ok {
+			continue
+		}
+		run := ""
+		if m.RunID != nil {
+			run = *m.RunID
+		}
+		if mi == (core.ModelInfo{}) {
+			if mi = models[run]; mi == (core.ModelInfo{}) {
+				mi = newest
+			}
+		}
+		c := s.pricing.price(mi.Provider, mi.Name, u)
+		marked.add(u, c)
+		if run == "" {
+			continue
+		}
+		if perTurn[run] == nil {
+			perTurn[run] = &summarizerSum{}
+		}
+		perTurn[run].add(u, c)
+	}
+	for i := range doc.Turns {
+		if f := perTurn[doc.Turns[i].RunID]; f != nil {
+			doc.Turns[i].Summarizer = f.figure()
+		}
+	}
+	if rest := sub(det.SummarizerUsage, marked.u); rest != (core.Usage{}) {
+		marked.add(rest, s.pricing.price(newest.Provider, newest.Name, rest))
+	}
+	if marked.n > 0 {
+		doc.Summarizer = marked.figure()
+	}
 }

@@ -135,6 +135,33 @@ export function costView(f: CostFields | null | undefined): CostView {
   )
 }
 
+/** The summarizer's figure (UX-B-13): thread's compaction and branch
+ * summaries are model calls of their own, never in a turn's usage —
+ * drawn beside a turn's and the session's cost as "+ summarizer $x"
+ * (studio/timeline.go prices it: each call at its summarizer model's
+ * rates when recorded, else the turn's). The title names its tokens and
+ * the figure's own title (its reason when it is not known). */
+export function summarizerView(
+  f:
+    | (CostFields & { usage: { input_tokens: number; output_tokens: number } })
+    | null
+    | undefined
+): CostView | null {
+  if (!f) return null
+  const v = costView(f)
+  const toks = `${f.usage.input_tokens.toLocaleString()} in / ${f.usage.output_tokens.toLocaleString()} out`
+  return {
+    ...v,
+    text: `+ summarizer ${v.text}`,
+    title: [
+      `the summarizer's model calls (compaction, branch summaries): ${toks} tokens, never in the turns' usage`,
+      v.title,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  }
+}
+
 /** The reason words studio/pricing.go gives a model no pricing row
  * matches (or a run that names none): what makes a figure "unpriced"
  * rather than "unknown" (tally's "n of m subagent runs unpriced", a

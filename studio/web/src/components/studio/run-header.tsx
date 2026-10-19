@@ -3,7 +3,7 @@
 // first three questions are answered above the fold: what was the
 // prompt, did it succeed, and what did it say.
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { ArrowUpRight, Check, Link2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
@@ -16,13 +16,15 @@ import {
   repairedWords,
   tokenSplit,
 } from "@/lib/cards"
-import type { RunDoc, Span, Transcript } from "@/lib/api"
+import type { RunDoc, RunRow, Span, Transcript } from "@/lib/api"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
 import {
   derivedUsageUnknown,
   isDerived,
   mergeHoles,
+  ownTurn,
+  poolParent,
   parkedKind,
   SETTLING_HINT,
   SETTLING_WORD,
@@ -92,7 +94,59 @@ import {
   StartedBy,
 } from "@/components/studio/lineage"
 import { LINEAGE_KEYS, lineageOfRun, linkedHoles } from "@/lib/delegation"
+import { TURN_STEPPER, turnSiblings } from "@/lib/timeline"
+import { isPlainShortcut } from "@/lib/keys"
 import type { ToolFactsMap } from "@/lib/error-kind"
+
+/** TurnStepper walks a session turn by turn (UX-B-21): "‹ t3 · turn 4
+ * of 5 · t5 ›", { and } its keys (the run page's [ ] walk steps). */
+function TurnStepper({ doc, runs }: { doc: RunDoc; runs: RunRow[] }) {
+  const navigate = useNavigate()
+  const at = turnSiblings(doc, runs.filter(ownTurn))
+  const prev = at?.prev?.id
+  const next = at?.next?.id
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isPlainShortcut(e)) return
+      const to = e.key === "{" ? prev : e.key === "}" ? next : undefined
+      if (!to) return
+      e.preventDefault()
+      void navigate(runLink(to))
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [navigate, prev, next])
+  if (!at) return null
+  return (
+    <nav
+      aria-label="the session's turns"
+      className="flex items-center gap-2 font-mono text-xs text-muted-foreground"
+      data-turn-stepper
+    >
+      {at.prev ? (
+        <Link
+          {...runLink(at.prev.id)}
+          title={TURN_STEPPER.prev}
+          className="hover:text-foreground"
+          data-turn-prev={at.prev.id}
+        >
+          ‹ t{at.prev.turn}
+        </Link>
+      ) : null}
+      <span>{TURN_STEPPER.of(at.index, at.total)}</span>
+      {at.next ? (
+        <Link
+          {...runLink(at.next.id)}
+          title={TURN_STEPPER.next}
+          className="hover:text-foreground"
+          data-turn-next={at.next.id}
+        >
+          t{at.next.turn} ›
+        </Link>
+      ) : null}
+    </nav>
+  )
+}
 
 /** StoppedByChip is what ended the run (U3.2), in lib/stopped-by.ts's
  * words, linking to the step where it fired; on every status. */
@@ -417,12 +471,20 @@ export function RunHeader({
   // A parked turn's resume (U1): its session's turns — the query the
   // parked-calls block polls — say whether a later turn resumed it.
   // Only a turn of its own session is looked up: a child of either
-  // kind, a nested Generate or an experiment is decided elsewhere.
+  // kind, a nested Generate or an experiment is decided elsewhere. A
+  // turn of its own session reads them for its stepper too (UX-B-21).
+  const turn = ownTurn(doc)
+  // A delegated session's turn (a thread/pool child) is decided and
+  // read from its parent session: no read of its own for a stepper.
+  const stepper = turn && !poolParent(doc)
   const sess = useQuery({
     ...sessionQuery(doc.session_id),
     enabled:
-      doc.pending > 0 &&
-      ["decide", "read-only", "no-public-id"].includes(parkedKind(doc, null)),
+      stepper ||
+      (doc.pending > 0 &&
+        ["decide", "read-only", "no-public-id"].includes(
+          parkedKind(doc, null)
+        )),
   })
   // The run's configuration (U27's store; UX-E-50): read once, only
   // when the run document says the hash resolves.
@@ -469,32 +531,60 @@ export function RunHeader({
   )
   return (
     <div className="space-y-2.5">
-      <Breadcrumb>
-        <BreadcrumbList className="font-mono text-xs">
-          <BreadcrumbItem>
-            <BreadcrumbLink render={<Link to="/runs" />}>runs</BreadcrumbLink>
-          </BreadcrumbItem>
-          {doc.parent_run_id ? (
-            <>
-              <BreadcrumbSeparator />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Breadcrumb>
+          <BreadcrumbList className="font-mono text-xs">
+            {turn ? (
+              <>
+                {/* A session's turn (UX-B-21): sessions › its session › tN. */}
+                <BreadcrumbItem>
+                  <BreadcrumbLink render={<Link to="/sessions" />}>
+                    {TURN_STEPPER.crumb}
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbLink
+                    render={<Link {...sessionLink(doc.session_id)} />}
+                    title={doc.session_id}
+                    data-crumb-session={doc.session_id}
+                  >
+                    {shortId(doc.session_id)}
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+              </>
+            ) : (
               <BreadcrumbItem>
-                <BreadcrumbLink
-                  render={<Link {...runLink(doc.parent_run_id)} />}
-                  title="the parent run"
-                >
-                  {doc.parent_run_id}
+                <BreadcrumbLink render={<Link to="/runs" />}>
+                  runs
                 </BreadcrumbLink>
               </BreadcrumbItem>
-            </>
-          ) : null}
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <span className="text-foreground" title={doc.id}>
-              {shortId(doc.id)}
-            </span>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
+            )}
+            {doc.parent_run_id ? (
+              <>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbLink
+                    render={<Link {...runLink(doc.parent_run_id)} />}
+                    title="the parent run"
+                  >
+                    {doc.parent_run_id}
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+              </>
+            ) : null}
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <span className="text-foreground" title={doc.id}>
+                {turn ? `t${doc.turn}` : shortId(doc.id)}
+              </span>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+        {stepper && sess.data ? (
+          <TurnStepper doc={doc} runs={sess.data.runs} />
+        ) : null}
+      </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {/* The page's title (U6): agent · the prompt (lib/title.ts's

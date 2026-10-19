@@ -1,11 +1,16 @@
-// A session page (S4.7): the thread's turns in order, each a run
-// card; experiments nest under their source turn via forked_from. The
-// header and the tab lead with the session's title (U6, lib/title.ts's
-// sessionTitle), the id a copyable line under it.
+// A session page (S4.7): the thread's turns in order. Its default view
+// is the timeline (U15.1, components/studio/session-timeline.tsx): the
+// turns on a shared time axis, resumes grouped under their park, the
+// state log's marks under the turn each is filed under and a drawer per
+// mark (?mark=); the table of turns, experiments nested under their
+// source turn via forked_from, is ?view=table. The header and the tab
+// lead with the session's title (U6, lib/title.ts's sessionTitle), the
+// id a copyable line under it.
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
+import { useCallback } from "react"
 
-import { sessionQuery } from "@/lib/api"
+import { metaQuery, sessionQuery, timelineQuery } from "@/lib/api"
 import { fetchSessionForks, nestExperiments } from "@/lib/experiments"
 import { absoluteTime, relativeTime, tokens, UNNAMED_AGENT } from "@/lib/format"
 import { IdChip, StatusChip, TitleText } from "@/components/studio/runs-table"
@@ -26,18 +31,52 @@ import {
   turnsWord,
 } from "@/lib/delegation"
 import type { SessionDoc, SessionRow } from "@/lib/api"
-import { runLink, sessionLink } from "@/lib/links"
+import {
+  runLink,
+  sessionLink,
+  sessionSearch,
+  sessionViewLink,
+} from "@/lib/links"
+import type { SessionView } from "@/lib/links"
+import { summarizerView } from "@/lib/cost"
+import {
+  decisionsWords,
+  exchangesWords,
+  grantsWords,
+  TIMELINE_OFF,
+  timelineUnread,
+  TREE_PENDING,
+  turnOfRow,
+  VIEWS,
+} from "@/lib/timeline"
+import { SessionTimeline } from "@/components/studio/session-timeline"
 import { LineageLine } from "@/components/studio/lineage"
-import { Cost, useCostCapable } from "@/components/studio/cost"
+import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
 import { HoleBadge } from "@/components/studio/hole-badge"
 
 export const Route = createFileRoute("/sessions/$id")({
+  validateSearch: sessionSearch,
   component: SessionPage,
 })
 
 function SessionPage() {
   const { id } = Route.useParams()
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const view: SessionView = search.view ?? "timeline"
   const q = useQuery(sessionQuery(id))
+  const meta = useQuery(metaQuery())
+  const timelineCapable = !!meta.data?.capabilities.includes("timeline")
+  const tl = useQuery({ ...timelineQuery(id), enabled: timelineCapable })
+  const costCapable = useCostCapable()
+  const select = useCallback(
+    (mark: string | undefined) =>
+      void navigate({
+        search: (prev) => ({ ...prev, mark }),
+        replace: true,
+      }),
+    [navigate]
+  )
   const title = q.data ? sessionTitle(q.data, q.data.runs[0]) : undefined
   useDocumentTitle({
     page: "session",
@@ -89,6 +128,21 @@ function SessionPage() {
   const du = s.delegated_usage
   const experiments = nestExperiments(turns, forks.data?.runs ?? [])
   const forked = [...experiments.values()].reduce((n, l) => n + l.length, 0)
+  // The timeline's turns are the session document's when the state log
+  // is not read (capability off, or the read failed): no turn is lost
+  // because its marks are.
+  const marks = tl.data?.marks ?? []
+  const tlTurns = tl.data?.turns ?? turns.map(turnOfRow)
+  const sum = summarizerView(tl.data?.summarizer)
+  const decided = decisionsWords(marks)
+  const grants = grantsWords(marks)
+  const tlNote = !meta.data
+    ? ""
+    : !timelineCapable
+      ? TIMELINE_OFF
+      : tl.isError
+        ? timelineUnread(tl.error.message)
+        : ""
 
   return (
     <div className="space-y-3">
@@ -109,11 +163,30 @@ function SessionPage() {
             while that turn's calls await a decision. */}
         <StatusChip row={turns.at(-1) ?? s} runs={turns} complete detail />
         <span className="text-xs text-muted-foreground">{s.agent}</span>
-        <span className="font-mono text-[11px] text-faint">
-          {s.turns} {s.turns === 1 ? "turn" : "turns"} ·{" "}
-          {tokens(s.usage.input_tokens)} in / {tokens(s.usage.output_tokens)}{" "}
-          out
+        <span className="font-mono text-[11px] text-faint" data-session-counts>
+          {exchangesWords(tlTurns)} · {tokens(s.usage.input_tokens)} in /{" "}
+          {tokens(s.usage.output_tokens)} out
         </span>
+        {decided ? (
+          <span
+            className="font-mono text-[11px] text-faint"
+            data-session-decisions
+          >
+            {decided}
+          </span>
+        ) : null}
+        {grants ? (
+          <span className="font-mono text-[11px] text-faint">{grants}</span>
+        ) : null}
+        {costCapable ? (
+          <span
+            className="flex items-baseline gap-1.5 text-[11px]"
+            data-session-cost
+          >
+            <Cost fields={s} chip={false} label="the session's cost" />
+            {sum ? <CostText v={sum} chip={false} label="summarizer" /> : null}
+          </span>
+        ) : null}
         {du && (du.input_tokens > 0 || du.output_tokens > 0) ? (
           <span
             className="font-mono text-[11px] text-faint"
@@ -142,9 +215,67 @@ function SessionPage() {
         </span>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border bg-background">
-        <SessionTurns turns={turns} experiments={experiments} />
-      </div>
+      <nav
+        aria-label="session views"
+        className="flex items-center gap-1 text-xs"
+      >
+        {VIEWS.map((v) => (
+          <Link
+            key={v.view}
+            {...sessionViewLink(id, { view: v.view })}
+            aria-current={view === v.view ? "page" : undefined}
+            title={v.title}
+            className={`rounded-sm border px-2 py-0.5 font-mono ${view === v.view ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            data-session-view={v.view}
+          >
+            {v.word}
+          </Link>
+        ))}
+      </nav>
+
+      {view === "timeline" ? (
+        <>
+          {tlNote ? (
+            <p
+              className="font-mono text-[11px] text-muted-foreground"
+              data-timeline-note
+            >
+              {tlNote}
+            </p>
+          ) : null}
+          {tl.data && tl.data.holes.length > 0 ? (
+            <div className="space-y-1" data-timeline-holes>
+              {tl.data.holes.map((h) => (
+                <HoleBadge key={h.hole} {...h} detail />
+              ))}
+            </div>
+          ) : null}
+          {timelineCapable && tl.isPending ? (
+            <div className="flex justify-center py-6">
+              <Spinner />
+            </div>
+          ) : tlTurns.length > 0 || marks.length > 0 ? (
+            <SessionTimeline
+              sessionID={id}
+              doc={{ turns: tlTurns, marks }}
+              rows={turns}
+              selected={search.mark}
+              onSelect={select}
+            />
+          ) : null}
+        </>
+      ) : view === "table" ? (
+        <div className="overflow-x-auto rounded-lg border bg-background">
+          <SessionTurns turns={turns} experiments={experiments} />
+        </div>
+      ) : (
+        <p
+          className="py-6 text-center font-mono text-xs text-muted-foreground"
+          data-tree-pending
+        >
+          {TREE_PENDING}
+        </p>
+      )}
       {delegated.length > 0 || s.delegated_unknown ? (
         <DelegatedSessions doc={s} rows={delegated} />
       ) : null}

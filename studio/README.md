@@ -2660,8 +2660,12 @@ U12.2), `sessions/{id}` (turns in order), `sessions/{id}/timeline` and
 `sessions/{id}/entries` (U12.2, capability `timeline`: the turns beside
 the session's state log — thread records and compaction markers from
 the `session_events` index, on lanes, with their holes; a read token
-gets `content_hidden` instead of a mark's content; docs/record-contract.md
-§6), `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
+gets `content_hidden` instead of a mark's content; `summarizer` on a
+turn and on the session: thread's summarizer calls priced at read time,
+never in a turn's usage, U15.1; docs/record-contract.md §6 — the
+session page's default view draws it: exchanges on a time axis, a
+drawer per mark at `?mark=`, the table at `?view=table`),
+`sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
 public_id}`, the public id `thread.PublicID` stamped on the session's
 turns — MAX(`weft.public_id`) over its top-level turns: one value per
 thread session; a session whose turns carry several answers the

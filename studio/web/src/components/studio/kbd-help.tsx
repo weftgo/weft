@@ -46,6 +46,11 @@ export const bindings: Binding[] = [
   },
   { keys: [",", "."], action: "one event back / forward", where: "run" },
   {
+    keys: ["{", "}"],
+    action: "previous / next turn of the run's session",
+    where: "run",
+  },
+  {
     keys: ["n"],
     action:
       "jump to step: the story's scrubber (←→ home end on it; a number + enter in its box)",

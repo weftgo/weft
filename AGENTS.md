@@ -299,7 +299,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    included: the turns in order, the marks in record-time order — kind, lane approvals|grants|compaction|steer_queue|
 //    //    branch_fork|pool(|other), run_id/turn (null: session-level), entry, fields, content (a read token: content_hidden) —
 //    //    ≤ 2,000, the lanes' counts, holes not_recorded (only when a turn parked or resumed: a plain send writes no
-//    //    record)/stripped/hidden (a panel token's counts exact, both routes alike)/truncated cause response_cap) and sessions/{id}/entries?offset=&limit=
+//    //    record)/stripped/hidden (a panel token's counts exact, both routes alike)/truncated cause response_cap; summarizer on a turn and the
+//    //    session, U15.1: thread's summarizer calls priced at read time, never in usage — the page /sessions/$id draws it as its
+//    //    default view: exchanges on a time axis, a drawer per mark ?mark=, ?view=table|tree; a turn's run page steps { }) and sessions/{id}/entries?offset=&limit=
 //    //    (the same marks paged, ≤ 1,000, next_offset; sessions/{id}'s scope, 501 without the capability),
 //    //    sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, DELETE runs/{id} and DELETE

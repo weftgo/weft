@@ -51,7 +51,7 @@ export function FlowStrip({
               p.bad
                 ? "border-status-bad/50 bg-status-bad/5"
                 : selectedKey === p.key
-                  ? "border-thread bg-accent"
+                  ? "border-thread bg-background ring-1 ring-thread"
                   : "border-border bg-background"
             }`}
             onClick={() => onSelect(p.key)}

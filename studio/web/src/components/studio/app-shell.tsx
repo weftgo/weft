@@ -35,7 +35,10 @@ import {
   Settings,
 } from "lucide-react"
 
-import { metaQuery, studioToken } from "@/lib/api"
+import { metaQuery, runQuery, studioToken } from "@/lib/api"
+import { ownTurn } from "@/lib/honesty"
+import { TURN_STEPPER } from "@/lib/timeline"
+import { shortId } from "@/lib/title"
 import { canReplay } from "@/lib/replay"
 import { applyStoredDensity } from "@/lib/density"
 import { goChord, isPlainShortcut } from "@/lib/keys"
@@ -78,6 +81,7 @@ import { mayReadExperiments } from "@/components/studio/no-experiments"
 import {
   experimentsLink,
   playgroundLink,
+  sessionLink,
   settingsLink,
   tracesLink,
 } from "@/lib/links"
@@ -97,9 +101,24 @@ function skipToContent(e: React.MouseEvent) {
   t?.scrollIntoView({ block: "nearest" })
 }
 
+/** useTurnPlace is the session a run page's run is a turn of (UX-B-21),
+ * read from the run document the page already holds (never fetched
+ * here); "" off a run page and for any other run. */
+function useTurnPlace(): { session: string; turn: number } {
+  const location = useLocation()
+  const parts = location.pathname.split("/").filter(Boolean)
+  const id = parts[0] === "runs" ? safeDecode(parts.slice(1).join("/")) : ""
+  const run = useQuery({ ...runQuery(id), enabled: false })
+  return run.data && id && ownTurn(run.data)
+    ? { session: run.data.session_id, turn: run.data.turn }
+    : { session: "", turn: 0 }
+}
+
 function Nav() {
   const meta = useQuery(metaQuery())
   const location = useLocation()
+  // A session's turn is a place in its session: Sessions is lit.
+  const inSession = !!useTurnPlace().session
   // UX-F-26: behind the token wall meta answers 401, so nothing says
   // which capability-gated pages exist; they stay listed, disabled, so
   // the sidebar does not change shape once the token is in.
@@ -128,7 +147,11 @@ function Nav() {
     <SidebarMenuItem key={to}>
       <SidebarMenuButton
         render={<Link to={to} />}
-        isActive={location.pathname.startsWith(to)}
+        isActive={
+          to === "/sessions"
+            ? location.pathname.startsWith(to) || inSession
+            : location.pathname.startsWith(to) && !(to === "/runs" && inSession)
+        }
         tooltip={label}
       >
         {icon}
@@ -196,6 +219,26 @@ function safeDecode(s: string): string {
 function Place() {
   const location = useLocation()
   const parts = location.pathname.split("/").filter(Boolean)
+  const turn = useTurnPlace()
+  if (parts[0] === "runs" && parts.length > 1 && turn.session) {
+    return (
+      <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <Link to="/sessions" className="hover:text-foreground">
+          {TURN_STEPPER.crumb}
+        </Link>
+        <span className="text-faint">›</span>
+        <Link
+          {...sessionLink(turn.session)}
+          className="truncate font-mono hover:text-foreground"
+          title={turn.session}
+        >
+          {shortId(turn.session)}
+        </Link>
+        <span className="text-faint">›</span>
+        <span className="font-mono text-foreground">t{turn.turn}</span>
+      </span>
+    )
+  }
   if (parts[0] === "runs" && parts.length > 1) {
     return (
       <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">

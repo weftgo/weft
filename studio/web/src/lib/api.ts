@@ -528,6 +528,76 @@ export interface SessionDoc extends SessionRow {
   delegated_sessions_cache?: string
 }
 
+/** A summarizer figure (studio/timeline.go's summarizerCost, UX-B-13):
+ * what thread's summarizer calls cost, priced at read time — never
+ * folded into a turn's usage. */
+export interface SummarizerCost extends CostFields {
+  usage: Usage
+}
+
+/** One turn on the session timeline (timeline.go's timelineTurn). */
+export interface TimelineTurn {
+  run_id: string
+  turn: number
+  agent: string
+  status: RunStatus
+  started: string
+  finished: string | null
+  last_seen: string
+  steps: number
+  pending?: number
+  prompt_preview?: string
+  resumed_from?: string
+  resumed_by?: string
+  stopped_by?: string
+  error_type?: string
+  usage: Usage
+  /** The marks filed under it. */
+  marks: number
+  /** The summarizer calls its marks name, priced; absent when none. */
+  summarizer?: SummarizerCost
+}
+
+/** One mark: a thread record or a compaction marker (timeline.go's
+ * sessionEntry; docs/record-contract.md §4's table names each kind's
+ * fields and content). */
+export interface SessionMark {
+  /** The record's time: the order. */
+  at: string
+  /** The fact's own time (the body's at), absent for a marker. */
+  fact_at?: string
+  record: string
+  kind: string
+  event: string
+  lane: string
+  /** The run it is filed under; null for a session-level mark. */
+  run_id: string | null
+  turn: number | null
+  entry?: string
+  content_mark: string
+  fields: Record<string, unknown>
+  /** Who decided, a reason, a steer's text: content, present only when
+   * recorded and readable (content_hidden says a read token's). */
+  content?: Record<string, unknown>
+  content_hidden?: boolean
+}
+
+/** GET /api/sessions/{id}/timeline (capability "timeline", U12.2):
+ * turns in order, marks in record-time order (≤ 2,000), lanes, holes. */
+export interface TimelineDoc {
+  session_id: string
+  public_id?: string
+  agent: string
+  status: RunStatus
+  turns: TimelineTurn[]
+  marks: SessionMark[]
+  lanes: { lane: string; marks: number }[]
+  marks_total: number
+  holes: StepHole[]
+  /** The session's whole summarizer bill; absent when none. */
+  summarizer?: SummarizerCost
+}
+
 /** GET /api/public/{public_id}. */
 export interface PublicResolution {
   session_id: string
@@ -2066,6 +2136,16 @@ export function sessionQuery(id: string) {
   return queryOptions({
     queryKey: ["session", id],
     queryFn: () => get<SessionDoc>(`sessions/${encodeURIComponent(id)}`),
+  })
+}
+
+/** GET /api/sessions/{id}/timeline: the session page's default view. */
+export function timelineQuery(id: string) {
+  return queryOptions({
+    queryKey: ["session-timeline", id],
+    staleTime: 5_000,
+    queryFn: () =>
+      get<TimelineDoc>(`sessions/${encodeURIComponent(id)}/timeline`),
   })
 }
 

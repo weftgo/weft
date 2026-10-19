@@ -27,6 +27,7 @@ import type { RunDoc, RunRow, RunsPage, Span } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
+  apiError,
   FakeStudio,
   golden,
   pagedEvents,
@@ -48,6 +49,19 @@ import { LoopGraphView } from "@/components/studio/loop-graph"
 import { loopGraph } from "@/lib/loopgraph"
 import { ALL_RUNS } from "@/lib/run-tree"
 import { treeRows } from "@/lib/waterfall-tree"
+import * as waterfallTree from "@/lib/waterfall-tree"
+
+// The loop's rows builder, spied (U34-fix2): the page builds its every-
+// child-expanded rows with treeRows({ expanded: ALL_RUNS }); a passthrough.
+vi.mock("@/lib/waterfall-tree", async (orig) => {
+  const m = await orig<typeof waterfallTree>()
+  return { ...m, treeRows: vi.fn(m.treeRows) }
+})
+/** How many times the page built the loop's whole tree. */
+const loopBuilds = () =>
+  vi
+    .mocked(waterfallTree.treeRows)
+    .mock.calls.filter(([input]) => input.expanded === ALL_RUNS).length
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -68,6 +82,15 @@ function serve(
     caps?: string[]
     /** Per run id: fields over its row (a cost block). */
     rows?: Record<string, Partial<RunRow>>
+    /** The run still running: its events up to (not including) this
+     * index, the stream open for the rest. */
+    live?: number
+    /** A trace id even without spans (the spans read back empty). */
+    trace?: boolean
+    /** GET runs/{id}/spans answers a 500. */
+    spansFail?: boolean
+    /** The requests capability, its read answering a 500. */
+    requestsFail?: boolean
   } = {}
 ) {
   stubBrowser()
@@ -87,12 +110,15 @@ function serve(
     ...(parent
       ? { parent_run_id: parent, parent_call_id: x.id.split("/").at(-1) }
       : {}),
+    ...(!parent && opts.live !== undefined
+      ? { status: "running", finished: null }
+      : {}),
     ...opts.rows?.[x.id],
   })
   const parentOf = (id: string) => /^(.+)\/\d+\/[^/]+$/.exec(id)?.[1]
   const doc: RunDoc = {
     ...row(r),
-    trace_id: withSpans ? "t1" : "",
+    trace_id: (opts.trace ?? withSpans) ? "t1" : "",
     children: kids
       .filter((k) => parentOf(k.id) === r.id)
       .map((k) => row(k, r.id)),
@@ -106,15 +132,39 @@ function serve(
   const s = new FakeStudio()
     .on("GET meta", {
       ...golden<Record<string, unknown>>("meta"),
-      capabilities: ["ingest", "spans_tree", ...(opts.caps ?? [])],
+      capabilities: [
+        "ingest",
+        "spans_tree",
+        ...(opts.live !== undefined ? ["live"] : []),
+        ...(opts.requestsFail ? ["requests"] : []),
+        ...(opts.caps ?? []),
+      ],
     })
     .on(`GET runs/${r.id}`, doc)
-    .on(`GET runs/${r.id}/events`, paged(b.events))
+    .on(
+      `GET runs/${r.id}/events`,
+      opts.live === undefined
+        ? paged(b.events)
+        : pagedEvents(
+            b.events
+              .slice(0, opts.live)
+              .map((event, pos) => ({ pos, time: rOK.started, event })),
+            { done: false }
+          )
+    )
     .on(`GET runs/${r.id}/transcript`, transcriptOf([]))
-    .on(`GET runs/${r.id}/spans`, () => ({
-      spans: withSpans ? b.spans : ([] as Span[]),
-      holes: [],
-    }))
+    .on(`GET runs/${r.id}/spans`, () =>
+      opts.spansFail
+        ? apiError(500, "internal", "database is locked")
+        : {
+            spans: withSpans ? b.spans : ([] as Span[]),
+            holes: [],
+          }
+    )
+  if (opts.requestsFail)
+    s.on(`GET runs/${r.id}/requests`, () =>
+      apiError(500, "internal", "database is locked")
+    )
   for (const k of kids)
     s.on(`GET runs/${k.id}`, {
       ...row(k, parentOf(k.id)),
@@ -618,12 +668,13 @@ describe("U34-fix", () => {
     fireEvent.click(
       document.querySelector(`[data-loop-expand="${CSS.escape(ops)}"]`)!
     )
+    // "—" not read yet, until ops-manager's document names its row.
     await waitFor(() =>
       expect(
         document.querySelector(
-          "[data-loop-node='t:inventory_specialist'] [data-loop-cost]"
-        )
-      ).not.toBeNull()
+          "[data-loop-node='t:inventory_specialist'] [data-loop-cost] title"
+        )?.textContent
+      ).toBe("no price for acme/m1")
     )
     const unknown = document.querySelector(
       "[data-loop-node='t:inventory_specialist'] [data-loop-cost]"
@@ -640,14 +691,21 @@ describe("U34-fix", () => {
       search: { scale: "graph", level: "agents" },
     })
     await waitFor(() =>
-      // director's and ops-manager's: the grandchild's row is not read
-      // with nothing selected under it — not drawn, never guessed.
-      expect(document.querySelectorAll("[data-graph-cost]").length).toBe(2)
+      expect(document.querySelectorAll("[data-graph-cost]").length).toBe(3)
     )
     expect(
       document.querySelector("[data-node='a:ops-manager'] [data-graph-cost]")!
         .textContent
     ).toContain("$0.0125")
+    // The grandchild's row is not read with nothing selected under it:
+    // "—" with sumCost's reason (U34-fix2), never nothing, never a guess.
+    const unread = document.querySelector(
+      "[data-node='a:inventory-specialist'] [data-graph-cost]"
+    )!
+    expect(unread.textContent).toContain("—")
+    expect(unread.querySelector("title")!.textContent).toBe(
+      "a run's cost is not read yet"
+    )
   })
 
   it("the draw's budget: a 1,000-step run's model and render, with CI margin", () => {
@@ -662,10 +720,11 @@ describe("U34-fix", () => {
     }
     const make = () =>
       loopGraph(treeRows(input, "time").rows, r.id, { stoppedBy: "max_steps" })
-    // The model (lib/loopgraph.test.ts's budget): warmed, the best of three.
+    // The model (lib/loopgraph.test.ts's budget): warmed, the best of 25
+    // samples — a parallel run's spike lands on some, never on all.
     let g = make()
     let model = Infinity
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 25; i++) {
       const t0 = performance.now()
       g = make()
       model = Math.min(model, performance.now() - t0)
@@ -689,5 +748,251 @@ describe("U34-fix", () => {
     expect(model).toBeLessThan(50)
     // jsdom draws far slower than a browser: a generous bound.
     expect(draw).toBeLessThan(1500)
+  })
+})
+
+describe("U34-fix2", () => {
+  const ops = "r_dir/0/call_1"
+  const pressedNodes = () =>
+    Array.from(
+      document.querySelectorAll("[data-loop-node][aria-pressed='true']")
+    ).map((n) => n.getAttribute("data-loop-node"))
+
+  it("a picked never-called node clears on every other selection: one node pressed, never two", () => {
+    const b = build(DESK_PARKED)
+    const rows = treeRows(
+      { runId: DESK_PARKED.id, spans: b.spans, fold: b.fold },
+      "time"
+    ).rows
+    const g = loopGraph(rows, DESK_PARKED.id, {
+      stoppedBy: "parked",
+      pending: b.pending,
+      catalog: [
+        { name: "lookup_order" },
+        { name: "issue_refund" },
+        { name: "search_docs" },
+      ],
+    })
+    const onSelect = vi.fn()
+    const onClear = vi.fn()
+    const view = (selectedNode?: string) => (
+      <LoopGraphView
+        graph={g}
+        chain={[]}
+        depth={0}
+        selectedNode={selectedNode}
+        onSelect={onSelect}
+        onClear={onClear}
+        onStep={() => {}}
+        onFocusRun={() => {}}
+        openRun={(r) => `/runs/${r}`}
+      />
+    )
+    // The page's landing selection lights the model.
+    const { rerender } = render(view("model"))
+    expect(pressedNodes()).toEqual(["model"])
+    // The insight picks the never-called node: it alone is pressed.
+    fireEvent.click(document.querySelector("[data-insight='never']")!)
+    expect(pressedNodes()).toEqual(["o:search_docs"])
+    // A tool's click selects its row and clears the pick at once — even
+    // before the page's ?sel= moves.
+    fireEvent.click(node("t:lookup_order"))
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(pressedNodes()).toEqual(["model"])
+    rerender(view("t:lookup_order"))
+    expect(pressedNodes()).toEqual(["t:lookup_order"])
+    // Picked again, then the page's selection moves (J / K, a link):
+    // the pick clears.
+    fireEvent.click(node("o:search_docs"))
+    expect(pressedNodes()).toEqual(["o:search_docs"])
+    rerender(view("end"))
+    expect(pressedNodes()).toEqual(["end"])
+    // Picked again, then the end, an edge and Esc each clear it.
+    fireEvent.click(node("o:search_docs"))
+    fireEvent.click(node("end"))
+    expect(pressedNodes()).toEqual(["end"])
+    fireEvent.click(node("o:search_docs"))
+    fireEvent.click(
+      document.querySelector('[data-loop-edge="model>t:issue_refund"]')!
+    )
+    expect(pressedNodes()).toEqual(["end"])
+    fireEvent.click(node("o:search_docs"))
+    fireEvent.keyDown(node("o:search_docs"), { key: "Escape" })
+    expect(onClear).toHaveBeenCalledTimes(1)
+    expect(pressedNodes()).toEqual(["end"])
+  })
+
+  it("a failed requests read is said as such, never 'no request record carried a tool catalog'", async () => {
+    serve(FLAKY, { requestsFail: true })
+    renderApp(`/runs/${FLAKY.id}?scale=graph`)
+    await waitFor(() => expect(nodes()).toHaveLength(4))
+    const hole = await waitFor(() => {
+      const h = document.querySelector("[data-loop-offered-hole] [data-hole]")
+      expect(h).not.toBeNull()
+      return h!
+    })
+    expect(hole.getAttribute("data-hole")).toBe("gap")
+    const words = document.querySelector(
+      "[data-loop-offered-hole]"
+    )!.textContent
+    expect(words).toContain("the request record could not be read")
+    expect(words).toContain("database is locked")
+    expect(words).not.toContain("no request record of this run carried")
+  })
+
+  it("the agents level: a failed spans read is a read failure, never 'this run recorded none'", async () => {
+    serve(DIRECTOR, { spansFail: true })
+    renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
+    const hole = await waitFor(() => {
+      const h = document.querySelector("[data-level-hole] [data-hole]")
+      expect(h).not.toBeNull()
+      return h!
+    })
+    expect(hole.getAttribute("data-hole")).toBe("gap")
+    const words = document.querySelector("[data-level-hole]")!.textContent
+    expect(words).toContain("the run's spans could not be read")
+    expect(words).toContain("database is locked")
+    expect(words).not.toContain("recorded none")
+    expect(document.querySelector("[data-call-graph]")).toBeNull()
+  })
+
+  it("the agents level: 'recorded none' on a successful empty read", async () => {
+    // A trace id, and its spans read back empty: the read succeeded.
+    serve(DIRECTOR, { spans: false, trace: true })
+    renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-level-hole]")?.textContent
+      ).toContain("recorded none")
+    )
+  })
+
+  it("subagent nodes not read yet draw — with the reason, never nothing", () => {
+    const b = build(DIRECTOR)
+    const rows = treeRows(
+      {
+        runId: DIRECTOR.id,
+        spans: b.spans,
+        fold: b.fold,
+        expanded: ALL_RUNS,
+      },
+      "time"
+    ).rows
+    const g = loopGraph(rows, DIRECTOR.id, { stoppedBy: "final_answer" })
+    render(
+      <LoopGraphView
+        graph={g}
+        chain={[]}
+        depth={0}
+        // Pricing on, the child's row not read yet.
+        costOf={() => undefined}
+        onSelect={() => {}}
+        onClear={() => {}}
+        onStep={() => {}}
+        onFocusRun={() => {}}
+        openRun={(r) => `/runs/${r}`}
+      />
+    )
+    const cost = document.querySelector(
+      "[data-loop-node='t:ops_manager'] [data-loop-cost]"
+    )!
+    expect(cost.getAttribute("data-cost-known")).toBe("false")
+    expect(cost.textContent).toContain("—")
+    expect(cost.querySelector("title")!.textContent).toBe(
+      "a run's cost is not read yet"
+    )
+    expect(node("t:ops_manager").getAttribute("aria-label")).toContain("—")
+  })
+
+  it("axe finds nothing on the parked support-desk run and the director's subagent loop", async () => {
+    const check = async () => {
+      const res = await axe.run(loopOf()!.parentElement!.parentElement!, {
+        rules: { "label-content-name-mismatch": { enabled: true } },
+      })
+      expect(
+        res.violations.map(
+          (v) =>
+            `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
+        )
+      ).toEqual([])
+    }
+    serve(DESK_PARKED)
+    renderApp(`/runs/${DESK_PARKED.id}?scale=graph`)
+    await waitFor(() => expect(nodes()).toHaveLength(2))
+    await check()
+    // Each tool node's name starts with its visible words, in order.
+    for (const n of document.querySelectorAll<SVGGElement>(
+      "[data-loop-node^='t:']"
+    )) {
+      const seen = Array.from(n.querySelectorAll("text"))
+        .map((t) =>
+          Array.from(t.childNodes)
+            .filter(
+              (c) =>
+                c.nodeType === Node.TEXT_NODE ||
+                (c instanceof Element && !c.hasAttribute("aria-hidden"))
+            )
+            .map((c) => (c.nodeName === "title" ? "" : c.textContent))
+            .join("")
+        )
+        .join("")
+        .replace(/\s+/g, " ")
+        .trim()
+      expect(n.getAttribute("aria-label")!.replace(/\s+/g, " ")).toBe(seen)
+    }
+    cleanup()
+    serve(DIRECTOR, { caps: ["pricing"] })
+    renderApp(`/runs/${DIRECTOR.id}?scale=graph`)
+    await waitFor(() => expect(nodes()).toHaveLength(1))
+    await check()
+    fireEvent.click(
+      document.querySelector(`[data-loop-expand="${CSS.escape(ops)}"]`)!
+    )
+    await waitFor(() =>
+      expect(loopOf()?.getAttribute("data-loop-graph")).toBe(ops)
+    )
+    await check()
+  })
+
+  it("a text-delta batch on a live run does not rebuild the loop's rows; a tool call does", async () => {
+    const b = build(FLAKY)
+    // Live up to the second step's first tool_start.
+    const cut = b.events.findIndex(
+      (e, i) =>
+        e.type === "tool_start" &&
+        b.events.slice(0, i).some((x) => x.type === "step_finish")
+    )
+    expect(cut).toBeGreaterThan(0)
+    serve(FLAKY, { live: cut })
+    renderApp(`/runs/${FLAKY.id}?scale=graph`)
+    await waitFor(() => expect(nodes().length).toBeGreaterThan(0))
+    await waitFor(() => expect(FakeEventSource.open()).toHaveLength(1))
+    const es = FakeEventSource.open()[0]
+    es.connect()
+    // Let the open's catch-up read settle.
+    await new Promise((r) => setTimeout(r, 50))
+    const before = loopBuilds()
+    expect(before).toBeGreaterThan(0)
+    const rec = (kind: string, pos: number, event: unknown) =>
+      es.emit(
+        "record",
+        {
+          run_id: FLAKY.id,
+          session_id: "",
+          public_id: "",
+          kind,
+          pos,
+          time: rOK.started,
+          event,
+        },
+        kind === "event" ? String(pos) : ""
+      )
+    for (let d = 0; d < 40; d++)
+      rec("delta", d, { type: "text_delta", run_id: FLAKY.id, text: "w " })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(loopBuilds()).toBe(before)
+    // The control: the next tool_start moves the loop — rebuilt.
+    rec("event", cut, b.events[cut])
+    await waitFor(() => expect(loopBuilds()).toBeGreaterThan(before))
   })
 })

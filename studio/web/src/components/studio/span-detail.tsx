@@ -79,7 +79,7 @@ function Facts({ rows }: { rows: [string, React.ReactNode][] }) {
     <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-xs">
       {rows.map(([k, v]) => (
         <div key={k} className="contents">
-          <dt className="text-faint">{k}</dt>
+          <dt className="text-muted-foreground">{k}</dt>
           <dd className="min-w-0 break-all">{v}</dd>
         </div>
       ))}
@@ -193,7 +193,7 @@ function RunSteps({
         </div>
       ))}
       {run.steps.length === 0 ? (
-        <p className="font-mono text-xs text-faint">no steps yet</p>
+        <p className="font-mono text-xs text-muted-foreground">no steps yet</p>
       ) : null}
     </div>
   )
@@ -282,7 +282,7 @@ function Answer({
     bad = false
   ) => (
     <div key={k} className="contents">
-      <dt className="text-faint">{ANSWER_LABELS[k]}</dt>
+      <dt className="text-muted-foreground">{ANSWER_LABELS[k]}</dt>
       <dd
         className={`min-w-0 break-words ${bad ? "text-status-bad" : ""}`}
         data-answer-line={k}
@@ -306,7 +306,7 @@ function Answer({
       data-answer
     >
       <div className="contents">
-        <dt className="text-faint">{ANSWER_LABELS.verdict}</dt>
+        <dt className="text-muted-foreground">{ANSWER_LABELS.verdict}</dt>
         <dd
           className={`min-w-0 break-words ${verdict.bad ? "text-status-bad" : "text-foreground"}`}
           data-verdict
@@ -467,7 +467,7 @@ function Verbs({
       {verbs}
       {off ? (
         <span
-          className="font-mono text-[11px] text-faint"
+          className="font-mono text-[11px] text-muted-foreground"
           data-drawer-verbs-off
         >
           {off}
@@ -561,9 +561,17 @@ function LogsTab({
     enabled: on,
   })
   if (!on)
-    return <p className="font-mono text-xs text-faint">{DRAWER.logsOff}</p>
+    return (
+      <p className="font-mono text-xs text-muted-foreground">
+        {DRAWER.logsOff}
+      </p>
+    )
   if (q.isPending)
-    return <p className="font-mono text-xs text-faint">{DRAWER.loading}</p>
+    return (
+      <p className="font-mono text-xs text-muted-foreground">
+        {DRAWER.loading}
+      </p>
+    )
   if (q.isError)
     return (
       <p className="font-mono text-xs text-status-bad">{q.error.message}</p>
@@ -578,11 +586,16 @@ function LogsTab({
       {lines.length ? (
         <LogLines lines={lines} />
       ) : page.badge ? null : running || page.partial ? (
-        <p className="font-mono text-xs text-faint" data-logs-pending>
+        <p
+          className="font-mono text-xs text-muted-foreground"
+          data-logs-pending
+        >
           {LOGS.pending}
         </p>
       ) : (
-        <p className="font-mono text-xs text-faint">{DRAWER.noLogs}</p>
+        <p className="font-mono text-xs text-muted-foreground">
+          {DRAWER.noLogs}
+        </p>
       )}
     </div>
   )
@@ -652,7 +665,9 @@ export function SpanDetail({
         className="flex min-h-0 flex-col rounded-lg border bg-background px-3 py-3"
         data-drawer
       >
-        <p className="font-mono text-xs text-faint">{DRAWER.select}</p>
+        <p className="font-mono text-xs text-muted-foreground">
+          {DRAWER.select}
+        </p>
       </div>
     )
   const kind = row?.kind ?? span.kind
@@ -700,7 +715,7 @@ export function SpanDetail({
       data-drawer-kind={kind}
     >
       <div className="flex items-center gap-2 border-b px-3 py-1.5 font-mono text-[11px]">
-        <span className="text-faint uppercase" data-kind-label>
+        <span className="text-muted-foreground uppercase" data-kind-label>
           {KIND_LABEL[kind]}
         </span>
         <span className="min-w-0 truncate text-foreground">
@@ -713,7 +728,7 @@ export function SpanDetail({
           <Button
             variant="ghost"
             size="xs"
-            className="ml-auto h-5 px-1.5 font-mono text-[10px] text-faint hover:text-foreground"
+            className="ml-auto h-5 px-1.5 font-mono text-[10px] text-muted-foreground hover:text-foreground"
             title={`move the playhead to the start of this row (event #${span.from})`}
             onClick={() => onJump(span.from + 1)}
           >
@@ -759,7 +774,7 @@ export function SpanDetail({
                   holes={stepAttemptsHole(span.node as FoldedStep, requests)}
                 />
               ) : null}
-              <span className="ml-auto font-mono text-[10px] text-faint tabular-nums">
+              <span className="ml-auto font-mono text-[10px] text-muted-foreground tabular-nums">
                 events {span.from}–{span.to}
               </span>
             </div>
@@ -852,7 +867,9 @@ export function SpanDetail({
             step && requests ? (
               <OpenRequest req={requests} step={step.index} />
             ) : (
-              <p className="font-mono text-xs text-faint">{DRAWER.noRequest}</p>
+              <p className="font-mono text-xs text-muted-foreground">
+                {DRAWER.noRequest}
+              </p>
             )
           ) : active === "response" ? (
             (span.kind === "run" || span.kind === "subagent") && span.node ? (
@@ -873,7 +890,7 @@ export function SpanDetail({
                 {!step.text &&
                 !step.reasoning &&
                 step.toolCalls.length === 0 ? (
-                  <p className="font-mono text-xs text-faint">
+                  <p className="font-mono text-xs text-muted-foreground">
                     nothing revealed for this step yet
                   </p>
                 ) : null}
@@ -886,7 +903,7 @@ export function SpanDetail({
                 onJump={onJump}
               />
             ) : (
-              <p className="font-mono text-xs text-faint">
+              <p className="font-mono text-xs text-muted-foreground">
                 {DRAWER.noResponse}
               </p>
             )
@@ -960,7 +977,11 @@ function ToolsTab({
   onJump: (t: number) => void
 }) {
   if (!calls.length)
-    return <p className="font-mono text-xs text-faint">{DRAWER.noTools}</p>
+    return (
+      <p className="font-mono text-xs text-muted-foreground">
+        {DRAWER.noTools}
+      </p>
+    )
   return (
     <div className="space-y-2">
       {calls.map((c) => (
@@ -1039,7 +1060,9 @@ function RawTab({
           ) : null}
         </>
       ) : (
-        <p className="font-mono text-xs text-faint">{DRAWER.noSpan}</p>
+        <p className="font-mono text-xs text-muted-foreground">
+          {DRAWER.noSpan}
+        </p>
       )}
       {span.node && !span.timed ? (
         <>

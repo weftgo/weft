@@ -362,11 +362,14 @@ describe("the budget (§3.5)", () => {
       loopInsights(g)
       return g
     }
-    // The best of five, warmed: a parallel suite's load spike is not
-    // the budget's (the CI margin), the work measured is the page's.
+    // The best of 25 samples, warmed: the spec's 50 ms is the model's in
+    // isolation (standalone 9–18 ms); a parallel suite's load spike or a
+    // GC pause lands on some samples, never on all 25 (U34-fix2: the
+    // best of five once read 50.47 ms under a parallel vitest run). The
+    // work measured is the page's.
     let g = once()
     let ms = Infinity
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 25; i++) {
       const t0 = performance.now()
       g = once()
       ms = Math.min(ms, performance.now() - t0)

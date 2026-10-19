@@ -106,8 +106,9 @@ function agentCost(
   if (!t.agent || !costOf) return undefined
   const kids = [...new Set(t.calls.flatMap((c) => (c.child ? [c.child] : [])))]
   if (!kids.length) return undefined
+  // A row not read yet is sumCost's "—" with its reason, never nothing.
   const views = kids.map(costOf)
-  return views.length === 1 ? views[0] : sumCost(views)
+  return views.length === 1 ? (views[0] ?? sumCost(views)) : sumCost(views)
 }
 
 export function LoopGraphView({
@@ -199,8 +200,25 @@ export function LoopGraphView({
   const stop = order.includes(focus) ? focus : (selectedNode ?? PROMPT)
   const refs = useRef(new Map<string, SVGGElement>())
   // A never-called tool has no row to select: an insight naming one
-  // focuses and marks its node.
+  // focuses and marks its node — until any other selection (a node, an
+  // edge, an insight, Esc, or the page's ?sel= moving) clears it: one
+  // node pressed, never two.
   const [picked, setPicked] = useState<string>()
+  const [pickedAt, setPickedAt] = useState(selectedNode)
+  if (pickedAt !== selectedNode) {
+    setPickedAt(selectedNode)
+    if (picked) setPicked(undefined)
+  }
+  const select = (key: string) => {
+    setPicked(undefined)
+    onSelect(key)
+  }
+  const clear = () => {
+    setPicked(undefined)
+    onClear()
+  }
+  // The node pressed: the picked never-called one, else the selection's.
+  const pressed = picked ?? selectedNode
   const move = (to: string | undefined) => {
     if (!to) return
     setFocus(to)
@@ -226,7 +244,7 @@ export function LoopGraphView({
     }
     if (k === "Escape") {
       e.preventDefault()
-      onClear()
+      clear()
       return
     }
     if (k === "ArrowRight") {
@@ -258,7 +276,7 @@ export function LoopGraphView({
     },
     role: "button",
     tabIndex: id === stop ? 0 : -1,
-    "aria-pressed": id === selectedNode,
+    "aria-pressed": id === pressed,
     // The name starts with the visible words (axe label-content-name-mismatch).
     "aria-label": label,
     "data-loop-node": id,
@@ -334,7 +352,7 @@ export function LoopGraphView({
           aria-label={INSIGHTS_LABEL}
           data-loop-insights
         >
-          <span className="text-faint">{INSIGHTS_LABEL} ▸</span>
+          <span className="text-muted-foreground">{INSIGHTS_LABEL} ▸</span>
           {insights.map((ins, i) => (
             <button
               key={`${ins.kind}${i}`}
@@ -354,7 +372,7 @@ export function LoopGraphView({
                     : ins.node === MODEL
                       ? firstStep
                       : keyOf(t?.calls[0])
-                if (key) onSelect(key)
+                if (key) select(key)
               }}
             >
               {ins.text}
@@ -385,7 +403,7 @@ export function LoopGraphView({
                 x={colX[2] + TW + 2}
                 y={toolY(f.from) - 8}
                 textAnchor="end"
-                className="fill-faint text-[9px]"
+                className="fill-muted-foreground text-[9px]"
               >
                 {f.source}
               </text>
@@ -408,14 +426,14 @@ export function LoopGraphView({
             className={`cursor-pointer fill-none ${STROKE[graph.end.tone === "ok" ? "idle" : graph.end.tone]}`}
             strokeWidth={1.5}
             data-loop-edge="model>end"
-            onClick={() => (lastKey ? onSelect(lastKey) : undefined)}
+            onClick={() => (lastKey ? select(lastKey) : undefined)}
           />
           {shown.map((t, i) => {
             const y = toolY(i) + H / 2
             const x2 = colX[2]
             const c = (mx + x2) / 2
             const w = 1 + Math.min(2, Math.log2(t.calls.length || 1))
-            const on = t.id === selectedNode || (lit?.has(t.id) ?? false)
+            const on = t.id === pressed || (lit?.has(t.id) ?? false)
             const back =
               t.parked || t.denied ? "parked" : t.fails ? "error" : "idle"
             const first = keyOf(t.calls[0])
@@ -428,7 +446,7 @@ export function LoopGraphView({
                 data-lit={lit?.has(t.id) ? "" : undefined}
                 // The first call along it (the node's own button is the
                 // keyboard's way to the same selection).
-                onClick={() => (first ? onSelect(first) : undefined)}
+                onClick={() => (first ? select(first) : undefined)}
               >
                 <title>{`${CALLS_HINT} ×${t.calls.length} · ${RESULTS_HINT}`}</title>
                 <path
@@ -464,18 +482,18 @@ export function LoopGraphView({
           {/* The prompt */}
           <g
             transform={`translate(${colX[0]},${modelY})`}
-            {...nodeProps(PROMPT, PROMPT_LABEL, () => onSelect(graph.runKey))}
+            {...nodeProps(PROMPT, PROMPT_LABEL, () => select(graph.runKey))}
           >
             <rect
               width={PW}
               height={H}
               rx={6}
               className={
-                selectedNode === PROMPT
+                pressed === PROMPT
                   ? "fill-accent stroke-thread"
                   : "fill-background stroke-border"
               }
-              strokeWidth={selectedNode === PROMPT ? 2 : 1}
+              strokeWidth={pressed === PROMPT ? 2 : 1}
             />
             {ring(PW)}
             <text x={10} y={27} className="fill-foreground text-[11px]">
@@ -486,7 +504,7 @@ export function LoopGraphView({
           <g
             transform={`translate(${colX[1]},${modelY})`}
             {...nodeProps(MODEL, `${MODEL_LABEL} ${modelLine(graph)}`, () =>
-              firstStep ? onSelect(firstStep) : undefined
+              firstStep ? select(firstStep) : undefined
             )}
           >
             <rect
@@ -494,11 +512,11 @@ export function LoopGraphView({
               height={H}
               rx={6}
               className={
-                selectedNode === MODEL
+                pressed === MODEL
                   ? "fill-accent stroke-thread"
                   : "fill-background stroke-border"
               }
-              strokeWidth={selectedNode === MODEL ? 2 : 1}
+              strokeWidth={pressed === MODEL ? 2 : 1}
             />
             {ring(MW)}
             <text
@@ -509,13 +527,13 @@ export function LoopGraphView({
               <tspan aria-hidden>◆ </tspan>
               {MODEL_LABEL}{" "}
             </text>
-            <text x={10} y={34} className="fill-faint text-[10px]">
+            <text x={10} y={34} className="fill-muted-foreground text-[10px]">
               {modelLine(graph)}
             </text>
           </g>
           {/* The tools */}
           {shown.map((t, i) => {
-            const on = t.id === selectedNode
+            const on = t.id === pressed
             const tone = toolTone(t)
             const cost = agentCost(t, costOf)
             const label = `${t.agent ?? t.name} ${toolMarks(t)} ${toolLine(t)}${cost ? ` ${cost.text}` : ""}`
@@ -526,7 +544,7 @@ export function LoopGraphView({
                 opacity={dimmed(t.id)}
                 {...nodeProps(t.id, label, () => {
                   const k = keyOf(t.calls[0])
-                  if (k) onSelect(k)
+                  if (k) select(k)
                 })}
                 data-calls={t.calls.length}
                 data-marks={toolMarks(t)}
@@ -556,10 +574,17 @@ export function LoopGraphView({
                   {t.agent ?? t.name}{" "}
                   <tspan className="fill-muted-foreground">
                     {toolMarks(t)}
-                  </tspan>
+                  </tspan>{" "}
                 </text>
-                <text x={10} y={34} className="fill-faint text-[10px]">
-                  {toolLine(t)}
+                {/* Each line ends in a space: the accessible name is the
+                    visible words in their order (label above), and a
+                    screen reader's text never runs two lines together. */}
+                <text
+                  x={10}
+                  y={34}
+                  className="fill-muted-foreground text-[10px]"
+                >
+                  {toolLine(t)}{" "}
                 </text>
                 {cost ? (
                   <text
@@ -638,7 +663,6 @@ export function LoopGraphView({
                 setPicked(`o:${n}`)
               )}
               aria-disabled
-              aria-pressed={picked === `o:${n}`}
               data-never-called={n}
               opacity={picked === `o:${n}` ? 1 : 0.6}
             >
@@ -667,7 +691,7 @@ export function LoopGraphView({
             {...nodeProps(
               END,
               `${graph.end.word} ${endTokens(graph.end)}`.trim(),
-              () => (lastKey ? onSelect(lastKey) : undefined)
+              () => (lastKey ? select(lastKey) : undefined)
             )}
             data-loop-end={graph.end.by ?? ""}
             data-word={graph.end.word}
@@ -677,8 +701,8 @@ export function LoopGraphView({
               width={MW + 50}
               height={H}
               rx={6}
-              className={`${selectedNode === END ? "fill-accent" : "fill-background"} ${STROKE[graph.end.tone]} ${graph.end.tone === "running" ? "motion-safe:animate-pulse" : ""}`}
-              strokeWidth={selectedNode === END ? 2 : 1.5}
+              className={`${pressed === END ? "fill-accent" : "fill-background"} ${STROKE[graph.end.tone]} ${graph.end.tone === "running" ? "motion-safe:animate-pulse" : ""}`}
+              strokeWidth={pressed === END ? 2 : 1.5}
             />
             {ring(MW + 50)}
             <text
@@ -689,7 +713,7 @@ export function LoopGraphView({
               <tspan aria-hidden>■ </tspan>
               {graph.end.word}{" "}
             </text>
-            <text x={10} y={34} className="fill-faint text-[10px]">
+            <text x={10} y={34} className="fill-muted-foreground text-[10px]">
               {endTokens(graph.end)}
             </text>
           </g>
@@ -697,7 +721,7 @@ export function LoopGraphView({
       </div>
       {graph.offered === null && offeredHole ? (
         <div className="flex items-center gap-1.5" data-loop-offered-hole>
-          <span className="text-faint">{NEVER_CALLED}:</span>
+          <span className="text-muted-foreground">{NEVER_CALLED}:</span>
           <HoleBadge {...offeredHole} />
         </div>
       ) : null}
@@ -708,7 +732,7 @@ export function LoopGraphView({
           aria-label={STEPS_LABEL}
           data-loop-steps
         >
-          <span className="text-faint">{STEPS_LABEL}</span>
+          <span className="text-muted-foreground">{STEPS_LABEL}</span>
           {graph.steps.map((s) => (
             <button
               key={s.n}

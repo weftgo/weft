@@ -135,6 +135,8 @@ import {
   NO_SPANS_LEVEL,
   OFFERED_NONE,
   OFFERED_UNREAD,
+  offeredUnreadable,
+  spansUnreadable,
   runChain,
 } from "@/lib/loopgraph"
 import type { GraphLevel } from "@/lib/loopgraph"
@@ -689,6 +691,18 @@ function RunPage() {
   // is off with a not_recorded badge, and ?level=agents reads the loop.
   const level: GraphLevel =
     search.level === "agents" && haveTime ? "agents" : "loop"
+  // Why the agents level is off (U34-fix2): "recorded none" only on a
+  // read that succeeded — the spans came back empty on a run that is
+  // over, or the run has no trace to read; a failed read says so;
+  // nothing while it is being read (or the run still runs).
+  const levelHole: HoleMark | undefined = haveTime
+    ? undefined
+    : spans.isError
+      ? spansUnreadable(spans.error.message)
+      : (spans.isSuccess && runStatus !== "running") ||
+          (run.isSuccess && !run.data.trace_id)
+        ? NO_SPANS_LEVEL
+        : undefined
 
   // The child subtree in place (U9.2, UX-A-01): a child run row stays
   // one row until expanded; its rows (and its children's, lazily — drawn
@@ -1219,21 +1233,26 @@ function RunPage() {
   )
   const costOfRuns = useCallback(
     (rs: readonly string[]) => {
+      // A row not read yet is sumCost's "—" with its reason (U34-fix2):
+      // drawn, never nothing.
       const vs = rs.map(costOf)
-      if (!vs.length || vs.every((v) => !v)) return undefined
-      return vs.length === 1 ? vs[0] : sumCost(vs)
+      if (!vs.length) return undefined
+      return vs.length === 1 ? (vs[0] ?? sumCost(vs)) : sumCost(vs)
     },
     [costOf]
   )
   // The tools offered and never called, unknown: why (the A3 table's
-  // not_recorded) — nothing while the requests are being read.
+  // not_recorded) — nothing while the requests are being read; a failed
+  // read says so, never "no record carried a catalog" (U34-fix2).
   const offeredHole: HoleMark | undefined = !ownLoop
     ? OFFERED_UNREAD
     : !requestsCapable
       ? { hole: "not_recorded", cause: "not_served" }
-      : requestsQ.isPending
-        ? undefined
-        : OFFERED_NONE
+      : requestsQ.isError
+        ? offeredUnreadable(requestsQ.error.message)
+        : requestsQ.isPending
+          ? undefined
+          : OFFERED_NONE
   // run_finish.pending by its ids: a new array per event batch, the
   // same calls.
   const pendingKey = atPlayhead.pending.map((p) => p.id).join(",")
@@ -1657,9 +1676,9 @@ function RunPage() {
                       {l}
                     </button>
                   ))}
-                  {!haveTime && spans.fetchStatus === "idle" ? (
+                  {levelHole ? (
                     <span data-level-hole>
-                      <HoleBadge {...NO_SPANS_LEVEL} />
+                      <HoleBadge {...levelHole} />
                     </span>
                   ) : null}
                 </div>
@@ -1963,7 +1982,7 @@ function RunPage() {
                           >
                             ›
                           </button>
-                          <span className="text-faint">
+                          <span className="text-muted-foreground">
                             · {loopCall.tool.name}
                           </span>
                         </div>

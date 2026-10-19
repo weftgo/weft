@@ -1790,19 +1790,26 @@ failure; a repeated call is matched on its arguments by run, step and
 call id (an id repeats across steps), content-off's null arguments
 never matching. The end node selects the last step's model call; an
 edge selects the first call along it; a never-called insight focuses
-its node. Unknown offered tools are a `not recorded` badge (a child
-loop's catalog is not read on this page). A child loop's scrubber
+its node and marks it pressed until any other selection clears it (one
+node pressed, never two). Selecting the last step's model row (from the
+tree, the drawer or J / K) lights the end node, not the model node: that
+row is the end's — accepted. Unknown offered tools are a `not recorded`
+badge (a child loop's catalog is not read on this page); a failed
+requests read is a `gap` badge with the read's error, never "none". A child loop's scrubber
 selects its own step rows (`s:<run>:<n>`), `?step=` staying the root's.
 A subagent node carries its child run's own cost (lib/cost.ts's words,
 `—` with the reason when unknown; capability `pricing`), on both
-levels. `?level=agents` is the call graph (`src/lib/graph.ts`) over
+levels; a child row not read yet draws `—` with sumCost's reason ("a
+run's cost is not read yet"), never nothing. `?level=agents` is the call graph (`src/lib/graph.ts`) over
 the same spans: one node per agent (its runs, the slowest, failures,
 tokens when the spans carry them) in call-depth columns, one per MCP
 server (a tool whose request-catalog source starts `mcp`, the run's own
 calls; a child run's MCP calls are said not shown, its catalog not read
 here), each edge its call count and slowest call (the slowest, not a
 percentile; an agent node's runs' own cost), a self-call a loop over
-its node; off (a `not recorded` badge) on a run without spans; a node
+its node; off on a run without spans — a `not recorded` badge only
+when the spans read back empty (or the run has no trace), a `gap` badge
+with the error when the read failed, nothing while it reads; a node
 selects its first run's row and the selected row lights its node —
 switching scales keeps the selection. Pool children are sessions, not
 runs of the trace: not drawn. The selected row opens the drawer beside

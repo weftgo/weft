@@ -84,7 +84,9 @@ export function HoleBadge({
       {badge}
       <span className="text-[11px] text-muted-foreground">
         {w.reason}
-        {w.fix ? <span className="text-faint"> · fix: {w.fix}</span> : null}
+        {w.fix ? (
+          <span className="text-muted-foreground"> · fix: {w.fix}</span>
+        ) : null}
       </span>
     </span>
   )

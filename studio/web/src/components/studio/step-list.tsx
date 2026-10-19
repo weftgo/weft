@@ -207,7 +207,7 @@ export function Usage({
     >
       {tokens(usage.input_tokens)} in / {tokens(usage.output_tokens)} out
       {splits.length ? (
-        <span className="text-faint"> · {splits.join(" · ")}</span>
+        <span className="text-muted-foreground"> · {splits.join(" · ")}</span>
       ) : null}
     </span>
   )
@@ -240,7 +240,7 @@ function JumpButton({
     <Button
       variant="ghost"
       size="icon-xs"
-      className="text-faint opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100"
+      className="text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100"
       aria-label={label}
       title={label}
       onClick={(e) => {
@@ -332,7 +332,7 @@ function CallPill({
       ) : (
         <span className="font-mono text-[11px] text-ev-result">ok</span>
       )}
-      <span className="font-mono text-[11px] text-faint tabular-nums">
+      <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
         {bytes(new TextEncoder().encode(r.content).length)}
       </span>
       {exec ? <ExecFacts text={exec} /> : null}
@@ -347,7 +347,7 @@ function CallPill({
 function ExecFacts({ text }: { text: string }) {
   return (
     <span
-      className="font-mono text-[11px] text-faint tabular-nums"
+      className="font-mono text-[11px] text-muted-foreground tabular-nums"
       title="the call's wall time / the Timeout it ran under · the wait for its turn · its origin (the execute_tool span, the tools record)"
       data-exec-facts
     >
@@ -408,7 +408,7 @@ export function ToolCallRow({
           data-call-toggle
         >
           <ChevronRight
-            className={`size-3 shrink-0 text-faint transition-transform ${open ? "rotate-90" : ""}`}
+            className={`size-3 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
             data-slot="icon"
           />
           <span className="font-mono text-[13px] text-ev-tool">
@@ -431,7 +431,7 @@ export function ToolCallRow({
             child={!!(child || call.childRunId)}
           />
           <span
-            className="ml-auto font-mono text-[10px] text-faint"
+            className="ml-auto font-mono text-[10px] text-muted-foreground"
             title="the call id (call_id on the wire)"
           >
             {call.callId}
@@ -489,7 +489,7 @@ export function ToolCallRow({
           ) : call.streamedArgs ? (
             <div className="font-mono text-xs text-muted-foreground">
               writing args…{" "}
-              <span className="text-faint">{call.streamedArgs}</span>
+              <span className="text-muted-foreground">{call.streamedArgs}</span>
             </div>
           ) : null}
           {child ? <SubagentBlock child={child} onJump={onJump} /> : null}
@@ -921,7 +921,7 @@ function StepCard({
         ) : null}
         <span className="ml-auto flex items-center gap-1">
           <span
-            className="font-mono text-[10px] text-faint tabular-nums"
+            className="font-mono text-[10px] text-muted-foreground tabular-nums"
             title="this step's events, by stream position"
           >
             events {step.from}–{step.to}
@@ -1444,7 +1444,7 @@ export function StepList({
           ) : null}
           {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}
           {view.steps.length === 0 ? (
-            <p className="py-6 text-center font-mono text-xs text-faint">
+            <p className="py-6 text-center font-mono text-xs text-muted-foreground">
               {replaying || upTo === 0
                 ? "nothing revealed yet — play or step forward"
                 : events.length === 0
@@ -1473,7 +1473,7 @@ export function StepList({
               )}
             </p>
           ) : view.finished ? null : (
-            <p className="text-center font-mono text-xs text-faint">
+            <p className="text-center font-mono text-xs text-muted-foreground">
               {replaying
                 ? `replay · ${upTo} of ${events.length} events shown`
                 : isLive(doc)

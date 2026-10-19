@@ -176,9 +176,12 @@ export function SubagentBlock({
         >
           <ChevronRight
             data-slot="icon"
-            className={`size-3.5 text-faint transition-transform ${open ? "rotate-90" : ""}`}
+            className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
           />
-          <span className="eyebrow" title={CHILD_TITLES[kind]}>
+          <span
+            className="font-mono text-[11px] tracking-[0.08em] text-muted-foreground uppercase"
+            title={CHILD_TITLES[kind]}
+          >
             {eyebrow}
           </span>{" "}
           <span
@@ -190,7 +193,7 @@ export function SubagentBlock({
           </span>
         </button>
         {child.model ? (
-          <span className="font-mono text-[11px] text-faint">
+          <span className="font-mono text-[11px] text-muted-foreground">
             {child.model.provider}/{child.model.name}
           </span>
         ) : null}
@@ -222,17 +225,21 @@ export function SubagentBlock({
               : "—"}
         </span>
         <HoleBadges holes={holes} />
-        <span className="font-mono text-[11px] text-faint">{child.id}</span>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          {child.id}
+        </span>
         {/* A10: replay from here replays the CHILD as its own run (its
             id, its agent), the parent untouched. */}
         <span className="ml-auto flex items-center">
           <ChildVerb runID={child.id} agent={child.agent} />
         </span>
-        {/* A delegated session opens its session first (UX-B-06). */}
+        {/* A delegated session opens its session first (UX-B-06). The
+            links are ink, not thread-ink: on the block's tint thread-ink
+            reads 4.45:1, under AA's 4.5 (U34-fix2, axe in Chromium). */}
         {kind === "delegated" && child.session_id ? (
           <Link
             {...sessionLink(child.session_id)}
-            className="flex items-center gap-0.5 font-mono text-[11px] text-thread-ink hover:underline"
+            className="flex items-center gap-0.5 font-mono text-[11px] text-foreground hover:underline"
             data-child-session={child.session_id}
           >
             {OPEN_SESSION}
@@ -241,7 +248,7 @@ export function SubagentBlock({
         ) : null}
         <Link
           {...runLink(child.id)}
-          className={`flex items-center gap-0.5 font-mono text-[11px] hover:underline ${kind === "delegated" ? "text-faint" : "text-thread-ink"}`}
+          className={`flex items-center gap-0.5 font-mono text-[11px] hover:underline ${kind === "delegated" ? "text-muted-foreground" : "text-foreground"}`}
         >
           {OPEN_RUN}
           <ArrowUpRight className="size-3" data-slot="icon" />
@@ -257,7 +264,9 @@ export function SubagentBlock({
                 data-child-step={step.index}
               >
                 <div className="flex items-center gap-2">
-                  <span className="eyebrow">step {step.index}</span>
+                  <span className="font-mono text-[11px] tracking-[0.08em] text-muted-foreground uppercase">
+                    step {step.index}
+                  </span>
                   {step.finish ? (
                     <span className="font-mono text-[11px] text-muted-foreground">
                       {step.finish.reason}
@@ -282,7 +291,7 @@ export function SubagentBlock({
               </div>
             ))
           ) : (
-            <span className="font-mono text-[11px] text-faint">
+            <span className="font-mono text-[11px] text-muted-foreground">
               {doc.isFetching || stream.loading
                 ? "loading the child's events…"
                 : "no events from the child yet"}

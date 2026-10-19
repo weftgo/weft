@@ -134,7 +134,7 @@ function outcomeOf(a: StepAttempt) {
       </span>
     )
   }
-  return <span className="text-faint">outcome not reported</span>
+  return <span className="text-muted-foreground">outcome not reported</span>
 }
 
 function AttemptRow({ a, from }: { a: StepAttempt; from?: string }) {
@@ -146,7 +146,7 @@ function AttemptRow({ a, from }: { a: StepAttempt; from?: string }) {
       className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11px]"
     >
       <span
-        className="min-w-16 text-faint"
+        className="min-w-16 text-muted-foreground"
         data-attempt-layer={a.layer || undefined}
       >
         {a.attempt === 0 && typeof a.request_index === "number"
@@ -164,12 +164,12 @@ function AttemptRow({ a, from }: { a: StepAttempt; from?: string }) {
         </span>
       ) : null}
       {a.retry_after_ms ? (
-        <span className="text-faint">
+        <span className="text-muted-foreground">
           retry after {msText(a.retry_after_ms)}
         </span>
       ) : null}
       {st && en ? (
-        <span className="text-faint tabular-nums">
+        <span className="text-muted-foreground tabular-nums">
           {st} – {en}
         </span>
       ) : null}
@@ -212,7 +212,7 @@ function AttemptsPane({ doc, running }: { doc: StepDoc; running: boolean }) {
           ))}
         </ul>
       ) : badge ? null : running ? (
-        <span className="font-mono text-[11px] text-faint">
+        <span className="font-mono text-[11px] text-muted-foreground">
           {ATTEMPTS_NOT_STORED}
         </span>
       ) : (
@@ -266,7 +266,7 @@ export function AttemptsSection({
         the attempts could not be read: {q.error.message}
       </p>
     ) : (
-      <p className="pt-2 font-mono text-[11px] text-faint">
+      <p className="pt-2 font-mono text-[11px] text-muted-foreground">
         loading the attempts…
       </p>
     )
@@ -290,7 +290,7 @@ export function AttemptsSection({
           attempts
         </button>
         {!open && rows.length > 1 ? (
-          <span className="font-mono text-[11px] text-faint">
+          <span className="font-mono text-[11px] text-muted-foreground">
             {rows.length} attempts
           </span>
         ) : null}

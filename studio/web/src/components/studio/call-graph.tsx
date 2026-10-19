@@ -192,8 +192,8 @@ export function CallGraphView({
                 <tspan aria-hidden>{n.kind === "agent" ? "▣ " : "⧉ "}</tspan>
                 {n.label}{" "}
               </text>
-              <text x={10} y={34} className="fill-faint text-[10px]">
-                {nodeLine(n)}
+              <text x={10} y={34} className="fill-muted-foreground text-[10px]">
+                {nodeLine(n)}{" "}
               </text>
               {cost ? (
                 <text
@@ -213,10 +213,10 @@ export function CallGraphView({
         })}
       </svg>
       {graph.edges.length === 0 ? (
-        <p className="px-1 pt-1 text-faint">{GRAPH_ALONE}</p>
+        <p className="px-1 pt-1 text-muted-foreground">{GRAPH_ALONE}</p>
       ) : null}
       {graph.unsourced.length > 0 ? (
-        <p className="px-1 pt-1 text-faint" data-graph-unsourced>
+        <p className="px-1 pt-1 text-muted-foreground" data-graph-unsourced>
           {graphUnsourced(graph.unsourced.length)}
         </p>
       ) : null}

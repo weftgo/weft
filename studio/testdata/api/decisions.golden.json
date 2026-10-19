@@ -82,6 +82,23 @@
       }
     ]
   },
+  "read_token_two_actors_t1_decided": {
+    "run": "01K00000000000000000000001-t2",
+    "at": "2026-10-01T09:30:00.006Z",
+    "actor": "agent-7,agent-8",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "r1",
+        "name": "issue_refund",
+        "outcome": "denied",
+        "via": "user",
+        "who_hidden": true,
+        "reason_badge": "hidden",
+        "at": "2026-10-01T09:00:00Z"
+      }
+    ]
+  },
   "resumed_decided": {
     "run": "a1100000000000000000000000000002",
     "at": "2026-10-01T09:21:00.008Z",
@@ -96,7 +113,8 @@
       {
         "call_id": "call_2",
         "name": "add_note",
-        "outcome": "resolved"
+        "outcome": "resolved",
+        "result": "noted by hand"
       }
     ]
   },
@@ -114,7 +132,8 @@
       {
         "call_id": "call_2",
         "name": "add_note",
-        "outcome": "resolved"
+        "outcome": "resolved",
+        "result": "noted by hand"
       }
     ]
   },
@@ -181,6 +200,7 @@
         "outcome": "resolved",
         "via": "user",
         "who": "agent-7",
+        "result": "in transit, arriving Friday",
         "at": "2026-10-01T09:00:00Z"
       }
     ]

@@ -278,8 +278,8 @@ function DecideRow({
 
 /** One decided call's outcome (U13.2, lib/decisions.ts): "✋ denied ·
  * agent-7 · 'need a photo of the damage' → t2" in its outcome's tone,
- * the turn a link; a hidden or uncaptured reason its badge; via / key /
- * grant / when on a faint line under it. */
+ * the turn a link; a hidden or uncaptured reason (or resolved result)
+ * its badge; via / key / grant / when on a faint line under it. */
 export function DecisionRow({
   c,
   d,
@@ -291,15 +291,17 @@ export function DecisionRow({
   to?: string
 }) {
   const o = outcomeOf(c.outcome)
+  // A denial's reason or a resolve's result unreadable: one badge.
+  const hole = c.reason_badge || c.result_badge
   return (
     <div className="font-sans" data-decision={c.outcome}>
       <span className={TONE_TEXT[o.tone]} data-decision-line="">
         {decisionLine(c, d)}
       </span>
-      {c.reason_badge ? (
+      {hole ? (
         <>
           {" "}
-          <HoleBadge hole={c.reason_badge} {...REASON_HOLE[c.reason_badge]} />
+          <HoleBadge hole={hole} {...REASON_HOLE[hole]} />
         </>
       ) : null}
       {c.who_hidden ? (

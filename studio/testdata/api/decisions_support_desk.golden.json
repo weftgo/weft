@@ -12,7 +12,8 @@
       {
         "call_id": "call_2",
         "name": "add_note",
-        "outcome": "resolved"
+        "outcome": "resolved",
+        "result": "noted by hand"
       }
     ]
   },
@@ -29,7 +30,8 @@
       {
         "call_id": "call_2",
         "name": "add_note",
-        "outcome": "resolved"
+        "outcome": "resolved",
+        "result": "noted by hand"
       }
     ]
   }

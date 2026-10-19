@@ -1069,7 +1069,8 @@ any other `DENIED: …` → `denied`, else `approved` (`source`
 outcome: a resolve is otherwise not told apart); with no transcript
 either (content off before U13.1) from its step-0 `execute_tool` spans
 that a resume denied (`weft.tool.denied`, `denied_kind` `no_decision`
-→ `no_decision`) or that started before the first `chat` span
+→ `no_decision`) or that started before the first `chat` span — every
+step-0 one when no `chat` span exists (no model call ran) —
 (`approved`; `source` `spans`, each `derived`: a resolve has no span);
 with none of these `source` `none` and `hole` `not_recorded` — never an
 empty list without one. Each call: `call_id`, `name` (the transcript's,
@@ -1081,23 +1082,33 @@ one names the call: `approve` → `approved`, `deny` → `denied`, `resolve`
 / `key_id` / `grant_id` / `at` from thread's `approval.decision` records
 filed under the parked run or the resume (§4; read through
 `SessionEventQuery.RunIDs`, those two runs alone, at most 5,000 records,
-a note past them), folded as thread folds them (ADR 0021 §5): a deny
-resolves, a resolve resolves, approvals resolve together — every
+a note past them), folded as thread folds them (ADR 0021 §5) under the
+quorum the call's `approval.request` names: a deny resolves, a resolve
+resolves, approvals resolve together once the quorum's distinct
+approvers (the key, else the grant, else `who`) stand — every
 approver's `who` and `key_id` named, `" + "`-joined, in record order (a
-quorum: `alice + bob`, `k_alice + k_bob`) — and a deny or resolve beside
-an approval is a split verdict, `denied` `via` `quorum`, its reason the
-model-visible `DENIED: …` text of the transcript (the session's own
-expiry or interrupt beside an approval stays its own deny); else
+quorum: `alice + bob`, `k_alice + k_bob`, `via` `quorum`); a call short
+of its quorum, and any call core left `no_decision`, takes no
+attribution from the records — and a deny or resolve beside an approval
+is a split verdict, `denied` `via` `quorum`, `who` its denier (none for
+a resolve's conflict) and `approved_by` the approvals it overruled, its
+reason the model-visible `DENIED: …` text of the transcript (the
+session's own expiry or interrupt beside an approval stays its own
+deny); else
 `weft.tool.approved_by` / `weft.grant.id` and a denied call's
 zero-length span start (§3; the flag read as a bool or the string
 `"true"`, `obsdb.AttrTrue`), `who` (the records' `content.who`), and a
 denial's `reason` (the record's `content.reason`, else the result text
-after `DENIED: `). The actor is metadata — an opaque id the app chose —
-and every identity reads it; thread's `who` and the reason are content:
-a read-scoped panel token gets `reason_badge` `hidden`, and
-`who_hidden` only when a `who` exists in content alone (the resume
-names no actor); a denial with no reason recorded (content off)
-`reason_badge` `not_recorded`. A panel token's resume of another public
+after `DENIED: `), and a resolved call's `result` (the resume's
+pre-step result: core runs no handler for a resolve, so no tool event
+or span carries it). The actor is metadata — an opaque id the app
+chose — and every identity reads it; thread's `who`, `approved_by`, the
+reason and the result are content: a read-scoped panel token gets
+`reason_badge` / `result_badge` `hidden`, and `who_hidden` when a `who`
+exists in content and no single actor names the decider (no actor,
+several comma-joined, or a split verdict); a denial with no reason
+recorded (content off) `reason_badge` `not_recorded`, a resolve with no
+result recorded `result_badge` `not_recorded`. A panel token's resume of another public
 id is left out (no block). Studio's `TestRunDecisions` pins it over the
 `thread_approvals`, `thread_content_off`, `thread_grants`, `resumed` and
 `approval_denied` fixtures (`studio/testdata/api/decisions.golden.json`);

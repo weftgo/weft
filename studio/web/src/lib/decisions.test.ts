@@ -233,6 +233,40 @@ describe("the resumed card and its note", () => {
       ""
     )
   })
+
+  // U13.2-fix2 2: core emits no tool event for a resolve — the fold
+  // never holds it; the server serves its result on the decided call.
+  it("a resolved row's result is the server's: the resumed fixture's add_note", () => {
+    const d = g.resumed_resumes
+    expect(decidedResult(d.calls[1], [])).toBe("noted by hand")
+    expect(
+      decidedResult(
+        { call_id: "r1", outcome: "resolved", result_badge: "hidden" },
+        [{ callId: "r1", result: { content: "leaked" } }]
+      )
+    ).toBe("")
+  })
+})
+
+describe("who decided, honestly (U13.2-fix2)", () => {
+  it("two actors on a read token: no decider, the hidden badge", () => {
+    const d = g.read_token_two_actors_t1_decided
+    expect(d.calls[0].who_hidden).toBe(true)
+    expect(line("read_token_two_actors_t1_decided")).toBe("✋ denied → t2")
+  })
+
+  it("a split verdict names its denier and the approvers as such", () => {
+    const d = g.thread_t1_decided
+    const c = { ...d.calls[0], who: "bob", approved_by: "alice", reason: "" }
+    expect(decisionLine(c, d)).toBe("✋ denied by bob · approved by alice")
+    // A hidden split names neither side, nor the actor in their place.
+    expect(
+      decisionLine(
+        { call_id: "x", outcome: "denied", via: "quorum", who_hidden: true },
+        d
+      )
+    ).toBe("✋ denied")
+  })
 })
 
 describe("rw.support-desk's shape (U13.2-fix 6)", () => {

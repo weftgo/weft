@@ -843,7 +843,7 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		c := calls[cid]
 		if sp, ok := toolSpans[cid]; ok {
 			c.Span = &stepSpan{ID: sp.SpanID, Started: sp.Start, Finished: sp.End, Status: spanStatus(sp.StatusCode)}
-			if p, _ := sp.Attrs["weft.tool.pending"].(bool); p {
+			if obsdb.AttrTrue(sp.Attrs, "weft.tool.pending") {
 				c.Pending = true
 			}
 			if c.Result != nil && (stripped || callStripped[cid]) {

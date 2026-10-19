@@ -32,10 +32,16 @@ import (
 //   - the outcome, via / key / grant / when: thread's approval.decision
 //     records filed under the parked run or the resume (the body's
 //     outcome, via, key_id, grant_id, at; who under content), folded as
-//     thread folds them — every approver of a quorum named, a split
-//     verdict via quorum, its reason the model-visible DENIED text —
-//     else the resumed call's execute_tool span (weft.tool.approved_by,
+//     thread folds them under the quorum its approval.request names —
+//     every approver of a met quorum named, a call short of it unnamed
+//     (core's no_decision takes no attribution), a split verdict via
+//     quorum naming its denier as the decider and the approvals as
+//     approvers, its reason the model-visible DENIED text — else the
+//     resumed call's execute_tool span (weft.tool.approved_by,
 //     weft.grant.id; a denied call's zero-length span's start);
+//   - a resolved call's result: the resume's pre-step result (core runs
+//     no handler for a resolve — no tool event, no span), under the
+//     content policy (result_badge hidden / not_recorded);
 //   - the reason of a denial: thread's content.reason, else the resume's
 //     DENIED result text after "DENIED: " (both under the content
 //     policy: absent content-off, reason_badge not_recorded);
@@ -44,9 +50,10 @@ import (
 //   - expired: a deny thread decided via expiry, or a DENIED result
 //     reading "expired: …".
 //
-// A read-scoped panel token gets no who and no reason (reason_badge
-// hidden; who_hidden only when no actor names the decider: readsThread
-// Content's rule). A read that fails is said (error, or a note when the
+// A read-scoped panel token gets no who, no reason and no resolved
+// result (reason_badge / result_badge hidden; who_hidden unless one
+// actor names the decider — several comma-joined, or a split verdict's
+// two sides, name no one call's: readsThreadContent's rule). A read that fails is said (error, or a note when the
 // block still stands), never an empty list.
 
 // decisionsCap bounds the calls one decisions block lists (core's
@@ -80,9 +87,13 @@ type decisionDoc struct {
 // is then not told apart). Via is thread's via (user, signed, grant,
 // approver, quorum, expiry, …), else the span's approved_by. Who is
 // thread's content.who — every approver of a quorum, " + "-joined, as
-// KeyID their keys; Reason a denial's reason; ReasonBadge why a denial
-// has none (hidden, not_recorded). At is the decision's own time when a
-// record names one.
+// KeyID their keys; a split verdict's Who its denier, ApprovedBy the
+// approvers it overruled; WhoHidden says a who in content the reader
+// may not read and no single actor names. Reason is a denial's reason,
+// ReasonBadge why a denial has none (hidden, not_recorded); Result a
+// resolved call's result (the resume's pre-step result: core runs no
+// handler, so no tool event or span carries it), ResultBadge why it has
+// none. At is the decision's own time when a record names one.
 type decidedCall struct {
 	CallID      string     `json:"call_id"`
 	Name        string     `json:"name,omitempty"`
@@ -93,8 +104,11 @@ type decidedCall struct {
 	GrantID     string     `json:"grant_id,omitempty"`
 	Who         string     `json:"who,omitempty"`
 	WhoHidden   bool       `json:"who_hidden,omitempty"`
+	ApprovedBy  string     `json:"approved_by,omitempty"`
 	Reason      string     `json:"reason,omitempty"`
 	ReasonBadge string     `json:"reason_badge,omitempty"`
+	Result      string     `json:"result,omitempty"`
+	ResultBadge string     `json:"result_badge,omitempty"`
 	At          *time.Time `json:"at,omitempty"`
 }
 
@@ -214,8 +228,8 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 		slices.SortStableFunc(step0, func(a, b obsdb.Span) int { return a.Start.Compare(b.Start) })
 		for _, sp := range step0 {
 			denied := obsdb.AttrTrue(sp.Attrs, "weft.tool.denied")
-			if !denied && (firstChat.IsZero() || !sp.Start.Before(firstChat)) {
-				continue // the model's own call, or no model call to place it before
+			if !denied && !firstChat.IsZero() && !sp.Start.Before(firstChat) {
+				continue // the model's own call; with no model call, every step-0 call is a decided one
 			}
 			c := decidedCall{CallID: attrString(sp.Attrs, "gen_ai.tool.call.id"), Outcome: outcomeApproved, Derived: true}
 			if denied {
@@ -252,11 +266,11 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 			}
 		}
 		var reason string
-		if rec, ok := recs[c.CallID]; ok && rec.outcome != "" {
-			if c.Outcome != outcomeNoDecision {
-				// The record names the decision (a resolve reads resolved).
-				c.Outcome, c.Derived = rec.outcome, false
-			}
+		// The record's attribution only with its outcome adopted: a call
+		// core left undecided (short of its quorum) names no approver.
+		if rec, ok := recs[c.CallID]; ok && rec.outcome != "" && c.Outcome != outcomeNoDecision {
+			// The record names the decision (a resolve reads resolved).
+			c.Outcome, c.Derived = rec.outcome, false
 			if rec.via != "" {
 				c.Via = rec.via
 			}
@@ -272,17 +286,30 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 			if rec.via == "expiry" && c.Outcome == outcomeDenied {
 				c.Outcome = outcomeExpired
 			}
-			if len(rec.who) > 0 {
+			if len(rec.who)+len(rec.approvers) > 0 {
 				switch {
 				case reads:
 					c.Who = strings.Join(rec.who, " + ")
-				case out.Actor == "":
-					// The actor is metadata and names the decider; a who
-					// in content alone is hidden from this token.
+					c.ApprovedBy = strings.Join(rec.approvers, " + ")
+				case out.Actor == "" || strings.Contains(out.Actor, ",") || len(rec.approvers) > 0:
+					// The actor is metadata and names the decider when it
+					// is one; several (thread comma-joins them) or a split
+					// verdict's sides are no one call's — a who in content
+					// alone is then hidden from this token.
 					c.WhoHidden = true
 				}
 			}
 			reason = rec.reason // a split verdict's is the transcript's (below)
+		}
+		if c.Outcome == outcomeResolved {
+			switch {
+			case !hasRes || res.Content == "":
+				c.ResultBadge = string(obsdb.HoleNotRecorded)
+			case !reads:
+				c.ResultBadge = string(obsdb.HoleHidden)
+			default:
+				c.Result = res.Content
+			}
 		}
 		if hasRes && c.Outcome == outcomeDenied && strings.HasPrefix(res.Content, deniedPrefix+"expired") {
 			c.Outcome = outcomeExpired
@@ -413,21 +440,26 @@ type rawDecision struct {
 
 // threadDecision is a call's decision records folded as thread folds
 // them (effectiveDecision, ADR 0021 §5): outcome the verdict's
-// (approved, denied, resolved; "" while none resolves the call), who /
-// keys every decider the verdict stands on, in record order — each
-// approver of a quorum — and a split verdict via quorum with no reason
-// of its own (the model saw thread's; the transcript's text names it).
+// (approved, denied, resolved; "" while none resolves the call — a
+// quorum not yet met included), who / keys the deciders the verdict
+// stands on, in record order — each approver of a met quorum — and a
+// split verdict via quorum with no reason of its own (the model saw
+// thread's; the transcript's text names it), who its denier and
+// approvers the approvals it overruled.
 type threadDecision struct {
 	outcome, via, grantID, reason string
-	who, keys                     []string
+	who, keys, approvers          []string
 	at                            *time.Time
 }
 
-// foldDecisions folds one call's records in order: a deny resolves
-// (beside an approve a split verdict, unless the session's own expiry or
-// interrupt), one resolve resolves (beside an approve or another
-// resolve a split verdict), approvals resolve together.
-func foldDecisions(ds []rawDecision) threadDecision {
+// foldDecisions folds one call's records in order under the session's
+// quorum (the call's approval.request names it; < 2 is one): a deny
+// resolves (beside an approve a split verdict, unless the session's own
+// expiry or interrupt), one resolve resolves (beside an approve or
+// another resolve a split verdict), approvals resolve together once
+// quorum distinct approvers (thread's approverIdentity: the key, else
+// the grant, else who) stand.
+func foldDecisions(ds []rawDecision, quorum int) threadDecision {
 	verdict := func(outcome string, by []rawDecision) threadDecision {
 		last := by[len(by)-1]
 		v := threadDecision{outcome: outcome, via: last.via, reason: last.reason, at: last.at}
@@ -444,39 +476,63 @@ func foldDecisions(ds []rawDecision) threadDecision {
 		}
 		return v
 	}
-	split := func(by []rawDecision) threadDecision {
-		v := verdict(outcomeDenied, by)
-		v.via, v.reason = "quorum", ""
+	// split is the verdict a conflict resolves to: a deny via quorum, its
+	// decider the conflicting deny (none for a resolve's conflict), the
+	// approvals beside it named as approvers — never as deniers.
+	split := func(conflict rawDecision, approves []rawDecision) threadDecision {
+		v := threadDecision{outcome: outcomeDenied, via: "quorum", at: conflict.at}
+		if conflict.outcome == "deny" {
+			v = verdict(outcomeDenied, []rawDecision{conflict})
+			v.via, v.reason = "quorum", ""
+		}
+		for _, d := range approves {
+			if d.who != "" && !slices.Contains(v.approvers, d.who) {
+				v.approvers = append(v.approvers, d.who)
+			}
+		}
 		return v
 	}
 	var approves []rawDecision
+	approvers := map[string]bool{}
 	resolved := -1
 	for i, d := range ds {
 		switch d.outcome {
 		case "deny":
 			if len(approves) > 0 && d.via != "expiry" && d.via != "interrupt" {
-				return split(ds[:i+1])
+				return split(d, approves)
 			}
 			return verdict(outcomeDenied, []rawDecision{d})
 		case "resolve", "resolve_error":
 			if resolved >= 0 || len(approves) > 0 {
-				return split(ds[:i+1])
+				return split(d, approves)
 			}
 			resolved = i
 		case "approve":
 			if resolved >= 0 {
-				return split(ds[:i+1])
+				return split(d, append(approves, d))
 			}
 			approves = append(approves, d)
+			switch {
+			case d.keyID != "":
+				approvers["key:"+d.keyID] = true
+			case d.via == "grant":
+				approvers["grant"] = true
+			default:
+				approvers["who:"+d.who] = true
+			}
 		}
 	}
 	switch {
 	case resolved >= 0:
 		return verdict(outcomeResolved, ds[resolved:resolved+1])
-	case len(approves) > 0:
-		return verdict(outcomeApproved, approves)
+	case len(approves) > 0 && len(approvers) >= max(quorum, 1):
+		v := verdict(outcomeApproved, approves)
+		if quorum > 1 {
+			v.via = "quorum" // the span's approved_by under a quorum
+		}
+		return v
 	}
-	return threadDecision{}
+	return threadDecision{} // undecided, or short of its quorum: no names
 }
 
 // threadDecisionPages bounds the session-event pages one decisions read
@@ -504,6 +560,7 @@ func (s *Server) threadDecisions(ctx context.Context, parked, resume obsdb.RunRo
 	}
 	q := obsdb.SessionEventQuery{SessionID: sid, RunIDs: runs, Limit: obsdb.MaxSessionEventLimit}
 	byCall := map[string][]rawDecision{}
+	quorum := map[string]int{}
 	var order []string
 	note := ""
 	for range threadDecisionPages {
@@ -513,7 +570,20 @@ func (s *Server) threadDecisions(ctx context.Context, parked, resume obsdb.RunRo
 			break
 		}
 		for _, e := range page.Events {
-			if obsdb.SessionEventKind(e) != "approval.decision" {
+			kind := obsdb.SessionEventKind(e)
+			if kind == "approval.request" {
+				// The quorum the call's approvals must meet (thread names it
+				// on the request when it is > 1).
+				var req struct {
+					CallID string `json:"call_id"`
+					Quorum int    `json:"quorum"`
+				}
+				if json.Unmarshal(e.Body, &req) == nil && req.CallID != "" {
+					quorum[req.CallID] = req.Quorum
+				}
+				continue
+			}
+			if kind != "approval.decision" {
 				continue
 			}
 			var body struct {
@@ -551,7 +621,7 @@ func (s *Server) threadDecisions(ctx context.Context, parked, resume obsdb.RunRo
 		}
 	}
 	for _, id := range order {
-		out[id] = foldDecisions(byCall[id])
+		out[id] = foldDecisions(byCall[id], quorum[id])
 	}
 	return out, note
 }

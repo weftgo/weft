@@ -75,6 +75,19 @@ func TestRunDecisions(t *testing.T) {
 		t.Errorf("t2 resumes = %s, want t1's deny", s)
 	}
 
+	// U13.2-fix2 1: a resume decided by two actors (thread comma-joins
+	// them) names no one call's decider: a read token gets the hidden
+	// badge, not a bare "denied".
+	two := ingestEdited(t, "thread_approvals", true, func(kv map[string]any) bool {
+		if kv["key"] == "weft.approval.actor" {
+			kv["value"] = map[string]any{"stringValue": "agent-7,agent-8"}
+		}
+		return true
+	})
+	out["read_token_two_actors_t1_decided"], _ = runBlocks(t, two, sess+"-t1", read)
+	if s := string(out["read_token_two_actors_t1_decided"]); !strings.Contains(s, `"who_hidden":true`) || strings.Contains(s, `"who"`) {
+		t.Errorf("two actors, read token: %s, want who_hidden and no who", s)
+	}
 	off := decisionsServer(t, "thread_content_off")
 	out["content_off_t1_decided"], _ = runBlocks(t, off, sess+"-t1", "srv")
 	if s := string(out["content_off_t1_decided"]); !strings.Contains(s, `"reason_badge":"not_recorded"`) || strings.Contains(s, `"who"`) {

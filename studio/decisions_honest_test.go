@@ -157,31 +157,159 @@ func TestDecisionsWithoutResumeCalls(t *testing.T) {
 	}
 }
 
-// TestFoldDecisions (U13.2-fix 4b): a call's records fold as thread
-// folds them — a quorum's approvers all named, a split verdict a deny
-// via quorum with no reason of its own (the transcript's DENIED text is
-// the model-visible one), the session's own expiry beside an approval
-// its own deny, a resolve resolved.
+// TestFoldDecisions (U13.2-fix 4b, U13.2-fix2 4): a call's records fold
+// as thread folds them — a met quorum's approvers all named, a call
+// short of its quorum undecided and unnamed, a split verdict a deny via
+// quorum with no reason of its own (the transcript's DENIED text is the
+// model-visible one) naming its denier as the decider and the approvals
+// as approvers, the session's own expiry beside an approval its own
+// deny, a resolve resolved.
 func TestFoldDecisions(t *testing.T) {
 	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	a := func(who, key string) rawDecision {
 		return rawDecision{outcome: "approve", via: "signed", who: who, keyID: key, at: &at}
 	}
 	for _, tc := range []struct {
-		name string
-		ds   []rawDecision
-		want string
+		name   string
+		ds     []rawDecision
+		quorum int
+		want   string
 	}{
-		{"quorum", []rawDecision{a("alice", "k_alice"), a("bob", "k_bob")}, "approved|signed|alice + bob|k_alice + k_bob|"},
-		{"split", []rawDecision{a("alice", "k_alice"), {outcome: "deny", via: "user", who: "bob", reason: "no"}}, "denied|quorum|alice + bob|k_alice|"},
-		{"expiry beside an approval", []rawDecision{a("alice", ""), {outcome: "deny", via: "expiry", reason: "expired: no decision before 09:00"}}, "denied|expiry|||expired: no decision before 09:00"},
-		{"resolve", []rawDecision{{outcome: "resolve_error", via: "user", who: "agent-7"}}, "resolved|user|agent-7||"},
-		{"undecided", nil, "||||"},
+		{"two approvals, no quorum", []rawDecision{a("alice", "k_alice"), a("bob", "k_bob")}, 0, "approved|signed|alice + bob|k_alice + k_bob||"},
+		// U13.2-fix2 4a: a quorum met names every approver; one short of
+		// it names nobody (the call is core's no_decision).
+		{"quorum met", []rawDecision{a("alice", "k_alice"), a("bob", "k_bob")}, 2, "approved|quorum|alice + bob|k_alice + k_bob||"},
+		{"short of its quorum", []rawDecision{a("alice", "k_alice")}, 2, "|||||"},
+		{"one key twice is one approver", []rawDecision{a("alice", "k_alice"), a("alice2", "k_alice")}, 2, "|||||"},
+		// U13.2-fix2 4b: a split verdict's decider is its denier; the
+		// approvals it overruled are approvers, never deniers.
+		{"split", []rawDecision{a("alice", "k_alice"), {outcome: "deny", via: "user", who: "bob", reason: "no"}}, 2, "denied|quorum|bob||alice|"},
+		{"resolve beside an approval", []rawDecision{a("alice", ""), {outcome: "resolve", via: "user", who: "carol"}}, 0, "denied|quorum|||alice|"},
+		{"expiry beside an approval", []rawDecision{a("alice", ""), {outcome: "deny", via: "expiry", reason: "expired: no decision before 09:00"}}, 0, "denied|expiry||||expired: no decision before 09:00"},
+		{"resolve", []rawDecision{{outcome: "resolve_error", via: "user", who: "agent-7"}}, 0, "resolved|user|agent-7|||"},
+		{"undecided", nil, 0, "|||||"},
 	} {
-		v := foldDecisions(tc.ds)
-		got := strings.Join([]string{v.outcome, v.via, strings.Join(v.who, " + "), strings.Join(v.keys, " + "), v.reason}, "|")
+		v := foldDecisions(tc.ds, tc.quorum)
+		got := strings.Join([]string{v.outcome, v.via, strings.Join(v.who, " + "), strings.Join(v.keys, " + "), strings.Join(v.approvers, " + "), v.reason}, "|")
 		if got != tc.want {
 			t.Errorf("%s: fold = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// ingestWithoutChat ingests a fixture's spans alone with its chat spans
+// and weft.resume.calls left out: a resume no model call followed (it
+// parked again, or failed, before one), recorded with no transcript.
+func ingestWithoutChat(t *testing.T, fixture string) http.Handler {
+	t.Helper()
+	srv := New(Open(t.TempDir()+"/dec.db"), Token("srv"))
+	t.Cleanup(func() { _ = srv.Close() })
+	h := srv.Handler()
+	b, err := os.ReadFile("../obsdb/testdata/contract/" + fixture + "/traces.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		ResourceSpans []struct {
+			Resource   any `json:"resource"`
+			ScopeSpans []struct {
+				Scope any              `json:"scope"`
+				Spans []map[string]any `json:"spans"`
+			} `json:"scopeSpans"`
+		} `json:"resourceSpans"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for i := range doc.ResourceSpans {
+		for j := range doc.ResourceSpans[i].ScopeSpans {
+			ss := &doc.ResourceSpans[i].ScopeSpans[j]
+			var keep []map[string]any
+			for _, sp := range ss.Spans {
+				if name, _ := sp["name"].(string); strings.HasPrefix(name, "chat") {
+					continue
+				}
+				attrs, _ := sp["attributes"].([]any)
+				var kept []any
+				for _, a := range attrs {
+					if m, _ := a.(map[string]any); m["key"] != "weft.resume.calls" {
+						kept = append(kept, a)
+					}
+				}
+				sp["attributes"] = kept
+				keep = append(keep, sp)
+			}
+			ss.Spans = keep
+		}
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _, body := post(t, h, "/studio/v1/traces", "application/json", string(out)); code != http.StatusOK {
+		t.Fatalf("ingest %s: %d %s", fixture, code, body)
+	}
+	return h
+}
+
+// TestDecisionsNoModelCall (U13.2-fix2 3): a resume with no step-0 chat
+// span ran no model call, so every step-0 execute_tool span is a
+// decided call — listed approved (derived), never skipped into a
+// not_recorded hole.
+func TestDecisionsNoModelCall(t *testing.T) {
+	h := ingestWithoutChat(t, "resumed")
+	d := readDoc(t, firstOf(runBlocks(t, h, "a1100000000000000000000000000001", "srv")))
+	if d.Source != "spans" || callLines(d) != "call_1=approved derived" || d.Hole != "" {
+		t.Errorf("no model call = %+v, want call_1 approved from its span", d)
+	}
+}
+
+// TestDecisionsResolvedResult (U13.2-fix2 2): core emits no tool event
+// or span for a resolve, so a resolved call's result is served on the
+// decided call from the resume's pre-step result — under the content
+// policy: hidden to a read token, not_recorded with no transcript.
+func TestDecisionsResolvedResult(t *testing.T) {
+	res := decisionsServer(t, "resumed")
+	d := readDoc(t, firstOf(runBlocks(t, res, "a1100000000000000000000000000001", "srv")))
+	if c := d.Calls[1]; c.Outcome != outcomeResolved || c.Result != "noted by hand" || c.ResultBadge != "" {
+		t.Errorf("resumed call_2 = %+v, want resolved with the result noted by hand", c)
+	}
+	if c := d.Calls[0]; c.Result != "" || c.ResultBadge != "" {
+		t.Errorf("an approved call carries its result in the fold, not here: %+v", c)
+	}
+	const sess = "01K00000000000000000000001"
+	h := decisionsServer(t, "thread_approvals")
+	read, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_thread_approvals", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := readDoc(t, firstOf(runBlocks(t, h, sess+"-t7", "srv")))
+	hidden := readDoc(t, firstOf(runBlocks(t, h, sess+"-t7", read)))
+	if full.Calls[0].Result == "" || hidden.Calls[0].Result != "" || hidden.Calls[0].ResultBadge != "hidden" {
+		t.Errorf("t7's resolve: full %+v, read token %+v — want the result, then hidden", full.Calls[0], hidden.Calls[0])
+	}
+	spans := ingestEdited(t, "resumed", false, func(map[string]any) bool { return true })
+	d = readDoc(t, firstOf(runBlocks(t, spans, "a1100000000000000000000000000001", "srv")))
+	if c := d.Calls[1]; c.Outcome != outcomeResolved || c.Result != "" || c.ResultBadge != "not_recorded" {
+		t.Errorf("spans alone: call_2 = %+v, want resolved, result not_recorded", c)
+	}
+}
+
+// TestDecisionsUndecidedNamesNoOne (U13.2-fix2 4a): a call core left
+// undecided (weft.resume.calls no_decision: short of its quorum) takes
+// no via, who or key from thread's records beside it.
+func TestDecisionsUndecidedNamesNoOne(t *testing.T) {
+	const sess = "01K00000000000000000000001"
+	h := ingestEdited(t, "thread_approvals", true, func(kv map[string]any) bool {
+		if kv["key"] == "weft.resume.calls" {
+			if v, _ := kv["value"].(map[string]any); v["stringValue"] == "p1=resolved" {
+				kv["value"] = map[string]any{"stringValue": "p1=no_decision"}
+			}
+		}
+		return true
+	})
+	d := readDoc(t, firstOf(runBlocks(t, h, sess+"-t7", "srv")))
+	if c := d.Calls[0]; c.Outcome != outcomeNoDecision || c.Via != "" || c.Who != "" || c.KeyID != "" || c.WhoHidden {
+		t.Errorf("t7 undecided = %+v, want no_decision with no attribution", c)
 	}
 }

@@ -4,7 +4,8 @@
 // approved calls ran before the model's first call, and step 0 no
 // longer draws the ones this card lists (withoutDecided) — so an
 // approved or resolved row carries what the call left ("→ …",
-// decidedResult). The panel's turn view draws the same card
+// decidedResult: a resolve's from the server; unreadable, the row's
+// badge says so). The panel's turn view draws the same card
 // (parity.test.ts).
 import { Link } from "@tanstack/react-router"
 

@@ -244,8 +244,14 @@ export interface DecidedCall {
   grant_id?: string
   who?: string
   who_hidden?: boolean
+  /** A split verdict's overruled approvers (who is its denier). */
+  approved_by?: string
   reason?: string
   reason_badge?: string
+  /** A resolved call's result (no tool event carries it), else why
+   * not (result_badge hidden / not_recorded). */
+  result?: string
+  result_badge?: string
   at?: string
 }
 

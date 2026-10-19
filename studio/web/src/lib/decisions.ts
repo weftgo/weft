@@ -58,21 +58,24 @@ export const OUTCOME: Record<
 export const outcomeOf = (o: string) =>
   OUTCOME[o] ?? { icon: "·", word: o, tone: "result" as const }
 
-/** A denial's reason the reader cannot see: the badge (A3) with its
- * reason and fix, by the block's reason_badge ("" fix: none applies). */
+/** A denial's reason or a resolve's result the reader cannot see: the
+ * badge (A3) with its reason and fix, by the call's reason_badge or
+ * result_badge ("" fix: none applies). */
 export const REASON_HOLE: Record<string, { reason: string; fix: string }> = {
   hidden: {
-    reason: "a deny reason is content: a read-scoped token does not read it",
+    reason:
+      "a reason or result is content: a read-scoped token does not read it",
     fix: "",
   },
   not_recorded: {
-    reason: "the deny reason was not captured: content was off",
+    reason: "the reason or result was not captured: content was off",
     fix: "record with content on",
   },
 }
 
-/** Who decided, when only thread's content names it (no actor
- * metadata) and the reader may not read content: the hidden badge. */
+/** Who decided, when only thread's content names it (no one actor in
+ * metadata: none, several, or a split verdict's two sides) and the
+ * reader may not read content: the hidden badge. */
 export const WHO_HOLE = {
   reason: "who decided is content: a read-scoped token does not read it",
   fix: "",
@@ -87,22 +90,36 @@ export const CALLS_HOLE = {
 
 /** The decider a call names: thread's who, else the signing key, else
  * the resume's one actor (weft.approval.actor — several are the run's,
- * not this call's). "" when nothing names one. */
+ * not this call's; nor is it a split verdict's denier, or a decider the
+ * server hid). "" when nothing names one. */
 export function decider(c: DecidedCall, d: DecisionDoc): string {
-  return c.who || c.key_id || (d.actor && !d.actor.includes(",") ? d.actor : "")
+  return (
+    c.who ||
+    c.key_id ||
+    (d.actor && !d.actor.includes(",") && !c.who_hidden && !c.approved_by
+      ? d.actor
+      : "")
+  )
 }
 
 /** One decided call's line: "✋ denied · agent-7 · 'need a photo' → t2"
  * — the outcome, the decider, a denial's reason (quoted; absent when
  * hidden or not captured: the badge says that) and, given, the turn the
- * decision resumed in. */
+ * decision resumed in. A split verdict names both sides: "✋ denied by
+ * bob · approved by alice". */
 export function decisionLine(
   c: DecidedCall,
   d: DecisionDoc,
   to?: string
 ): string {
   const o = outcomeOf(c.outcome)
-  const parts = [`${o.icon} ${o.word}`, decider(c, d)]
+  const who = decider(c, d)
+  const parts = c.approved_by
+    ? [
+        `${o.icon} ${o.word}${who && ` by ${who}`}`,
+        `${OUTCOME.approved.word} by ${c.approved_by}`,
+      ]
+    : [`${o.icon} ${o.word}`, who]
   // An expired row says "expired" once: thread's reason opens with it.
   const why =
     c.outcome === "expired" ? c.reason?.replace(/^expired: /, "") : c.reason
@@ -153,16 +170,21 @@ export function decisionsNote(d: DecisionDoc, resume: string): string {
     .join(" · ")
 }
 
-/** What an approved or resolved call left (the fold's pre-step call's
- * result): the resumed card's "→ …" line under its row on both
- * surfaces — step 0 no longer draws the call. "" when none. */
+/** What an approved or resolved call left: the resumed card's "→ …"
+ * line under its row on both surfaces — step 0 no longer draws the
+ * call. An approval's result is the fold's pre-step call's; a resolve's
+ * the server's (core runs no handler for it: no tool event to fold),
+ * its result_badge the badge beside the row when it is not readable.
+ * "" when none. */
 export function decidedResult(
   c: DecidedCall,
   calls: { callId: string; result?: { content: string } }[] | undefined
 ): string {
-  return c.outcome === "approved" || c.outcome === "resolved"
-    ? (calls?.find((x) => x.callId === c.call_id)?.result?.content ?? "")
-    : ""
+  return c.outcome === "resolved"
+    ? (c.result ?? "")
+    : c.outcome === "approved"
+      ? (calls?.find((x) => x.callId === c.call_id)?.result?.content ?? "")
+      : ""
 }
 
 /** decidedCall finds one parked call's decision in a block. */

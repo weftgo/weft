@@ -5761,8 +5761,9 @@ export class WeftDevtools extends HTMLElement {
       "data-tone": outcomeOf(c.outcome).tone,
       "data-weft-decision": c.outcome,
     })
-    if (c.reason_badge)
-      box.append(" ", badge(c.reason_badge, REASON_HOLE[c.reason_badge]))
+    // A denial's reason or a resolve's result unreadable: one badge.
+    const hole = c.reason_badge || c.result_badge
+    if (hole) box.append(" ", badge(hole, REASON_HOLE[hole]))
     if (c.who_hidden) box.append(" ", badge("hidden", WHO_HOLE))
     if (to)
       box.append(

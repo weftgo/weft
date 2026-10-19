@@ -2097,27 +2097,37 @@ describe("decisions on both surfaces (U13.2)", () => {
   const serveDecided = (
     studioMeta: boolean,
     read?: boolean,
-    seed: "thread" | "support_desk" = "thread"
+    seed: "thread" | "support_desk" | "resolved" = "thread"
   ) => {
     const fake = serveAppTurn(new FakeStudio(), { resumed: true, studioMeta })
     // The fixture's parked call (call_deploy_1) stands for r1 (the
-    // support desk's first call, its approved one).
+    // support desk's first call, its approved one) — or, seed resolved,
+    // for the resumed fixture's resolved add_note (its second).
+    const nth = seed === "resolved" ? 1 : 0
     const call = (d: DecisionDoc) => ({
       ...d,
-      calls: d.calls.slice(0, 1).map((c) => ({ ...c, call_id: APP_CALL.id })),
+      calls: d.calls
+        .slice(nth, nth + 1)
+        .map((c) => ({ ...c, call_id: APP_CALL.id })),
     })
     const t1 = call(
       blocks[
         seed === "support_desk"
           ? "support_desk_decided"
-          : read
-            ? "read_token_t1_decided"
-            : "thread_t1_decided"
+          : seed === "resolved"
+            ? "resumed_decided"
+            : read
+              ? "read_token_t1_decided"
+              : "thread_t1_decided"
       ]
     )
     const t2 = call(
       blocks[
-        seed === "support_desk" ? "support_desk_resumes" : "thread_t2_resumes"
+        seed === "support_desk"
+          ? "support_desk_resumes"
+          : seed === "resolved"
+            ? "resumed_resumes"
+            : "thread_t2_resumes"
       ]
     )
     if (seed === "support_desk") {
@@ -2300,6 +2310,36 @@ describe("decisions on both surfaces (U13.2)", () => {
     expect([panelParked, studioParked]).toEqual([LINE, LINE])
     expect(panelCard).toEqual(["✓ approved", `→ ${REFUND}`])
     expect(studioCard).toEqual(panelCard)
+  })
+
+  // U13.2-fix2 2: a resolve runs no handler — no tool event, nothing in
+  // the fold — so the card's "→ …" is the server's result on the decided
+  // call: the resumed fixture's add_note, "noted by hand", on both.
+  it("the resumed fixture's resolved call: ↩ resolved · op_42 → noted by hand", async () => {
+    serveDecided(false, false, "resolved")
+    const el = await panelSeen(
+      APP_RESUMED,
+      "[data-weft-resumed-card] [data-weft-result]"
+    )
+    const card = $(el, "[data-weft-resumed-card]")!
+    const panel = [
+      card.querySelector("[data-weft-decision]")?.firstChild?.textContent,
+      card.querySelector("[data-weft-result]")?.textContent,
+    ]
+    await reset(el)
+    serveDecided(true, false, "resolved")
+    renderApp(`/runs/${APP_RESUMED}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-resumed-result]")).toBeTruthy()
+    )
+    const sc = document.querySelector("[data-resumed-card]")!
+    const studio = [
+      sc.querySelector("[data-decision-line]")?.textContent,
+      sc.querySelector("[data-resumed-result]")?.textContent,
+    ]
+    cleanup()
+    expect(panel).toEqual(["↩ resolved · op_42", "→ noted by hand"])
+    expect(studio).toEqual(panel)
   })
 
   it("the resume turn opens with the resumed-from card, before step 0, on both", async () => {

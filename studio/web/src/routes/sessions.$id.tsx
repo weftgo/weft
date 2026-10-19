@@ -10,7 +10,11 @@
 // the lines the turns continue, abandoned turns marked, forks on the
 // origin), a forked session's lineage, the turn-number line and the
 // page live — a run frame of this session refetches the session and
-// its timeline.
+// its timeline. U31.2: the header's verbs (copy the public id, export
+// the conversation as JSON lines, open in app, delete — UX-B-29) and
+// its storage line (UX-S3-21, components/studio/session-actions.tsx);
+// the table newest first like the panel, ?order=oldest the other
+// (UX-S3-16). Every turn is in the document (no cap to say).
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useCallback, useEffect, useState } from "react"
@@ -79,8 +83,10 @@ import { LineageLine } from "@/components/studio/lineage"
 import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { THREAD_LINK } from "@/lib/status-class"
-import { AWAITING_TITLE, DECIDE } from "@/lib/session-states"
+import { AWAITING_TITLE, DECIDE, TURN_ORDER } from "@/lib/session-states"
 import { SessionCounts } from "@/components/studio/session-state"
+import { SessionActions } from "@/components/studio/session-actions"
+import type { TurnOrder } from "@/lib/session-states"
 
 export const Route = createFileRoute("/sessions/$id")({
   validateSearch: sessionPageSearch,
@@ -92,6 +98,7 @@ function SessionPage() {
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
   const view: SessionPageView = search.view ?? "timeline"
+  const order: TurnOrder = search.order ?? "newest"
   const q = useQuery(sessionQuery(id))
   const meta = useQuery(metaQuery())
   const timelineCapable = !!meta.data?.capabilities.includes("timeline")
@@ -341,6 +348,8 @@ function SessionPage() {
         </span>
       </div>
 
+      <SessionActions doc={s} turns={turns} />
+
       {forksOut.length ? (
         <div
           className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs"
@@ -420,9 +429,28 @@ function SessionPage() {
           ) : null}
         </>
       ) : view === "table" ? (
-        <div className="overflow-x-auto rounded-lg border bg-background">
-          <SessionTurns turns={turns} experiments={experiments} />
-        </div>
+        <>
+          <OrderSwitch
+            order={order}
+            onChange={(o) =>
+              void navigate({
+                search: (prev) => ({
+                  ...prev,
+                  order: o === "oldest" ? "oldest" : undefined,
+                }),
+                replace: true,
+              })
+            }
+          />
+          <div className="overflow-x-auto rounded-lg border bg-background">
+            <SessionTurns
+              turns={turns}
+              experiments={experiments}
+              agent={s.agent}
+              order={order}
+            />
+          </div>
+        </>
       ) : view === "approvals" ? (
         <>
           {tlNote ? (
@@ -472,13 +500,6 @@ function SessionPage() {
           no turns of this session recorded
         </p>
       ) : null}
-      {s.turns > turns.length ? (
-        <p className="text-center font-mono text-[11px] text-faint">
-          showing {turns.length.toLocaleString()} of {s.turns.toLocaleString()}{" "}
-          turns — the session document is capped; the runs list filtered by this
-          session pages through all of them
-        </p>
-      ) : null}
       <p
         className="text-center font-mono text-[11px] text-faint"
         data-session-forks
@@ -508,6 +529,38 @@ function SessionPage() {
           </>
         )}
       </p>
+    </div>
+  )
+}
+
+/** OrderSwitch is the table's order (UX-S3-16): newest first — the
+ * devtools panel's order — or oldest first, one press apart. */
+function OrderSwitch({
+  order,
+  onChange,
+}: {
+  order: TurnOrder
+  onChange: (o: TurnOrder) => void
+}) {
+  return (
+    <div
+      className="flex items-center gap-1 text-xs"
+      role="group"
+      aria-label="turn order"
+      data-turn-order={order}
+    >
+      {(Object.keys(TURN_ORDER) as TurnOrder[]).map((o) => (
+        <button
+          key={o}
+          type="button"
+          aria-pressed={order === o}
+          title={TURN_ORDER[o].title}
+          onClick={() => onChange(o)}
+          className={`rounded-sm border px-2 py-0.5 font-mono ${order === o ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          {TURN_ORDER[o].word}
+        </button>
+      ))}
     </div>
   )
 }

@@ -236,7 +236,7 @@ describe("the session header", () => {
 })
 
 describe("the conversation page", () => {
-  it("a public id with no thread session: its runs oldest first, an experiment nested, live", async () => {
+  it("a public id with no thread session: its runs newest first (the panel's order, UX-S3-16), an experiment nested, live", async () => {
     const pub = "arena:cli-1:rw.support-desk"
     const t1 = row({
       id: "r1",
@@ -273,7 +273,7 @@ describe("the conversation page", () => {
     const turns = [...container.querySelectorAll("[data-turn]")].map((n) =>
       n.getAttribute("data-turn")
     )
-    expect(turns).toEqual(["r1", "r2"])
+    expect(turns).toEqual(["r2", "r1"])
     expect(
       studio.requests.some(
         (r) => r.path === "runs" && r.query.get("public_id") === pub

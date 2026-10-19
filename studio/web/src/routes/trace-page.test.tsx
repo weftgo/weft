@@ -545,12 +545,9 @@ describe("the trace page's a11y (H7)", () => {
     renderApp(`/traces/${TRACE}?sel=s0`)
     await waitFor(() => expect(chatBox()).toBeTruthy())
     const main = document.querySelector<HTMLElement>("main") ?? document.body
-    // aria-required-children is off as in run-long's axe runs: the
-    // waterfall's axis row (its expand / collapse buttons) has sat
-    // inside role="tree" since before H7 — a finding of its own.
-    const res = await axe.run(main, {
-      rules: { "aria-required-children": { enabled: false } },
-    })
+    // Every rule on: the waterfall's axis row sits outside its
+    // role="tree" (waterfall.tsx), so aria-required-children holds.
+    const res = await axe.run(main)
     expect(
       res.violations.map(
         (v) =>

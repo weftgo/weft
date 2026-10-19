@@ -248,6 +248,42 @@ describe("Studio's tinted surfaces and code window (U34-fix4)", () => {
       expect(req).toContain('"bg-status-bad/8 text-status-bad line-through"')
     })
 
+    it(`${theme}: status-int and ev-error text clear 4.5:1 on every wash it sits on (U31.2)`, () => {
+      const s = studioTokens(sel)
+      // The interrupted / cancelled word, error-as-data and the panel's
+      // warn are one mustard drawn as text: on the page, a card, the
+      // quiet panels and sidebar, a hovered row, the subagent block's
+      // secondary/40 (its child status word), the failure callout's
+      // status-bad/5, the thread's /5 and their own /10 chip.
+      for (const ink of ["status-int", "ev-error"]) {
+        const washes: Record<string, string> = {
+          sidebar: s.sidebar,
+          "sidebar-accent": s["sidebar-accent"],
+        }
+        for (const base of ["background", "card", "secondary"]) {
+          washes[base] = s[base]
+          washes[`secondary/40 over ${base}`] = over(s.secondary, s[base], 0.4)
+          for (const tint of ["status-bad", "thread"])
+            washes[`${tint}/5 over ${base}`] = over(s[tint], s[base], 0.05)
+          for (const tint of ["status-int", "ev-error"])
+            washes[`${tint}/10 over ${base}`] = over(s[tint], s[base], 0.1)
+        }
+        for (const [name, bg] of Object.entries(washes))
+          expect(
+            contrast(s[ink], bg),
+            `${theme} --${ink} on ${name}`
+          ).toBeGreaterThanOrEqual(4.5)
+      }
+      // The panel's warn is the same mustard, on its own surfaces.
+      const p = PALETTE[theme]
+      expect(p.warn).toBe(s["status-int"])
+      for (const bg of ["bg", "bg2", "bg3"])
+        expect(
+          contrast(p.warn, p[bg]),
+          `${theme} --weft-warn on --weft-${bg}`
+        ).toBeGreaterThanOrEqual(4.5)
+    })
+
     it(`${theme}: on the sidebar's hover wash (sidebar-accent) text is the item's ink`, () => {
       const s = studioTokens(sel)
       expect(

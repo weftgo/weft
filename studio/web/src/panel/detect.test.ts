@@ -249,13 +249,18 @@ describe("when the header rung is on (C5's clause)", () => {
     const routes = demoRoutes()
     routes["POST /run"] = () => scoped("pub_demo;run=r_1")
     fakeStudio(routes)
+    // A bound function's source reads "[native code]": the page's
+    // fetch looks the browser's own, as on a real page.
+    window.fetch = window.fetch.bind(window)
     const original = window.fetch
+    expect(isNativeFetch(original)).toBe(true)
     const a = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
     const afterA = window.fetch
     const b = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
-    expect(text(b, ".weft-detect")).toContain(
-      "detect: headers+markers (chained)"
-    ) // B chained to A's wrapper
+    // Deterministic: A's wrapper is seen through, so B says what A
+    // says — no page patch below either.
+    expect(text(a, ".weft-detect")).toBe(" · detect: headers+markers")
+    expect(text(b, ".weft-detect")).toBe(" · detect: headers+markers")
     a.remove() // A first: window.fetch is B's wrapper, A's is left in place, inert
     expect(window.fetch).not.toBe(afterA)
     const res = await window.fetch("/run", { method: "POST" })
@@ -266,6 +271,23 @@ describe("when the header rung is on (C5's clause)", () => {
     expect(window.fetch).toBe(afterA) // B put back what it found: A's inert wrapper…
     expect((await window.fetch("/run", { method: "POST" })).status).toBe(200) // …a pass-through to the original
     expect(original).not.toBe(afterA)
+  })
+
+  it("two panels over a page's own patch both say (chained), whichever installed first", async () => {
+    fakeStudio(demoRoutes())
+    const pageFetch = window.fetch
+    window.fetch = function (this: unknown, ...a: Parameters<typeof fetch>) {
+      return pageFetch.apply(this, a)
+    }
+    const a = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
+    const b = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
+    for (const el of [a, b])
+      expect(text(el, ".weft-detect")).toBe(
+        " · detect: headers+markers (chained)"
+      )
+    b.remove()
+    a.remove()
+    window.fetch = pageFetch
   })
 
   it("headerRungOn: the page must be on loopback too", () => {

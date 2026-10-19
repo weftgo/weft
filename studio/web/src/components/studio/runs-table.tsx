@@ -219,18 +219,23 @@ export function RunTitle({
   extra,
   lead,
   t = runTitle(run),
+  label,
 }: {
   run: RunRow
   extra?: string
   /** Words before the title inside the link (a session's "t3"). */
   lead?: string
   t?: Title
+  /** The link's accessible name when its text is not enough (a
+   * session turn's "turn 3: … (succeeded)", UX-B-40). */
+  label?: string
 }) {
   return (
     <>
       <Link
         {...runLink(run.id)}
         className="flex min-w-0 items-center gap-1.5 text-[13px] hover:text-thread-ink"
+        aria-label={label}
         data-run-link={run.id}
       >
         {lead ? (
@@ -339,7 +344,7 @@ export interface RunsTableProps {
 
 /** CostCell is a run's own cost and, when its subagents cost anything
  * (or could not be priced), their delegated figure under it. */
-function CostCell({ run }: { run: RunRow }) {
+export function CostCell({ run }: { run: RunRow }) {
   const del = delegatedView(run)
   const showDel = !del.known || (del.usd ?? 0) > 0
   return (

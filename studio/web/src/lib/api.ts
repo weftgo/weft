@@ -2006,16 +2006,38 @@ export async function fetchExport(
    * and otlp; studio/export.go). */
   tree = false
 ): Promise<{ blob: Blob; name: string }> {
-  const headers: Record<string, string> = {
-    Accept: format === "wefttest" ? "application/zip" : "*/*",
-  }
-  const res = await authorized(
-    new URL(
-      exportPath(runID, format) + (tree ? "&tree=1" : ""),
-      apiBase()
-    ).toString(),
-    { headers }
+  return fetchDownload(
+    exportPath(runID, format) + (tree ? "&tree=1" : ""),
+    format === "wefttest" ? "application/zip" : "*/*",
+    `${runID}.${format === "wefttest" ? "zip" : format}`
   )
+}
+
+/** GET /api/sessions/{id}/export?format=jsonl (UX-B-29,
+ * studio/session_export.go): the conversation as JSON lines — a session
+ * line, every turn's run export in turn order, the state log, the
+ * holes — saved as <session>.session.jsonl. */
+export function fetchSessionExport(
+  sessionID: string
+): Promise<{ blob: Blob; name: string }> {
+  return fetchDownload(
+    `sessions/${encodeURIComponent(sessionID)}/export?format=jsonl`,
+    "*/*",
+    `${sessionID}.session.jsonl`
+  )
+}
+
+/** fetchDownload GETs an API path with the bearer as a blob and its
+ * Content-Disposition's file name (fallback when none); a refusal is an
+ * ApiError carrying the server's words. */
+async function fetchDownload(
+  path: string,
+  accept: string,
+  fallback: string
+): Promise<{ blob: Blob; name: string }> {
+  const res = await authorized(new URL(path, apiBase()).toString(), {
+    headers: { Accept: accept },
+  })
   if (!res.ok) {
     let code = "network"
     let message = `${res.status} ${res.statusText}`
@@ -2032,10 +2054,7 @@ export async function fetchExport(
   }
   return {
     blob: await res.blob(),
-    name: dispositionName(
-      res.headers.get("Content-Disposition"),
-      `${runID}.${format === "wefttest" ? "zip" : format}`
-    ),
+    name: dispositionName(res.headers.get("Content-Disposition"), fallback),
   }
 }
 
@@ -2059,6 +2078,16 @@ export interface DeleteDoc {
  * its subagent children, from studio's database only. */
 export function deleteRun(runID: string) {
   return request<DeleteDoc>("DELETE", `runs/${encodeURIComponent(runID)}`)
+}
+
+/** DELETE /api/sessions/{id} (capability "delete", deleteRun's rule):
+ * every turn of the session from studio's database only — the app's
+ * thread store is untouched (UX-B-29). */
+export function deleteSession(sessionID: string) {
+  return request<DeleteDoc>(
+    "DELETE",
+    `sessions/${encodeURIComponent(sessionID)}`
+  )
 }
 
 /** PUT /api/agents/{name}/proposal's and DELETE's 200 (studio/proposals.go). */

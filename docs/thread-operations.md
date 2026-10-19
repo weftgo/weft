@@ -79,6 +79,13 @@ volume.
 
 There are two layers, and they answer different questions.
 
+Neither, nor the backend or its durability, is recorded: Studio's
+session page shows a `not_recorded` storage badge unless the app names
+them itself on every turn —
+`thread.WithRunMetadata(map[string]string{"storage": "jsonl · per-step durable"})`
+— which the page then shows as its storage line, a first clue when a
+write fails with `ErrLocked`.
+
 **The backend's lock: which `Storage` value, in which process, may
 write.** It is taken on a session's first write (`Create`, `Append`,
 or a Session's first write) and held until the session is released,

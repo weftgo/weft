@@ -41,6 +41,18 @@ export function absoluteTime(iso: string): string {
   return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())} ${zoneLabel(t.getTimezoneOffset())}`
 }
 
+/** "09:57:56.123" — the viewer's wall-clock time of day to the
+ * millisecond (ms=false: to the second), the session table's turn
+ * start (UX-B-19) and a parked call's request expiry (UX-B-41); the
+ * date and zone are absoluteTime's, on hover. */
+export function clockTime(iso: string, ms = true): string {
+  const t = new Date(Date.parse(iso))
+  if (Number.isNaN(t.getTime())) return "—"
+  const p = (n: number, w = 2) => String(n).padStart(w, "0")
+  const hms = `${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`
+  return ms ? `${hms}.${p(t.getMilliseconds(), 3)}` : hms
+}
+
 /** Run-level duration (finished - started), "12ms" / "1.2s" / "4m03s" / "2h05m". */
 export function duration(started: string, finished: string | null): string {
   const a = Date.parse(started)

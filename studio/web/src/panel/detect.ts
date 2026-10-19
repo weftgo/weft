@@ -20,7 +20,10 @@
 //   - never the panel's own Studio requests (the caller's ignore);
 //   - chained: the wrapper calls the fetch it found (a native one or
 //     another library's patch) with the page's own this and arguments,
-//     and returns what it returns once it settles;
+//     and returns what it returns once it settles; another panel's
+//     wrapper is seen through (chained is the answer it gave), so the
+//     footer's "(chained)" names the page's patch alone, whichever
+//     panel installed first;
 //   - restored: put back exactly as found on disconnect, when
 //     window.fetch is still the wrapper; another patcher that wrapped
 //     after it is left alone (the wrapper then passes through inert —
@@ -36,6 +39,9 @@
 // wrapped either (§13.3).
 import { parseScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
+
+/** The key a panel's wrapper carries its own chained answer under. */
+const CHAINED = Symbol.for("weft.chained")
 
 /** The response header the app sets (Go: scope.HeaderName). */
 export const SCOPE_HEADER = "Weft-Scope"
@@ -55,8 +61,8 @@ export interface HeaderRungOptions {
 }
 
 export interface HeaderRung {
-  /** The fetch found was not the browser's own: the wrapper chains to
-   * it all the same. */
+  /** The fetch found was not the browser's own, another panel's
+   * wrapper seen through: the wrapper chains to it all the same. */
   readonly chained: boolean
   /** restore puts back the function the wrapper replaced, when
    * window.fetch is still the wrapper, and reports whether it did;
@@ -129,23 +135,26 @@ export function installHeaderRung(opts: HeaderRungOptions): HeaderRung | null {
     return null
   }
   if (typeof prev !== "function") return null
-  const native = (opts.isNativeFetch ?? isNativeFetch)(prev)
+  // Another panel's wrapper is not the page's patch: chained is read
+  // through it, so two panels on one page say the same whichever
+  // installed first (a Symbol.for key: one across bundles).
+  const below = (prev as unknown as Record<symbol, boolean | undefined>)[
+    CHAINED
+  ]
+  const chained = below ?? !(opts.isNativeFetch ?? isNativeFetch)(prev)
   let live = true
 
   const read = (res: unknown, input: unknown) => {
-    if (!live || !res || typeof res !== "object") return
-    const headers = (res as { headers?: { get?: unknown } }).headers
-    if (!headers || typeof headers.get !== "function") return
-    const value = (headers as Headers).get(SCOPE_HEADER)
+    if (!live) return
+    // Called inside the wrapper's try: a value with no headers.get (an
+    // opaque stand-in, a primitive) throws here and is read as nothing.
+    const value = (res as Response).headers.get(SCOPE_HEADER)
     if (!value) return
     // The response's own URL (after redirects) — or, where a response
     // carries none (a constructed one), the URL that was asked for.
-    const at = (res as { url?: unknown }).url
+    // (A Response's url is a string, "" when constructed.)
     const page = opts.pageURL ? opts.pageURL() : location.href
-    const url = new URL(
-      typeof at === "string" && at ? at : requestURL(input),
-      page
-    )
+    const url = new URL((res as Response).url || requestURL(input), page)
     if (!readable(url.href, page)) return
     if (opts.ignore?.(url.href)) return
     const scope = parseScope(value)
@@ -184,6 +193,7 @@ export function installHeaderRung(opts: HeaderRungOptions): HeaderRung | null {
     }
     return null
   }
+  ;(wrapper as unknown as Record<symbol, boolean>)[CHAINED] = chained
   try {
     window.fetch = wrapper
     if (window.fetch !== wrapper) return giveUp()
@@ -191,7 +201,7 @@ export function installHeaderRung(opts: HeaderRungOptions): HeaderRung | null {
     return giveUp()
   }
   return {
-    chained: !native,
+    chained,
     restore() {
       live = false
       try {

@@ -4,10 +4,11 @@
 // exchanges, and the list's turn-state filters — the words and roles
 // of obsdb.SessionTurnFacts' fields. Studio only: the devtools panel
 // imports none of it (its turn chips are lib/turn-chips.ts's).
-import type { SessionRow, TurnOutcome } from "./api"
-import { plural } from "./format"
+import type { RunRow, SessionRow, TurnOutcome } from "./api"
+import { absoluteTime, plural, relativeTime, spanMs } from "./format"
 import type { Role } from "./palette"
 import { AWAITING, STATUS } from "./status"
+import type { Status } from "./status"
 import { END_WORDS } from "./timeline"
 
 /** One outcome's mark on the strip: a glyph, its word (the hover and
@@ -151,3 +152,129 @@ export function sinceOf(key: string | undefined, now = Date.now()) {
   const c = SESSION_SINCE.find((s) => s.key === key)
   return c ? new Date(now - c.ms).toISOString() : undefined
 }
+
+// ── The session table (U31.2) ───────────────────────────────────────
+
+/** The table's two orders (UX-S3-16): newest first, as the devtools
+ * panel's turn list ("turns, newest first"), with oldest first one
+ * click away (?order=oldest); the timeline is a time axis, oldest at
+ * its start. */
+export const TURN_ORDER = {
+  newest: {
+    word: "newest first",
+    title:
+      "turns newest first — the devtools panel's turn list reads the same order",
+  },
+  oldest: {
+    word: "oldest first",
+    title: "turns in the order they ran, the first turn at the top",
+  },
+} as const
+
+export type TurnOrder = keyof typeof TURN_ORDER
+
+/** The table's caption: what it lists, in which order. */
+export const turnsCaption = (o: TurnOrder) => `turns, ${TURN_ORDER[o].word}`
+
+/** A turn's start (UX-B-19): the time of day to the millisecond is the
+ * cell; this, its hover — the date, the zone and how long ago. */
+export const startedTitle = (iso: string, now?: number) =>
+  `${absoluteTime(iso)} · ${relativeTime(iso, now)}`
+
+/** turnGap is the wait before a turn (UX-B-19): from the end of the
+ * turn before it (its finish, else its last record) to this one's
+ * start — "+0.5s waited for a decision" after a turn that parked,
+ * "+12.0s after t2" otherwise, "started while t2 ran" when it began
+ * first (a steer, a queued send). null for the first turn or a time
+ * that does not parse. */
+export function turnGap(
+  prev: Pick<RunRow, "turn" | "finished" | "last_seen" | "pending"> | undefined,
+  r: Pick<RunRow, "started">
+): { text: string; title: string } | null {
+  if (!prev) return null
+  const end = Date.parse(prev.finished ?? prev.last_seen)
+  const start = Date.parse(r.started)
+  if (Number.isNaN(end) || Number.isNaN(start)) return null
+  const t = prev.turn ? `t${prev.turn}` : "the turn before"
+  if (start < end)
+    return {
+      text: `started while ${t} ran`,
+      title: `began ${spanMs(end - start)} before ${t} ended (a steer or a queued send)`,
+    }
+  const gap = spanMs(start - end)
+  return prev.pending > 0
+    ? {
+        text: `+${gap} waited for a decision`,
+        title: `${t} parked; this turn started ${gap} after it — the park → decision latency`,
+      }
+    : {
+        text: `+${gap} after ${t}`,
+        title: `this turn started ${gap} after ${t} ended`,
+      }
+}
+
+/** A turn link's accessible name (UX-B-40): "turn 3: Here is the photo
+ * of the cracked dripper (succeeded)", the status's detail after its
+ * word — never the 30-character run id. */
+export function turnLinkLabel(
+  r: { turn?: number; id: string },
+  title: string,
+  s: Pick<Status, "word" | "detail">
+): string {
+  const head = r.turn ? `turn ${r.turn}` : r.id
+  return `${head}: ${title} (${s.word}${s.detail ? ` · ${s.detail}` : ""})`
+}
+
+/** The chip on a turn whose agent is not the session's (UX-B-20): the
+ * agent column is gone, the header names the session's agent. */
+export const otherAgentTitle = (agent: string, session: string) =>
+  `this turn ran ${agent}, not the session's ${session || "agent"} (a handoff)`
+
+/** STORAGE (UX-S3-21): the session's storage backend, durability and
+ * writer lease live in the app's process — no record carries them.
+ * The header reads the one metadata key the fix names, and says
+ * not_recorded without it. */
+export const STORAGE = {
+  key: "storage",
+  label: "storage",
+  title: (v: string) =>
+    `the app's own words for the session's storage (its turns' "storage" metadata, thread.WithRunMetadata): ${v}`,
+  hole: {
+    hole: "not_recorded",
+    label: "storage · not recorded",
+    reason:
+      "the session's storage backend (jsonl · sqlite · memory), its durability (per step, thread.FsyncOnFlush, FsyncEveryAppend) and its writer lease are the app's process state: no record carries them",
+    fix: 'stamp them on every turn: thread.WithRunMetadata(map[string]string{"storage": "jsonl · per-step durable"}) — an ErrLocked is diagnosed in docs/thread-operations.md (the lock)',
+  },
+} as const
+
+/** storageOf is the newest turn's "storage" metadata, "" when none. */
+export function storageOf(turns: readonly { meta?: Record<string, string> }[]) {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const v = turns[i].meta?.[STORAGE.key]
+    if (v) return v
+  }
+  return ""
+}
+
+/** The session header's verbs (UX-B-29). */
+export const SESSION_ACTIONS = {
+  export: {
+    label: "export jsonl",
+    title:
+      "download the conversation as JSON lines: a session line, every turn's run export in turn order (at most 200), then the session's state log and its holes",
+  },
+  exported: (file: string) => `saved ${file}`,
+  exportRefused: (m: string) => `export refused: ${m}`,
+  copyPublic: "copy public id",
+  copyPublicTitle:
+    "copy the public id — the browser-safe handle the app and the devtools panel name this conversation by",
+  delete: "delete session…",
+  deleteTitle: (id: string) => `Delete session ${id}?`,
+  deleteBody: (turns: number) =>
+    `Its ${plural(turns, "turn")} — their spans, records, app logs, search index and the session's state log — are removed from studio's database only. The app's thread store (the jsonl file or sqlite database the session lives in) is untouched: the conversation itself goes on. This cannot be undone.`,
+  deleteAction: "delete session",
+  deleted: (id: string) => `deleted session ${id}`,
+  deleteRefused: (m: string) => `delete refused: ${m}`,
+  cancel: "cancel",
+} as const

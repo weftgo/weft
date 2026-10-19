@@ -7,8 +7,8 @@
 // before the resume's step 0. Studio's parked card and resumed card and
 // the panel's approvals block and turn view draw these words alone
 // (parity.test.ts holds both).
-import type { DecidedCall, DecisionDoc } from "./api"
-import { plural } from "./format"
+import type { DecidedCall, DecisionDoc, SessionMark } from "./api"
+import { absoluteTime, clockTime, plural, spanMs } from "./format"
 import type { TONE } from "./palette"
 
 /** The three decision verbs, as every button and toast says them. */
@@ -220,4 +220,49 @@ export function withoutDecided<
         : { ...s, toolCalls: s.toolCalls.filter(keep) }
     ),
   }
+}
+
+/** requestExpiries is each parked call's request expiry (UX-B-41):
+ * the approval.request records filed under runID whose expiry field
+ * (thread.RequestExpiry, RFC 3339) is set, by call id. Empty when the
+ * session's state log was not read or no request has one. */
+export function requestExpiries(
+  marks: readonly SessionMark[],
+  runID: string
+): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const m of marks) {
+    if (m.kind !== "approval.request" || m.run_id !== runID) continue
+    const call = m.fields.call_id
+    const exp = m.fields.expiry
+    if (typeof call === "string" && typeof exp === "string" && exp)
+      out.set(call, exp)
+  }
+  return out
+}
+
+/** expiryWords is a parked call's expiry beside its "awaiting a
+ * decision": "expires 09:57:56 (in 40.0s)" before it lapses, "⏱
+ * expired 09:57:56 — denied at the next touch (lazy expiry)" after —
+ * thread denies an expired request when the session is next touched
+ * (a Decide, a Send, a Resume), never on a timer. title: the absolute
+ * stamp and that rule. */
+export function expiryWords(
+  expiry: string,
+  now: number
+): { text: string; title: string; lapsed: boolean } {
+  const at = Date.parse(expiry)
+  const lapsed = !Number.isNaN(at) && at <= now
+  const title = `the request expires ${absoluteTime(expiry)} (thread.RequestExpiry): an expired request is denied the next time the session is touched — a decide, a send, a resume — never on a timer`
+  return lapsed
+    ? {
+        text: `⏱ expired ${clockTime(expiry, false)} — denied at the next touch (lazy expiry)`,
+        title,
+        lapsed,
+      }
+    : {
+        text: `expires ${clockTime(expiry, false)} (in ${spanMs(at - now)})`,
+        title,
+        lapsed,
+      }
 }

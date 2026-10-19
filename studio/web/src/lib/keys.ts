@@ -32,7 +32,10 @@ let chordUntil = 0
  * on r or a within CHORD_MS of it, "swallow" on any other key in that
  * window — every page's single-key handlers must not see a key that
  * belongs to the chord (the run page's r is its raw view) — and null
- * otherwise. A bare modifier neither ends nor starts it. */
+ * otherwise. A bare modifier neither ends nor starts it; a key typed
+ * into a box or held with ctrl/meta/alt disarms the chord and is
+ * left alone (null) — focus moved into a field, or ctrl-r, is not the
+ * chord's. */
 export function goChord(
   e: KeyboardEvent,
   now = Date.now()
@@ -40,6 +43,7 @@ export function goChord(
   if (MODIFIERS.has(e.key)) return null
   if (chordUntil > now) {
     chordUntil = 0
+    if (!isPlainShortcut(e)) return null
     if (e.key === "r") return "/runs"
     if (e.key === "a") return "/agents"
     return "swallow"

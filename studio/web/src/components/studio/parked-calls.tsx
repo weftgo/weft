@@ -24,7 +24,9 @@ import {
   decisionDetail,
   decisionLine,
   decisionsNote,
+  expiryWords,
   outcomeOf,
+  requestExpiries,
   REASON_HOLE,
   VERB,
   VERB_TITLE,
@@ -36,6 +38,7 @@ import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { useRuntimesNeeded } from "@/hooks/use-notices"
+import { useCapabilities } from "@/hooks/use-capabilities"
 import {
   ApiError,
   fetchCommand,
@@ -45,6 +48,7 @@ import {
   runtimesQuery,
   sessionQuery,
   studioToken,
+  timelineQuery,
 } from "@/lib/api"
 import type {
   CommandStatus,
@@ -436,6 +440,32 @@ function useAppTurn(doc: RunDoc) {
   }
 }
 
+/** useRequestExpiries reads a session turn's request expiries (UX-B-41)
+ * from its session's state log — the approval.request records' expiry
+ * (thread.RequestExpiry), never a guess — while its calls await a
+ * decision, and a clock that ticks each second while one has not
+ * lapsed. Empty off a session, without capability "timeline", or once
+ * decided. */
+function useRequestExpiries(doc: RunDoc) {
+  const { has } = useCapabilities()
+  const on = !!doc.session_id && has("timeline") && !doc.decided
+  const tl = useQuery({
+    ...timelineQuery(doc.session_id),
+    enabled: on,
+  })
+  const exp = on
+    ? requestExpiries(tl.data?.marks ?? [], doc.id)
+    : new Map<string, string>()
+  const [now, setNow] = useState(() => Date.now())
+  const ticking = [...exp.values()].some((e) => Date.parse(e) > now)
+  useEffect(() => {
+    if (!ticking) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [ticking])
+  return { exp, now }
+}
+
 export function ParkedCalls({
   doc,
   pending,
@@ -459,6 +489,7 @@ export function ParkedCalls({
     facts,
   } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
+  const expiry = useRequestExpiries(doc)
   // A 403 is live until a runtimes read started after it has applied
   // and the gate says decide — the panel's rule, strict: a failed or an
   // in-flight read keeps it.
@@ -530,6 +561,9 @@ export function ParkedCalls({
                     ? "decided"
                     : (words?.get(p.id)?.word ?? AWAITING)}
                 </span>
+                {shown !== "resumed" && expiry.exp.get(p.id) ? (
+                  <RequestExpiry at={expiry.exp.get(p.id)!} now={expiry.now} />
+                ) : null}
               </>
             )}
             {shown === "experiment" ||
@@ -689,5 +723,19 @@ export function AppSteer({ doc }: { doc: RunDoc }) {
       </button>
       <VerbLine v={verbs.steer} runID={doc.id} verb="steer" />
     </form>
+  )
+}
+
+/** A parked call's request expiry (UX-B-41): lib/decisions.ts's words. */
+function RequestExpiry({ at, now }: { at: string; now: number }) {
+  const w = expiryWords(at, now)
+  return (
+    <span
+      className={w.lapsed ? "text-status-int" : "text-faint"}
+      title={w.title}
+      data-request-expiry={w.lapsed ? "lapsed" : "open"}
+    >
+      {` · ${w.text}`}
+    </span>
   )
 }

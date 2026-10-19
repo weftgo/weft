@@ -2113,7 +2113,8 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 // serveSessionRoutes dispatches /api/sessions/{id}: the thread's turns
 // in order (obsdb's SessionDetail); /api/sessions/{id}/public_id is the
 // reverse of api/public (serveSessionPublicID); /timeline and /entries
-// are the session's state log (timeline.go, U12.2). Session ids carry no
+// are the session's state log (timeline.go, U12.2); /export the whole
+// conversation as JSON lines (session_export.go). Session ids carry no
 // slash, so the sub-route shadows none.
 func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
@@ -2124,6 +2125,7 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	for ext, serve := range map[string]func(http.ResponseWriter, *http.Request, string){
 		"/timeline": s.serveSessionTimeline,
 		"/entries":  s.serveSessionEntries,
+		"/export":   s.serveSessionExport, // UX-B-29, session_export.go
 	} {
 		if sid, ok := strings.CutSuffix(id, ext); ok && sid != "" && !strings.Contains(sid, "/") {
 			serve(w, r, sid)

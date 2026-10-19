@@ -51,4 +51,20 @@ describe("goChord (P8-pre-web #4)", () => {
     expect(at("r", 1001)).toBeNull()
     expect(at("g", 1000, { ctrlKey: true })).toBeNull()
   })
+  it("the armed chord disarms on a typing target or a modifier, which keep their key", () => {
+    expect(at("g", 1000)).toBe("start")
+    // Focus moved into a field: the r is typed, not a destination.
+    expect(
+      goChord(key({ key: "r" }, document.createElement("textarea")), 1100)
+    ).toBeNull()
+    // ...and the chord is over.
+    expect(at("r", 1200)).toBeNull()
+    expect(at("g", 2000)).toBe("start")
+    // ctrl-r reloads: neither the chord's destination nor swallowed.
+    expect(at("r", 2100, { ctrlKey: true })).toBeNull()
+    expect(at("a", 2200)).toBeNull()
+    expect(at("g", 3000)).toBe("start")
+    expect(at("k", 3100, { metaKey: true })).toBeNull()
+    expect(at("r", 3200)).toBeNull()
+  })
 })

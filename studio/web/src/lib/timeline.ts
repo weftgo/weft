@@ -39,6 +39,8 @@ export type SessionPageView = SessionView | "approvals"
 /** The session page's search: lib/links.ts's, the approvals view too. */
 export interface SessionPageSearch extends Omit<SessionSearch, "view"> {
   view?: Exclude<SessionPageView, "timeline">
+  /** The table's order (UX-S3-16): newest first unless "oldest". */
+  order?: "oldest"
 }
 
 /** sessionPageSearch is the session page's validateSearch. */
@@ -47,6 +49,7 @@ export function sessionPageSearch(
 ): SessionPageSearch {
   const out: SessionPageSearch = sessionSearch(search)
   if (search.view === "approvals") out.view = "approvals"
+  if (search.order === "oldest") out.order = "oldest"
   return out
 }
 

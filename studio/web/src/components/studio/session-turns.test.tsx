@@ -35,7 +35,11 @@ describe("SessionTurns", () => {
       fork("pg_two", second, 1),
     ])
     const { container } = await renderWithRouter(
-      <SessionTurns turns={session.runs} experiments={experiments} />
+      <SessionTurns
+        turns={session.runs}
+        experiments={experiments}
+        order="oldest"
+      />
     )
     const rows = [...container.querySelectorAll("tbody tr")].map(
       (tr) =>
@@ -82,7 +86,7 @@ describe("SessionTurns", () => {
       },
     ]
     const { container } = await renderWithRouter(
-      <SessionTurns turns={turns} experiments={new Map()} />
+      <SessionTurns turns={turns} experiments={new Map()} order="oldest" />
     )
     const heads = [...container.querySelectorAll("[data-run-link]")].map(
       (a) => a.textContent

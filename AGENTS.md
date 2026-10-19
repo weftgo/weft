@@ -315,6 +315,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    ?view=approvals every decision (call, tool, outcome, who / via / key, grant, parked → resumed turn, refused signatures) and grant
 //    //    (rule, scope, uses n of max with their calls, revoked / expired); the forks read in one obsdb.SessionQuery.IDs query, both backends) and sessions/{id}/entries?offset=&limit=
 //    //    (the same marks paged, ≤ 1,000, next_offset; sessions/{id}'s scope, 501 without the capability),
+//    //    sessions/{id}/export?format=jsonl (UX-B-29: the conversation as JSON lines — a session line, every turn's
+//    //    run jsonl export in turn order (≤ 200), the state log's session_mark lines (≤ 2,000), session_hole lines;
+//    //    sessions/{id}'s scope; the session page's export / copy public id / open in app / delete verbs),
 //    //    sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, DELETE runs/{id} and DELETE
 //    //    sessions/{id} (capability "delete": a run with its subagent children, or a session's runs —

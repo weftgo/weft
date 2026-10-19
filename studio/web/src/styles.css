@@ -72,13 +72,13 @@
   --ev-step: #191713;
   --ev-tool: #2f5bd3;
   --ev-result: #4d7a2a;
-  --ev-error: #9a6a06; /* error-as-data is mustard, not red */
+  --ev-error: #875c04; /* error-as-data is mustard, not red; text, so 4.5:1 on every wash it sits on (U31.2, palette.test.ts) */
   --ev-reasoning: #6e6759;
   --status-ok: #1f7a45;
   --status-bad: #b42318;
   --status-run: #ef4d21; /* the thread, darkened to clear 3:1 on paper */
   --status-run-ink: #d13c10; /* the running word: 4.5:1 on paper (U1-fix) */
-  --status-int: #9a6a06;
+  --status-int: #875c04; /* the interrupted / warn word: 4.5:1 on every wash, the panel's warn (U31.2) */
   --status-parked: #8a3fb0; /* a run parked on an approval (U1) */
 }
 

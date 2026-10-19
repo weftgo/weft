@@ -27,7 +27,7 @@ export const PALETTE: Record<Theme, Record<string, string>> = {
     line: "#e7e3d9",
     accent: "#d13c10",
     "on-accent": "#fbfaf7",
-    warn: "#9a6a06",
+    warn: "#875c04",
     err: "#b42318",
     info: "#2f5bd3",
     ok: "#1f7a45",

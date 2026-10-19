@@ -2608,8 +2608,14 @@ panel token: its detail would be refused. A row carries no span
 attribute, so the read scope has nothing to redact; a trace whose
 earlier span arrives between page reads can be listed again on a later
 page (never skipped); clients dedupe by `trace_id`. `before_id` without
-`before` is ignored), `traces/{trace_id}` (any trace), `sessions`,
-`sessions/{id}` (turns in order), `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
+`before` is ignored), `traces/{trace_id}` (any trace), `sessions`
+(`tag.<k>=<v>`: the sessions one of whose own turns carries the pair,
+U12.2), `sessions/{id}` (turns in order), `sessions/{id}/timeline` and
+`sessions/{id}/entries` (U12.2, capability `timeline`: the turns beside
+the session's state log — thread records and compaction markers from
+the `session_events` index, on lanes, with their holes; a read token
+gets `content_hidden` instead of a mark's content; docs/record-contract.md
+§6), `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
 public_id}`, the public id `thread.PublicID` stamped on the session's
 turns — MAX(`weft.public_id`) over its top-level turns: one value per
 thread session; a session whose turns carry several answers the

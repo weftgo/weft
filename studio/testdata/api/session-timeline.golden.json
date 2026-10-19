@@ -1,0 +1,365 @@
+{
+  "session_id": "s_acme",
+  "public_id": "pub_acme",
+  "agent": "acme-support",
+  "status": "succeeded",
+  "turns": [
+    {
+      "run_id": "s_acme-t1",
+      "turn": 1,
+      "agent": "acme-support",
+      "status": "succeeded",
+      "started": "2020-01-01T09:00:10.123Z",
+      "finished": "2020-01-01T09:00:12.123Z",
+      "last_seen": "2020-01-01T09:00:12.123Z",
+      "steps": 1,
+      "prompt_preview": "Order A-1002 arrived cracked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 3
+      },
+      "marks": 2
+    },
+    {
+      "run_id": "s_acme-t2",
+      "turn": 2,
+      "agent": "acme-support",
+      "status": "succeeded",
+      "started": "2020-01-01T09:00:20.123Z",
+      "finished": "2020-01-01T09:00:22.123Z",
+      "last_seen": "2020-01-01T09:00:22.123Z",
+      "steps": 1,
+      "prompt_preview": "Here is the photo",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 3
+      },
+      "marks": 1
+    },
+    {
+      "run_id": "s_acme-t3",
+      "turn": 3,
+      "agent": "acme-support",
+      "status": "succeeded",
+      "started": "2020-01-01T09:00:30.123Z",
+      "finished": "2020-01-01T09:00:32.123Z",
+      "last_seen": "2020-01-01T09:00:32.123Z",
+      "steps": 1,
+      "prompt_preview": "resume",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 3
+      },
+      "marks": 2
+    },
+    {
+      "run_id": "s_acme-t4",
+      "turn": 4,
+      "agent": "acme-support",
+      "status": "succeeded",
+      "started": "2020-01-01T09:00:40.123Z",
+      "finished": "2020-01-01T09:00:42.123Z",
+      "last_seen": "2020-01-01T09:00:42.123Z",
+      "steps": 1,
+      "prompt_preview": "AUTUMN30 coupon",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 3
+      },
+      "marks": 1
+    },
+    {
+      "run_id": "s_acme-t5",
+      "turn": 5,
+      "agent": "acme-support",
+      "status": "succeeded",
+      "started": "2020-01-01T09:00:50.123Z",
+      "finished": "2020-01-01T09:00:52.123Z",
+      "last_seen": "2020-01-01T09:00:53.123Z",
+      "steps": 1,
+      "prompt_preview": "email me a confirmation",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 3
+      },
+      "marks": 3
+    },
+    {
+      "run_id": "s_acme-t6",
+      "turn": 6,
+      "agent": "acme-support",
+      "status": "succeeded",
+      "started": "2020-01-01T09:01:00.123Z",
+      "finished": "2020-01-01T09:01:02.123Z",
+      "last_seen": "2020-01-01T09:01:02.123Z",
+      "steps": 1,
+      "prompt_preview": "summarise this case",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 3
+      },
+      "marks": 1
+    }
+  ],
+  "marks": [
+    {
+      "at": "2020-01-01T09:00:11.123Z",
+      "fact_at": "2020-01-01T09:00:11.123Z",
+      "record": "thread",
+      "kind": "approval.request",
+      "event": "weft.thread.approval.request",
+      "lane": "approvals",
+      "run_id": "s_acme-t1",
+      "turn": 1,
+      "entry": "e5",
+      "content_mark": "none",
+      "fields": {
+        "args_sha256": "6dfb",
+        "call_id": "r1",
+        "tool": "issue_refund"
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:12.123Z",
+      "fact_at": "2020-01-01T09:00:12.123Z",
+      "record": "thread",
+      "kind": "approval.decision",
+      "event": "weft.thread.approval.decision",
+      "lane": "approvals",
+      "run_id": "s_acme-t1",
+      "turn": 1,
+      "entry": "e7",
+      "content_mark": "full",
+      "fields": {
+        "call_id": "r1",
+        "outcome": "deny",
+        "request_entry": "e5",
+        "via": "user"
+      },
+      "content": {
+        "reason": "need a photo of the damage",
+        "who": "agent-7"
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:21.123Z",
+      "fact_at": "2020-01-01T09:00:21.123Z",
+      "record": "thread",
+      "kind": "receipt",
+      "event": "weft.thread.receipt",
+      "lane": "steer_queue",
+      "run_id": "s_acme-t2",
+      "turn": 2,
+      "entry": "e9",
+      "content_mark": "stripped",
+      "fields": {
+        "input": "steer",
+        "receipt_id": "e9",
+        "state": "delivered"
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:31.123Z",
+      "fact_at": "2020-01-01T09:00:31.123Z",
+      "record": "thread",
+      "kind": "approval.request",
+      "event": "weft.thread.approval.request",
+      "lane": "approvals",
+      "run_id": "s_acme-t3",
+      "turn": 3,
+      "entry": "e16",
+      "content_mark": "none",
+      "fields": {
+        "args_sha256": "6dfb",
+        "call_id": "r2",
+        "tool": "issue_refund"
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:32.123Z",
+      "fact_at": "2020-01-01T09:00:32.123Z",
+      "record": "thread",
+      "kind": "approval.decision",
+      "event": "weft.thread.approval.decision",
+      "lane": "approvals",
+      "run_id": "s_acme-t3",
+      "turn": 3,
+      "entry": "e19",
+      "content_mark": "full",
+      "fields": {
+        "call_id": "r2",
+        "outcome": "approve",
+        "request_entry": "e16",
+        "via": "user"
+      },
+      "content": {
+        "who": "agent-7"
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:41.123Z",
+      "record": "compaction",
+      "kind": "compaction",
+      "event": "weft.compaction",
+      "lane": "compaction",
+      "run_id": "s_acme-t4",
+      "turn": 4,
+      "entry": "e24",
+      "content_mark": "none",
+      "fields": {
+        "entries": 1,
+        "hash": "sha256:acme",
+        "messages_after": 2,
+        "messages_before": 9,
+        "reason": "threshold",
+        "replaced": 8,
+        "scope": "session",
+        "tokens_after": 300,
+        "tokens_before": 900
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:51.123Z",
+      "fact_at": "2020-01-01T09:00:51.123Z",
+      "record": "thread",
+      "kind": "approval.request",
+      "event": "weft.thread.approval.request",
+      "lane": "approvals",
+      "run_id": "s_acme-t5",
+      "turn": 5,
+      "entry": "e29",
+      "content_mark": "none",
+      "fields": {
+        "args_sha256": "9a1c",
+        "call_id": "e1",
+        "tool": "send_email"
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:52.123Z",
+      "fact_at": "2020-01-01T09:00:52.123Z",
+      "record": "thread",
+      "kind": "approval.decision",
+      "event": "weft.thread.approval.decision",
+      "lane": "approvals",
+      "run_id": "s_acme-t5",
+      "turn": 5,
+      "entry": "e31",
+      "content_mark": "full",
+      "fields": {
+        "always": true,
+        "call_id": "e1",
+        "outcome": "approve",
+        "request_entry": "e29",
+        "via": "user"
+      },
+      "content": {
+        "who": "agent-7"
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:53.123Z",
+      "fact_at": "2020-01-01T09:00:53.123Z",
+      "record": "thread",
+      "kind": "grant.mint",
+      "event": "weft.thread.grant.mint",
+      "lane": "grants",
+      "run_id": "s_acme-t5",
+      "turn": 5,
+      "entry": "e32",
+      "content_mark": "none",
+      "fields": {
+        "args": 1,
+        "call_id": "e1",
+        "grant_id": "e32",
+        "scope": "session",
+        "tool": "send_email",
+        "via": "always"
+      }
+    },
+    {
+      "at": "2020-01-01T09:01:02.123Z",
+      "fact_at": "2020-01-01T09:01:02.123Z",
+      "record": "thread",
+      "kind": "label",
+      "event": "weft.thread.label",
+      "lane": "branch_fork",
+      "run_id": "s_acme-t6",
+      "turn": 6,
+      "entry": "e38",
+      "content_mark": "none",
+      "fields": {
+        "name": "case-closed",
+        "target": "e37"
+      }
+    },
+    {
+      "at": "2020-01-01T09:01:03.123Z",
+      "fact_at": "2020-01-01T09:01:03.123Z",
+      "record": "thread",
+      "kind": "pin",
+      "event": "weft.thread.pin",
+      "lane": "compaction",
+      "run_id": null,
+      "turn": null,
+      "entry": "e39",
+      "content_mark": "none",
+      "fields": {
+        "target": "e37"
+      }
+    },
+    {
+      "at": "2020-01-01T09:01:10.123Z",
+      "fact_at": "2020-01-01T09:01:10.123Z",
+      "record": "thread",
+      "kind": "grant.revoke",
+      "event": "weft.thread.grant.revoke",
+      "lane": "grants",
+      "run_id": null,
+      "turn": null,
+      "entry": "e40",
+      "content_mark": "none",
+      "fields": {
+        "grant_id": "e32",
+        "tool": "send_email",
+        "uses": 1
+      }
+    }
+  ],
+  "lanes": [
+    {
+      "lane": "approvals",
+      "marks": 6
+    },
+    {
+      "lane": "grants",
+      "marks": 2
+    },
+    {
+      "lane": "compaction",
+      "marks": 2
+    },
+    {
+      "lane": "steer_queue",
+      "marks": 1
+    },
+    {
+      "lane": "branch_fork",
+      "marks": 1
+    },
+    {
+      "lane": "pool",
+      "marks": 0
+    }
+  ],
+  "marks_total": 12,
+  "holes": [
+    {
+      "hole": "stripped",
+      "reason": "content not captured by this app: the destination stripped it (weft.content = stripped) or the agent captured none (weft.Content(false), weft.content = none) — prompts, catalogs, messages, tool arguments and results were dropped before storage",
+      "fix": "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
+      "count": 1
+    }
+  ]
+}
+

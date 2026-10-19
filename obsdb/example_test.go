@@ -279,3 +279,40 @@ func ExampleCommandStore() {
 	// cmd_1 accepted run_1 accepted at 1s
 	// run_1 → rt_1 parks on [issue_refund]
 }
+
+// A SessionEventReader reads a session's state log — thread's records
+// and its compaction markers — in record-time order from the
+// session_events index, a record filed under no run (held at Close)
+// among them: the session timeline's one read.
+func ExampleSessionEventReader() {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	t0 := time.Unix(0, 1790845923120000000).UTC()
+	fact := func(run, kind, body string, at time.Duration) obsdb.Record {
+		return obsdb.Record{Time: t0.Add(at), EventName: "weft.thread." + kind, Body: body, Attrs: map[string]any{
+			"weft.record": obsdb.RecordThread, "weft.run.id": run, "weft.session.id": "s_1", "weft.content": "none"}}
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{
+		fact("s_1-t1", "approval.request", `{"kind":"approval.request","session":"s_1","entry":"e3","call_id":"c1","tool":"refund"}`, 0),
+		fact("s_1-t1", "approval.decision", `{"kind":"approval.decision","session":"s_1","entry":"e4","call_id":"c1","outcome":"deny","via":"user"}`, time.Second),
+		fact("", "grant.revoke", `{"kind":"grant.revoke","session":"s_1","entry":"e9","grant_id":"g1"}`, 2*time.Second),
+	}}); err != nil {
+		log.Fatal(err)
+	}
+	page, err := db.(obsdb.SessionEventReader).SessionEvents(context.Background(), obsdb.SessionEventQuery{SessionID: "s_1"})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, e := range page.Events {
+		fmt.Printf("%q %s\n", e.RunID, obsdb.SessionEventKind(e))
+	}
+	fmt.Println(page.Total)
+	// Output:
+	// "s_1-t1" approval.request
+	// "s_1-t1" approval.decision
+	// "" grant.revoke
+	// 3
+}

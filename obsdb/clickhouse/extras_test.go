@@ -90,6 +90,7 @@ func TestTTLOptionModifiesTables(t *testing.T) {
 	for _, c := range []struct{ table, want string }{
 		{"otel_logs", "toIntervalSecond(3600)"},
 		{"weft_records", "toIntervalSecond(3600)"},
+		{"weft_session_events", "toIntervalSecond(3600)"},
 		{"otel_traces", "toIntervalSecond(172800)"},
 		{"weft_runs", "toIntervalSecond(172800)"},
 	} {

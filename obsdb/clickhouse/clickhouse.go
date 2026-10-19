@@ -13,7 +13,8 @@ import (
 )
 
 // DefaultContentTTL and DefaultMetaTTL are S3.6's retention defaults:
-// content-bearing rows (otel_logs, weft_records, weft_deltas) 30 days,
+// content-bearing rows (otel_logs, weft_records, weft_deltas,
+// weft_session_events) 30 days,
 // spans and runs 90 days.
 const (
 	DefaultContentTTL = 30 * 24 * time.Hour
@@ -141,6 +142,7 @@ func (d *DB) applyTTLs(ctx context.Context) error {
 		fmt.Sprintf("ALTER TABLE otel_logs MODIFY TTL Timestamp + toIntervalSecond(%d)", contentSec),
 		fmt.Sprintf("ALTER TABLE weft_records MODIFY TTL Time + toIntervalSecond(%d)", contentSec),
 		fmt.Sprintf("ALTER TABLE weft_deltas MODIFY TTL Time + toIntervalSecond(%d)", contentSec),
+		fmt.Sprintf("ALTER TABLE weft_session_events MODIFY TTL Time + toIntervalSecond(%d)", contentSec),
 		fmt.Sprintf("ALTER TABLE otel_traces MODIFY TTL Timestamp + toIntervalSecond(%d)", metaSec),
 		fmt.Sprintf("ALTER TABLE weft_runs MODIFY TTL LastSeen + toIntervalSecond(%d)", metaSec),
 	} {

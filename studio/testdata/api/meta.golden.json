@@ -24,6 +24,7 @@
     "search",
     "manifests",
     "spans_tree",
+    "timeline",
     "pricing",
     "delete",
     "proposals",

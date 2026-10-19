@@ -1,0 +1,442 @@
+package studio
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/obsdb"
+)
+
+// The session timeline (U12.2; UX-B-01, UX-B-02, UX-S3-01; A3, D6):
+// GET /api/sessions/{id}/timeline — the session's turns in order beside
+// its marks (thread's state-log records and compaction markers, in
+// record-time order, each placed on a lane) — and GET
+// /api/sessions/{id}/entries, the same records as a paged list. Both
+// read obsdb only: the turns from DB.Session, the marks from the
+// session_events index (obsdb.SessionEventReader). The marks are an
+// index of the session file, never evidence (ADR 0021 §5).
+//
+// Scope: a panel token reads its public id's session only (sessions/{id}'s
+// rule), its turns and the marks that carry its public id; a mark of
+// another public id is left out and counted (a hidden hole). Content: a
+// mark's content object (who decided, a reason, a steer's text, a
+// summary) rides only when the record carried it (content on) and the
+// identity reads content — every identity but a read-scoped panel
+// token, which gets content_hidden instead (readsThreadContent).
+
+// timelineMarkCap bounds the marks one timeline response reads; past it
+// a truncated hole (cause response_cap) points at /entries. A var so a
+// test can lower it.
+var timelineMarkCap = 2000
+
+// The lanes a mark sits on, in the order a timeline lists them
+// (UX-B-01's filters): approvals, grants, compaction, steer / queue,
+// branch / fork, pool; a kind this build does not know lands on other,
+// listed only when one does.
+const (
+	laneApprovals  = "approvals"
+	laneGrants     = "grants"
+	laneCompaction = "compaction"
+	laneSteerQueue = "steer_queue"
+	laneBranchFork = "branch_fork"
+	lanePool       = "pool"
+	laneOther      = "other"
+)
+
+var timelineLanes = []string{laneApprovals, laneGrants, laneCompaction, laneSteerQueue, laneBranchFork, lanePool}
+
+// laneOf is the lane of a mark's kind (obsdb.SessionEventKind):
+// approval.* approvals; grant.* grants; a compaction marker, uncompact
+// and pin compaction; a receipt, an interrupt and a rewind steer /
+// queue (the busy policies' outcomes); branch, fork and label branch /
+// fork (the tree's navigation); pool.* pool.
+func laneOf(kind string) string {
+	switch {
+	case strings.HasPrefix(kind, "approval."):
+		return laneApprovals
+	case strings.HasPrefix(kind, "grant."):
+		return laneGrants
+	case kind == obsdb.RecordCompaction, kind == "uncompact", kind == "pin":
+		return laneCompaction
+	case kind == "receipt", kind == "interrupt", kind == "rewind":
+		return laneSteerQueue
+	case kind == "branch", kind == "fork", kind == "label":
+		return laneBranchFork
+	case strings.HasPrefix(kind, "pool."):
+		return lanePool
+	}
+	return laneOther
+}
+
+// readsThreadContent says whether the identity may read a mark's
+// content object: everyone but a read-scoped panel token (readsPrompts'
+// rule) — the object names who decided (an actor id), deny reasons and
+// steer texts, which a page-embedded read token must not carry.
+func readsThreadContent(r *http.Request) bool { return readsPrompts(r) }
+
+// sessionEntry is one mark: a thread record or a compaction marker as
+// the timeline and the entries list draw it. At is the record's time
+// (the order); FactAt the body's at, the fact's time on the session's
+// clock (absent for a marker, which names none). RunID is the run it is
+// filed under, null for a session-level record (filed under no run: held
+// at Close); Turn that run's turn in this session, null when it is none
+// of its turns. Entry is the thread entry the fact names. ContentMark is
+// the record's weft.content (full, none, stripped). Fields is the body
+// without kind, session, at, entry and content; Content the content
+// object, absent when the record carried none or ContentHidden says the
+// identity may not read it.
+type sessionEntry struct {
+	At            time.Time      `json:"at"`
+	FactAt        *time.Time     `json:"fact_at,omitempty"`
+	Record        string         `json:"record"`
+	Kind          string         `json:"kind"`
+	Event         string         `json:"event"`
+	Lane          string         `json:"lane"`
+	RunID         *string        `json:"run_id"`
+	Turn          *int           `json:"turn"`
+	Entry         string         `json:"entry,omitempty"`
+	ContentMark   string         `json:"content_mark"`
+	Fields        map[string]any `json:"fields"`
+	Content       map[string]any `json:"content,omitempty"`
+	ContentHidden bool           `json:"content_hidden,omitempty"`
+}
+
+// timelineTurn is one turn on the timeline: its run, order, outcome and
+// the marks filed under it.
+type timelineTurn struct {
+	RunID         string     `json:"run_id"`
+	Turn          int        `json:"turn"`
+	Agent         string     `json:"agent"`
+	Status        string     `json:"status"`
+	Started       time.Time  `json:"started"`
+	Finished      *time.Time `json:"finished"`
+	LastSeen      time.Time  `json:"last_seen"`
+	Steps         int        `json:"steps"`
+	Pending       int        `json:"pending,omitempty"`
+	PromptPreview string     `json:"prompt_preview,omitempty"`
+	ResumedFrom   string     `json:"resumed_from,omitempty"`
+	ResumedBy     string     `json:"resumed_by,omitempty"`
+	StoppedBy     string     `json:"stopped_by,omitempty"`
+	ErrorType     string     `json:"error_type,omitempty"`
+	Usage         core.Usage `json:"usage"`
+	Marks         int        `json:"marks"`
+}
+
+// timelineLane is one lane's count of the marks read.
+type timelineLane struct {
+	Lane  string `json:"lane"`
+	Marks int    `json:"marks"`
+}
+
+// timelineDoc is GET /api/sessions/{id}/timeline: the session's
+// identity, its turns (every one, in turn order), its marks (record
+// time order, at most timelineMarkCap), the lanes with their counts
+// (the six always, other when a mark sits on it), the session's whole
+// mark count and the holes — not_recorded (turns, no mark: the state
+// log never reached Studio), stripped (marks a content-off destination
+// stripped), hidden (marks or content the identity may not read),
+// truncated (marks past the cap).
+type timelineDoc struct {
+	SessionID  string         `json:"session_id"`
+	PublicID   string         `json:"public_id,omitempty"`
+	Agent      string         `json:"agent"`
+	Status     string         `json:"status"`
+	Turns      []timelineTurn `json:"turns"`
+	Marks      []sessionEntry `json:"marks"`
+	Lanes      []timelineLane `json:"lanes"`
+	MarksTotal int            `json:"marks_total"`
+	Holes      []stepHole     `json:"holes"`
+}
+
+// entriesDoc is GET /api/sessions/{id}/entries: one page of the
+// session's marks in record-time order (offset, limit ≤ 1000), the
+// session's whole count, the next page's offset (null on the last) and
+// the holes the page carries (the timeline's, but truncated: a page is
+// a read away, never a cut).
+type entriesDoc struct {
+	SessionID  string         `json:"session_id"`
+	Entries    []sessionEntry `json:"entries"`
+	Total      int            `json:"total"`
+	Offset     int            `json:"offset"`
+	NextOffset *int           `json:"next_offset"`
+	Holes      []stepHole     `json:"holes"`
+}
+
+// The holes' words. The not_recorded fix names what U12.1 wired: the
+// agent's LoggerProvider (thread files its records through it) and
+// thread.WithRunMetadata for the session's tags.
+const (
+	timelineNotRecordedReason = "no thread record or compaction marker of this session was stored: its state log never reached this Studio (an agent without the pipeline's LoggerProvider, a destination that dropped them, or a weft older than the thread record family)"
+	timelineNotRecordedFix    = "give the agent the pipeline's LoggerProvider — weft.LoggerProvider(lp), or otel.Install, which wires it — and thread reports its state log through it; thread.WithRunMetadata stamps the session's tags on every turn"
+	timelineHiddenFix         = "use a playground-scoped token, or the dev token"
+)
+
+// sessionEventsFor checks the database reads session events: 501 with
+// the capability's off reason when it does not.
+func (s *Server) sessionEventsFor(w http.ResponseWriter, r *http.Request) (obsdb.SessionEventReader, bool) {
+	er, ok := s.db.(obsdb.SessionEventReader)
+	if !ok {
+		writeError(w, r, http.StatusNotImplemented, "not_implemented", offTimeline)
+		return nil, false
+	}
+	return er, true
+}
+
+// sessionScopeFor reads the session for the two routes: its detail
+// (turns scoped to a panel token's public id) and ok. A session no turn
+// of which is stored still answers when it has events (a session of
+// session-level records alone, every one held at Close); otherwise 404
+// — for a panel token too, so the refusal never says whether it exists
+// elsewhere.
+func (s *Server) sessionScopeFor(w http.ResponseWriter, r *http.Request, er obsdb.SessionEventReader, id string) (obsdb.SessionDetail, bool) {
+	if !s.scopeSessionID(w, r, id) {
+		return obsdb.SessionDetail{}, false
+	}
+	det, err := s.db.Session(r.Context(), id)
+	switch {
+	case errors.Is(err, obsdb.ErrNotFound):
+		page, perr := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, Limit: 1})
+		if perr != nil {
+			dbError(w, r, "session events", id, perr)
+			return obsdb.SessionDetail{}, false
+		}
+		pub := panelPublicID(r)
+		if page.Total == 0 || (pub != "" && (len(page.Events) == 0 || page.Events[0].PublicID != pub)) {
+			dbError(w, r, "session", id, err)
+			return obsdb.SessionDetail{}, false
+		}
+		det = obsdb.SessionDetail{SessionRow: obsdb.SessionRow{ID: id, PublicID: pub}}
+	case err != nil:
+		dbError(w, r, "session", id, err)
+		return obsdb.SessionDetail{}, false
+	}
+	if pub := panelPublicID(r); pub != "" && len(det.Runs) > 0 {
+		det.Runs = withPublicID(det.Runs, pub)
+		det.SessionRow = scopedSessionRow(det.SessionRow, det.Runs, pub)
+	}
+	return det, true
+}
+
+// markBuilder turns stored events into marks for one request: the
+// turns' numbers, the scope and the content rule, counting what it
+// leaves out.
+type markBuilder struct {
+	sessionID    string
+	turns        map[string]int
+	pub          string // a panel token's public id, "" for any other identity
+	readsContent bool
+	hidden       int // marks of another public id, left out
+	contentHid   int // marks whose content the identity may not read
+	stripped     int // marks a content-off destination stripped
+}
+
+func (s *Server) newMarkBuilder(r *http.Request, det obsdb.SessionDetail) *markBuilder {
+	mb := &markBuilder{sessionID: det.ID, turns: map[string]int{}, pub: panelPublicID(r), readsContent: readsThreadContent(r)}
+	for _, rr := range det.Runs {
+		mb.turns[rr.ID] = rr.Turn
+	}
+	return mb
+}
+
+// mark is one event as a mark, ok false when the scope leaves it out.
+func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
+	if mb.pub != "" && e.PublicID != mb.pub {
+		mb.hidden++
+		return sessionEntry{}, false
+	}
+	kind := obsdb.SessionEventKind(e)
+	out := sessionEntry{
+		At: e.Time, Record: e.Kind, Kind: kind, Event: e.Name, Lane: laneOf(kind),
+		ContentMark: e.Content, Fields: map[string]any{},
+	}
+	if e.RunID != "" {
+		id := e.RunID
+		out.RunID = &id
+		if n, ok := mb.turns[id]; ok {
+			out.Turn = &n
+		} else if n := turnOf(mb.sessionID, id); n > 0 {
+			out.Turn = &n
+		}
+	}
+	if e.Content == string(obsdb.HoleStripped) {
+		mb.stripped++
+	}
+	var body map[string]any
+	if json.Unmarshal(e.Body, &body) != nil {
+		// A body that does not parse is shown as a mark of its kind and
+		// time with no fields (the record's attributes said what it is).
+		return out, true
+	}
+	for k, v := range body {
+		switch k {
+		case "kind", "session":
+		case "at":
+			if str, ok := v.(string); ok {
+				if t, err := time.Parse(time.RFC3339Nano, str); err == nil {
+					t = t.UTC()
+					out.FactAt = &t
+				}
+			}
+		case "entry":
+			out.Entry, _ = v.(string)
+		case "content":
+			c, ok := v.(map[string]any)
+			if !ok || len(c) == 0 {
+				continue
+			}
+			if !mb.readsContent {
+				out.ContentHidden = true
+				mb.contentHid++
+				continue
+			}
+			out.Content = c
+		default:
+			out.Fields[k] = v
+		}
+	}
+	return out, true
+}
+
+// holes is the holes a set of marks carries, in ADR 0028 §11's order.
+func (mb *markBuilder) holes(turns, total int, truncatedAt int) []stepHole {
+	hs := holeSet{}
+	if total == 0 && turns > 0 {
+		hs[obsdb.HoleNotRecorded] = stepHole{Hole: string(obsdb.HoleNotRecorded), Reason: timelineNotRecordedReason, Fix: timelineNotRecordedFix}
+	}
+	if mb.stripped > 0 {
+		reason, fix := obsdb.HoleNote(obsdb.HoleStripped)
+		hs[obsdb.HoleStripped] = stepHole{Hole: string(obsdb.HoleStripped), Reason: reason, Fix: fix, Count: mb.stripped}
+	}
+	if n := mb.hidden + mb.contentHid; n > 0 {
+		var why []string
+		if mb.hidden > 0 {
+			why = append(why, fmt.Sprintf("%d of this session's marks carry another public id than your token's", mb.hidden))
+		}
+		if mb.contentHid > 0 {
+			why = append(why, fmt.Sprintf("%d marks' content (who decided, reasons, texts) is not read by a read-scoped panel token", mb.contentHid))
+		}
+		hs[obsdb.HoleHidden] = stepHole{Hole: string(obsdb.HoleHidden), Reason: strings.Join(why, "; "), Fix: timelineHiddenFix, Count: n}
+	}
+	if truncatedAt > 0 {
+		hs[obsdb.HoleTruncated] = stepHole{Hole: string(obsdb.HoleTruncated),
+			Reason: fmt.Sprintf("the session has %d marks; this response reads the first %d — nothing was lost", total, truncatedAt),
+			Fix:    fmt.Sprintf("page the rest: GET /api/sessions/{id}/entries?offset=%d", truncatedAt)}
+	}
+	return hs.list()
+}
+
+// serveSessionTimeline answers api/sessions/{id}/timeline.
+func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id string) {
+	er, ok := s.sessionEventsFor(w, r)
+	if !ok {
+		return
+	}
+	det, ok := s.sessionScopeFor(w, r, er, id)
+	if !ok {
+		return
+	}
+	mb := s.newMarkBuilder(r, det)
+	doc := timelineDoc{SessionID: id, PublicID: det.PublicID, Agent: det.Agent, Status: string(det.Status),
+		Turns: make([]timelineTurn, 0, len(det.Runs)), Marks: []sessionEntry{}}
+	perTurn := map[string]int{}
+	lanes := map[string]int{}
+	read, truncatedAt := 0, 0
+	for read < timelineMarkCap {
+		page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, Offset: read,
+			Limit: min(obsdb.MaxSessionEventLimit, timelineMarkCap-read)})
+		if err != nil {
+			dbError(w, r, "session events", id, err)
+			return
+		}
+		doc.MarksTotal = page.Total
+		for _, e := range page.Events {
+			m, ok := mb.mark(e)
+			if !ok {
+				continue
+			}
+			doc.Marks = append(doc.Marks, m)
+			lanes[m.Lane]++
+			if m.RunID != nil {
+				perTurn[*m.RunID]++
+			}
+		}
+		read += len(page.Events)
+		if len(page.Events) == 0 || read >= page.Total {
+			break
+		}
+	}
+	if doc.MarksTotal > read {
+		truncatedAt = read
+	}
+	if mb.pub != "" {
+		doc.MarksTotal -= mb.hidden // a panel token's count is its own marks' (the hole counts the rest)
+	}
+	for _, rr := range det.Runs {
+		t := timelineTurn{
+			RunID: rr.ID, Turn: rr.Turn, Agent: rr.Agent, Status: string(rr.Status),
+			Started: rr.Started, LastSeen: rr.LastSeen, Steps: rr.Steps, Pending: rr.Pending,
+			PromptPreview: rr.PromptPreview, ResumedFrom: rr.ResumedFrom, ResumedBy: rr.ResumedBy,
+			StoppedBy: rr.StoppedBy, ErrorType: rr.ErrorType, Usage: rr.Usage, Marks: perTurn[rr.ID],
+		}
+		if rr.Finished != nil {
+			f := *rr.Finished
+			t.Finished = &f
+		}
+		doc.Turns = append(doc.Turns, t)
+	}
+	for _, l := range timelineLanes {
+		doc.Lanes = append(doc.Lanes, timelineLane{Lane: l, Marks: lanes[l]})
+	}
+	if n := lanes[laneOther]; n > 0 {
+		doc.Lanes = append(doc.Lanes, timelineLane{Lane: laneOther, Marks: n})
+	}
+	doc.Holes = mb.holes(len(det.Runs), doc.MarksTotal+mb.hidden, truncatedAt)
+	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// serveSessionEntries answers api/sessions/{id}/entries?offset=&limit=.
+func (s *Server) serveSessionEntries(w http.ResponseWriter, r *http.Request, id string) {
+	er, ok := s.sessionEventsFor(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	offset, limit := 0, 0
+	for name, dst := range map[string]*int{"offset": &offset, "limit": &limit} {
+		if v := q.Get(name); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				badRequest(w, r, name+" must be a non-negative integer")
+				return
+			}
+			*dst = n
+		}
+	}
+	det, ok := s.sessionScopeFor(w, r, er, id)
+	if !ok {
+		return
+	}
+	page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, Offset: offset, Limit: limit})
+	if err != nil {
+		dbError(w, r, "session events", id, err)
+		return
+	}
+	mb := s.newMarkBuilder(r, det)
+	doc := entriesDoc{SessionID: id, Entries: []sessionEntry{}, Total: page.Total, Offset: offset}
+	for _, e := range page.Events {
+		if m, ok := mb.mark(e); ok {
+			doc.Entries = append(doc.Entries, m)
+		}
+	}
+	if next := offset + len(page.Events); len(page.Events) > 0 && next < page.Total {
+		doc.NextOffset = &next
+	}
+	doc.Holes = mb.holes(len(det.Runs), page.Total, 0)
+	writeJSON(w, r, http.StatusOK, doc)
+}

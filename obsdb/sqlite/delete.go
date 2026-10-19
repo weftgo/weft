@@ -13,7 +13,7 @@ import (
 
 // Deletion and retention (plan A7, §13.13): every statement below names
 // one of obsdb's own tables — runs, records, spans, other_logs,
-// run_search, run_tools, runs_fts — and nothing else. A file that also
+// run_search, run_tools, runs_fts, session_events — and nothing else. A file that also
 // holds thread's sessions (sessions, entries, session_locks,
 // thread_migrations) keeps them byte-identical: Studio never writes the
 // app's conversation store.
@@ -52,7 +52,16 @@ func (d *DB) DeleteSession(ctx context.Context, id string) (err error) {
 		if err != nil {
 			return nil, err
 		}
+		// The session's events go whole, a record filed under no run
+		// (held at Close) included: session_events is keyed by session.
+		res, err := tx.ExecContext(ctx, `DELETE FROM session_events WHERE session_id = ? AND session_id <> ''`, id)
+		if err != nil {
+			return nil, err
+		}
 		if len(roots) == 0 {
+			if n, _ := res.RowsAffected(); n > 0 {
+				return nil, nil // a session of runless events alone: they were its whole record
+			}
 			return nil, fmt.Errorf("%w: session %s", obsdb.ErrNotFound, id)
 		}
 		return closure(ctx, tx, roots, false)
@@ -270,6 +279,7 @@ func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) (extra int, err e
 		`DELETE FROM run_search WHERE run_id IN (%s)`,
 		`DELETE FROM run_tools WHERE run_id IN (%s)`,
 		`DELETE FROM records WHERE run_id IN (%s)`,
+		`DELETE FROM session_events WHERE run_id IN (%s) AND run_id <> ''`,
 	} {
 		if err := inChunks(ids, func(ph string, args []any) error {
 			_, err := tx.ExecContext(ctx, fmt.Sprintf(stmt, ph), args...)

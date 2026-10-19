@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -1460,6 +1461,29 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		for _, p := range q.Parents {
 			narrowArgs, condArgs = append(narrowArgs, p), append(condArgs, p)
 		}
+	}
+	if len(q.Meta) > 0 {
+		// The tag filter (U12.2) selects sessions, never turns: the
+		// sessions one of whose own turns carries every pair (RunQuery.Meta's
+		// subset match over the collapsed rows), every turn of each then
+		// grouped. The narrow reads those sessions' runs by
+		// idx_weft_session_id before the collapse; the cond holds the
+		// collapsed rows to them.
+		tagged := "SELECT SessionID FROM (SELECT RunId, max(SessionID) AS SessionID, max(Meta) AS Meta, max(PublicID) AS PublicID," +
+			" max(ParentRunID) AS ParentRunID, max(CallerRunID) AS CallerRunID, max(Turn) AS Turn, max(Playground) AS Playground" +
+			" FROM weft_runs GROUP BY RunId) WHERE SessionID != '' AND Playground = 0 AND " + ownTurnCH
+		var targs []any
+		if q.PublicID != "" {
+			tagged += " AND PublicID = ?"
+			targs = append(targs, q.PublicID)
+		}
+		for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
+			tagged += " AND JSONHas(Meta, ?) AND JSONExtractString(Meta, ?) = ?"
+			targs = append(targs, k, k, q.Meta[k])
+		}
+		narrows = append(narrows, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID IN ("+tagged+"))")
+		cond += " AND SessionID IN (" + tagged + ")"
+		narrowArgs, condArgs = append(narrowArgs, targs...), append(condArgs, targs...)
 	}
 	narrow := ""
 	if len(narrows) > 0 {

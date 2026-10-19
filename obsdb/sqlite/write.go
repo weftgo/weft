@@ -76,6 +76,15 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 			r.Time = r.Observed
 		}
 		if w.RunID == "" {
+			if obsdb.IsSessionEventKind(w.Record) && w.SessionID != "" {
+				// A thread record filed under no run (held at Close, U12.2):
+				// the session's, never an app log line — session_events
+				// alone holds it.
+				if err := insertSessionEvent(ctx, tx, r, w); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := insertOtherLog(ctx, tx, r); err != nil {
 				return err
 			}
@@ -125,6 +134,18 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 			// none; DB.Requests attaches it to its attempt.
 			if _, err := insertRecord(ctx, tx, r, w); err != nil {
 				return err
+			}
+		case obsdb.RecordThread, obsdb.RecordCompaction:
+			// thread's state log and its compaction marker (record
+			// contract §4): stored as plain records under the run, counted
+			// under none, and indexed by session (session_events, U12.2).
+			if _, err := insertRecord(ctx, tx, r, w); err != nil {
+				return err
+			}
+			if w.SessionID != "" {
+				if err := insertSessionEvent(ctx, tx, r, w); err != nil {
+					return err
+				}
 			}
 		case "heartbeat":
 			// Never a row: no position, so the (run, kind, pos) key
@@ -300,6 +321,19 @@ func insertRecord(ctx context.Context, tx *sql.Tx, r obsdb.Record, w obsdb.Weft)
 	}
 	n, _ := res.RowsAffected()
 	return n == 1, nil
+}
+
+// insertSessionEvent indexes a thread record or compaction marker by
+// its session (migration 0022), idempotent on (session, run, kind,
+// pos) like the records table.
+func insertSessionEvent(ctx context.Context, tx *sql.Tx, r obsdb.Record, w obsdb.Weft) error {
+	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO session_events
+		(session_id, run_id, kind, pos, time_ns, event_name, public_id, content, body)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		w.SessionID, w.RunID, w.Record, w.Pos, unixNS(r.Time),
+		obsdb.SessionEventName(w.Record, r.EventName, []byte(r.Body)), w.PublicID,
+		attrString(r.Attrs, "weft.content"), r.Body)
+	return err
 }
 
 func insertOtherLog(ctx context.Context, tx *sql.Tx, r obsdb.Record) error {

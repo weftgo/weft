@@ -1,0 +1,90 @@
+{
+  "session_id": "s_acme",
+  "entries": [
+    {
+      "at": "2020-01-01T09:00:11.123Z",
+      "fact_at": "2020-01-01T09:00:11.123Z",
+      "record": "thread",
+      "kind": "approval.request",
+      "event": "weft.thread.approval.request",
+      "lane": "approvals",
+      "run_id": "s_acme-t1",
+      "turn": 1,
+      "entry": "e5",
+      "content_mark": "none",
+      "fields": {
+        "args_sha256": "6dfb",
+        "call_id": "r1",
+        "tool": "issue_refund"
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:12.123Z",
+      "fact_at": "2020-01-01T09:00:12.123Z",
+      "record": "thread",
+      "kind": "approval.decision",
+      "event": "weft.thread.approval.decision",
+      "lane": "approvals",
+      "run_id": "s_acme-t1",
+      "turn": 1,
+      "entry": "e7",
+      "content_mark": "full",
+      "fields": {
+        "call_id": "r1",
+        "outcome": "deny",
+        "request_entry": "e5",
+        "via": "user"
+      },
+      "content": {
+        "reason": "need a photo of the damage",
+        "who": "agent-7"
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:21.123Z",
+      "fact_at": "2020-01-01T09:00:21.123Z",
+      "record": "thread",
+      "kind": "receipt",
+      "event": "weft.thread.receipt",
+      "lane": "steer_queue",
+      "run_id": "s_acme-t2",
+      "turn": 2,
+      "entry": "e9",
+      "content_mark": "stripped",
+      "fields": {
+        "input": "steer",
+        "receipt_id": "e9",
+        "state": "delivered"
+      }
+    },
+    {
+      "at": "2020-01-01T09:00:31.123Z",
+      "fact_at": "2020-01-01T09:00:31.123Z",
+      "record": "thread",
+      "kind": "approval.request",
+      "event": "weft.thread.approval.request",
+      "lane": "approvals",
+      "run_id": "s_acme-t3",
+      "turn": 3,
+      "entry": "e16",
+      "content_mark": "none",
+      "fields": {
+        "args_sha256": "6dfb",
+        "call_id": "r2",
+        "tool": "issue_refund"
+      }
+    }
+  ],
+  "total": 12,
+  "offset": 0,
+  "next_offset": 4,
+  "holes": [
+    {
+      "hole": "stripped",
+      "reason": "content not captured by this app: the destination stripped it (weft.content = stripped) or the agent captured none (weft.Content(false), weft.content = none) — prompts, catalogs, messages, tool arguments and results were dropped before storage",
+      "fix": "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
+      "count": 1
+    }
+  ]
+}
+

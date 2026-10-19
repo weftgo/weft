@@ -632,10 +632,17 @@ const MaxGaps = 1000
 // Parents keeps the sessions delegated by any of those sessions
 // (SessionRow's ParentSession: thread/pool child sessions, ADR 0022),
 // empty any: one read lists a whole level of a delegation tree.
+//
+// Meta keeps the sessions one of whose own turns carries every pair in
+// its metadata (RunQuery.Meta's subset match, U12.2 — the API's
+// tag.<k>=<v>: thread.WithRunMetadata's tags, core.Metadata's pairs).
+// It selects sessions, never turns: a listed session's turns, usage,
+// order, Total and cursor are all of its turns', tagged or not.
 type SessionQuery struct {
 	Agent, PublicID string
 	Q               string
 	Parents         []string
+	Meta            map[string]string
 	Before          time.Time // cursor on LastSeen; zero = newest
 	BeforeID        string    // with Before: the (LastSeen, ID) pair, as RunQuery.BeforeID
 	Limit           int       // 0 = 50, max 500

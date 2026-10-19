@@ -612,8 +612,11 @@ A store keeps them as plain records under the run they are filed under
 (SQLite's `records` table at the body-derived position; ClickHouse's
 `otel_logs`); no reader applies them to the run row (they move its
 last-seen, like any record), and their attributes add nothing to `meta`
-but the run's own metadata. The session timeline that reads them is
-plan U12.2's.
+but the run's own metadata. Each one that carries a `weft.session.id`
+— a `thread` record or a `compaction` marker — is also indexed by its
+session (`session_events`, §6), a record filed under no run (held at
+`Close`, `weft.run.id` `""`) included: it is the session's, never an
+app log line.
 
 ### `heartbeat`
 
@@ -929,6 +932,63 @@ and absent otherwise, so a list titles an untitled content-off session
 (`obsdb.SessionRow.Title`/`FirstPrompt`/`ContentOff`; the fixtures'
 `sessions`). `SessionQuery.Q` matches a term against the title, the
 first turn's whole prompt, the session id, the public id and the agent.
+`SessionQuery.Meta` (Studio's `/api/sessions?tag.<k>=<v>`, U12.2, D6)
+keeps the sessions one of whose own turns carries every pair in its
+`meta` (`thread.WithRunMetadata`'s tags, `core.Metadata`'s pairs; on
+ClickHouse the collapsed row's `meta`, `RunQuery.Meta`'s rule): it
+selects sessions, never turns — a listed session is grouped over all
+its turns, tagged or not.
+
+**A session's state log** (U12.2, D6, A3) is read from the
+`session_events` index, never from the runs' records: every `thread`
+record and `compaction` marker (§4) carrying a `weft.session.id`,
+written at ingest beside the record — SQLite's `session_events` (0022:
+key `(session_id, run_id, kind, pos)`, `pos` the record's body-derived
+position; `session_events_time` orders a session by `(time_ns, run_id,
+kind, pos)`), ClickHouse's `weft_session_events` (0025: a view over
+`otel_logs`, `ReplacingMergeTree` ordered by `(SessionId, Time, RunId,
+Kind, BodyHash)`, read `FINAL`; the content TTL) — both backfilled from
+what was stored before. `obsdb.SessionEventReader.SessionEvents` pages
+one session in record-time order (ties: run id, kind, then the key's
+last column — the order a reader must not depend on), each event its run
+id (`""` for a session-level record), `weft.record`, event name (the
+record's, else `weft.compaction` / `weft.thread.<body kind>`),
+`weft.public_id`, `weft.content` and body verbatim; a retried batch's
+duplicate reads once. `DeleteRun` and `Sweep` remove a run's events,
+`DeleteSession` every event of the session (the runless ones, and on
+ClickHouse their `otel_logs` rows, included). The conformance fixtures'
+`thread_records` are read back through it per session on both backends
+(`checkSessionEvents`); obsdbtest's `SessionEvents` case pins the order,
+the runless record, the paging, the dedup, the tag filter and the
+deletions.
+
+Studio derives two reads from it (U12.2): `GET
+/api/sessions/{id}/timeline` — the session's turns (`DB.Session`'s,
+turn order: run id, turn, status, times, steps, pending, prompt preview,
+the approval link, usage, the count of marks filed under it), its marks
+(the events in order, at most 2,000; each `at` (record time), `fact_at`
+(the body's `at`), `record`, `kind` (`approval.decision`, `compaction`,
+…), `event`, `lane`, `run_id` and `turn` (null for a session-level
+mark), `entry`, `content_mark` (`weft.content`), `fields` (the body
+without `kind`, `session`, `at`, `entry`, `content`) and `content` (the
+body's content object)), the six lanes with their counts — `approvals`
+(`approval.*`), `grants` (`grant.*`), `compaction` (the marker,
+`uncompact`, `pin`), `steer_queue` (`receipt`, `interrupt`, `rewind`),
+`branch_fork` (`branch`, `fork`, `label`), `pool` (`pool.*`), plus
+`other` for a kind this build does not know — `marks_total` and the
+holes — and `GET /api/sessions/{id}/entries?offset=&limit=` (the same
+marks paged, ≤ 1,000, `next_offset`). Holes: `not_recorded` (turns and
+not one mark: the state log never reached the store — the fix names the
+agent's `LoggerProvider` and `thread.WithRunMetadata`), `stripped`
+(marks a content-off destination stripped, counted), `hidden` (a panel
+token's: marks of another public id left out, and for a read-scoped
+token every content object, `content_hidden: true` on the mark — who
+decided is an actor id, reasons and texts are content), `truncated`
+(cause `response_cap`: past the cap, the fix the `/entries` offset). A
+panel token reads its public id's session only (`sessions/{id}`'s
+scope); a session of session-level marks alone (no turn stored)
+answers with no turns. The exported state log is an index, not
+evidence (ADR 0021 §5).
 
 **Manifests** (U27) are not derived from the records: a row's
 `manifest_hash` is the root span's `weft.manifest.hash` (§2), and a

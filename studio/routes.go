@@ -201,6 +201,16 @@ func (s *Server) registerGroups() {
 	if _, ok := s.db.(obsdb.TreeReader); ok {
 		s.addGroup(routeGroup{name: "spans_tree", capability: "spans_tree"})
 	}
+	// The session timeline (U12.2): GET /api/sessions/{id}/timeline and
+	// /entries, a session's turns beside its state log. The routes are
+	// the sessions route's sub-routes (serveSessionRoutes); the
+	// capability says they are served — present when the database reads
+	// session events (obsdb.SessionEventReader — both first-party
+	// backends), otherwise meta.capabilities_off says why and both
+	// answer 501.
+	if _, ok := s.db.(obsdb.SessionEventReader); ok {
+		s.addGroup(routeGroup{name: "timeline", capability: "timeline"})
+	}
 	// The pricing table (plan A5): GET /api/settings/pricing, the
 	// effective table read-only. Always present; cost itself rides the
 	// rows, priced at read time.

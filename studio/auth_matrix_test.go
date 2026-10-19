@@ -675,6 +675,15 @@ func TestAuthMatrix(t *testing.T) {
 				return forbidden403
 			}},
 		{name: "GET /api/sessions/{id}", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] }, resources: all, want: scoped(ok)},
+		// The session timeline and its entries (U12.2): sessions/{id}'s
+		// scope — a panel token reads its public id's session only (the
+		// marks of another public id inside it are a hidden hole, the
+		// content a read token's hidden too: TestSessionTimelineScope).
+		{name: "GET /api/sessions/{id}/timeline", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/timeline" }, resources: all, want: scoped(ok)},
+		{name: "GET /api/sessions/{id}/entries", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/entries?limit=10" }, resources: all, want: scoped(ok)},
+		// The tag filter (D6): the list's scoping, forced onto a panel
+		// token's public id.
+		{name: "GET /api/sessions?tag.<k>=<v>", method: "GET", path: fixed("/api/sessions?tag.tenant=acme"), resources: one, want: anyValid(ok)},
 		// The reverse of public/ (plan C4): the dev token's alone. Every
 		// panel token is 403 (badge hidden, pinned below) whatever the
 		// session — its own included, an unknown one included, so the

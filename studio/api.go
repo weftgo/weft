@@ -1710,12 +1710,14 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 
 // serveSessions answers api/sessions (S4.2): public_id and agent
 // filters, q (obsdb.SessionQuery.Q: every term in the title, the first
-// turn's prompt, the id, the public id or the agent), before (RFC
+// turn's prompt, the id, the public id or the agent), tag.<k>=<v>
+// (obsdb.SessionQuery.Meta: the sessions one of whose own turns carries
+// every pair — thread.WithRunMetadata's tags; U12.2, D6), before (RFC
 // 3339, on last-seen) with before_id (the cursor's session id) and
 // limit.
 func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	query := obsdb.SessionQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id"), Q: strings.TrimSpace(q.Get("q"))}
+	query := obsdb.SessionQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id"), Q: strings.TrimSpace(q.Get("q")), Meta: tagParams(q)}
 	if id := idFrom(r); id.panel != nil {
 		if asked := q.Get("public_id"); asked != "" && asked != id.panel.PublicID {
 			forbidden(w, r)
@@ -1772,13 +1774,23 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 
 // serveSessionRoutes dispatches /api/sessions/{id}: the thread's turns
 // in order (obsdb's SessionDetail); /api/sessions/{id}/public_id is the
-// reverse of api/public (serveSessionPublicID). Session ids carry no
+// reverse of api/public (serveSessionPublicID); /timeline and /entries
+// are the session's state log (timeline.go, U12.2). Session ids carry no
 // slash, so the sub-route shadows none.
 func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
 	if sid, ok := strings.CutSuffix(id, "/public_id"); ok && sid != "" && !strings.Contains(sid, "/") {
 		s.serveSessionPublicID(w, r, sid)
 		return
+	}
+	for ext, serve := range map[string]func(http.ResponseWriter, *http.Request, string){
+		"/timeline": s.serveSessionTimeline,
+		"/entries":  s.serveSessionEntries,
+	} {
+		if sid, ok := strings.CutSuffix(id, ext); ok && sid != "" && !strings.Contains(sid, "/") {
+			serve(w, r, sid)
+			return
+		}
 	}
 	if id == "" || strings.Contains(id, "/") {
 		notFound(w, r, "no such api route "+r.URL.Path)

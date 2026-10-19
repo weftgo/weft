@@ -15,7 +15,8 @@ import (
 // Deletion and retention (plan A7, §13.13) on ClickHouse: lightweight
 // DELETE FROM … WHERE (GA since ClickHouse 23.3; the tables are all
 // MergeTree-family, none carries a projection) on obsdb's tables only —
-// otel_traces, otel_logs, weft_records, weft_deltas, weft_runs. Deleted
+// otel_traces, otel_logs, weft_records, weft_deltas, weft_session_events,
+// weft_runs. Deleted
 // rows are masked at once (every read, FINAL included, skips them) and
 // leave the parts at the next merge; Vacuum forces that merge. The
 // tables' TTLs (TTL, DefaultContentTTL, DefaultMetaTTL) stay as they
@@ -64,15 +65,32 @@ func (d *DB) DeleteSession(ctx context.Context, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	if len(roots) == 0 {
+	// The session's events go whole, a record filed under no run (held
+	// at Close) included: weft_session_events is keyed by session.
+	evs, err := d.queryIDs(ctx, `SELECT DISTINCT RunId FROM weft_session_events WHERE SessionId = ?`, id)
+	if err != nil {
+		return err
+	}
+	if len(roots) == 0 && len(evs) == 0 {
 		return fmt.Errorf("%w: session %s", obsdb.ErrNotFound, id)
 	}
 	ids, err := d.closure(ctx, roots, false)
 	if err != nil {
 		return err
 	}
-	_, err = d.deleteRuns(ctx, ids)
-	return err
+	if _, err = d.deleteRuns(ctx, ids); err != nil {
+		return err
+	}
+	sctx := ch.Context(ctx, ch.WithSettings(ch.Settings{"mutations_sync": 2}))
+	for _, stmt := range []string{
+		`DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] = '' AND LogAttributes['weft.session.id'] = ? AND LogAttributes['weft.record'] IN ('thread', 'compaction')`,
+		`DELETE FROM weft_session_events WHERE SessionId = ?`,
+	} {
+		if err := d.conn.Exec(sctx, stmt, id); err != nil {
+			return fmt.Errorf("clickhouse: delete session events: %w", err)
+		}
+	}
+	return nil
 }
 
 // Sweep deletes the runs not running whose LastSeen is before the
@@ -274,6 +292,7 @@ func (d *DB) deleteRuns(ctx context.Context, ids []string) (extra int, err error
 		`DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] IN (%s)`,
 		`DELETE FROM weft_records WHERE RunId IN (%s)`,
 		`DELETE FROM weft_deltas WHERE RunId IN (%s)`,
+		`DELETE FROM weft_session_events WHERE RunId IN (%s) AND RunId != ''`,
 		`DELETE FROM weft_runs WHERE RunId IN (%s)`,
 	} {
 		if err := inChunks(ids, func(ph string, args []any) error {

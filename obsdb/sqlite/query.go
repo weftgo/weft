@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -1222,6 +1224,21 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		for _, p := range q.Parents {
 			sargs = append(sargs, p)
 		}
+	}
+	if len(q.Meta) > 0 {
+		// The tag filter (U12.2) selects sessions, never turns: a session
+		// one of whose own turns carries every pair (bound parameters, as
+		// RunQuery.Meta's), its grouping then over all its turns.
+		sub := `SELECT rt.session_id FROM runs rt WHERE rt.session_id <> '' AND rt.playground = 0 AND ` + ownTurn("rt")
+		if q.PublicID != "" {
+			sub += ` AND rt.public_id = ?`
+			sargs = append(sargs, q.PublicID)
+		}
+		for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
+			sub += ` AND EXISTS (SELECT 1 FROM json_each(rt.meta) WHERE json_each.key = ? AND json_each.value = ?)`
+			sargs = append(sargs, k, q.Meta[k])
+		}
+		scope += ` AND session_id IN (` + sub + `)`
 	}
 	// Total is the whole match, as Runs' is: the cursor pages through
 	// it and never narrows it.

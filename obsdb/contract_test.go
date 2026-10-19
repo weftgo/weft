@@ -301,6 +301,7 @@ func runContract(t *testing.T, backend string, open func(*testing.T) obsdb.DB) {
 				w, _ := json.MarshalIndent(want.ThreadRecords, "", "  ")
 				t.Errorf("%s: thread records differ from %s/expect.json\n got: %s\nwant: %s", backend, dir, g, w)
 			}
+			checkSessionEvents(t, backend, dir, db, want.ThreadRecords)
 		})
 	}
 	if n < 10 {

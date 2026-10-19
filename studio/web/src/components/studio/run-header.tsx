@@ -7,7 +7,11 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { ArrowUpRight, Check, Link2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
-import { sessionQuery, storedManifestQuery } from "@/lib/api"
+import {
+  sessionQuery,
+  storedManifestQuery,
+  turnNeighboursQuery,
+} from "@/lib/api"
 import { concurrencyWords } from "@/lib/request-pane"
 import {
   attachmentsOf,
@@ -16,7 +20,8 @@ import {
   repairedWords,
   tokenSplit,
 } from "@/lib/cards"
-import type { RunDoc, RunRow, Span, Transcript } from "@/lib/api"
+import type { RunDoc, Span, Transcript } from "@/lib/api"
+import { summarizerView } from "@/lib/cost"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
 import {
@@ -42,6 +47,7 @@ import {
 } from "@/lib/format"
 import { CopyButton } from "@/components/studio/codewin"
 import {
+  CostText,
   RunCost,
   ScriptedChip,
   UnpricedNote,
@@ -56,13 +62,6 @@ import {
   UnknownTokens,
 } from "@/components/studio/runs-table"
 import { Badge } from "@/components/ui/badge"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
 import { forkSource } from "@/lib/experiments"
 import {
   appLink,
@@ -76,7 +75,7 @@ import {
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useCopyLink } from "@/hooks/use-copy-link"
 import { useDocumentTitle } from "@/hooks/use-document-title"
-import { runTitle, shortId } from "@/lib/title"
+import { runTitle } from "@/lib/title"
 import { statusOf } from "@/lib/status"
 import type { TitlePlace } from "@/lib/title"
 import {
@@ -94,17 +93,20 @@ import {
   StartedBy,
 } from "@/components/studio/lineage"
 import { LINEAGE_KEYS, lineageOfRun, linkedHoles } from "@/lib/delegation"
-import { TURN_STEPPER, turnSiblings } from "@/lib/timeline"
+import { TURN_STEPPER } from "@/lib/timeline"
 import { isPlainShortcut } from "@/lib/keys"
 import type { ToolFactsMap } from "@/lib/error-kind"
 
 /** TurnStepper walks a session turn by turn (UX-B-21): "‹ t3 · turn 4
- * of 5 · t5 ›", { and } its keys (the run page's [ ] walk steps). */
-function TurnStepper({ doc, runs }: { doc: RunDoc; runs: RunRow[] }) {
+ * of 5 · t5 ›", { and } its keys (the run page's [ ] walk steps). Its
+ * read is bounded (lib/timeline.ts's turnNeighbours): one run row each
+ * side and the two sides' counts, never the whole session. */
+function TurnStepper({ doc }: { doc: RunDoc }) {
   const navigate = useNavigate()
-  const at = turnSiblings(doc, runs.filter(ownTurn))
-  const prev = at?.prev?.id
-  const next = at?.next?.id
+  const q = useQuery(turnNeighboursQuery(doc.session_id, doc.turn))
+  const at = q.data
+  const prev = at?.prev_turn?.id
+  const next = at?.next_turn?.id
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isPlainShortcut(e)) return
@@ -123,25 +125,25 @@ function TurnStepper({ doc, runs }: { doc: RunDoc; runs: RunRow[] }) {
       className="flex items-center gap-2 font-mono text-xs text-muted-foreground"
       data-turn-stepper
     >
-      {at.prev ? (
+      {at.prev_turn ? (
         <Link
-          {...runLink(at.prev.id)}
+          {...runLink(at.prev_turn.id)}
           title={TURN_STEPPER.prev}
           className="hover:text-foreground"
-          data-turn-prev={at.prev.id}
+          data-turn-prev={at.prev_turn.id}
         >
-          ‹ t{at.prev.turn}
+          ‹ t{at.prev_turn.turn}
         </Link>
       ) : null}
       <span>{TURN_STEPPER.of(at.index, at.total)}</span>
-      {at.next ? (
+      {at.next_turn ? (
         <Link
-          {...runLink(at.next.id)}
+          {...runLink(at.next_turn.id)}
           title={TURN_STEPPER.next}
           className="hover:text-foreground"
-          data-turn-next={at.next.id}
+          data-turn-next={at.next_turn.id}
         >
-          t{at.next.turn} ›
+          t{at.next_turn.turn} ›
         </Link>
       ) : null}
     </nav>
@@ -471,21 +473,18 @@ export function RunHeader({
   // A parked turn's resume (U1): its session's turns — the query the
   // parked-calls block polls — say whether a later turn resumed it.
   // Only a turn of its own session is looked up: a child of either
-  // kind, a nested Generate or an experiment is decided elsewhere. A
-  // turn of its own session reads them for its stepper too (UX-B-21).
-  const turn = ownTurn(doc)
-  // A delegated session's turn (a thread/pool child) is decided and
-  // read from its parent session: no read of its own for a stepper.
-  const stepper = turn && !poolParent(doc)
+  // kind, a nested Generate or an experiment is decided elsewhere.
   const sess = useQuery({
     ...sessionQuery(doc.session_id),
     enabled:
-      stepper ||
-      (doc.pending > 0 &&
-        ["decide", "read-only", "no-public-id"].includes(
-          parkedKind(doc, null)
-        )),
+      doc.pending > 0 &&
+      ["decide", "read-only", "no-public-id"].includes(parkedKind(doc, null)),
   })
+  // A turn of its own session steps to its neighbours (UX-B-21) — a
+  // delegated session's turn (a thread/pool child) is read from its
+  // parent session: no stepper of its own.
+  const stepper = ownTurn(doc) && !poolParent(doc)
+  const summarizer = summarizerView(doc.summarizer)
   // The run's configuration (U27's store; UX-E-50): read once, only
   // when the run document says the hash resolves.
   const stored = useQuery({
@@ -531,60 +530,10 @@ export function RunHeader({
   )
   return (
     <div className="space-y-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Breadcrumb>
-          <BreadcrumbList className="font-mono text-xs">
-            {turn ? (
-              <>
-                {/* A session's turn (UX-B-21): sessions › its session › tN. */}
-                <BreadcrumbItem>
-                  <BreadcrumbLink render={<Link to="/sessions" />}>
-                    {TURN_STEPPER.crumb}
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  <BreadcrumbLink
-                    render={<Link {...sessionLink(doc.session_id)} />}
-                    title={doc.session_id}
-                    data-crumb-session={doc.session_id}
-                  >
-                    {shortId(doc.session_id)}
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-              </>
-            ) : (
-              <BreadcrumbItem>
-                <BreadcrumbLink render={<Link to="/runs" />}>
-                  runs
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-            )}
-            {doc.parent_run_id ? (
-              <>
-                <BreadcrumbSeparator />
-                <BreadcrumbItem>
-                  <BreadcrumbLink
-                    render={<Link {...runLink(doc.parent_run_id)} />}
-                    title="the parent run"
-                  >
-                    {doc.parent_run_id}
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-              </>
-            ) : null}
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <span className="text-foreground" title={doc.id}>
-                {turn ? `t${doc.turn}` : shortId(doc.id)}
-              </span>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
-        {stepper && sess.data ? (
-          <TurnStepper doc={doc} runs={sess.data.runs} />
-        ) : null}
-      </div>
+      {/* The breadcrumb is the shell's (app-shell.tsx's Place, every
+          page's): runs › [parent ›] id, or a turn's sessions › its
+          session › tN (UX-B-21). The header adds the turn stepper. */}
+      {stepper ? <TurnStepper doc={doc} /> : null}
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {/* The page's title (U6): agent · the prompt (lib/title.ts's
@@ -725,6 +674,11 @@ export function RunHeader({
               (doc.delegated_cost_usd ?? 0) > 0
             }
           />
+        ) : null}
+        {costCapable && summarizer ? (
+          <span data-cost-part="summarizer">
+            <CostText v={summarizer} chip={false} label="summarizer" />
+          </span>
         ) : null}
         {costCapable ? <UnpricedNote rows={[doc]} /> : null}
         <span title={absoluteTime(doc.started)}>

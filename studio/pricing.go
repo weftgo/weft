@@ -427,7 +427,15 @@ const (
 	costUnpriced = "unpriced" // no row matches the model
 	costUnknown  = "unknown"  // the figure could not be computed
 	costScripted = "scripted" // a known, exact $0: a scripted model
+	// costEstimate is a known figure priced at a stand-in model's rates:
+	// a summarizer call whose own model was not recorded, priced at its
+	// turn's (U15.1-fix, UX-B-13).
+	costEstimate = "estimate"
 )
+
+// estimateReason is cost_reason's words on a summarizer figure priced
+// at its turn's model (costEstimate).
+const estimateReason = "priced at the turn's model: the summarizer's model was not recorded"
 
 // Cache marks (cache).
 const (

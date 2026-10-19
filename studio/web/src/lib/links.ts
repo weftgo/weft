@@ -209,8 +209,9 @@ export type SessionView = "timeline" | "tree" | "table"
 export interface SessionSearch {
   /** Absent: the timeline. */
   view?: Exclude<SessionView, "timeline">
-  /** The mark whose drawer is open: its thread entry id, else m<n>
-   * (its index among the timeline's marks — lib/timeline.ts's markKey). */
+  /** The mark whose drawer is open: its thread entry id, else
+   * kind:at:run (lib/timeline.ts's markKeys — stable while the
+   * session grows). */
   mark?: string
 }
 

@@ -34,6 +34,11 @@ const toneText: Record<SpanTone, string> = {
   running: "text-status-run-ink",
   never: "text-ev-error",
 }
+// The selected row's wash (bg-accent) leaves light mustard at 4.19:1:
+// an error-as-data row's words take the foreground ink while selected,
+// the icon and the badge's border keeping the tone (axe color-contrast).
+const selectedInk = (tone: SpanTone, selected: boolean) =>
+  selected && (tone === "error" || tone === "never")
 const badgeTone: Record<SpanTone, string> = {
   step: "border-border text-muted-foreground",
   tool: "border-ev-result/50 text-ev-result",
@@ -418,7 +423,7 @@ export function Waterfall({
                     {KIND_ICON[sp.kind]}
                   </span>
                   {(() => {
-                    const cls = `shrink-0 truncate ${toneText[sp.tone]} ${
+                    const cls = `shrink-0 truncate ${selectedInk(sp.tone, selected) ? "text-foreground" : toneText[sp.tone]} ${
                       sp.kind === "run" || sp.kind === "step"
                         ? "font-medium"
                         : ""
@@ -459,7 +464,7 @@ export function Waterfall({
                   })()}
                   {sp.badge ? (
                     <span
-                      className={`max-w-28 shrink-0 truncate rounded-full border px-1.5 text-[9.5px] leading-4 ${badgeTone[sp.tone]}`}
+                      className={`max-w-28 shrink-0 truncate rounded-full border px-1.5 text-[9.5px] leading-4 ${selectedInk(sp.tone, selected) ? "border-ev-error/50 text-foreground" : badgeTone[sp.tone]}`}
                       title={sp.badge}
                     >
                       {sp.badge}

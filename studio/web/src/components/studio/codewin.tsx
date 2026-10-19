@@ -160,6 +160,11 @@ export function CodeWin({
               : ""
         }`}
         data-folded={folded ? "" : undefined}
+        // A scrolling region the keyboard reaches (axe's
+        // scrollable-region-focusable): focusable, named by its title.
+        tabIndex={0}
+        role="group"
+        aria-label={title ? `${title} (scrollable)` : "code (scrollable)"}
       >
         <code>{parsed !== null ? <JsonText text={shown} /> : shown}</code>
       </pre>

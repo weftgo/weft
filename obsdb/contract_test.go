@@ -108,6 +108,16 @@ type contractSession struct {
 	// SummarizerUsage is the session's summarizer spans' usage (§6, O15):
 	// omitted when it summarized nothing.
 	SummarizerUsage *contractUsage `json:"summarizer_usage,omitempty"`
+	// SummarizerModels is that usage split by the model each summarizer
+	// span named (§6, U15.1-fix): what a reader prices each part at.
+	SummarizerModels []contractModelUsage `json:"summarizer_models,omitempty"`
+}
+
+// contractModelUsage is one model's part of a usage figure.
+type contractModelUsage struct {
+	Provider string        `json:"provider,omitempty"`
+	Model    string        `json:"model,omitempty"`
+	Usage    contractUsage `json:"usage"`
 }
 
 // contractUsage is a usage figure as the contract states it.
@@ -522,12 +532,16 @@ func observeSessions(t *testing.T, db obsdb.DB) []contractSession {
 		if u := s.SummarizerUsage; u != (core.Usage{}) {
 			cs.SummarizerUsage = &contractUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 		}
+		for _, m := range s.SummarizerModels {
+			cs.SummarizerModels = append(cs.SummarizerModels, contractModelUsage{Provider: m.Provider, Model: m.Model,
+				Usage: contractUsage{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens}})
+		}
 		// The one session's read says the same (Session is the detail
 		// route's; both backends fill it alike).
 		if d, err := db.Session(context.Background(), s.ID); err != nil {
 			t.Fatalf("Session(%s): %v", s.ID, err)
-		} else if d.SummarizerUsage != s.SummarizerUsage {
-			t.Errorf("Session(%s).SummarizerUsage = %+v, the list's %+v", s.ID, d.SummarizerUsage, s.SummarizerUsage)
+		} else if d.SummarizerUsage != s.SummarizerUsage || !slices.Equal(d.SummarizerModels, s.SummarizerModels) {
+			t.Errorf("Session(%s).SummarizerUsage = %+v %+v, the list's %+v %+v", s.ID, d.SummarizerUsage, d.SummarizerModels, s.SummarizerUsage, s.SummarizerModels)
 		}
 		out = append(out, cs)
 	}

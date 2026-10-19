@@ -404,6 +404,14 @@ type runPage struct {
 	// step 0 (U13.2, decisions.go). Absent when the run is neither.
 	Decided *decisionDoc `json:"decided,omitempty"`
 	Resumes *decisionDoc `json:"resumes,omitempty"`
+	// Summarizer is what the summarizer calls filed under this run cost
+	// (UX-B-13, U15.1-fix): the compaction markers and SummarizeLeft
+	// branch records under it that name summarizer_usage, priced as the
+	// session timeline prices its turn (markCost: the recorded
+	// summarizer_model's rates, else the run's model's, an estimate).
+	// Never in the run's usage or cost_usd. Absent when none, or when
+	// the session events could not be read.
+	Summarizer *summarizerCost `json:"summarizer,omitempty"`
 }
 
 // callerLinkedCap bounds a run page's caller_linked rows.
@@ -896,7 +904,11 @@ const (
 // stop), error_type (a failed run's kind, exact: max_steps, cancelled,
 // model_error, …), id_prefix (the runs whose id starts with it, byte
 // for byte: a pasted short id — the ⌘K palette's lookup, children
-// included under all=1), tag.<k>=<v> metadata matches, before (the
+// included under all=1), turn_below / turn_above (the runs whose turn
+// is below / above it: with session and limit=1, a turn's neighbour and
+// total how many lie that side — the run page's turn stepper, O(1)
+// rows), oldest (true: oldest first, the cursor paging forward),
+// tag.<k>=<v> metadata matches, before (the
 // RFC 3339 paging cursor on started) with before_id (the cursor's run
 // id: exact inside a tie) and limit. next_before / next_before_id are
 // the next page's before / before_id, null on the last page.
@@ -944,6 +956,24 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		query.Before = t
 		query.BeforeID = q.Get("before_id")
+	}
+	for name, dst := range map[string]*int{"turn_below": &query.TurnBelow, "turn_above": &query.TurnAbove} {
+		if v := q.Get(name); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 {
+				badRequest(w, r, name+" must be a positive turn number")
+				return
+			}
+			*dst = n
+		}
+	}
+	if v := q.Get("oldest"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			badRequest(w, r, "oldest must be true or false (1 or 0)")
+			return
+		}
+		query.Oldest = b
 	}
 	if !scopeRunsQuery(w, r, &query, q.Get("public_id")) {
 		return
@@ -1116,7 +1146,44 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 		ManifestAvailable: s.manifestAvailable(r.Context(), det.ManifestHash)}
 	s.callerLinked(r.Context(), c, id, &page)
 	s.runDecisions(r, det.RunRow, &page)
+	page.Summarizer = s.runSummarizer(r, det.RunRow)
 	writeJSON(w, r, http.StatusOK, page)
+}
+
+// runSummarizer is a session run's summarizer figure (runPage's
+// Summarizer): the session events filed under it — one bounded read,
+// the run's own marks — that name a summarizer call, each priced by
+// markCost at the run's model as the stand-in. nil for a run of no
+// session, a database without session events, a failed read (logged:
+// reporting never fails the run document) or no summarizer call.
+func (s *Server) runSummarizer(r *http.Request, rr obsdb.RunRow) *summarizerCost {
+	er, ok := s.db.(obsdb.SessionEventReader)
+	if !ok || rr.SessionID == "" {
+		return nil
+	}
+	pub := panelPublicID(r)
+	page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: rr.SessionID, PublicID: pub,
+		RunIDs: []string{rr.ID}, Limit: obsdb.MaxSessionEventLimit})
+	if err != nil {
+		slog.Default().DebugContext(r.Context(), "studio: a run's summarizer marks could not be read", "run", rr.ID, "err", err)
+		return nil
+	}
+	mb := &markBuilder{sessionID: rr.SessionID, turns: map[string]int{}, pub: pub}
+	at := core.ModelInfo{Provider: rr.Provider, Name: rr.Model}
+	var sum summarizerSum
+	for _, e := range page.Events {
+		m, ok := mb.mark(e)
+		if !ok {
+			continue
+		}
+		if u, mi, ok := markSummarizer(m); ok {
+			sum.add(u, s.markCost(u, mi, at))
+		}
+	}
+	if sum.n == 0 {
+		return nil
+	}
+	return sum.figure()
 }
 
 // callerLinked fills a run page's caller_linked rows (U14): the runs

@@ -192,6 +192,14 @@ func runsInner(q obsdb.RunQuery) (string, []any) {
 	if q.CallerRunID != "" {
 		eq("CallerRunID", q.CallerRunID)
 	}
+	if q.TurnBelow > 0 {
+		conds = append(conds, "Turn < ?")
+		args = append(args, q.TurnBelow)
+	}
+	if q.TurnAbove > 0 {
+		conds = append(conds, "Turn > ?")
+		args = append(args, q.TurnAbove)
+	}
 	switch {
 	case q.ParentRunID == "" && q.SessionID != "":
 		// A session's top-level runs are its own turns (D3, the
@@ -1611,7 +1619,8 @@ func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, p
 		args = append(args, pub)
 	}
 	tok := func(k string) string { return "sum(toInt64OrZero(SpanAttributes['" + k + "']))" }
-	rs, err := d.conn.Query(ctx, `SELECT SpanAttributes['weft.session.id'] AS sid, `+
+	rs, err := d.conn.Query(ctx, `SELECT SpanAttributes['weft.session.id'] AS sid,
+		SpanAttributes['gen_ai.provider.name'] AS provider, SpanAttributes['gen_ai.request.model'] AS model, `+
 		tok("gen_ai.usage.input_tokens")+`, `+tok("gen_ai.usage.output_tokens")+`, `+
 		tok("gen_ai.usage.cache_read.input_tokens")+`, `+tok("gen_ai.usage.cache_creation.input_tokens")+`, `+
 		tok("gen_ai.usage.reasoning.output_tokens")+`
@@ -1619,25 +1628,26 @@ func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, p
 			WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID IN (?`+strings.Repeat(",?", len(rows)-1)+`) AND r.SessionID != ''`+scope+`)
 				AND SpanAttributes['`+obsdb.AttrChatRole+`'] = '`+obsdb.ChatRoleSummarizer+`'
 			LIMIT 1 BY TraceId, SpanId)
-		GROUP BY sid`, args...)
+		GROUP BY sid, provider, model`, args...)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rs.Close() }()
-	by := map[string]core.Usage{}
+	by := map[string][]obsdb.ModelUsage{}
 	for rs.Next() {
 		var id string
-		var u core.Usage
-		if err := rs.Scan(&id, &u.InputTokens, &u.OutputTokens, &u.CachedInputTokens, &u.CacheWriteTokens, &u.ReasoningTokens); err != nil {
+		var m obsdb.ModelUsage
+		u := &m.Usage
+		if err := rs.Scan(&id, &m.Provider, &m.Model, &u.InputTokens, &u.OutputTokens, &u.CachedInputTokens, &u.CacheWriteTokens, &u.ReasoningTokens); err != nil {
 			return err
 		}
-		by[id] = u
+		by[id] = append(by[id], m)
 	}
 	if err := rs.Err(); err != nil {
 		return err
 	}
 	for i := range rows {
-		rows[i].SummarizerUsage = by[rows[i].ID]
+		rows[i].SummarizerUsage, rows[i].SummarizerModels = obsdb.SumModelUsage(by[rows[i].ID])
 	}
 	return nil
 }

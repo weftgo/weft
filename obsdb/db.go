@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -235,6 +237,13 @@ type RunQuery struct {
 	// Generates. Pair it with ParentRunID "*" — a caller-linked run is
 	// top-level by ParentRunID.
 	CallerRunID string
+	// TurnBelow and TurnAbove keep the runs whose RunRow.Turn is below
+	// / above them (0 = no bound): with SessionID, a turn's neighbours —
+	// TurnBelow N, Limit 1 the newest-started turn before N, and the
+	// page's Total how many there are; TurnAbove N with Oldest the
+	// first after it (U15.1-fix: a turn page's stepper reads O(1) rows,
+	// never the whole session).
+	TurnBelow, TurnAbove int
 	// Oldest turns the list around: oldest first, in start order (run
 	// id breaking ties, ascending), and the (Before, BeforeID) cursor
 	// then reads the runs after that one — RunPage.NextBefore pages
@@ -672,6 +681,13 @@ type SessionRow struct {
 	// cost. Zero when the session summarized nothing (or before weft
 	// recorded the spans).
 	SummarizerUsage core.Usage
+	// SummarizerModels is SummarizerUsage split by the model that
+	// summarized — each summarizer span's gen_ai.provider.name and
+	// gen_ai.request.model (Provider and Model "" when the span named
+	// none) — sorted by provider, then model: what a reader prices each
+	// part at (U15.1-fix, UX-B-13). Its parts sum to SummarizerUsage;
+	// nil when the session summarized nothing.
+	SummarizerModels []ModelUsage
 	// Title is the newest turn's (by turn, then start) non-empty
 	// SessionTitleKey — thread's Title as that turn started, a label
 	// that survives content-off — "" when no turn carried one.
@@ -695,6 +711,35 @@ type SessionRow struct {
 	// weft 0.18 — its ParentRunID). "" for a session nothing delegated,
 	// and ParentRun "" for a child submitted outside a run (p.Submit).
 	ParentSession, ParentCall, ParentRun string
+}
+
+// ModelUsage is one model's part of a summed usage figure: the
+// provider and model a span named ("" when it named none) and the usage
+// of the spans that named them.
+type ModelUsage struct {
+	Provider, Model string
+	Usage           core.Usage
+}
+
+// SumModelUsage is parts' total and the parts sorted by provider, then
+// model (nil when there are none): the backends' one rule for a
+// SessionRow's SummarizerUsage and SummarizerModels.
+func SumModelUsage(parts []ModelUsage) (core.Usage, []ModelUsage) {
+	if len(parts) == 0 {
+		return core.Usage{}, nil
+	}
+	out := slices.Clone(parts)
+	slices.SortFunc(out, func(a, b ModelUsage) int {
+		if c := strings.Compare(a.Provider, b.Provider); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Model, b.Model)
+	})
+	var sum core.Usage
+	for _, p := range out {
+		sum = sum.Add(p.Usage)
+	}
+	return sum, out
 }
 
 // SessionContentOff is SessionRow.ContentOff's rule over the session's

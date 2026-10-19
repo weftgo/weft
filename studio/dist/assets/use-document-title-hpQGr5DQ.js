@@ -1,0 +1,1 @@
+import{Qi as e,S as t,ea as n}from"./use-capabilities-b7EJUTZO.js";var r=n(e(),1);function i(e){let n=t(e);(0,r.useEffect)(()=>{typeof document<`u`&&(document.title=n)},[n])}export{i as t};

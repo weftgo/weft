@@ -150,7 +150,17 @@
       "summarizer_usage": {
         "input_tokens": 2700,
         "output_tokens": 90
-      }
+      },
+      "summarizer_models": [
+        {
+          "provider": "wefttest",
+          "model": "script",
+          "usage": {
+            "input_tokens": 2700,
+            "output_tokens": 90
+          }
+        }
+      ]
     }
   ],
   "thread_records": [

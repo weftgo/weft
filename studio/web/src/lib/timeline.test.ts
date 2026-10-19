@@ -14,8 +14,12 @@ import {
   markKeys,
   markLine,
   resumeOfTurn,
+  gapReason,
+  marksByTurn,
+  PARKED_BEFORE_STEP,
+  SESSION_LEVEL,
   turnGaps,
-  turnSiblings,
+  unlistedRun,
 } from "./timeline"
 
 const S = "s_war"
@@ -129,15 +133,43 @@ describe("turnGaps (UX-E-19)", () => {
     expect(turnGaps(turns, marks)).toEqual([
       {
         turn: 2,
+        to: 2,
         text: "t2 · consumed by a steer · delivered into t1",
         mark: "e_a",
       },
-      { turn: 4, text: "t4 · consumed by a steer · dropped", mark: "e_c" },
+      {
+        turn: 4,
+        to: 4,
+        text: "t4 · consumed by a steer · dropped",
+        mark: "e_c",
+      },
     ])
   })
-  it("says a skipped number no receipt names", () => {
+  it("says a skipped number no receipt names as a not_recorded hole", () => {
     expect(turnGaps([turn(1), turn(3)], [])).toEqual([
-      { turn: 2, text: "t2 · no run of this turn number was recorded" },
+      { turn: 2, to: 2, text: "t2", reason: gapReason(2, 2) },
+    ])
+  })
+  it("collapses consecutive unexplained numbers into one range: t1 + t1000 is one gap", () => {
+    const far = { ...turn(1), run_id: `${S}-t1000`, turn: 1000 }
+    const gaps = turnGaps([turn(1), far], [])
+    expect(gaps).toEqual([
+      { turn: 2, to: 999, text: "t2–t999", reason: gapReason(2, 999) },
+    ])
+    expect(gapReason(2, 999)).toMatch(/^no run of these turn numbers/)
+    // A receipt in the middle splits the range around the number it took.
+    const took = mark(
+      "receipt",
+      1,
+      { input: "steer", receipt_id: "e_m", state: "queued", turn: 500 },
+      { entry: "e_m" }
+    )
+    expect(
+      turnGaps([turn(1), far], [took]).map((g) => [g.turn, g.to, g.text])
+    ).toEqual([
+      [2, 499, "t2–t499"],
+      [500, 500, "t500 · consumed by a steer"],
+      [501, 999, "t501–t999"],
     ])
   })
 })
@@ -242,26 +274,68 @@ describe("exchanges (UX-S3-05)", () => {
 })
 
 describe("markKeys", () => {
-  it("keys a mark by its entry, by its position when it has none or shares one", () => {
+  it("keys a mark by its entry, else kind:at:run; a true duplicate gains its occurrence", () => {
     expect(
       markKeys([
         mark("label", 1, {}, { entry: "e1" }),
         mark("interrupt", 1, {}),
         mark("pin", 1, {}, { entry: "e2" }),
         mark("pin", 1, {}, { entry: "e2" }),
+        mark("interrupt", null, {}),
       ])
-    ).toEqual(["e1", "m1", "m2", "m3"])
+    ).toEqual([
+      "e1",
+      `interrupt:2026-10-19T12:00:01.100Z:${S}-t1`,
+      "e2",
+      "e2:1",
+      "interrupt:2026-10-19T12:00:01.100Z:session",
+    ])
+  })
+  it("keeps every key when a live session grows a mark earlier in the list", () => {
+    const before = [
+      mark("interrupt", 6, {}, { at: "2026-10-19T12:00:06.000Z" }),
+      mark("label", 6, {}, { entry: "e9" }),
+    ]
+    const grown = [mark("pin", 1, {}, { entry: "e0" }), ...before]
+    expect(markKeys(grown).slice(1)).toEqual(markKeys(before))
   })
 })
 
-describe("turnSiblings (UX-B-21)", () => {
-  it("places a turn among its session's turns", () => {
-    const rows = [3, 1, 2].map((n) => ({ id: `${S}-t${n}`, turn: n }))
-    const at = turnSiblings({ id: `${S}-t2` }, rows)
-    expect(at).toMatchObject({ index: 2, total: 3 })
-    expect(at?.prev?.turn).toBe(1)
-    expect(at?.next?.turn).toBe(3)
-    expect(turnSiblings({ id: "other" }, rows)).toBeNull()
+describe("the parking step of a re-park (core's resolvePending)", () => {
+  it("links the resume's pre-step card when it parked before step 0", () => {
+    const ts = [
+      turn(1, { pending: 1, resumed_by: `${S}-t2` }),
+      turn(2, { steps: 0, pending: 1, resumed_from: `${S}-t1` }),
+    ]
+    const req = mark(
+      "approval.request",
+      2,
+      { call_id: "r9", tool: "issue_refund" },
+      { lane: "approvals", entry: "e_q" }
+    )
+    const { links } = markDetail(req, ts)
+    expect(links[0].label).toBe(`parked in t2 · ${PARKED_BEFORE_STEP}`)
+    expect(links[0].link.search).toMatchObject({ sel: "c:resume:r9" })
+    expect(links[0].link.search).not.toHaveProperty("step")
+    // A park in a step links that step.
+    const step = markDetail({ ...req, run_id: `${S}-t1`, turn: 1 }, ts)
+    expect(step.links[0].label).toBe("parked in t1 · step 0")
+  })
+})
+
+describe("where a mark is filed (finding 7)", () => {
+  it("tells a session-level mark from one under a run this page does not list", () => {
+    const loose = mark("grant.revoke", null, { grant_id: "g1" })
+    const gone = mark("label", 42, { name: "x" })
+    const ts = [turn(1)]
+    const row = (m: SessionMark) =>
+      markDetail(m, ts).rows.find((r) => r.k === "filed under")?.v
+    expect(row(loose)).toBe(SESSION_LEVEL)
+    expect(row(gone)).toBe(unlistedRun(`${S}-t42`))
+    expect(marksByTurn({ turns: ts, marks: [loose, gone] })).toMatchObject({
+      loose: [0],
+      unlisted: [1],
+    })
   })
 })
 
@@ -285,5 +359,19 @@ describe("summarizerView (UX-B-13)", () => {
     expect(unpriced?.text).toBe("+ summarizer —")
     expect(unpriced?.title).toContain("acme/x has no price")
     expect(summarizerView(undefined)).toBeNull()
+  })
+  it("marks an estimate at the turn's model with ≈ and its reason", () => {
+    const est = summarizerView({
+      usage: { input_tokens: 1800, output_tokens: 60 },
+      cost_usd: 0.0045,
+      cost_known: true,
+      cost_badge: "estimate",
+      cost_reason:
+        "priced at the turn's model: the summarizer's model was not recorded",
+      cache: "not_reported",
+    })
+    expect(est?.text).toBe("+ summarizer ≈$0.0045")
+    expect(est?.badge).toBe("estimate")
+    expect(est?.title).toContain("an estimate: priced at the turn's model")
   })
 })

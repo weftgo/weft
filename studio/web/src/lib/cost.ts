@@ -135,6 +135,13 @@ export function costView(f: CostFields | null | undefined): CostView {
   )
 }
 
+/** An estimate's badge, mark and word (studio/pricing.go's
+ * costEstimate): a known figure priced at a stand-in model's rates — a
+ * summarizer call whose own model was not recorded, at its turn's. */
+export const ESTIMATE_BADGE = "estimate"
+export const ESTIMATE_MARK = "≈"
+export const ESTIMATE_WORD = "an estimate"
+
 /** The summarizer's figure (UX-B-13): thread's compaction and branch
  * summaries are model calls of their own, never in a turn's usage —
  * drawn beside a turn's and the session's cost as "+ summarizer $x"
@@ -150,11 +157,16 @@ export function summarizerView(
   if (!f) return null
   const v = costView(f)
   const toks = `${f.usage.input_tokens.toLocaleString()} in / ${f.usage.output_tokens.toLocaleString()} out`
+  // An estimate (cost_badge "estimate"): known, priced at a stand-in
+  // model's rates — "≈", its reason in the title.
+  const est = v.known && f.cost_badge === ESTIMATE_BADGE
   return {
     ...v,
-    text: `+ summarizer ${v.text}`,
+    badge: est ? ESTIMATE_BADGE : v.badge,
+    text: `+ summarizer ${est ? ESTIMATE_MARK : ""}${v.text}`,
     title: [
       `the summarizer's model calls (compaction, branch summaries): ${toks} tokens, never in the turns' usage`,
+      est ? `${ESTIMATE_WORD}: ${f.cost_reason ?? ""}` : "",
       v.title,
     ]
       .filter(Boolean)

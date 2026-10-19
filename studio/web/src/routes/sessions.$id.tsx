@@ -42,6 +42,8 @@ import { summarizerView } from "@/lib/cost"
 import {
   decisionsWords,
   exchangesWords,
+  FORKS_TITLE,
+  forksWords,
   grantsWords,
   TIMELINE_OFF,
   timelineUnread,
@@ -53,6 +55,7 @@ import { SessionTimeline } from "@/components/studio/session-timeline"
 import { LineageLine } from "@/components/studio/lineage"
 import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
 import { HoleBadge } from "@/components/studio/hole-badge"
+import { THREAD_LINK } from "@/lib/status-class"
 
 export const Route = createFileRoute("/sessions/$id")({
   validateSearch: sessionSearch,
@@ -291,16 +294,34 @@ function SessionPage() {
           session pages through all of them
         </p>
       ) : null}
-      <p className="text-center font-mono text-[11px] text-faint">
-        {forks.isError
-          ? `experiments could not be read: ${forks.error.message}`
-          : forks.isPending
-            ? "looking for experiments…"
-            : `${forked} ${forked === 1 ? "experiment" : "experiments"} forked from these turns${
-                forks.data.truncated
-                  ? " — only the newest 2,000 playground runs were searched"
-                  : ""
-              }`}
+      <p
+        className="text-center font-mono text-[11px] text-faint"
+        data-session-forks
+      >
+        {forks.isError ? (
+          `experiments could not be read: ${forks.error.message}`
+        ) : forks.isPending ? (
+          "looking for experiments…"
+        ) : (
+          <>
+            {/* The experiments nest under their source turn in the
+                table: off it, the count is the way there. */}
+            {view === "table" || forked === 0 ? (
+              forksWords(forked)
+            ) : (
+              <Link
+                {...sessionViewLink(id, { view: "table" })}
+                className={THREAD_LINK}
+                title={FORKS_TITLE}
+              >
+                {forksWords(forked)}
+              </Link>
+            )}
+            {forks.data.truncated
+              ? " — only the newest 2,000 playground runs were searched"
+              : ""}
+          </>
+        )}
       </p>
     </div>
   )

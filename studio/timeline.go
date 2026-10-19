@@ -552,7 +552,8 @@ func markSummarizer(m sessionEntry) (u core.Usage, model core.ModelInfo, ok bool
 // summarizerSum folds priced summarizer calls into one figure: known
 // when every part is, the first unknown part's badge and reason, the
 // unpriced models of all, a scripted badge only when every part is
-// scripted, the cache not_reported when any part's is.
+// scripted, an estimate (its reason) when any known part is one, the
+// cache not_reported when any part's is.
 type summarizerSum struct {
 	u core.Usage
 	c cost
@@ -578,6 +579,8 @@ func (s *summarizerSum) add(u core.Usage, c cost) {
 		out.badge, out.reason = s.c.badge, s.c.reason
 	case !c.known:
 		out.badge, out.reason = c.badge, c.reason
+	case s.c.badge == costEstimate || c.badge == costEstimate:
+		out.badge, out.reason = costEstimate, estimateReason
 	case s.c.badge == costScripted && c.badge == costScripted:
 		out.badge, out.reason = costScripted, scriptedReason
 	}
@@ -588,13 +591,34 @@ func (s *summarizerSum) figure() *summarizerCost {
 	return &summarizerCost{Usage: s.u, costFields: s.c.fields()}
 }
 
+// estimate is c priced at a stand-in model: still known when that
+// model is priced, badged an estimate with its reason (an unpriced or
+// unknown figure keeps its own badge and reason: it is no estimate).
+func estimate(c cost) cost {
+	if c.known && c.badge != costScripted {
+		c.badge, c.reason = costEstimate, estimateReason
+	}
+	return c
+}
+
+// markCost is one summarizer call's figure: at its recorded model's
+// rates (mi), else at the stand-in turn model's (at) — an estimate,
+// badged so, its reason the words a reader shows.
+func (s *Server) markCost(u core.Usage, mi, at core.ModelInfo) cost {
+	if mi != (core.ModelInfo{}) {
+		return s.pricing.price(mi.Provider, mi.Name, u)
+	}
+	return estimate(s.pricing.price(at.Provider, at.Name, u))
+}
+
 // priceSummarizer fills the turns' and the session's summarizer
-// figures (UX-B-13): each mark naming a summarizer call priced at its
-// summarizer_model's rates, else at its turn's model's (the newest
-// turn's for a session-level mark); the session's whole figure is the
-// marks' plus what of SummarizerUsage no mark names (a call past the
-// cap, a summary without a marker), that part at the newest turn's
-// model's rates.
+// figures (UX-B-13). Each mark naming a summarizer call is priced by
+// markCost: at its summarizer_model's rates, else at its turn's model's
+// (the newest turn's for a session-level mark) — an estimate, said so.
+// The session's whole figure is the marks' plus
+// what of SummarizerUsage no mark names (a call past the cap, a summary
+// without a marker), each model's part of it at that model's rates —
+// a part whose spans named no model at the newest turn's, an estimate.
 func (s *Server) priceSummarizer(doc *timelineDoc, det obsdb.SessionDetail) {
 	models := map[string]core.ModelInfo{}
 	var newest core.ModelInfo
@@ -603,6 +627,20 @@ func (s *Server) priceSummarizer(doc *timelineDoc, det obsdb.SessionDetail) {
 		models[rr.ID] = mi
 		if mi != (core.ModelInfo{}) {
 			newest = mi
+		}
+	}
+	// The spans' parts: what is left of each once the marks priced
+	// theirs. Usage the spans counted under no model is its own part.
+	parts := slices.Clone(det.SummarizerModels)
+	if len(parts) == 0 && det.SummarizerUsage != (core.Usage{}) {
+		parts = []obsdb.ModelUsage{{Usage: det.SummarizerUsage}}
+	}
+	take := func(mi core.ModelInfo, u core.Usage) {
+		for i := range parts {
+			if parts[i].Provider == mi.Provider && parts[i].Model == mi.Name {
+				parts[i].Usage = sub(parts[i].Usage, u)
+				return
+			}
 		}
 	}
 	perTurn := map[string]*summarizerSum{}
@@ -616,12 +654,12 @@ func (s *Server) priceSummarizer(doc *timelineDoc, det obsdb.SessionDetail) {
 		if m.RunID != nil {
 			run = *m.RunID
 		}
-		if mi == (core.ModelInfo{}) {
-			if mi = models[run]; mi == (core.ModelInfo{}) {
-				mi = newest
-			}
+		at := models[run]
+		if at == (core.ModelInfo{}) {
+			at = newest
 		}
-		c := s.pricing.price(mi.Provider, mi.Name, u)
+		c := s.markCost(u, mi, at)
+		take(mi, u)
 		marked.add(u, c)
 		if run == "" {
 			continue
@@ -636,8 +674,24 @@ func (s *Server) priceSummarizer(doc *timelineDoc, det obsdb.SessionDetail) {
 			doc.Turns[i].Summarizer = f.figure()
 		}
 	}
-	if rest := sub(det.SummarizerUsage, marked.u); rest != (core.Usage{}) {
-		marked.add(rest, s.pricing.price(newest.Provider, newest.Name, rest))
+	// The rest, bounded by what the session's spans counted beyond the
+	// marks' (a mark whose model no span names takes from no part).
+	rest := sub(det.SummarizerUsage, marked.u)
+	for _, p := range parts {
+		u := core.Usage{
+			InputTokens: min(p.Usage.InputTokens, rest.InputTokens), OutputTokens: min(p.Usage.OutputTokens, rest.OutputTokens),
+			CachedInputTokens: min(p.Usage.CachedInputTokens, rest.CachedInputTokens), CacheWriteTokens: min(p.Usage.CacheWriteTokens, rest.CacheWriteTokens),
+			ReasoningTokens: min(p.Usage.ReasoningTokens, rest.ReasoningTokens),
+		}
+		if u == (core.Usage{}) {
+			continue
+		}
+		rest = sub(rest, u)
+		if p.Model == "" {
+			marked.add(u, estimate(s.pricing.price(newest.Provider, newest.Name, u)))
+		} else {
+			marked.add(u, s.pricing.price(p.Provider, p.Model, u))
+		}
 	}
 	if marked.n > 0 {
 		doc.Summarizer = marked.figure()

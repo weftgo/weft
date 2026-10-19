@@ -57,19 +57,33 @@ export const timelineUnread = (why: string) =>
 export const TIMELINE_OFF =
   "this Studio does not read a session's state log (capability timeline is off): the turns are drawn without their marks"
 
-/** A session-level mark's heading: filed under no run (held at Close). */
+/** A session-level mark's heading: filed under no run (run_id null —
+ * thread held it until the session closed, with no run to file it
+ * under). */
 export const SESSION_LEVEL =
   "filed under no turn (held until the session closed)"
 
-/** markKey is a mark's key in ?mark=: its thread entry id when that is
- * unique among the marks, else m<index> (an interrupt names no entry). */
+/** The heading of the marks filed under a run this page does not list
+ * (a deleted turn, or one outside the reader's scope). */
+export const UNLISTED_RUN =
+  "filed under a run not on this page (a deleted or unlisted turn)"
+
+/** unlistedRun is the drawer's "filed under" value for such a mark. */
+export const unlistedRun = (run: string) => `${run} · not on this page`
+
+/** markKeys are the marks' keys in ?mark=, stable while a live session
+ * grows (a new mark, earlier or later, moves no other key): a mark's
+ * thread entry id, else kind:at:run (an interrupt names no entry); a
+ * true duplicate — the same key again — gains ":<n>", its occurrence
+ * among that key's marks. */
 export function markKeys(marks: readonly SessionMark[]): string[] {
   const seen = new Map<string, number>()
-  for (const m of marks)
-    if (m.entry) seen.set(m.entry, (seen.get(m.entry) ?? 0) + 1)
-  return marks.map((m, i) =>
-    m.entry && seen.get(m.entry) === 1 ? m.entry : `m${i}`
-  )
+  return marks.map((m) => {
+    const base = m.entry || `${m.kind}:${m.at}:${m.run_id ?? "session"}`
+    const n = seen.get(base) ?? 0
+    seen.set(base, n + 1)
+    return n ? `${base}:${n}` : base
+  })
 }
 
 /** clockTime is a time of day to the millisecond, local: "11:57:53.599"
@@ -407,16 +421,31 @@ const asStatusRow = (t: TimelineTurn) => ({
 
 /** A skipped turn number (UX-E-19): thread mints a turn number for an
  * input it accepts while a turn runs; a steer delivered into that turn
- * (or dropped) never names a run. The words say which receipt took it. */
+ * (or dropped) never names a run. The words say which receipt took it;
+ * a run of numbers no receipt explains is one gap, "t2–t8", drawn as a
+ * not_recorded hole with its reason (never a row per number). */
 export interface TurnGap {
+  /** The first skipped number (the gap's sort key) … */
   turn: number
+  /** … and the last: turn itself for a number a receipt explains. */
+  to: number
   text: string
   /** The receipt mark's key that consumed it, when one did. */
   mark?: string
+  /** No receipt explains the numbers: the not_recorded hole's reason. */
+  reason?: string
 }
 
+/** The words of a run of turn numbers no receipt explains. */
+export const gapRange = (from: number, to: number) =>
+  from === to ? `t${from}` : `t${from}–t${to}`
+export const gapReason = (from: number, to: number) =>
+  `no run of ${from === to ? "this turn number" : "these turn numbers"} was recorded and no receipt names ${from === to ? "it" : "them"}: a turn that never reported (its process ended first, or a destination dropped it), or a turn this reader cannot see`
+
 /** turnGaps lists the turn numbers between a session's first and last
- * turn that no run carries, each with the receipt that took it. */
+ * turn that no run carries: each one a receipt took with that receipt,
+ * consecutive unexplained ones as one range. Linear in the session's
+ * span and its marks (t1 + t1000 is one gap, not 998 rows). */
 export function turnGaps(
   turns: readonly TimelineTurn[],
   marks: readonly SessionMark[]
@@ -426,19 +455,35 @@ export function turnGaps(
   const lo = Math.min(...have)
   const hi = Math.max(...have)
   const keys = markKeys(marks)
+  // The first receipt naming each number, read once.
+  const took = new Map<number, number>()
+  marks.forEach((m, i) => {
+    const n = num(m.fields.turn)
+    if (m.kind === "receipt" && n && !took.has(n)) took.set(n, i)
+  })
   const out: TurnGap[] = []
+  let open: number | undefined
+  const close = (to: number) => {
+    if (open === undefined) return
+    out.push({
+      turn: open,
+      to,
+      text: gapRange(open, to),
+      reason: gapReason(open, to),
+    })
+    open = undefined
+  }
   for (let n = lo + 1; n < hi; n++) {
-    if (have.has(n)) continue
-    const i = marks.findIndex(
-      (m) => m.kind === "receipt" && num(m.fields.turn) === n
-    )
-    if (i < 0) {
-      out.push({
-        turn: n,
-        text: `t${n} · no run of this turn number was recorded`,
-      })
+    if (have.has(n)) {
+      close(n - 1)
       continue
     }
+    const i = took.get(n)
+    if (i === undefined) {
+      open ??= n
+      continue
+    }
+    close(n - 1)
     const r = marks[i]
     const id = str(r.fields.receipt_id)
     const fate = marks.find(
@@ -456,10 +501,12 @@ export function turnGaps(
         : ` · ${str(fate.fields.state)}`
     out.push({
       turn: n,
+      to: n,
       text: `t${n} · consumed by a ${what}${end}`,
       mark: keys[i],
     })
   }
+  close(hi - 1)
   return out
 }
 
@@ -593,7 +640,14 @@ export function markDetail(
         `${tokens(u.input_tokens ?? 0)} in / ${tokens(u.output_tokens ?? 0)} out`
       )
   }
-  row("filed under", m.run_id ? tag(m.run_id) : SESSION_LEVEL)
+  row(
+    "filed under",
+    !m.run_id
+      ? SESSION_LEVEL
+      : turns.some((t) => t.run_id === m.run_id)
+        ? tag(m.run_id)
+        : unlistedRun(m.run_id)
+  )
   row("record", `${m.event} · content ${m.content_mark}`)
 
   // The links: the parking step (the parked run's last step, where the
@@ -601,11 +655,19 @@ export function markDetail(
   const parked = m.run_id ? turns.find((t) => t.run_id === m.run_id) : undefined
   const call = str(f.call_id)
   if (m.lane === "approvals" && parked && call) {
-    const step = Math.max(parked.steps - 1, 0)
-    links.push({
-      label: `parked in ${tag(parked.run_id)} · step ${step}`,
-      link: runLink(parked.run_id, { step, call }),
-    })
+    // A resume that parks again before any step (core's resolvePending:
+    // steps 0) parked on its pre-step card, not on a step.
+    links.push(
+      parked.steps > 0
+        ? {
+            label: `parked in ${tag(parked.run_id)} · step ${parked.steps - 1}`,
+            link: runLink(parked.run_id, { step: parked.steps - 1, call }),
+          }
+        : {
+            label: `parked in ${tag(parked.run_id)} · ${PARKED_BEFORE_STEP}`,
+            link: runLink(parked.run_id, { call, resumed: true }),
+          }
+    )
     const to = resumeOfTurn(parked.run_id, turns)
     if (to)
       links.push({
@@ -633,6 +695,9 @@ export function markDetail(
   return { rows, links }
 }
 
+/** A park before any step (a resume that re-parked in resolvePending). */
+export const PARKED_BEFORE_STEP = "parked before step 0"
+
 /** The turn stepper's words (UX-B-21): a turn's run page walks its
  * session turn by turn — { and } (the run page's [ ] walk steps). */
 export const TURN_STEPPER = {
@@ -642,34 +707,33 @@ export const TURN_STEPPER = {
   crumb: "sessions",
 }
 
-/** turnSiblings places a session turn among its session's own turns
- * (turn order): its neighbours, its 1-based position and the count;
- * null when the run is not one of them. */
-export function turnSiblings<T extends { id: string; turn: number }>(
-  run: { id: string },
-  turns: readonly T[]
-): { prev?: T; next?: T; index: number; total: number } | null {
-  const own = [...turns].sort((a, b) => a.turn - b.turn)
-  const i = own.findIndex((t) => t.id === run.id)
-  if (i < 0) return null
-  return { prev: own[i - 1], next: own[i + 1], index: i + 1, total: own.length }
-}
-
-/** The marks under each turn (run id → indices into doc.marks), and the
- * session-level ones (run_id null, or a run not among the turns). */
+/** The marks under each turn (run id → indices into doc.marks), the
+ * session-level ones (loose: run_id null) and those filed under a run
+ * the page does not list (unlisted). */
 export function marksByTurn(doc: Pick<TimelineDoc, "marks" | "turns">): {
   byRun: Map<string, number[]>
   loose: number[]
+  unlisted: number[]
 } {
   const runs = new Set(doc.turns.map((t) => t.run_id))
   const byRun = new Map<string, number[]>()
   const loose: number[] = []
+  const unlisted: number[] = []
   doc.marks.forEach((m, i) => {
-    if (m.run_id && runs.has(m.run_id)) {
+    if (!m.run_id) loose.push(i)
+    else if (!runs.has(m.run_id)) unlisted.push(i)
+    else {
       const l = byRun.get(m.run_id) ?? []
       l.push(i)
       byRun.set(m.run_id, l)
-    } else loose.push(i)
+    }
   })
-  return { byRun, loose }
+  return { byRun, loose, unlisted }
 }
+
+/** The session page's footer: the experiments forked from its turns —
+ * a link to the table, where they nest under their source turn. */
+export const forksWords = (n: number) =>
+  `${n} ${n === 1 ? "experiment" : "experiments"} forked from these turns`
+export const FORKS_TITLE =
+  "the table view lists each experiment under the turn it forked"

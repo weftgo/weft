@@ -28,7 +28,8 @@ import type {
   TimelineDoc,
   TimelineTurn,
 } from "@/lib/api"
-import { TRAIL_NOTE } from "@/lib/timeline"
+import { queryClient } from "@/lib/query"
+import { markKeys, TRAIL_NOTE, UNLISTED_RUN } from "@/lib/timeline"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
@@ -217,6 +218,193 @@ describe("the session timeline (U15.1)", () => {
     )
   })
 
+  it("a read token's drawer: who is a hidden badge, the mark says content hidden", async () => {
+    const hidden: SessionMark[] = marks.map((m) =>
+      m.content ? { ...m, content: undefined, content_hidden: true } : { ...m }
+    )
+    studio.on(`GET sessions/${SID}/timeline`, { ...timeline, marks: hidden })
+    renderApp(`/sessions/${SID}`)
+    const denial = await screen.findByRole("button", { name: /^denied → t2/ })
+    expect(denial.textContent).toContain("· content hidden")
+    fireEvent.click(denial)
+    const drawer = await screen.findByRole("complementary")
+    const who = drawer.querySelector('[data-drawer-row="who"]')
+    expect(who?.querySelector('[data-hole="hidden"]')).toBeTruthy()
+    expect(drawer.querySelector('[data-drawer-row="reason"]')).toBeNull()
+  })
+
+  it("a content-off session: the marks without their words, the record says stripped", async () => {
+    const off: SessionMark[] = marks.map((m) => ({
+      ...m,
+      content: undefined,
+      content_mark: m.content ? "stripped" : m.content_mark,
+    }))
+    studio.on(`GET sessions/${SID}/timeline`, { ...timeline, marks: off })
+    renderApp(`/sessions/${SID}`)
+    const denial = await screen.findByRole("button", { name: /^denied → t2/ })
+    expect(denial.textContent).not.toContain("content hidden")
+    fireEvent.click(denial)
+    const drawer = await screen.findByRole("complementary")
+    const row = (k: string) =>
+      drawer.querySelector(`[data-drawer-row="${k}"]`)?.textContent
+    expect(row("who")).toBeUndefined()
+    expect(row("reason")).toBeUndefined()
+    expect(row("record")).toBe(
+      "weft.thread.approval.decision · content stripped"
+    )
+    expect(row("via")).toBe("user")
+  })
+
+  it("draws a timeline of session-level marks alone, and a mark under an unlisted run apart", async () => {
+    const loose = marks.filter((m) => m.run_id === null)
+    const gone: SessionMark = {
+      ...marks[0],
+      run_id: `${SID}-t99`,
+      turn: 99,
+      entry: "e99",
+    }
+    studio.on(`GET sessions/${SID}/timeline`, {
+      ...timeline,
+      turns: [],
+      marks: [...loose, gone],
+    })
+    studio.on(`GET sessions/${SID}`, { ...session, runs: [], turns: 0 })
+    const { container } = renderApp(`/sessions/${SID}`)
+    await waitFor(() =>
+      expect(container.querySelector("[data-session-level]")).toBeTruthy()
+    )
+    expect(container.querySelector("[data-exchange]")).toBeNull()
+    expect(
+      container.querySelectorAll("[data-session-level] [data-mark]")
+    ).toHaveLength(loose.length)
+    const unlisted = container.querySelector("[data-unlisted-run]")!
+    expect(unlisted.textContent).toContain(UNLISTED_RUN)
+    expect(unlisted.querySelectorAll("[data-mark]")).toHaveLength(1)
+  })
+
+  it("draws the truncated hole (response_cap) over the marks it cut", async () => {
+    studio.on(`GET sessions/${SID}/timeline`, {
+      ...timeline,
+      holes: [
+        {
+          hole: "truncated",
+          cause: "response_cap",
+          reason:
+            "the session has 2400 marks; this response reads the first 2000 — nothing was lost",
+          fix: "page the rest: GET /api/sessions/{id}/entries?offset=2000",
+        },
+      ],
+    })
+    const { container } = renderApp(`/sessions/${SID}`)
+    await screen.findByRole("button", { name: /denied · agent-7/ })
+    const hole = container.querySelector(
+      '[data-timeline-holes] [data-hole="truncated"]'
+    )
+    expect(hole?.getAttribute("title")).toMatch(
+      /first 2000.*entries\?offset=2000/
+    )
+  })
+
+  it("keeps ?mark= on the same mark when a live session grows an earlier one", async () => {
+    // An interrupt names no entry: its key is kind:at:run, not its index.
+    const interrupt: SessionMark = {
+      ...marks[0],
+      kind: "interrupt",
+      event: "weft.thread.interrupt",
+      lane: "steer_queue",
+      entry: undefined,
+      fields: { policy: "interrupt", by_run: t(6) },
+      run_id: t(5),
+      turn: 5,
+      at: "2020-01-01T09:00:54.123Z",
+    }
+    const first = [...marks, interrupt]
+    studio.on(`GET sessions/${SID}/timeline`, { ...timeline, marks: first })
+    const k = markKeys(first).at(-1)!
+    const { router } = renderApp(
+      `/sessions/${SID}?mark=${encodeURIComponent(k)}`
+    )
+    const drawer = await screen.findByRole("complementary")
+    expect(drawer.textContent).toContain("interrupted by t6")
+    // A new mark lands before every other one: the list's indices move.
+    const grown = [
+      { ...marks[0], entry: "e1", at: "2020-01-01T09:00:10.500Z" },
+      ...first,
+    ]
+    studio.on(`GET sessions/${SID}/timeline`, { ...timeline, marks: grown })
+    await queryClient.invalidateQueries({ queryKey: ["session-timeline", SID] })
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-mark]")).toHaveLength(
+        grown.length
+      )
+    )
+    expect(router.state.location.search).toMatchObject({ mark: k })
+    expect(screen.getByRole("complementary").textContent).toContain(
+      "interrupted by t6"
+    )
+  })
+
+  it("links a re-park before any step to the resume's pre-step card", async () => {
+    // t2 resumed t1 and parked again before its first step (steps 0).
+    const reTurns = turns.map((x) =>
+      x.run_id === t(2)
+        ? { ...x, steps: 0, pending: 1, stopped_by: "parked" }
+        : x
+    )
+    const repark: SessionMark = {
+      ...marks[0],
+      run_id: t(2),
+      turn: 2,
+      entry: "e8",
+      fields: { call_id: "r1b", tool: "issue_refund" },
+    }
+    studio.on(`GET sessions/${SID}/timeline`, {
+      ...timeline,
+      turns: reTurns,
+      marks: [...marks, repark],
+    })
+    renderApp(`/sessions/${SID}?mark=e8`)
+    const drawer = await screen.findByRole("complementary")
+    const link = within(drawer).getByRole("link", {
+      name: "parked in t2 · parked before step 0",
+    })
+    expect(link.getAttribute("href")).toContain(
+      `/runs/${t(2)}?sel=c%3Aresume%3Ar1b`
+    )
+    expect(link.getAttribute("href")).not.toContain("step=")
+  })
+
+  it("links the experiments line to the table, where they nest", async () => {
+    studio.on("GET runs", (req) =>
+      req.query.get("playground") === "true"
+        ? {
+            total: 1,
+            runs: [
+              {
+                ...rows[0],
+                id: "x1",
+                playground: true,
+                forked_from: t(1),
+                meta: { "weft.forked_from": t(1) },
+              },
+            ],
+            next_before: null,
+          }
+        : { total: 0, runs: [], next_before: null }
+    )
+    const { container, router } = renderApp(`/sessions/${SID}`)
+    await screen.findByRole("button", { name: /denied · agent-7/ })
+    const line = await waitFor(() => {
+      const a = container.querySelector("[data-session-forks] a")
+      expect(a).toBeTruthy()
+      return a!
+    })
+    fireEvent.click(line)
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ view: "table" })
+    )
+  })
+
   it("draws the turns from the session when the state log cannot be read", async () => {
     studio.on(`GET sessions/${SID}/timeline`, () => {
       throw new Error("boom")
@@ -250,16 +438,30 @@ describe("a turn's run page in its session (UX-B-21)", () => {
       .on(`GET runs/${doc.id}/transcript`, transcriptOf([]))
   }
 
-  it("names its session in the breadcrumb, lights Sessions and steps to the turns beside it", async () => {
+  it("names its session in the one breadcrumb, lights Sessions and steps to the turns beside it", async () => {
     runPage({ ...rows[3], children: [] })
     runPage({ ...rows[4], children: [] })
+    // The stepper's reads: one row each side, the counts from totals.
+    studio.on("GET runs", (req) => {
+      const below = Number(req.query.get("turn_below") ?? 0)
+      const above = Number(req.query.get("turn_above") ?? 0)
+      const pick = below
+        ? rows.filter((r) => r.turn < below).reverse()
+        : above
+          ? rows.filter((r) => r.turn > above)
+          : []
+      return { total: pick.length, runs: pick.slice(0, 1), next_before: null }
+    })
     const { container, router } = renderApp(`/runs/${t(4)}`)
     const stepper = await screen.findByRole("navigation", {
       name: "the session's turns",
     })
     expect(stepper.textContent).toBe("‹ t3turn 4 of 6t5 ›")
-    const crumb = container.querySelector(`[data-crumb-session="${SID}"]`)
-    expect(crumb?.getAttribute("href")).toContain(`/sessions/${SID}`)
+    const crumbs = container.querySelectorAll(`[data-crumb-session="${SID}"]`)
+    expect(crumbs).toHaveLength(1)
+    expect(crumbs[0].getAttribute("href")).toContain(`/sessions/${SID}`)
+    // The header draws no breadcrumb of its own: the shell's is the one.
+    expect(container.querySelector('nav[aria-label="breadcrumb"]')).toBeNull()
     const lit = [...container.querySelectorAll("a[data-active]")].map(
       (a) => a.textContent
     )
@@ -268,6 +470,61 @@ describe("a turn's run page in its session (UX-B-21)", () => {
     fireEvent.keyDown(window, { key: "}" })
     await waitFor(() =>
       expect(router.state.location.pathname).toBe(`/runs/${t(5)}`)
+    )
+  })
+
+  it("reads O(1) rows for a 1,000-turn session's stepper, never the session document", async () => {
+    const N = 1000
+    const doc: RunDoc = {
+      ...rows[0],
+      id: t(500),
+      turn: 500,
+      pending: 0,
+      stopped_by: undefined,
+      resumed_by: undefined,
+      children: [],
+    }
+    runPage(doc)
+    studio.on("GET runs", (req) => {
+      const below = Number(req.query.get("turn_below") ?? 0)
+      const above = Number(req.query.get("turn_above") ?? 0)
+      const row = (n: number) => ({ ...rows[0], id: t(n), turn: n })
+      if (below)
+        return { total: below - 1, runs: [row(below - 1)], next_before: null }
+      if (above)
+        return { total: N - above, runs: [row(above + 1)], next_before: null }
+      return { total: 0, runs: [], next_before: null }
+    })
+    renderApp(`/runs/${t(500)}`)
+    const stepper = await screen.findByRole("navigation", {
+      name: "the session's turns",
+    })
+    expect(stepper.textContent).toBe("‹ t499turn 500 of 1000t501 ›")
+    const reads = studio
+      .calls("GET runs")
+      .filter((r) => r.query.has("turn_below") || r.query.has("turn_above"))
+    expect(reads).toHaveLength(2)
+    for (const r of reads) {
+      expect(r.query.get("limit")).toBe("1")
+      expect(r.query.get("session")).toBe(SID)
+    }
+    expect(studio.calls(`GET sessions/${SID}`)).toHaveLength(0)
+  })
+
+  it("draws the turn's summarizer on its cost line (UX-B-13)", async () => {
+    runPage({
+      ...rows[3],
+      children: [],
+      cost_usd: 0.001,
+      cost_known: true,
+      cost_badge: undefined,
+      summarizer: timeline.turns[3].summarizer,
+    })
+    const { container } = renderApp(`/runs/${t(4)}`)
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-cost-part="summarizer"]')?.textContent
+      ).toContain("+ summarizer $0.0003")
     )
   })
 })

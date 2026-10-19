@@ -81,6 +81,7 @@ import { mayReadExperiments } from "@/components/studio/no-experiments"
 import {
   experimentsLink,
   playgroundLink,
+  runLink,
   sessionLink,
   settingsLink,
   tracesLink,
@@ -101,17 +102,18 @@ function skipToContent(e: React.MouseEvent) {
   t?.scrollIntoView({ block: "nearest" })
 }
 
-/** useTurnPlace is the session a run page's run is a turn of (UX-B-21),
- * read from the run document the page already holds (never fetched
- * here); "" off a run page and for any other run. */
-function useTurnPlace(): { session: string; turn: number } {
+/** useTurnPlace is the session a run page's run is a turn of (UX-B-21)
+ * and the run's parent, read from the run document the page already
+ * holds (never fetched here); "" off a run page and for any other run. */
+function useTurnPlace(): { session: string; turn: number; parent: string } {
   const location = useLocation()
   const parts = location.pathname.split("/").filter(Boolean)
   const id = parts[0] === "runs" ? safeDecode(parts.slice(1).join("/")) : ""
   const run = useQuery({ ...runQuery(id), enabled: false })
+  const parent = (id && run.data?.parent_run_id) || ""
   return run.data && id && ownTurn(run.data)
-    ? { session: run.data.session_id, turn: run.data.turn }
-    : { session: "", turn: 0 }
+    ? { session: run.data.session_id, turn: run.data.turn, parent }
+    : { session: "", turn: 0, parent }
 }
 
 function Nav() {
@@ -215,7 +217,9 @@ function safeDecode(s: string): string {
   }
 }
 
-/** Where the reader is, for the header: runs › id. */
+/** Where the reader is, for the header — every page's one breadcrumb:
+ * runs › [parent ›] id, or a session's turn sessions › its session ›
+ * tN (UX-B-21). */
 function Place() {
   const location = useLocation()
   const parts = location.pathname.split("/").filter(Boolean)
@@ -231,6 +235,7 @@ function Place() {
           {...sessionLink(turn.session)}
           className="truncate font-mono hover:text-foreground"
           title={turn.session}
+          data-crumb-session={turn.session}
         >
           {shortId(turn.session)}
         </Link>
@@ -246,6 +251,19 @@ function Place() {
           runs
         </Link>
         <span className="text-faint">›</span>
+        {turn.parent ? (
+          <>
+            <Link
+              {...runLink(turn.parent)}
+              className="truncate font-mono hover:text-foreground"
+              title="the parent run"
+              data-crumb-parent={turn.parent}
+            >
+              {shortId(turn.parent)}
+            </Link>
+            <span className="text-faint">›</span>
+          </>
+        ) : null}
         <span className="truncate font-mono text-foreground">
           {safeDecode(parts.slice(1).join("/"))}
         </span>

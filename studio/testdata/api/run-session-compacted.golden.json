@@ -59,6 +59,17 @@
       "tokens_after": 1045,
       "reason": "manual"
     }
-  ]
+  ],
+  "summarizer": {
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5
+    },
+    "cost_usd": 0,
+    "cost_known": true,
+    "cost_badge": "scripted",
+    "cost_reason": "a scripted model: nothing bills it, an exact $0",
+    "cache": "exact"
+  }
 }
 

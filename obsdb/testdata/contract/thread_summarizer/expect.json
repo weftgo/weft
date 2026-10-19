@@ -125,7 +125,17 @@
       "summarizer_usage": {
         "input_tokens": 1200,
         "output_tokens": 40
-      }
+      },
+      "summarizer_models": [
+        {
+          "provider": "xai",
+          "model": "summary-mini",
+          "usage": {
+            "input_tokens": 1200,
+            "output_tokens": 40
+          }
+        }
+      ]
     }
   ]
 }

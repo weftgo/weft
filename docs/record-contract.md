@@ -1056,12 +1056,20 @@ read time (U15.1, UX-B-13; never stored): a turn carries `summarizer`
 (`usage` + the cost block) when marks filed under it — a compaction
 marker, a `SummarizeLeft` branch record — name `summarizer_usage`, each
 priced at its `summarizer_model`'s rates when recorded, else at the
-turn's model's; the document's `summarizer` is the marks' sum plus
-what of the session's `summarizer_usage` no mark names (a call past the
-cap, a summary without a marker) at the newest turn's model's rates;
-an unpriced part makes the figure not known, its model named. Absent
-when the session summarized nothing; never folded into a turn's usage
-or `cost_usd`.
+turn's model's as an estimate (`cost_known` true, `cost_badge`
+`estimate`, `cost_reason` "priced at the turn's model: the summarizer's
+model was not recorded"); the document's `summarizer` is the marks' sum
+plus what of the session's `summarizer_usage` no mark names (a call past
+the cap, a summary without a marker), each model's part of it at that
+model's rates — `obsdb.SessionRow.SummarizerModels`, the summarizer
+spans' usage split by their `gen_ai.provider.name` /
+`gen_ai.request.model` (U15.1-fix) — a part whose spans named no model
+at the newest turn's, an estimate; an unpriced part makes the figure not
+known, its model named. Absent when the session summarized nothing;
+never folded into a turn's usage or `cost_usd`. A session turn's run
+document (`GET /api/runs/{id}`) carries the same `summarizer` figure,
+from the session events filed under that run alone
+(`SessionEventQuery.RunIDs`), the run's model the stand-in.
 Its `usage` is its turns' own; `summarizer_usage`
 (`obsdb.SessionRow.SummarizerUsage`, audit O15) is apart: the summed
 `gen_ai.usage.*` of the summarizer `chat` spans (`weft.chat.role`
@@ -1069,7 +1077,12 @@ Its `usage` is its turns' own; `summarizer_usage`
 `runs_session` then each run's spans, ClickHouse through `weft_runs` by
 session then `otel_traces` by `RunId`, each span once — scoped to the
 public id's runs like the rest of the row, zero when the session
-summarized nothing. Never folded into `usage` or any run's: a reader
+summarized nothing. `SummarizerModels` is the same sum split by
+the model each span named (`gen_ai.provider.name`,
+`gen_ai.request.model`; "" when it named none), sorted by provider then
+model, its parts summing to `SummarizerUsage` (`obsdb.SumModelUsage`,
+both backends; the `thread_summarizer` and `thread_compaction`
+fixtures' `summarizer_models`). Never folded into `usage` or any run's: a reader
 adds it for the session's whole cost, labelled (the
 `thread_summarizer` and `thread_compaction` fixtures).
 

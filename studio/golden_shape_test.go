@@ -184,7 +184,9 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// problem counters); TestProblemCountersFromARealRun pins those
 		// fields from real runs that have them.
 		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".children_count", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".attempts_retried", ".fallbacks"}},
-		{"run-session-compacted.golden.json", "/api/runs/" + res.ID, []string{".compactions[]"}},
+		// The session marker's turn also carries its summarizer figure
+		// (UX-B-13, U15.1-fix); the plain real run is no session turn.
+		{"run-session-compacted.golden.json", "/api/runs/" + res.ID, []string{".compactions[]", ".summarizer"}},
 		{"runs.golden.json", "/api/runs", []string{".runs[].children_count", ".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
 		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd", ".runs[].cost_usd=<nil>", ".runs[].unpriced_models[]"}},
 		// Search (plan A7): run rows, prompt_preview included, from the

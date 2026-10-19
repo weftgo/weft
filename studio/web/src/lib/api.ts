@@ -37,7 +37,9 @@ export type RunStatus = "running" | "succeeded" | "failed" | "interrupted"
  * model — and cost_badge says why: "unpriced" (no row matches the
  * model) or "unknown" (the figure could not be computed), with
  * cost_reason naming it in one line; "scripted" marks a known, exact
- * $0 (a scripted model: wefttest, weft/runtime scripted — U7).
+ * $0 (a scripted model: wefttest, weft/runtime scripted — U7);
+ * "estimate" a known figure at a stand-in model's rates (a summarizer
+ * call whose model was not recorded, at its turn's — U15.1-fix).
  * unpriced_models are the provider/model pairs without a price behind
  * the figure (absent when none), five at most: a sixth and more are one
  * last element "(+n)" (lib/cost.ts's unpricedLine reads it). cache says whether the adapter reported the
@@ -46,7 +48,7 @@ export type RunStatus = "running" | "succeeded" | "failed" | "interrupted"
 export interface CostFields {
   cost_usd?: number | null
   cost_known?: boolean
-  cost_badge?: "unpriced" | "unknown" | "scripted"
+  cost_badge?: "unpriced" | "unknown" | "scripted" | "estimate"
   cost_reason?: string
   unpriced_models?: string[]
   /** "exact" | "not_reported" ("unknown" from a Studio before the
@@ -282,6 +284,9 @@ export interface RunDoc extends RunRow {
   decided?: DecisionDoc
   /** On a resume: the decided calls, drawn before step 0 (U13.2). */
   resumes?: DecisionDoc
+  /** A session turn's summarizer calls, priced (UX-B-13): never in its
+   * usage or cost_usd; absent when none. */
+  summarizer?: SummarizerCost
   /** The run's own holes (ADR 0028 §11, api.go's runHoles):
    * not_recorded, interrupted, derived, stripped, gap — each with its
    * reason and fix. Absent from a Studio older than A3. */
@@ -1164,6 +1169,13 @@ export interface RunsFilters {
   /** The runs whose id starts with this, byte for byte (U26: the ⌘K
    * palette's lookup of a pasted short id). /api/runs only. */
   id_prefix?: string
+  /** The runs whose turn is below / above it (U15.1-fix: with session
+   * and limit 1, a turn's neighbour, the page's total how many lie that
+   * side — the turn stepper's O(1) read). /api/runs only. */
+  turn_below?: number
+  turn_above?: number
+  /** Oldest first (the cursor pages forward). /api/runs only. */
+  oldest?: boolean
 }
 
 export function runsSearch(filters: RunsFilters): string {
@@ -1186,6 +1198,9 @@ export function runsSearch(filters: RunsFilters): string {
   if (filters.stopped_by) params.set("stopped_by", filters.stopped_by)
   if (filters.error_type) params.set("error_type", filters.error_type)
   if (filters.id_prefix) params.set("id_prefix", filters.id_prefix)
+  if (filters.turn_below) params.set("turn_below", String(filters.turn_below))
+  if (filters.turn_above) params.set("turn_above", String(filters.turn_above))
+  if (filters.oldest) params.set("oldest", "1")
   const qs = params.toString()
   return qs ? `?${qs}` : ""
 }
@@ -2136,6 +2151,52 @@ export function sessionQuery(id: string) {
   return queryOptions({
     queryKey: ["session", id],
     queryFn: () => get<SessionDoc>(`sessions/${encodeURIComponent(id)}`),
+  })
+}
+
+/** A session turn's place among its session's own turns (UX-B-21):
+ * its neighbours, its 1-based position and the count. */
+export interface TurnNeighbours {
+  prev_turn?: { id: string; turn: number }
+  next_turn?: { id: string; turn: number }
+  index: number
+  total: number
+}
+
+/** fetchTurnNeighbours reads a turn's place in two bounded reads
+ * (U15.1-fix): the session's own turns below it, newest first, one
+ * row — the previous turn, the page's total how many lie before — and
+ * above it, oldest first, one row. O(1) rows whatever the session's
+ * length; never the session document (every turn, priced). */
+export async function fetchTurnNeighbours(
+  session: string,
+  turn: number
+): Promise<TurnNeighbours> {
+  const side = (f: RunsFilters) =>
+    fetchRuns({ session, playground: false, limit: 1, ...f })
+  const [before, after] = await Promise.all([
+    turn > 1
+      ? side({ turn_below: turn })
+      : Promise.resolve<RunsPage>({ total: 0, runs: [], next_before: null }),
+    side({ turn_above: turn, oldest: true }),
+  ])
+  const one = (p: RunsPage) =>
+    p.runs[0] ? { id: p.runs[0].id, turn: p.runs[0].turn } : undefined
+  return {
+    prev_turn: one(before),
+    next_turn: one(after),
+    index: before.total + 1,
+    total: before.total + 1 + after.total,
+  }
+}
+
+/** The turn stepper's query: stale for 30 s, so walking a turn's steps
+ * reads it once — a live session's new turn shows within that. */
+export function turnNeighboursQuery(session: string, turn: number) {
+  return queryOptions({
+    queryKey: ["turn-neighbours", session, turn],
+    staleTime: 30_000,
+    queryFn: () => fetchTurnNeighbours(session, turn),
   })
 }
 

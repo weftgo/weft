@@ -32,6 +32,7 @@ import {
   toolsByCall,
   TRAIL_NOTE,
   turnGaps,
+  UNLISTED_RUN,
 } from "@/lib/timeline"
 import type { TurnGap } from "@/lib/timeline"
 import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
@@ -69,7 +70,7 @@ export function SessionTimeline({
     () => turnGaps(doc.turns, doc.marks),
     [doc.turns, doc.marks]
   )
-  const { byRun, loose } = useMemo(() => marksByTurn(doc), [doc])
+  const { byRun, loose, unlisted } = useMemo(() => marksByTurn(doc), [doc])
   const axis = useMemo(() => axisOf(doc.turns), [doc.turns])
   const rowOf = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows])
   const statusRows = useMemo(
@@ -89,11 +90,17 @@ export function SessionTimeline({
   const at = keys.indexOf(selected ?? "")
   const open = at >= 0 ? doc.marks[at] : undefined
 
-  // Gaps sit before the first exchange whose lead comes after them.
-  const gapsBefore = (n: number, prev: number) =>
-    gaps.filter((g) => g.turn < n && g.turn > prev)
-  const marks = (run: string) =>
-    (byRun.get(run) ?? []).map((i) => (
+  // Each gap sits before the first exchange whose lead comes after it
+  // (once: a gap among an exchange's resumes before the next one), the
+  // rest after the last.
+  let drawn = 0
+  const gapsBefore = (n: number) => {
+    const from = drawn
+    while (drawn < gaps.length && gaps[drawn].turn < n) drawn++
+    return gaps.slice(from, drawn)
+  }
+  const markList = (is: readonly number[]) =>
+    is.map((i) => (
       <MarkButton
         key={keys[i]}
         m={doc.marks[i]}
@@ -104,6 +111,7 @@ export function SessionTimeline({
         onSelect={onSelect}
       />
     ))
+  const marks = (run: string) => markList(byRun.get(run) ?? [])
   const turnRow = (t: TimelineTurn, prev?: TimelineTurn, lead?: boolean) => (
     <TurnRow
       t={t}
@@ -116,7 +124,6 @@ export function SessionTimeline({
     />
   )
 
-  let last = 0
   return (
     <div
       className={`grid gap-3 ${open ? "lg:grid-cols-[minmax(0,1fr)_24rem]" : ""}`}
@@ -128,8 +135,7 @@ export function SessionTimeline({
       >
         {groups.map((ex) => {
           const chain = [ex.lead, ...ex.resumes]
-          const before = gapsBefore(ex.lead.turn, last)
-          last = Math.max(...chain.map((t) => t.turn))
+          const before = gapsBefore(ex.lead.turn)
           return (
             <Fragment key={ex.lead.run_id}>
               {before.map((g) => (
@@ -160,27 +166,29 @@ export function SessionTimeline({
             </Fragment>
           )
         })}
+        {gapsBefore(Infinity).map((g) => (
+          <GapRow key={`gap-${g.turn}`} g={g} onSelect={onSelect} />
+        ))}
+        {unlisted.length ? (
+          <li className="space-y-1 px-3 py-2" data-unlisted-run>
+            <div className="eyebrow">{UNLISTED_RUN}</div>
+            <ul className="space-y-0.5 pl-[7.25rem] max-sm:pl-2">
+              {markList(unlisted)}
+            </ul>
+          </li>
+        ) : null}
         {loose.length ? (
           <li className="space-y-1 px-3 py-2" data-session-level>
             <div className="eyebrow">{SESSION_LEVEL}</div>
             <ul className="space-y-0.5 pl-[7.25rem] max-sm:pl-2">
-              {loose.map((i) => (
-                <MarkButton
-                  key={keys[i]}
-                  m={doc.marks[i]}
-                  k={keys[i]}
-                  turns={doc.turns}
-                  tools={tools}
-                  selected={selected === keys[i]}
-                  onSelect={onSelect}
-                />
-              ))}
+              {markList(loose)}
             </ul>
           </li>
         ) : null}
       </ol>
       {open ? (
         <MarkDrawer
+          k={keys[at]}
           m={open}
           turns={doc.turns}
           tools={tools}
@@ -346,9 +354,12 @@ function GapRow({
   return (
     <li
       className="px-3 py-1.5 pl-[8.5rem] font-mono text-[11px] text-muted-foreground max-sm:pl-3"
-      data-turn-gap={g.turn}
+      data-turn-gap={g.turn === g.to ? g.turn : `${g.turn}-${g.to}`}
     >
-      {g.mark ? (
+      {g.reason ? (
+        // Numbers no receipt explains: one hole for the run of them.
+        <HoleBadge hole="not_recorded" note={g.text} reason={g.reason} />
+      ) : g.mark ? (
         <button
           type="button"
           className={`text-left ${THREAD_LINK}`}
@@ -364,11 +375,15 @@ function GapRow({
 }
 
 function MarkDrawer({
+  k,
   m,
   turns,
   tools,
   onClose,
 }: {
+  /** The open mark's key: focus and scroll follow a new selection,
+   * never a refetch of the same mark. */
+  k: string
   m: SessionMark
   turns: readonly TimelineTurn[]
   tools: ReadonlyMap<string, string>
@@ -382,7 +397,7 @@ function MarkDrawer({
     heading.current?.focus({ preventScroll: true })
     // Narrow, the drawer sits under the list: bring it into view.
     heading.current?.scrollIntoView({ block: "nearest" })
-  }, [m])
+  }, [k])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose()

@@ -41,6 +41,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("PoolChild", poolChild(open))
 	t.Run("Children", children(open))
 	t.Run("IDPrefix", idPrefix(open))
+	t.Run("TurnBounds", turnBounds(open))
 	t.Run("Paging", paging(open))
 	t.Run("DeltaRule", deltaRule(open))
 	t.Run("HeartbeatRule", heartbeatRule(open))
@@ -1311,6 +1312,68 @@ func idPrefix(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		} {
 			if got := strings.Join(ids(c.q), " "); got != c.want {
 				t.Errorf("%+v = %q, want %q", c.q, got, c.want)
+			}
+		}
+	}
+}
+
+// turnBounds: RunQuery.TurnBelow / TurnAbove keep a session's turns
+// below / above a turn number — with Limit 1 a turn's neighbour, the
+// page's Total how many lie that side (U15.1-fix: a turn page's stepper
+// reads O(1) rows) — and compose with the session's own-turn rule: a
+// Subagent child carrying a turn number is no turn, another session's
+// turn is not listed.
+func turnBounds(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		var recs []obsdb.Record
+		start := func(id string, turn int64, d time.Duration, extra map[string]any) {
+			ex := map[string]any{"weft.turn": turn}
+			for k, v := range extra {
+				ex[k] = v
+			}
+			r := record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, ex)
+			r.Time = at(d)
+			recs = append(recs, r)
+		}
+		// Turns 1, 2, 4, 5 (3 never ran), a child of t4, another session.
+		for i, n := range []int64{1, 2, 4, 5} {
+			start(fmt.Sprintf("s_conf-t%d", n), n, time.Duration(i)*time.Second, nil)
+		}
+		start("s_conf-t4/1/c1", 4, 3*time.Second+time.Millisecond,
+			map[string]any{"weft.parent.run.id": "s_conf-t4", "weft.parent.call.id": "c1"})
+		start("s_other-t3", 3, 10*time.Second, map[string]any{"weft.session.id": "s_other"})
+		if err := db.Write(ctx(), obsdb.Batch{Records: recs}); err != nil {
+			t.Fatal(err)
+		}
+		read := func(q obsdb.RunQuery) (string, int) {
+			t.Helper()
+			page, err := db.Runs(ctx(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, r := range page.Runs {
+				out = append(out, r.ID)
+			}
+			return strings.Join(out, " "), page.Total
+		}
+		for _, c := range []struct {
+			q     obsdb.RunQuery
+			want  string
+			total int
+		}{
+			{obsdb.RunQuery{SessionID: "s_conf", TurnBelow: 4, Limit: 1}, "s_conf-t2", 2},
+			{obsdb.RunQuery{SessionID: "s_conf", TurnAbove: 2, Oldest: true, Limit: 1}, "s_conf-t4", 2},
+			{obsdb.RunQuery{SessionID: "s_conf", TurnAbove: 4, Oldest: true, Limit: 1}, "s_conf-t5", 1},
+			{obsdb.RunQuery{SessionID: "s_conf", TurnBelow: 1, Limit: 1}, "", 0},
+			{obsdb.RunQuery{SessionID: "s_conf", TurnAbove: 5, Oldest: true, Limit: 1}, "", 0},
+			{obsdb.RunQuery{SessionID: "s_conf", TurnBelow: 5, TurnAbove: 1}, "s_conf-t4 s_conf-t2", 2},
+			// The child counts under ParentRunID "*" only.
+			{obsdb.RunQuery{SessionID: "s_conf", ParentRunID: "*", TurnAbove: 2, Oldest: true}, "s_conf-t4 s_conf-t5 s_conf-t4/1/c1", 3},
+		} {
+			if got, total := read(c.q); got != c.want || total != c.total {
+				t.Errorf("%+v = %q (total %d), want %q (total %d)", c.q, got, total, c.want, c.total)
 			}
 		}
 	}

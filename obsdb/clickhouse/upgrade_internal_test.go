@@ -72,6 +72,10 @@ func TestUpgradeFromPreRequestRecord(t *testing.T) {
 		}
 	}
 	n := int64(0)
+	// A recent clock: the rows land before Open, under the migrations'
+	// default windows, which drop expired rows at insert and cut them
+	// at read — an absolute date here would expire on the calendar.
+	t0 := time.Now().UTC().Add(-time.Hour)
 	rec := func(run, kind string, attrs map[string]any, body string) obsdb.Record {
 		n++
 		a := map[string]any{"weft.record": kind, "weft.run.id": run}
@@ -79,7 +83,7 @@ func TestUpgradeFromPreRequestRecord(t *testing.T) {
 			a[k] = v
 		}
 		return obsdb.Record{
-			Time: time.Unix(0, 1790845923120000000+n).UTC(), EventName: "weft." + kind,
+			Time: t0.Add(time.Duration(n)), EventName: "weft." + kind,
 			Severity: 9, Body: body, Service: "conf-svc", Attrs: a,
 			Resource: map[string]any{"service.name": "conf-svc"},
 		}

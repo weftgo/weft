@@ -768,7 +768,11 @@ func equalJSON(t *testing.T, a, b any) bool {
 // openFreshClickHouse opens the ClickHouse backend on a brand-new
 // database derived from WEFT_CLICKHOUSE_DSN and drops it when the test
 // ends — obsdb/clickhouse's conformance helper, copied (that one lives
-// in another test package).
+// in another test package). It opens with a 30-year TTL on both
+// classes: the fixtures are dated 2026-10-01 (fixtureEpoch), and the
+// default windows (30 days of content, 90 of runs, cut at read time,
+// deleted at insert and merge time) would expire them on the calendar.
+// 30 years keeps LastSeen plus the window under DateTime's 2106 ceiling.
 func openFreshClickHouse(t *testing.T) obsdb.DB {
 	t.Helper()
 	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
@@ -793,7 +797,8 @@ func openFreshClickHouse(t *testing.T) obsdb.DB {
 		t.Fatalf("create database: %v", err)
 	}
 	u.Path = "/" + name
-	db, err := clickhouse.Open(u.String())
+	const testTTL = 30 * 365 * 24 * time.Hour
+	db, err := clickhouse.Open(u.String(), clickhouse.TTL(testTTL, testTTL))
 	if err != nil {
 		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE `%s`", name))
 		t.Fatalf("open: %v", err)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,9 +29,41 @@ func TestConformance(t *testing.T) {
 		t.Skip("WEFT_CLICKHOUSE_DSN not set: the conformance table needs a clickhouse server (README has the one-line container recipe)")
 	}
 	obsdbtest.Run(t, func(t *testing.T) obsdb.DB {
+		if retentionCase(t) {
+			db, _ := openFresh(t, defaultTTL)
+			return db
+		}
 		db, _ := openFresh(t)
 		return db
 	})
+}
+
+// testTTL is the window every ClickHouse test database opens with
+// unless it asks otherwise. The fixtures carry absolute dates (the
+// contract's 2026-10-01 clock, the 1790845923 s literals), and the
+// default windows — 30 days of content, 90 of runs, cut at read time
+// and deleted at insert and merge time — would expire them on a
+// calendar date, failing suites that test nothing about retention.
+// 30 years, not 100: LastSeen plus the window stays under DateTime's
+// 2106 ceiling, where a TTL computed as DateTime would wrap.
+const testTTL = 30 * 365 * 24 * time.Hour
+
+// longTTL opens a test database with testTTL on both classes.
+var longTTL = clickhouse.TTL(testTTL, testTTL)
+
+// defaultTTL keeps the migration's windows: given after longTTL it
+// restores the defaults, and Open then alters nothing.
+var defaultTTL = clickhouse.TTL(clickhouse.DefaultContentTTL, clickhouse.DefaultMetaTTL)
+
+// retentionCase names the conformance cases about the retention cut
+// itself: they write 2020-dated rows and run on the real default TTL.
+func retentionCase(t *testing.T) bool {
+	for _, name := range []string{"/SessionsOldDated", "/SessionsPartlyExpired"} {
+		if strings.HasSuffix(t.Name(), name) {
+			return true
+		}
+	}
+	return false
 }
 
 // The command store's restart property (plan I3): a second backend on
@@ -120,7 +153,9 @@ func TestCommandsPruneCountOnError(t *testing.T) {
 }
 
 // openFresh opens the backend on a brand-new database derived from
-// WEFT_CLICKHOUSE_DSN, dropping it when the test ends. It returns the
+// WEFT_CLICKHOUSE_DSN, dropping it when the test ends. It opens with
+// longTTL first, so a TTL option of the caller's (defaultTTL among
+// them) wins. It returns the
 // backend and the DSN of the fresh database (raw-connection tests use
 // it to talk to the same database as a stock collector would).
 func openFresh(t *testing.T, opts ...clickhouse.Option) (obsdb.DB, string) {
@@ -145,7 +180,7 @@ func openFresh(t *testing.T, opts ...clickhouse.Option) (obsdb.DB, string) {
 	}
 	u.Path = "/" + name
 	fresh := u.String()
-	db, err := clickhouse.Open(fresh, opts...)
+	db, err := clickhouse.Open(fresh, append([]clickhouse.Option{longTTL}, opts...)...)
 	if err != nil {
 		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE `%s`", name))
 		t.Fatalf("open: %v", err)

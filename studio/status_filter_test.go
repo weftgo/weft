@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
@@ -154,7 +155,12 @@ func freshClickHouse(t *testing.T) obsdb.DB {
 		t.Fatalf("create database: %v", err)
 	}
 	u.Path = "/" + name
-	db, err := clickhouse.Open(u.String())
+	// A 30-year TTL: the contract fixtures are dated 2026-10-01, and the
+	// default windows (30 days of content, 90 of runs) would expire them
+	// on the calendar; 30 years keeps LastSeen plus the window under
+	// DateTime's 2106 ceiling.
+	const testTTL = 30 * 365 * 24 * time.Hour
+	db, err := clickhouse.Open(u.String(), clickhouse.TTL(testTTL, testTTL))
 	if err != nil {
 		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE `%s`", name))
 		t.Fatalf("open: %v", err)

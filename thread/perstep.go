@@ -289,9 +289,16 @@ func (s *Session) branchBackLocked(ctx context.Context, entry string) error {
 		// navigated mid-turn. Leave the tree as the caller shaped it.
 		return nil
 	}
-	return s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
+	from := s.leaf
+	if err := s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
 		return LeafEntry{ID: id, ParentID: parent, Created: created, Entry: entry}
-	})
+	}); err != nil {
+		return err
+	}
+	// The overflowed attempt's step messages leave the path: a rewind,
+	// filed under the turn in flight (the attempt's run).
+	s.reportNavLocked(recRewind, "", from, map[string]any{"reason": "overflow"}, nil)
+	return nil
 }
 
 // turnEndMessages plans the message entries of the turn-end batch: the

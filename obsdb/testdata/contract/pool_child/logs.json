@@ -2423,6 +2423,125 @@
             "name": "github.com/weftgo/weft/core",
             "version": "v0.0.0-contract"
           }
+        },
+        {
+          "logRecords": [
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "thread"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "investment-lead"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_pool"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"call_id\":\"d1\",\"child_session\":\"01K00000000000000000000002\",\"content\":{\"prompt\":\"Analyse ACME\"},\"entry\":\"e_pool_child_0004\",\"kind\":\"pool.delegate\",\"receipt_id\":\"e_pool_child_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"accepted\"}"
+              },
+              "eventName": "weft.thread.pool.delegate",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846940026000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846940026000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "thread"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "investment-lead"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_pool"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"child_session\":\"01K00000000000000000000002\",\"content\":{\"stop\":\"ACME: P/E 18.2, momentum +12% — strong.\"},\"entry\":\"e_pool_child_0006\",\"kind\":\"pool.retire\",\"receipt_id\":\"e_pool_child_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"done\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}"
+              },
+              "eventName": "weft.thread.pool.retire",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846940027000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846940027000000",
+              "traceId": "7ace0000000000000000000000000001"
+            }
+          ],
+          "scope": {
+            "name": "github.com/weftgo/weft/thread"
+          }
         }
       ]
     }

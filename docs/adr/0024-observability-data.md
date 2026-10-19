@@ -348,6 +348,19 @@ accident; `Local` and `Studio` default to on. The core never truncates
 or rewrites content; `weft.StripContent` is the one shaping function and
 `weft/otel` calls it.
 
+Amendment, 2026-10-19 (plan U12.1, audit decision 4) — app-chosen names
+are metadata. A name the application gives a thing — a session's title
+(`weft.session.title`), a branch or entry label — is metadata, not
+content: it rides every destination, content off included, like the
+caller's own `Metadata` pairs. What a person or a model wrote stays
+content: a deny reason, who decided, a steer's text, a summary.
+`weft/thread`'s session records (record contract §4, kind `thread`)
+follow the rule: their ids, enums, counts and names always ride, their
+`content` object only where content is on — the agent's `Content`
+option first, else the destination's `Enabled` answer, then each
+content-off chain removing it — the same two-step capture-then-strip
+as the core's records.
+
 ### The core's dependency: trace + logs APIs
 
 ADR 0016's "the OTel trace API is the one dependency" becomes "the OTel

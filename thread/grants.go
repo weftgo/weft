@@ -300,6 +300,10 @@ func (s *Session) liveGrantsLocked(now time.Time, pending map[string]int) []Gran
 			continue
 		}
 		if !g.Expiry.IsZero() && now.After(g.Expiry) {
+			// The chain is the one place a lapse is noticed (liveness
+			// is derived, never stored): the grant.expire record, once
+			// per grant per Session, filed under the turn whose chain saw it.
+			s.reportGrantExpiryLocked("", g, "expiry", g.Expiry)
 			continue
 		}
 		if g.MaxUses > 0 && uses[g.ID]+pending[g.ID] >= g.MaxUses {

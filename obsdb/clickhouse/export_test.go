@@ -11,8 +11,8 @@ func SetPruneHook(fn func(rule string)) (remove func()) {
 // obsdb_migrations rows it holds (one per embedded migration): the one
 // place a new migration bumps — every test that pins them reads these.
 const (
-	WantSchemaVersion = 23
-	WantSchemaThrough = "0001 init … 0013 the emitted counts, 0014 records.dropped out of meta, 0015 the problem counters, 0016 the RunId index and the manifests, 0017 the problem tokens re-derived, 0018 retry counts, tap panics and the metadata cap, 0019 the approval link (ResumedFrom), 0020 the ParentRunID index, 0021 weft.logs.bridged out of meta, 0022 the run cards' facts out of meta, then 0023 pool-child identity (CallerRunID)"
+	WantSchemaVersion = 24
+	WantSchemaThrough = "0001 init … 0013 the emitted counts, 0014 records.dropped out of meta, 0015 the problem counters, 0016 the RunId index and the manifests, 0017 the problem tokens re-derived, 0018 retry counts, tap panics and the metadata cap, 0019 the approval link (ResumedFrom), 0020 the ParentRunID index, 0021 weft.logs.bridged out of meta, 0022 the run cards' facts out of meta, 0023 pool-child identity (CallerRunID), then 0024 weft.chat.role out of meta"
 )
 
 // WantMigrationRows is one obsdb_migrations row per embedded migration.

@@ -85,6 +85,10 @@ type expectDoc struct {
 	// identity, turns, and the title, first prompt and content-off mark
 	// Studio titles a session with. Omitted for a case with no session.
 	Sessions []contractSession `json:"sessions,omitempty"`
+	// ThreadRecords are the case's thread records (§4, kind thread;
+	// U12.1) as its logs.json carries them (threadRecordsOf): the
+	// record family's shape, pinned. Omitted for a case with none.
+	ThreadRecords []string `json:"thread_records,omitempty"`
 }
 
 // contractSession is one session row as the contract states it.
@@ -291,6 +295,11 @@ func runContract(t *testing.T, backend string, open func(*testing.T) obsdb.DB) {
 				g, _ := json.MarshalIndent(gs, "", "  ")
 				w, _ := json.MarshalIndent(want.Sessions, "", "  ")
 				t.Errorf("%s: session rows differ from %s/expect.json\n got: %s\nwant: %s", backend, dir, g, w)
+			}
+			if tr := threadRecordsOf(t, dir); !slices.Equal(tr, want.ThreadRecords) {
+				g, _ := json.MarshalIndent(tr, "", "  ")
+				w, _ := json.MarshalIndent(want.ThreadRecords, "", "  ")
+				t.Errorf("%s: thread records differ from %s/expect.json\n got: %s\nwant: %s", backend, dir, g, w)
 			}
 		})
 	}
@@ -870,7 +879,7 @@ func generateContract(t *testing.T) {
 		if !slices.Equal(got, ids) {
 			t.Fatalf("%s: the store read back runs %v, the pipeline ran %v", gc.name, got, ids)
 		}
-		doc := expectDoc{Case: gc.name, Description: gc.desc, Runs: runs, Sessions: sessions}
+		doc := expectDoc{Case: gc.name, Description: gc.desc, Runs: runs, Sessions: sessions, ThreadRecords: threadRecordsOf(t, dir)}
 		writeJSON(t, filepath.Join(dir, "expect.json"), doc)
 		t.Logf("regenerated %s (%d runs)", dir, len(runs))
 	}
@@ -1489,7 +1498,7 @@ func genCases() []genCase {
 			core.Instructions("You are a support agent."))
 		return []string{mustRun(t, ctx, agt, core.Prompt("hi")).ID}
 	}
-	return []genCase{
+	cases := []genCase{
 		{
 			name: "plain",
 			desc: "one model call, no tools: a succeeded run with one chat span and its request, prompt and messages records",
@@ -2108,7 +2117,7 @@ func genCases() []genCase {
 					wefttest.Say("Recommend ACME.")),
 					core.Instructions("You lead investments."),
 					pl.MustWrap("market_analyst", "Delegate a market analysis.", analyst))
-				s, err := thread.Create(ctx, thread.Memory(), lead, thread.PublicID("pub_pool"))
+				s, err := thread.Create(ctx, thread.Memory(), lead, append(fixtureSession("pool_child"), thread.PublicID("pub_pool"))...)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -2134,6 +2143,7 @@ func genCases() []genCase {
 			},
 		},
 	}
+	return append(cases, threadGenCases()...)
 }
 
 // redactCards is bridge_overrides' Redact: a bridged line's "4111…"

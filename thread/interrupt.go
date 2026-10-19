@@ -69,7 +69,11 @@ func (s *Session) interruptSendLocked(ctx context.Context, msg core.Message, opt
 			}
 		}
 		cancel := it.cancel
+		victim := it.runID
 		it.mu.Unlock()
+		// The interrupt's record, filed under the run it fells: the
+		// policy, and the turn that felled it (UX-B-09).
+		s.reportInterruptLocked(victim, t, policy, "run", 0)
 		// The mark outlives the arm: an Interrupt that lands between
 		// Send and the runner's setRunCancel (cancel still nil here)
 		// is not lost — runOne checks wasInterrupted when it arms the
@@ -85,11 +89,31 @@ func (s *Session) interruptSendLocked(ctx context.Context, msg core.Message, opt
 	}
 	// Only a boundary holds the session: deny its parked calls so the
 	// follow-up is not queued behind it.
+	parked, denied := s.lastRunIDLocked(), len(s.pendingLocked())
 	if err := s.denyPendingLocked(ctx, reasonInterrupted, viaInterrupt); err != nil {
 		s.dequeueLocked(context.WithoutCancel(ctx), t)
 		return nil, fmt.Errorf("thread: interrupt could not deny the parked approvals: %w", err)
 	}
+	if denied > 0 {
+		s.reportInterruptLocked(parked, t, policy, "boundary", denied)
+	}
 	return t, nil
+}
+
+// reportInterruptLocked files an interrupt (an Interrupt or Rollback
+// Send) under run: the policy, what it felled — a running turn ("run")
+// or an open approval boundary ("boundary", with the calls it denied)
+// — and the turn that felled it, by its minted run id and number.
+// Callers hold s.mu.
+func (s *Session) reportInterruptLocked(run string, by *Turn, policy Policy, target string, denied int) {
+	f := map[string]any{"policy": policy.String(), "target": target, "by_run": by.RunID()}
+	if n, ok := runSeq(s.header.ID, by.RunID()); ok {
+		f["by_turn"] = n
+	}
+	if denied > 0 {
+		f["denied_calls"] = denied
+	}
+	s.reportLocked(run, threadRec{kind: recInterrupt, fields: f})
 }
 
 // leafBeforeLocked returns the leaf as it stood before t's accepted
@@ -149,6 +173,7 @@ func (s *Session) rollbackLocked(t *Turn) {
 			"session", s.header.ID, "target", preTurn, "err", err)
 		return
 	}
+	from := s.leaf
 	if err := s.appendLocked(context.WithoutCancel(context.Background()), func(id, parent string, created time.Time) Entry {
 		return LeafEntry{ID: id, ParentID: parent, Created: created, Entry: preTurn}
 	}); err != nil {
@@ -156,6 +181,9 @@ func (s *Session) rollbackLocked(t *Turn) {
 			"session", s.header.ID, "target", preTurn, "err", err)
 		return
 	}
+	// The rewind's record, filed under the rolled-back run: its
+	// entries leave the path (UX-B-09).
+	s.reportNavLocked(recRewind, t.RunID(), from, map[string]any{"reason": "rollback"}, nil)
 	// A navigation off a parked tail may clear the approval boundary
 	// that held queued sends: the runner restarts at the queue's head
 	// (the same rule as Branch).

@@ -504,3 +504,36 @@ func ExampleClock() {
 	// header: 2026-10-01T09:00:01Z
 	// entry:  2026-10-01T09:00:02Z
 }
+
+// WithRunMetadata tags every turn of a session — a tenant, a batch —
+// the way core.Metadata tags one run: written into the header at
+// Create, so a reopened session keeps stamping it; an Open's own pairs
+// join it. The session's identity keys always win.
+func ExampleWithRunMetadata() {
+	ctx := context.Background()
+	st := thread.Memory()
+	var seen []string
+	agt := weft.New(wefttest.Script(wefttest.Say("one"), wefttest.Say("two")),
+		weft.OnRunEnd(func(ctx context.Context, _ *weft.RunResult, _ error) {
+			md := weft.MetadataFromContext(ctx)
+			seen = append(seen, md["tenant"]+" "+md["batch"]+" turn "+md["weft.turn"])
+		}))
+	s, err := thread.Create(ctx, st, agt, thread.WithRunMetadata(map[string]string{"tenant": "acme", "weft.turn": "9"}))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	turn, _ := s.Send(ctx, weft.User("hi"))
+	_, _ = turn.Wait()
+	_ = s.Close(ctx)
+	o, _ := thread.Open(ctx, st, s.ID(), agt, thread.WithRunMetadata(map[string]string{"batch": "b7"}))
+	turn, _ = o.Send(ctx, weft.User("again"))
+	_, _ = turn.Wait()
+	_ = o.Close(ctx)
+	for _, l := range seen {
+		fmt.Println(l)
+	}
+	// Output:
+	// acme  turn 1
+	// acme b7 turn 2
+}

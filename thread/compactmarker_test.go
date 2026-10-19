@@ -88,6 +88,10 @@ type markerBody struct {
 	MessagesAfter  int    `json:"messages_after"`
 	TokensBefore   int64  `json:"tokens_before"`
 	TokensAfter    int64  `json:"tokens_after"`
+	// The summarizer's model and usage (UX-B-13): counts and a model
+	// id, never content.
+	SummarizerModel *core.ModelInfo `json:"summarizer_model"`
+	SummarizerUsage *core.Usage     `json:"summarizer_usage"`
 }
 
 // markerCarriesMessages reports whether a session marker's body

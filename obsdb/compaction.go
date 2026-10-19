@@ -54,6 +54,10 @@ const (
 	ReasonCompacted   = "compacted"
 	// RecordCompaction is the weft.record of thread's session marker.
 	RecordCompaction = "compaction"
+	// RecordThread is the weft.record of thread's session records (the
+	// state log's family, event names weft.thread.<kind>; record
+	// contract §4). Stored as plain records under the run they concern.
+	RecordThread = "thread"
 )
 
 // CompactionOf reads one stored record as a Compaction, so every

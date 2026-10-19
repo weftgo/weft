@@ -174,6 +174,20 @@ func (p *destProc) OnEmit(ctx context.Context, r *sdklog.Record) error {
 		} else {
 			p.stripRequest(&clone)
 		}
+	case "thread":
+		// weft/thread's session records (contract §4): ids, enums,
+		// counts and names everywhere; the "content" object only where
+		// content is on, redacted there.
+		var keep bool
+		if p.content {
+			keep = p.shapeThread(&clone)
+		} else {
+			keep = p.stripThread(&clone)
+		}
+		if !keep {
+			p.drops.filtered(1)
+			return nil // never sent with content it could not strip
+		}
 	case "raw":
 		if !p.raw {
 			p.drops.filtered(1)

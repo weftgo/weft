@@ -57,6 +57,13 @@ type compactionMarker struct {
 	MessagesAfter  int    `json:"messages_after"`
 	TokensBefore   int64  `json:"tokens_before"`
 	TokensAfter    int64  `json:"tokens_after"`
+	// SummarizerModel and SummarizerUsage are what the compaction's
+	// summary cost and which model made it (the entry's own, UX-B-13):
+	// counts and a model id, never content; absent for a trim or a
+	// summarizer that ran no model. The call itself is a chat span
+	// with weft.chat.role = summarizer (threadrec.go).
+	SummarizerModel *core.ModelInfo `json:"summarizer_model,omitempty"`
+	SummarizerUsage *core.Usage     `json:"summarizer_usage,omitempty"`
 }
 
 // runSight is what the Session saw of a run it drove: its id, the
@@ -79,6 +86,8 @@ const maxSights = 4
 // every observed batch; cheap when nothing waits.
 func (s *Session) seeRun(rctx context.Context, runID string) {
 	var pending []*compactionMarker
+	var held []heldRec
+	var summaries []summarizerCall
 	s.locked(func() {
 		if n := len(s.sights); n == 0 || s.sights[n-1].id != runID {
 			s.sights = slices.DeleteFunc(s.sights, func(r runSight) bool { return r.id == runID })
@@ -88,10 +97,14 @@ func (s *Session) seeRun(rctx context.Context, runID string) {
 			s.sights = append(s.sights, runSight{id: runID, sc: trace.SpanContextFromContext(rctx), md: core.MetadataFromContext(rctx)})
 		}
 		pending, s.pendingMarkers = s.pendingMarkers, nil
+		held = s.takeHeldLocked()
+		summaries, s.heldSummaries = s.heldSummaries, nil
 	})
 	for _, m := range pending {
 		s.emitMarker(rctx, runID, nil, m)
 	}
+	s.emitHeldSummaries(rctx, runID, summaries)
+	s.emitHeld(rctx, runID, held)
 }
 
 // sightLocked is what the Session saw of run id, if it still
@@ -162,6 +175,14 @@ func (s *Session) reportCompaction(ctx context.Context, e CompactionEntry, befor
 		TokensAfter:    s.safeEstimate(after),
 	}
 	m.Replaced, m.Entries = contextChange(before, after)
+	if e.SummarizerModel != (core.ModelInfo{}) {
+		mi := e.SummarizerModel
+		m.SummarizerModel = &mi
+	}
+	if e.SummarizerUsage != (core.Usage{}) {
+		u := e.SummarizerUsage
+		m.SummarizerUsage = &u
+	}
 	if runID == "" {
 		held := true
 		s.locked(func() {
@@ -193,7 +214,7 @@ func (s *Session) reportCompaction(ctx context.Context, e CompactionEntry, befor
 		// is out of the sights): its session identity, read from the
 		// header and the run id — the caller's own pairs are gone.
 		n, _ := runSeq(s.header.ID, runID)
-		md = s.identityMetadata(n)
+		md = s.unseenRunMetadata(n)
 	}
 	s.emitMarker(ectx, runID, md, m)
 }

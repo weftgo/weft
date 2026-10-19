@@ -1,0 +1,392 @@
+{
+  "case": "thread_busy",
+  "description": "the busy policies: a steer accepted (receipt queued) and drained (delivered, under the run that drained it), a steer dropped by ClearQueue (dropped, under the busy turn), a queued send (accepted, its minted turn), an interrupt (interrupt under the felled run, by_turn the follow-up) and a rollback (interrupt, then rewind reason rollback under the run taken off the path); the steer texts under content",
+  "runs": [
+    {
+      "id": "01K00000000000000000000001-t1",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "warroom",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 1,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:32:00Z",
+      "finished": "2026-10-01T09:32:00.018Z",
+      "last_seen": "2026-10-01T09:32:00.083Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 9,
+      "message_count": 5,
+      "delta_count": 1,
+      "instructions_hash": "8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f",
+      "catalog_hash": "28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e",
+      "request_count": 2,
+      "events_emitted": 9,
+      "messages_emitted": 5,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "check_metric",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t3",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "warroom",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 3,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:32:00.008Z",
+      "finished": "2026-10-01T09:32:00.035Z",
+      "last_seen": "2026-10-01T09:32:00.086Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f",
+      "catalog_hash": "28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "check_metric",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t5",
+      "trace_id": "7ace0000000000000000000000000003",
+      "service": "contract-app",
+      "agent": "warroom",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 5,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:32:00.016Z",
+      "finished": "2026-10-01T09:32:00.045Z",
+      "last_seen": "2026-10-01T09:32:00.045Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f",
+      "catalog_hash": "28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t6",
+      "trace_id": "7ace0000000000000000000000000004",
+      "service": "contract-app",
+      "agent": "warroom",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 6,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:32:00.02Z",
+      "finished": "2026-10-01T09:32:00.026Z",
+      "last_seen": "2026-10-01T09:32:00.088Z",
+      "status": "failed",
+      "error": "weft: run failed at step 1: context canceled",
+      "steps": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "canceled",
+      "cancel_cause": "thread.interrupted",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 3,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f",
+      "catalog_hash": "28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e",
+      "request_count": 1,
+      "events_emitted": 3,
+      "messages_emitted": 2,
+      "error_type": "cancelled",
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "run_analysis",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "error",
+          "error_type": "context.Canceled"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t7",
+      "trace_id": "7ace0000000000000000000000000005",
+      "service": "contract-app",
+      "agent": "warroom",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 7,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:32:00.027Z",
+      "finished": "2026-10-01T09:32:00.063Z",
+      "last_seen": "2026-10-01T09:32:00.063Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f",
+      "catalog_hash": "28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t8",
+      "trace_id": "7ace0000000000000000000000000006",
+      "service": "contract-app",
+      "agent": "warroom",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 8,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:32:00.031Z",
+      "finished": "2026-10-01T09:32:00.037Z",
+      "last_seen": "2026-10-01T09:32:00.091Z",
+      "status": "failed",
+      "error": "weft: run failed at step 1: context canceled",
+      "steps": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "canceled",
+      "cancel_cause": "thread.interrupted",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 3,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f",
+      "catalog_hash": "28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e",
+      "request_count": 1,
+      "events_emitted": 3,
+      "messages_emitted": 2,
+      "error_type": "cancelled",
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "run_analysis",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "error",
+          "error_type": "context.Canceled"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t9",
+      "trace_id": "7ace0000000000000000000000000007",
+      "service": "contract-app",
+      "agent": "warroom",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 9,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:32:00.038Z",
+      "finished": "2026-10-01T09:32:00.081Z",
+      "last_seen": "2026-10-01T09:32:00.081Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f",
+      "catalog_hash": "28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    }
+  ],
+  "sessions": [
+    {
+      "id": "01K00000000000000000000001",
+      "agent": "warroom",
+      "turns": 7,
+      "first_prompt": "Check the current rps."
+    }
+  ],
+  "thread_records": [
+    "01K00000000000000000000001-t1 receipt full {\"content\":{\"text\":\"Focus only on the EU region.\"},\"entry\":\"e_thread_busy_0004\",\"input\":\"steer\",\"receipt_id\":\"e_thread_busy_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"queued\"}",
+    "01K00000000000000000000001-t1 receipt none {\"entry\":\"e_thread_busy_0009\",\"input\":\"steer\",\"receipt_id\":\"e_thread_busy_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"delivered\"}",
+    "01K00000000000000000000001-t3 receipt full {\"content\":{\"text\":\"this steer will be dropped\"},\"entry\":\"e_thread_busy_0012\",\"input\":\"steer\",\"receipt_id\":\"e_thread_busy_0012\",\"session\":\"01K00000000000000000000001\",\"state\":\"queued\"}",
+    "01K00000000000000000000001-t3 receipt none {\"entry\":\"e_thread_busy_0013\",\"input\":\"steer\",\"receipt_id\":\"e_thread_busy_0012\",\"session\":\"01K00000000000000000000001\",\"state\":\"dropped\"}",
+    "01K00000000000000000000001-t3 receipt full {\"content\":{\"text\":\"After that, summarise in one line.\"},\"entry\":\"e_thread_busy_0015\",\"input\":\"send\",\"minted_run\":\"01K00000000000000000000001-t5\",\"receipt_id\":\"e_thread_busy_0015\",\"session\":\"01K00000000000000000000001\",\"state\":\"accepted\",\"turn\":5}",
+    "01K00000000000000000000001-t6 receipt full {\"content\":{\"text\":\"Stop — just tell me the p99.\"},\"entry\":\"e_thread_busy_0024\",\"input\":\"send\",\"minted_run\":\"01K00000000000000000000001-t7\",\"receipt_id\":\"e_thread_busy_0024\",\"session\":\"01K00000000000000000000001\",\"state\":\"accepted\",\"turn\":7}",
+    "01K00000000000000000000001-t6 interrupt none {\"by_run\":\"01K00000000000000000000001-t7\",\"by_turn\":7,\"policy\":\"interrupt\",\"session\":\"01K00000000000000000000001\",\"target\":\"run\"}",
+    "01K00000000000000000000001-t8 receipt full {\"content\":{\"text\":\"Forget that. What's the error rate?\"},\"entry\":\"e_thread_busy_0033\",\"input\":\"send\",\"minted_run\":\"01K00000000000000000000001-t9\",\"receipt_id\":\"e_thread_busy_0033\",\"session\":\"01K00000000000000000000001\",\"state\":\"accepted\",\"turn\":9}",
+    "01K00000000000000000000001-t8 interrupt none {\"by_run\":\"01K00000000000000000000001-t9\",\"by_turn\":9,\"policy\":\"rollback\",\"session\":\"01K00000000000000000000001\",\"target\":\"run\"}",
+    "01K00000000000000000000001-t8 rewind none {\"entry\":\"e_thread_busy_0037\",\"from_entry\":\"e_thread_busy_0036\",\"reason\":\"rollback\",\"session\":\"01K00000000000000000000001\",\"to_entry\":\"e_thread_busy_0029\"}"
+  ]
+}

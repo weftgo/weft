@@ -489,6 +489,23 @@ func TestRecordsDisabledLoggerEmitsNothing(t *testing.T) {
 	}
 }
 
+// ExampleAgent_ContentCapture shows the two accessors a satellite
+// reporting beside the runs reads: the providers the runs report
+// through, and whether the agent's Content option decided the content
+// question (weft/thread's session records ask both).
+func ExampleAgent_ContentCapture() {
+	lp := newRecLogProvider()
+	agt := core.New(wefttest.Script(), core.LoggerProvider(lp), core.Content(false))
+	capture, set := agt.ContentCapture()
+	fmt.Println("records through the option's provider:", agt.LoggerProvider() == lp)
+	fmt.Println("tracer provider resolved:", agt.TracerProvider() != nil)
+	fmt.Println("content decided by the option:", set, "capture:", capture)
+	// Output:
+	// records through the option's provider: true
+	// tracer provider resolved: true
+	// content decided by the option: true capture: false
+}
+
 // ExampleLoggerProvider prints the record sequence of a one-tool run,
 // as a Logs API destination would receive it: every durable event and
 // every delta, positions contiguous.

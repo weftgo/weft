@@ -43,6 +43,11 @@ type Header struct {
 	Parent  *ParentRef        `json:"parent,omitempty"`
 	Lineage *Lineage          `json:"lineage,omitempty"`
 	Meta    map[string]string `json:"meta,omitempty"`
+	// RunMeta is the run metadata every turn of the session carries
+	// (WithRunMetadata): stamped on each run under the session's
+	// identity keys, which win. An additive key — a reader from before
+	// it ignores it and stamps none.
+	RunMeta map[string]string `json:"run_meta,omitempty"`
 }
 
 // Lineage names a pool child's origin (ADR 0022 §3): the parent

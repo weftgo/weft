@@ -215,6 +215,13 @@ func DeriveRecord(r Record) Weft {
 		// position is derived from its hash, so a retried batch lands on
 		// the same key and two compactions filed under one run do not.
 		w.Pos = markerPos(attr(r.Attrs, attrCompactionHash))
+	case w.Record == RecordThread:
+		// thread's session records (U12.1) have no counter either: the
+		// position is derived from the body — every record names its
+		// entry, kind and time, so two facts never share one and a
+		// retried batch lands on the same key. Stored as a plain record;
+		// no reader applies it to the run.
+		w.Pos = markerPos(r.Body)
 	case w.Record == "request" || w.Record == "prompt" || w.Record == "tools" || w.Record == RecordRaw:
 		// One of ADR 0028's kinds without its index: only a malformed
 		// producer gets here. -1 on both backends; duplicates collapse.
@@ -358,14 +365,16 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.tool.queue_ms":        {},
 	"weft.subagent.pending":     {},
 	"weft.output.submitted":     {},
-	"weft.tap.panics":           {}, // U32.1: the run's contained observer panics (Problems)
-	"weft.stop.raw":             {},
-	"weft.model.tool_calls":     {},
-	"weft.tool.approved":        {},
-	"weft.tool.pending":         {},
-	"weft.tool.result_bytes":    {},
-	"weft.metadata.dropped":     {},
-	"weft.override.hash":        {},
+	// U12.1 (audit O15): weft/thread's summarizer chat spans' role.
+	"weft.chat.role":         {},
+	"weft.tap.panics":        {}, // U32.1: the run's contained observer panics (Problems)
+	"weft.stop.raw":          {},
+	"weft.model.tool_calls":  {},
+	"weft.tool.approved":     {},
+	"weft.tool.pending":      {},
+	"weft.tool.result_bytes": {},
+	"weft.metadata.dropped":  {},
+	"weft.override.hash":     {},
 	// ADR 0028: the request record's keys.
 	"weft.request.index":     {},
 	"weft.prompt.index":      {},

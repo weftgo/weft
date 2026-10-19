@@ -16,7 +16,7 @@
       "weft_version": "v0.0.0-contract",
       "started": "2026-10-01T09:29:00Z",
       "finished": "2026-10-01T09:29:00.025Z",
-      "last_seen": "2026-10-01T09:29:00.025Z",
+      "last_seen": "2026-10-01T09:29:00.027Z",
       "status": "succeeded",
       "steps": 2,
       "stop_reason": "stop",
@@ -131,5 +131,9 @@
       "parent_call": "d1",
       "parent_run": "01K00000000000000000000001-t1"
     }
+  ],
+  "thread_records": [
+    "01K00000000000000000000001-t1 pool.delegate full {\"call_id\":\"d1\",\"child_session\":\"01K00000000000000000000002\",\"content\":{\"prompt\":\"Analyse ACME\"},\"entry\":\"e_pool_child_0004\",\"receipt_id\":\"e_pool_child_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"accepted\"}",
+    "01K00000000000000000000001-t1 pool.retire full {\"child_session\":\"01K00000000000000000000002\",\"content\":{\"stop\":\"ACME: P/E 18.2, momentum +12% — strong.\"},\"entry\":\"e_pool_child_0006\",\"receipt_id\":\"e_pool_child_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"done\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}"
   ]
 }

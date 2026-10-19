@@ -1,0 +1,157 @@
+{
+  "case": "thread_compaction",
+  "description": "a pin, a manual compaction whose summary is a model call — a chat span with weft.chat.role summarizer and its usage (1800 in, 60 out) under the run the compaction concerns, the marker body's summarizer_usage and summarizer_model — an uncompact, a SummarizeLeft branch (branch summarized, its summarizer usage, a second summarizer span), a label and a fork (fork, new_session) of the origin",
+  "runs": [
+    {
+      "id": "01K00000000000000000000001-t1",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "research",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 1,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:33:00Z",
+      "finished": "2026-10-01T09:33:00.016Z",
+      "last_seen": "2026-10-01T09:33:00.039Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8",
+      "catalog_hash": "950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch_doc",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t2",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "research",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 2,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:33:00Z",
+      "finished": "2026-10-01T09:33:00.033Z",
+      "last_seen": "2026-10-01T09:33:00.037Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8",
+      "catalog_hash": "950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": -1,
+          "model": "script",
+          "input_tokens": 1800,
+          "output_tokens": 60,
+          "status": "unset"
+        },
+        {
+          "step": -1,
+          "model": "script",
+          "input_tokens": 900,
+          "output_tokens": 30,
+          "status": "unset"
+        },
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch_doc",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    }
+  ],
+  "sessions": [
+    {
+      "id": "01K00000000000000000000001",
+      "agent": "research",
+      "turns": 2,
+      "first_prompt": "Fetch the raft document."
+    }
+  ],
+  "thread_records": [
+    "01K00000000000000000000001-t2 pin none {\"entry\":\"e_thread_compaction_0012\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_compaction_0002\"}",
+    "01K00000000000000000000001-t2 uncompact none {\"compaction\":\"e_thread_compaction_0013\",\"entry\":\"e_thread_compaction_0014\",\"from_entry\":\"e_thread_compaction_0013\",\"session\":\"01K00000000000000000000001\",\"to_entry\":\"e_thread_compaction_0012\"}",
+    "01K00000000000000000000001-t2 branch full {\"branch_from\":\"e_thread_compaction_0006\",\"content\":{\"summary\":\"SUMMARY of the abandoned branch: crdt notes.\"},\"entry\":\"e_thread_compaction_0015\",\"from_entry\":\"e_thread_compaction_0012\",\"session\":\"01K00000000000000000000001\",\"summarized\":true,\"summarizer_model\":{\"name\":\"script\",\"provider\":\"wefttest\"},\"summarizer_usage\":{\"input_tokens\":900,\"output_tokens\":30},\"summary_entry\":\"e_thread_compaction_0016\",\"to_entry\":\"e_thread_compaction_0006\"}",
+    "01K00000000000000000000001-t1 label none {\"entry\":\"e_thread_compaction_0017\",\"name\":\"after-raft\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_compaction_0006\"}",
+    "01K00000000000000000000001-t1 fork none {\"entry\":\"e_thread_compaction_0006\",\"new_session\":\"01K00000000000000000000001_fork\",\"session\":\"01K00000000000000000000001\"}"
+  ]
+}

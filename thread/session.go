@@ -74,6 +74,10 @@ type sessionConfig struct {
 	// (WithMeta, PublicID). A header option — later-life edits are
 	// info entries.
 	meta map[string]string
+	// runMeta is the run metadata WithRunMetadata gives: written into
+	// a created session's header (Create, Fork), held over the
+	// header's at Open — not a header-only option.
+	runMeta map[string]string
 	// createOnly names the header options that were applied, in the
 	// order given, so Open can refuse them by name (ErrCreateOnly).
 	createOnly []string
@@ -179,6 +183,28 @@ func (o metaOption) applySession(c *sessionConfig) {
 // edit, for every key outside the reserved "weft." prefix — those are
 // set here, once, or never.
 func WithMeta(meta map[string]string) SessionOption { return metaOption(meta) }
+
+type runMetaOption map[string]string
+
+func (o runMetaOption) applySession(c *sessionConfig) {
+	if c.runMeta == nil {
+		c.runMeta = map[string]string{}
+	}
+	maps.Copy(c.runMeta, o)
+}
+
+// WithRunMetadata gives every turn of the session run metadata — the
+// pairs core.Metadata would stamp, on every span and record of each
+// run (a tenant, a batch tag, weft.flow). At Create and Fork it is
+// written into the header (Header.RunMeta), so a reopened session
+// keeps stamping it; at Open it is held over the stored pairs for
+// this Session's life (the header itself is immutable). Merged over
+// earlier ones. The session's identity keys (weft.session.id,
+// weft.turn, weft.public_id, weft.session.title, the fork and pool
+// lineage) always win, and a Send's own thread.RunOptions(
+// core.Metadata(...)) wins per key over the session's. A fork takes
+// its origin's run metadata, its own over it.
+func WithRunMetadata(kv map[string]string) SessionOption { return runMetaOption(maps.Clone(kv)) }
 
 // reservedMetaPrefix marks the metadata keys that are the session's
 // identity: written to the header at Create or Fork, never edited by
@@ -376,6 +402,17 @@ type Session struct {
 	pendingMarkers []*compactionMarker
 	handed         []queuedSteer
 
+	// The thread record family's state (threadrec.go), guarded by mu:
+	// heldRecs are records no run could be named for yet (emitted under
+	// the next run that reports, dropped at Close — heldDropped counts
+	// the ones the bound pushed out), heldSummaries the summarizer
+	// calls waiting the same way, grantsLapsed the grants whose lapse
+	// this Session reported. None is persisted.
+	heldRecs      []heldRec
+	heldDropped   int
+	heldSummaries []summarizerCall
+	grantsLapsed  map[string]bool
+
 	// The compaction trigger's state (ADR 0020 §2): lastInput is the
 	// provider-reported input of the last model step the session ran,
 	// lastMeasureLeaf the entry that step's request covered up to (the
@@ -537,6 +574,9 @@ func newHeader(cfg *sessionConfig) (Header, error) {
 	}
 	if len(cfg.meta) > 0 {
 		h.Meta = maps.Clone(cfg.meta)
+	}
+	if len(cfg.runMeta) > 0 {
+		h.RunMeta = maps.Clone(cfg.runMeta)
 	}
 	return h, nil
 }
@@ -1695,6 +1735,8 @@ func (s *Session) sealLocked(ctx context.Context) error {
 	closed := fmt.Errorf("%w: session %s", ErrClosed, s.header.ID)
 	unreported := len(s.pendingMarkers)
 	s.pendingMarkers = nil
+	heldRecords := len(s.heldRecs) + s.heldDropped + len(s.heldSummaries)
+	s.heldRecs, s.heldDropped, s.heldSummaries = nil, 0, nil
 	queued := s.queue
 	s.queue = nil
 	w, _ := s.st.(*leased)
@@ -1710,6 +1752,10 @@ func (s *Session) sealLocked(ctx context.Context) error {
 		// on before the close: there is no run id to file them under.
 		s.agent.Logger().Debug("thread: compaction markers dropped at close: no run to report them under",
 			"session", s.header.ID, "markers", unreported)
+	}
+	if heldRecords > 0 {
+		s.agent.Logger().Debug("thread: session records dropped at close: no run to report them under",
+			"session", s.header.ID, "records", heldRecords)
 	}
 	for _, ps := range queued {
 		ps.turn.finish(nil, closed)
@@ -1985,6 +2031,9 @@ func (s *Session) adoptLocked(e Entry) {
 	if _, ok := e.(TurnEntry); ok {
 		s.turns++
 	}
+	// The state log's record (threadrec.go): every accepted entry that
+	// is a session fact is reported as it lands — observation only.
+	s.reportEntryLocked(e)
 }
 
 // cloneEntry returns a deep copy of an entry: every map, slice, raw

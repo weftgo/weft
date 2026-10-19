@@ -1,0 +1,450 @@
+{
+  "case": "thread_grants",
+  "description": "the decision chain at the boundary: four grants minted before any run (held, then filed under the first run), a glob grant's use, the approver's decision (via approver, who policy-bot), a deny-grant's refusal, a MaxUses grant's two uses and its lapse (grant.expire max_uses), a past-expiry grant's lapse noticed by the chain (grant.expire expiry), a revocation (grant.revoke with the grant's use count)",
+  "runs": [
+    {
+      "id": "01K00000000000000000000001-t1",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "sre",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 1,
+      "resumed_by": "01K00000000000000000000001-t2",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:31:00Z",
+      "finished": "2026-10-01T09:31:00.009Z",
+      "last_seen": "2026-10-01T09:31:00.089Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 5,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "6d200708924c5635810dffa6b724ed1952b1987281d19868b4728487a8463f08",
+      "catalog_hash": "c7d288230298af1e29b53ac4d11a52a2ce093f8c497c2f02ed85935c095d361c",
+      "request_count": 1,
+      "events_emitted": 5,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "run_command",
+          "call_id": "c1",
+          "step": 0,
+          "seq": 1,
+          "status": "unset",
+          "pending_source": "approval"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t2",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "sre",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 2,
+      "resumed_from": "01K00000000000000000000001-t1",
+      "resumed_by": "01K00000000000000000000001-t3",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:31:00.006Z",
+      "finished": "2026-10-01T09:31:00.022Z",
+      "last_seen": "2026-10-01T09:31:00.09Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 7,
+      "message_count": 3,
+      "delta_count": 0,
+      "instructions_hash": "6d200708924c5635810dffa6b724ed1952b1987281d19868b4728487a8463f08",
+      "catalog_hash": "c7d288230298af1e29b53ac4d11a52a2ce093f8c497c2f02ed85935c095d361c",
+      "request_count": 1,
+      "events_emitted": 7,
+      "messages_emitted": 3,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "run_command",
+          "call_id": "c1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok",
+          "approved": true
+        },
+        {
+          "name": "run_command",
+          "call_id": "c2",
+          "step": 0,
+          "seq": 3,
+          "status": "unset",
+          "pending_source": "approval"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t3",
+      "trace_id": "7ace0000000000000000000000000003",
+      "service": "contract-app",
+      "agent": "sre",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 3,
+      "resumed_from": "01K00000000000000000000001-t2",
+      "resumed_by": "01K00000000000000000000001-t4",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.approval.actor": "policy-bot"
+      },
+      "started": "2026-10-01T09:31:00.014Z",
+      "finished": "2026-10-01T09:31:00.035Z",
+      "last_seen": "2026-10-01T09:31:00.092Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 7,
+      "message_count": 3,
+      "delta_count": 0,
+      "instructions_hash": "6d200708924c5635810dffa6b724ed1952b1987281d19868b4728487a8463f08",
+      "catalog_hash": "c7d288230298af1e29b53ac4d11a52a2ce093f8c497c2f02ed85935c095d361c",
+      "request_count": 1,
+      "events_emitted": 7,
+      "messages_emitted": 3,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "run_command",
+          "call_id": "c2",
+          "step": 0,
+          "seq": 1,
+          "status": "ok",
+          "approved": true
+        },
+        {
+          "name": "run_command",
+          "call_id": "c3",
+          "step": 0,
+          "seq": 3,
+          "status": "unset",
+          "pending_source": "approval"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t4",
+      "trace_id": "7ace0000000000000000000000000004",
+      "service": "contract-app",
+      "agent": "sre",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 4,
+      "resumed_from": "01K00000000000000000000001-t3",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:31:00.022Z",
+      "finished": "2026-10-01T09:31:00.046Z",
+      "last_seen": "2026-10-01T09:31:00.046Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 3,
+      "delta_count": 1,
+      "instructions_hash": "6d200708924c5635810dffa6b724ed1952b1987281d19868b4728487a8463f08",
+      "catalog_hash": "c7d288230298af1e29b53ac4d11a52a2ce093f8c497c2f02ed85935c095d361c",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 3,
+      "problems": {
+        "denied": 1
+      },
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "run_command",
+          "call_id": "c3",
+          "step": 0,
+          "seq": -1,
+          "status": "error",
+          "error_type": "DENIED",
+          "denied": true,
+          "denied_kind": "denied"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t5",
+      "trace_id": "7ace0000000000000000000000000005",
+      "service": "contract-app",
+      "agent": "sre",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 5,
+      "resumed_by": "01K00000000000000000000001-t6",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:31:00.028Z",
+      "finished": "2026-10-01T09:31:00.056Z",
+      "last_seen": "2026-10-01T09:31:00.094Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 5,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "6d200708924c5635810dffa6b724ed1952b1987281d19868b4728487a8463f08",
+      "catalog_hash": "c7d288230298af1e29b53ac4d11a52a2ce093f8c497c2f02ed85935c095d361c",
+      "request_count": 1,
+      "events_emitted": 5,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "run_command",
+          "call_id": "x1",
+          "step": 0,
+          "seq": 1,
+          "status": "unset",
+          "pending_source": "approval"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t6",
+      "trace_id": "7ace0000000000000000000000000006",
+      "service": "contract-app",
+      "agent": "sre",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 6,
+      "resumed_from": "01K00000000000000000000001-t5",
+      "resumed_by": "01K00000000000000000000001-t7",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:31:00.034Z",
+      "finished": "2026-10-01T09:31:00.069Z",
+      "last_seen": "2026-10-01T09:31:00.097Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 7,
+      "message_count": 3,
+      "delta_count": 0,
+      "instructions_hash": "6d200708924c5635810dffa6b724ed1952b1987281d19868b4728487a8463f08",
+      "catalog_hash": "c7d288230298af1e29b53ac4d11a52a2ce093f8c497c2f02ed85935c095d361c",
+      "request_count": 1,
+      "events_emitted": 7,
+      "messages_emitted": 3,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "run_command",
+          "call_id": "x1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok",
+          "approved": true
+        },
+        {
+          "name": "run_command",
+          "call_id": "x2",
+          "step": 0,
+          "seq": 3,
+          "status": "unset",
+          "pending_source": "approval"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t7",
+      "trace_id": "7ace0000000000000000000000000007",
+      "service": "contract-app",
+      "agent": "sre",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 7,
+      "resumed_from": "01K00000000000000000000001-t6",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:31:00.042Z",
+      "finished": "2026-10-01T09:31:00.082Z",
+      "last_seen": "2026-10-01T09:31:00.098Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 6,
+      "message_count": 3,
+      "delta_count": 1,
+      "instructions_hash": "6d200708924c5635810dffa6b724ed1952b1987281d19868b4728487a8463f08",
+      "catalog_hash": "c7d288230298af1e29b53ac4d11a52a2ce093f8c497c2f02ed85935c095d361c",
+      "request_count": 1,
+      "events_emitted": 6,
+      "messages_emitted": 3,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "run_command",
+          "call_id": "x2",
+          "step": 0,
+          "seq": 1,
+          "status": "ok",
+          "approved": true
+        }
+      ],
+      "holes": []
+    }
+  ],
+  "sessions": [
+    {
+      "id": "01K00000000000000000000001",
+      "agent": "sre",
+      "turns": 7,
+      "first_prompt": "List the pods, list the dir, free some space."
+    }
+  ],
+  "thread_records": [
+    "01K00000000000000000000001-t1 grant.mint none {\"args\":1,\"entry\":\"e_thread_grants_0002\",\"grant_id\":\"e_thread_grants_0002\",\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"tool\":\"run_command\"}",
+    "01K00000000000000000000001-t1 grant.mint full {\"args\":1,\"content\":{\"reason\":\"destructive commands are never run from chat\"},\"deny\":true,\"entry\":\"e_thread_grants_0003\",\"grant_id\":\"e_thread_grants_0003\",\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"tool\":\"run_command\"}",
+    "01K00000000000000000000001-t1 grant.mint none {\"args\":1,\"entry\":\"e_thread_grants_0004\",\"grant_id\":\"e_thread_grants_0004\",\"max_uses\":2,\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"tool\":\"run_command\"}",
+    "01K00000000000000000000001-t1 grant.mint none {\"args\":1,\"entry\":\"e_thread_grants_0005\",\"expiry\":\"2026-10-01T08:59:00Z\",\"grant_id\":\"e_thread_grants_0005\",\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"tool\":\"run_command\"}",
+    "01K00000000000000000000001-t1 grant.expire none {\"expiry\":\"2026-10-01T08:59:00Z\",\"grant_id\":\"e_thread_grants_0005\",\"reason\":\"expiry\",\"session\":\"01K00000000000000000000001\",\"tool\":\"run_command\",\"uses\":0}",
+    "01K00000000000000000000001-t1 grant.use none {\"call_id\":\"c1\",\"entry\":\"e_thread_grants_0009\",\"grant_id\":\"e_thread_grants_0002\",\"outcome\":\"approved\",\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"uses\":1}",
+    "01K00000000000000000000001-t1 approval.decision none {\"call_id\":\"c1\",\"entry\":\"e_thread_grants_0010\",\"grant_id\":\"e_thread_grants_0002\",\"outcome\":\"approve\",\"session\":\"01K00000000000000000000001\",\"via\":\"grant\"}",
+    "01K00000000000000000000001-t2 approval.decision full {\"call_id\":\"c2\",\"content\":{\"who\":\"policy-bot\"},\"entry\":\"e_thread_grants_0017\",\"outcome\":\"approve\",\"session\":\"01K00000000000000000000001\",\"via\":\"approver\"}",
+    "01K00000000000000000000001-t3 grant.use none {\"call_id\":\"c3\",\"entry\":\"e_thread_grants_0023\",\"grant_id\":\"e_thread_grants_0003\",\"outcome\":\"denied\",\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"uses\":1}",
+    "01K00000000000000000000001-t3 approval.decision full {\"call_id\":\"c3\",\"content\":{\"reason\":\"destructive commands are never run from chat\"},\"entry\":\"e_thread_grants_0024\",\"grant_id\":\"e_thread_grants_0003\",\"outcome\":\"deny\",\"session\":\"01K00000000000000000000001\",\"via\":\"grant\"}",
+    "01K00000000000000000000001-t5 grant.use none {\"call_id\":\"x1\",\"entry\":\"e_thread_grants_0033\",\"grant_id\":\"e_thread_grants_0004\",\"max_uses\":2,\"outcome\":\"approved\",\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"uses\":1}",
+    "01K00000000000000000000001-t5 approval.decision none {\"call_id\":\"x1\",\"entry\":\"e_thread_grants_0034\",\"grant_id\":\"e_thread_grants_0004\",\"outcome\":\"approve\",\"session\":\"01K00000000000000000000001\",\"via\":\"grant\"}",
+    "01K00000000000000000000001-t6 grant.use none {\"call_id\":\"x2\",\"entry\":\"e_thread_grants_0040\",\"grant_id\":\"e_thread_grants_0004\",\"max_uses\":2,\"outcome\":\"approved\",\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"uses\":2}",
+    "01K00000000000000000000001-t6 grant.expire none {\"grant_id\":\"e_thread_grants_0004\",\"max_uses\":2,\"reason\":\"max_uses\",\"session\":\"01K00000000000000000000001\",\"tool\":\"run_command\",\"uses\":2}",
+    "01K00000000000000000000001-t6 approval.decision none {\"call_id\":\"x2\",\"entry\":\"e_thread_grants_0041\",\"grant_id\":\"e_thread_grants_0004\",\"outcome\":\"approve\",\"session\":\"01K00000000000000000000001\",\"via\":\"grant\"}",
+    "01K00000000000000000000001-t7 grant.revoke none {\"entry\":\"e_thread_grants_0047\",\"grant_id\":\"e_thread_grants_0002\",\"session\":\"01K00000000000000000000001\",\"tool\":\"run_command\",\"uses\":1}"
+  ]
+}

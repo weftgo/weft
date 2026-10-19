@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"maps"
 	"reflect"
 	"strconv"
 	"sync"
@@ -1076,7 +1077,14 @@ func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpt
 				parkedRun, actor = s.resumeLinkLocked()
 			}
 		})
-		runOpts := append([]core.RunOption(nil), callerOpts...)
+		// The session's run metadata (WithRunMetadata) rides first: a
+		// caller's own thread.RunOptions(core.Metadata(...)) wins over it
+		// per key, and the session's identity, appended below, over both.
+		var runOpts []core.RunOption
+		if rm := s.RunMeta(); len(rm) > 0 {
+			runOpts = append(runOpts, core.Metadata(rm))
+		}
+		runOpts = append(runOpts, callerOpts...)
 		runOpts = append(runOpts, decisions...)
 		// The session's steering source rides every run (ADR 0019): an
 		// empty queue drains nothing, and a Send under the Steer policy
@@ -1367,25 +1375,39 @@ const sessionTitleKey = "weft.session.title"
 // caller's. The compaction marker's fallback when it has no sight of
 // the run it is filed under (compactmarker.go).
 func (s *Session) identityMetadata(n int) map[string]string {
-	md := map[string]string{
-		"weft.session.id": s.header.ID,
-		"weft.turn":       strconv.Itoa(n), // the turnSeq the run id was minted from
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.identityMetadataLocked(n)
+}
+
+// unseenRunMetadata is unseenRunMetadataLocked taking s.mu.
+func (s *Session) unseenRunMetadata(n int) map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.unseenRunMetadataLocked(n)
+}
+
+// RunMeta returns the session's run metadata (WithRunMetadata): the
+// header's pairs with an Open's own over them — what every turn's run
+// carries under the session's identity keys. A copy.
+func (s *Session) RunMeta() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return maps.Clone(s.runMetaLocked())
+}
+
+// runMetaLocked is the session's run metadata, merged: the header's,
+// then the Open's WithRunMetadata over it. Shared, not a copy.
+// Callers hold s.mu.
+func (s *Session) runMetaLocked() map[string]string {
+	if len(s.cfg.runMeta) == 0 {
+		return s.header.RunMeta
 	}
-	if v := s.Meta()[publicIDKey]; v != "" {
-		md[publicIDKey] = v
+	if len(s.header.RunMeta) == 0 {
+		return s.cfg.runMeta
 	}
-	if v := s.Title(); v != "" {
-		md[sessionTitleKey] = v
-	}
-	if p := s.header.Parent; p != nil { // a fork
-		md["weft.session.forked_from"] = p.Session + "#" + p.Entry
-	}
-	if l := s.header.Lineage; l != nil { // a pool child
-		md["weft.session.parent"] = l.Session
-		if l.Call != "" {
-			md["weft.session.parent_call"] = l.Call
-		}
-	}
+	md := maps.Clone(s.header.RunMeta)
+	maps.Copy(md, s.cfg.runMeta)
 	return md
 }
 

@@ -3,7 +3,10 @@ package thread
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
+
+	"github.com/weftgo/weft/core"
 )
 
 // BranchOption configures one Branch call — the per-call layer over
@@ -77,10 +80,11 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 		if err := s.checkEntry(entryID); err != nil {
 			return err
 		}
-		summary, fromEntry, err := s.summarizeBranch(ctx, entryID)
+		sumOut, fromEntry, err := s.summarizeBranch(ctx, entryID)
 		if err != nil {
 			return err
 		}
+		summary := sumOut.Text
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if s.running && s.inFlight != nil {
@@ -106,9 +110,21 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 			return err
 		}
 		batch = append(batch, BranchSummaryEntry{ID: sum, ParentID: entryID, Created: now, Summary: summary, FromEntry: fromEntry})
+		from, left := s.leaf, s.lastRunIDLocked()
 		if err := s.appendEntriesLocked(ctx, batch...); err != nil {
 			return err
 		}
+		// The branch's record, filed under the run on the line it
+		// leaves: summarized, the summary's entry and what it cost
+		// (UX-B-13, UX-E-20); the summary text under the content policy.
+		extra := map[string]any{"summarized": true, "summary_entry": sum, "branch_from": fromEntry}
+		if sumOut.Usage != (core.Usage{}) {
+			extra["summarizer_usage"] = sumOut.Usage
+		}
+		if sumOut.Model != (core.ModelInfo{}) {
+			extra["summarizer_model"] = sumOut.Model
+		}
+		s.reportNavLocked(recBranch, left, from, extra, map[string]string{"summary": summary})
 		// A navigation off a parked tail may clear the approval
 		// boundary that held queued sends: the runner restarts at the
 		// queue's head (ADR 0021 §5).
@@ -123,11 +139,13 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 	if err := s.checkEntryLocked(entryID); err != nil {
 		return err
 	}
+	from, left := s.leaf, s.lastRunIDLocked()
 	if err := s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
 		return LeafEntry{ID: id, ParentID: parent, Created: created, Entry: entryID}
 	}); err != nil {
 		return err
 	}
+	s.reportNavLocked(recBranch, left, from, map[string]any{"summarized": false}, nil)
 	// A navigation off a parked tail may clear the approval boundary
 	// that held queued sends: the runner restarts at the queue's head.
 	s.kickRunnerLocked()
@@ -270,9 +288,18 @@ func (s *Session) Fork(ctx context.Context, entryID string, opts ...SessionOptio
 	}
 	path, err := s.pathLocked(entryID)
 	st := s.storageLocked()
+	forkedRun := s.lastRunOnPathLocked(path)
 	s.mu.Unlock()
 	if err != nil {
 		return nil, err
+	}
+	// A fork takes its origin's run metadata, its own over it.
+	if len(s.header.RunMeta) > 0 || len(s.cfg.runMeta) > 0 {
+		s.mu.Lock()
+		rm := maps.Clone(s.runMetaLocked())
+		s.mu.Unlock()
+		maps.Copy(rm, h.RunMeta)
+		h.RunMeta = rm
 	}
 
 	entries, err := forkEntries(&cfg, path)
@@ -292,6 +319,13 @@ func (s *Session) Fork(ctx context.Context, entryID string, opts ...SessionOptio
 		}
 		return nil, err
 	}
+	// The fork's record, on the origin: filed under the origin's run
+	// that produced the forked entry's line (UX-E-20).
+	s.locked(func() {
+		s.reportLocked(forkedRun, threadRec{kind: recFork, fields: map[string]any{
+			"new_session": h.ID, "entry": entryID,
+		}})
+	})
 	return f, nil
 }
 

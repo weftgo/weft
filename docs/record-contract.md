@@ -123,6 +123,7 @@ reads them from:
 |---|---|---|---|
 | `weft.session.title` | `thread` (`SetInfo`'s title) | the session's title (`Session.Title`) as the turn started, absent before one was set — a label, not content: it survives a content-off destination (the `session_title` fixture). A fork carries the newest title on the copied path at the fork point (a title set after the fork point, or on another branch, is not carried); the title is the newest across the whole entry tree, so a `Branch` back past a `SetInfo` keeps the newer title; a held compaction marker (no run of the session produced the context) goes out under the next run's own metadata, and the fallback for a run this Session did not see (before a reopen, or past its recent-runs list) stamps the title current when emitted | `meta`; the session row's `title` (§6) |
 | `weft.session.forked_from` | `thread` (`Fork`) | `<origin session>#<entry id>` | `meta` |
+| any caller key | `thread.WithRunMetadata` | a session's run metadata: written into the header at `Create` and `Fork` (`Header.RunMeta`, a fork taking its origin's under its own), held over it at `Open`, stamped on every turn's run under the session's identity keys (which win) and under a `Send`'s own `thread.RunOptions(core.Metadata(...))` (which wins per key); a record filed under a run the Session did not see stamps it too (the `thread_approvals` fixture's `arena.batch`) | `meta` |
 | `weft.session.parent` | `thread/pool` | the parent session of a pool child | `meta` |
 | `weft.session.parent_call` | `thread/pool` | the parent's tool call that spawned it, when known | `meta` |
 | `weft.playground` | `weft/runtime` | `"true"` on a run Studio's playground started (never part of a session) | column `playground` |
@@ -168,7 +169,7 @@ out of `meta`; only that list does. It is, exactly:
 | identity (§2) | `weft.run.id`, `weft.parent.run.id`, `weft.parent.call.id`, `weft.caller.run.id`, `weft.caller.call.id`, `weft.session.id`, `weft.public_id`, `weft.turn`, `gen_ai.agent.name` |
 | run-row columns | `weft.playground`, `weft.experiment.id`, `weft.forked_from`, `weft.resumed_from`, `weft.version`, `weft.manifest.hash`, `weft.instructions.hash` |
 | record keys (§4) | `weft.record`, `weft.event.type`, `weft.event.pos`, `weft.delta.pos`, `weft.messages.index`, `weft.messages.count`, `weft.messages.input`, `weft.messages.reason`, `weft.messages.from_seq`, `weft.messages.to_seq`, `weft.request.index`, `weft.prompt.index`, `weft.tools.index`, `weft.raw.index`, `weft.system.hash`, `weft.catalog.hash`, `weft.compaction.hash`, `weft.compaction.scope`, `weft.content`, `weft.content.truncated_bytes`, `weft.step.index`, `weft.tool.seq`, `weft.attempt.index`, `weft.latency_ms` |
-| span keys (§3) | `weft.run.steps`, `weft.run.pending`, `weft.run.denied`, `weft.run.stop_reason`, `weft.stop.raw`, `weft.model.tool_calls`, `weft.stream`, `weft.ttft_ms`, `weft.attempt.retry_after_ms`, `weft.tool.approved`, `weft.tool.pending`, `weft.tool.result_bytes`, `weft.tool.truncated_bytes`, `weft.tool.input_error`, `weft.tool.retry`, `weft.tool.retry_budget`, `weft.panic.layer`, `weft.metadata.dropped`, `weft.tap.panics`, `weft.resume.calls`, `weft.tool.denied`, `weft.tool.denied_kind`, `weft.override.hash` and every `weft.override.*` key of §3 |
+| span keys (§3) | `weft.run.steps`, `weft.run.pending`, `weft.run.denied`, `weft.run.stop_reason`, `weft.stop.raw`, `weft.model.tool_calls`, `weft.stream`, `weft.ttft_ms`, `weft.attempt.retry_after_ms`, `weft.tool.approved`, `weft.tool.pending`, `weft.tool.result_bytes`, `weft.tool.truncated_bytes`, `weft.tool.input_error`, `weft.tool.retry`, `weft.tool.retry_budget`, `weft.panic.layer`, `weft.metadata.dropped`, `weft.tap.panics`, `weft.resume.calls`, `weft.tool.denied`, `weft.tool.denied_kind`, `weft.chat.role`, `weft.override.hash` and every `weft.override.*` key of §3 |
 | GenAI keys (§8) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.finish_reasons`, the five `gen_ai.usage.*` keys, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `error.type` |
 | mirrors | `gen_ai.conversation.id`, `session.id`, `user.id` |
 
@@ -189,7 +190,9 @@ the compaction marker a reopened `thread` session emits for a run it did
 not see (a forked or pool session's `Compact` after a reopen) carries
 only that session's `weft.session.*` keys, whose JSON sorts above a map
 starting `{"tenant…`, so it can win and drop the caller's pairs from that
-run's ClickHouse `meta`.
+run's ClickHouse `meta`. A `thread` record (§4) filed under such a run
+carries the same fallback map (the session's run metadata under its
+identity) and has the same effect.
 
 ## 3. Spans
 
@@ -266,6 +269,27 @@ model middleware (retry, fallback) runs inside it.
 | `gen_ai.response.model` | string | at end, a call that finished: the model that *answered* |
 | `weft.ttft_ms` | int | at end: time to the first model event |
 | `error.type` | string | on failure |
+
+**The summarizer's calls** (`thread`, audit O15). Every model call a
+`thread` compaction or a `SummarizeLeft` branch summary makes — the
+provider-native compaction included — is a `chat` span of its own, on the
+agent's `TracerProvider` under the instrumentation scope
+`github.com/weftgo/weft/thread`: name `chat <model>`, kind Client,
+`gen_ai.operation.name` `chat`, `weft.chat.role` `summarizer` (string,
+never metadata — `obsdb.MetaOf` skips it), `weft.run.id` the run it is
+filed under, `gen_ai.provider.name` / `gen_ai.request.model` (the model
+that summarized), `gen_ai.usage.input_tokens` / `output_tokens` (+ the
+three splits when set) as the provider reported them, the run's
+metadata, `error.type` `summarizer` and an `Error` status when the call
+failed — an error, a stream that broke the contract, a summary cut at its cap or empty (its tokens were spent either way; a `CheckSummary` rejection of a complete summary is not a failed call). No
+`weft.step.index` (a reader reads -1). Filed under the turn in flight,
+else the last run of the session that produced the leaf's context — a
+child of that run's `invoke_agent` span when the Session saw the run;
+with no run yet, held with its recorded times and opened under the next
+run that reports. Its usage is never part of the run's own (the
+`invoke_agent` span's) usage: a reader that totals a session's cost adds
+the summarizer spans' usage as the summarizer's (the `thread_compaction`
+fixture: two, 1800 + 900 input tokens, under the run they concern).
 
 ### `attempt` — one try inside a model call
 
@@ -370,6 +394,7 @@ raises the delta high-water mark to 1, on both backends.
 | `tools` | `weft.tools` | `weft.tools.index` | one per distinct catalog hash | `{"hash", "tools": [...]}` |
 | `raw` | `weft.raw` | `weft.raw.index` | one per HTTP exchange, dev only | the wire request/response pair |
 | `compaction` | `weft.compaction` | none: derived from `weft.compaction.hash` | one per `thread` compaction | the session marker |
+| `thread` | `weft.thread.<kind>` | none: derived from the body (`obsdb.DeriveRecord`: the low 60 bits of its FNV-1a) | one per session fact (below) | the fact's ids, enums and counts, `content` under the policy |
 | `heartbeat` | `weft.heartbeat` | none | every 10 s per open run | none — never stored |
 
 ### `event` and `delta`
@@ -526,7 +551,69 @@ included, not re-canonicalised), `weft.content = none`,
 spans and records.
 No position attribute: a store derives the position from the hash. Body
 `{scope, hash, entry, reason, replaced, entries, messages_before,
-messages_after, tokens_before, tokens_after}`.
+messages_after, tokens_before, tokens_after, summarizer_model?,
+summarizer_usage?}` — the last two the compaction's summary cost
+(`{provider, name}` and a usage object; absent for a trim or a summarizer
+that ran no model; counts and a model id, never content). The call itself
+is a summarizer `chat` span (§3).
+
+### `thread` — the session's state log
+
+`thread` reports its state log (ADR 0021's audit trail, ADR 0019's
+receipts, the tree's navigation) as one record per fact, through the
+agent's `LoggerProvider` under the instrumentation scope
+`github.com/weftgo/weft/thread`: `weft.record = thread`, EventName
+`weft.thread.<kind>`, severity INFO (WARN for `approval.refused`),
+`weft.run.id`, `weft.content` (`full` when the body carries a `content`
+object, else `none`; a content-off chain's `stripped`), `gen_ai.agent.name`
+and the run's metadata — the run it is **filed under**: the run the entry
+names (a request's, a decision's and a delivered receipt's parking or
+draining run), else the turn in flight (the busy cause of a receipt, the
+turn whose chain saw a grant lapse, the delegating turn of a pool
+receipt), else the last run of the session that produced the leaf's
+context (the compaction marker's rule: a label, a revocation, a
+navigation is filed under the run on the line it leaves); with none —
+grants minted before the first turn — held and emitted under the next
+run that reports, dropped at `Close` with a Debug line. Like the marker,
+it carries `weft.session.id` with the session's other metadata but not
+the core's `gen_ai.conversation.id` / `session.id` mirrors, and no
+position attribute. The exported trail is an index, not evidence (ADR
+0021 §5): the session file is the record.
+
+The body is one JSON object: `kind`, `session`, `at` (the fact's time on
+the session's clock, RFC 3339), the kind's fields below (always: ids,
+enums, counts — absent when empty), and `content`, an object of strings
+that rides only when capture is on (the agent's `Content` option, else
+any destination's `Enabled` for `weft.messages` — the core's rule) and
+only the fields the fact has. App-chosen names — a label's `name` — are
+metadata, never content (ADR 0024).
+
+| Kind | When | Fields | `content` |
+|---|---|---|---|
+| `weft.thread.approval.request` | a call parks (the request entry) | `entry`, `call_id`, `tool`, `args_sha256`, `expiry`, `quorum` (when above 1), `child_session` / `wrapper_call` (a mirrored pool child's) | — |
+| `weft.thread.approval.decision` | any decision: `Decide`, `DecideSigned`, the chain's grant or approver step, an expiry, an interrupt, a pool resolution | `entry`, `call_id`, `outcome` (`approve`, `deny`, `resolve`, `resolve_error`), `via` (`user`, `signed`, `grant`, `approver`, `expiry`, `interrupt`, `child`, `parent`), `key_id`, `request_entry`, `always`, `grant_id` and `grant_scope` (`shared`) for the chain's grant step | `who`, `reason`, `content` (a resolve's result) |
+| `weft.thread.approval.refused` | a signed decision refused (audited at most 16 per request) | `entry`, `call_id`, `reason` (`bad_signature`, `replayed`, `expired`, `args_changed`, `not_pending`), `key_id` (when the ring holds it) | — |
+| `weft.thread.grant.mint` | `Grant`, or an approve-always verdict | `entry`, `grant_id`, `tool`, `scope` `session`, `args` (predicate count; their values never leave), `deny`, `max_uses`, `expiry`; `via` `always` and `call_id` when a decision minted it | `reason` (a deny-grant's model-visible text) |
+| `weft.thread.grant.use` | the chain matched a grant | `entry`, `call_id`, `grant_id`, `outcome` (`approved`, `denied`), `scope` (`session`, `shared`), `uses` (a session grant's count, this one included), `max_uses` | — |
+| `weft.thread.grant.revoke` | `Revoke` | `entry`, `grant_id`, `tool`, `uses` | — |
+| `weft.thread.grant.expire` | a grant's lapse, once per grant per Session: its last use under `MaxUses`, or its `Expiry` noticed passed by the chain | `grant_id`, `tool`, `reason` (`max_uses`, `expiry`), `uses`, `max_uses`, `expiry` | — |
+| `weft.thread.receipt` | a busy-policy receipt (ADR 0019) | `entry`, `receipt_id` (the acceptance entry), `state` (`queued`, `accepted`, `delivered`, `deferred`, `dropped`), `input` (`steer`, `send`), `minted_run` and `turn` (an accepted send's), `follow_up_entry` (a deferred steer's), `unanswered` | `text` (the accepted message) |
+| `weft.thread.interrupt` | an `Interrupt` or `Rollback` send felled a running turn (`target` `run`, filed under it) or an open approval boundary (`target` `boundary`, filed under the parked run) | `policy` (`interrupt`, `rollback`), `target`, `by_run`, `by_turn` (the follow-up's), `denied_calls` | — |
+| `weft.thread.rewind` | the leaf moved back so a run's entries left the path: a rollback (filed under the rolled-back run) or an overflow re-run's branch-back (under the attempt) | `entry` (the leaf entry), `from_entry`, `to_entry`, `reason` (`rollback`, `overflow`) | — |
+| `weft.thread.branch` | `Branch` | `entry`, `from_entry`, `to_entry`, `summarized`; with `SummarizeLeft` `summary_entry`, `branch_from`, `summarizer_usage`, `summarizer_model` | `summary` |
+| `weft.thread.uncompact` | `Uncompact` | `entry`, `from_entry`, `to_entry`, `compaction` (the entry undone) | — |
+| `weft.thread.label` | `Label` | `entry`, `target`, `name` | — |
+| `weft.thread.pin` | `Pin` | `entry`, `target` | — |
+| `weft.thread.fork` | `Fork`, on the origin, under its run that produced the forked entry's line | `entry` (the fork point), `new_session` | — |
+| `weft.thread.pool.delegate` | a `thread/pool` delegation accepted | `entry`, `receipt_id`, `child_session`, `call_id`, `state` `accepted` | `prompt` |
+| `weft.thread.pool.retire` | its settlement | `entry`, `receipt_id`, `child_session`, `call_id`, `state` (`done`, `failed`, `canceled`, `capped`), `usage` (the child session's whole cost) | `stop` |
+
+A store keeps them as plain records under the run they are filed under
+(SQLite's `records` table at the body-derived position; ClickHouse's
+`otel_logs`); no reader applies them to the run row (they move its
+last-seen, like any record), and their attributes add nothing to `meta`
+but the run's own metadata. The session timeline that reads them is
+plan U12.2's.
 
 ### `heartbeat`
 
@@ -639,7 +726,14 @@ numbers survive. A content-on chain may cap content (`MaxBytes`) and
 then sets `weft.content.truncated_bytes` (int, bytes cut) on the record;
 the transcript (`messages`) is never capped. A bridged app log line
 (§4) is content too: stripped by a content-off chain that takes it,
-redacted and capped by a content-on one.
+redacted and capped by a content-on one. A `thread` record (§4) keeps its
+body on every destination but for its `content` object: a content-off
+chain removes it (marked `stripped`; a body it cannot parse is dropped,
+unless the record says `none`), a content-on chain redacts each of its
+strings with `otel.ContentThread` and caps it (`MaxBytes`, setting
+`weft.content.truncated_bytes`). The fields that survive are ids, enums,
+counts and app-chosen names — a label's `name`; the session title rides
+as `weft.session.title` metadata (§2).
 
 ## 6. The run row: what a reader derives
 
@@ -1174,10 +1268,19 @@ makes it a turn; its session has a page of its own and, delegated by
 | `queue_breakpoints` | the phase 8 facts `run_cards` does not hold: a step's two calls under `Parallelism(1)`, the first holding the one slot 30 ms — the second's `execute_tool` span carries `weft.tool.queue_ms` (int, the generator sets it to 1), the first's none; and a playground run's breakpoint park — the runtime's metadata `weft.playground` `true` and `weft.playground.breakpoints` `refund_order` on every record and span, the call parked through `ParkOn` (`pending_source` `park_on`): what Studio and the panel read as a breakpoint (lib/cards.ts `parkWord`), not an approval gate. (`run_cards` holds the request record's `prepared` and `thinking.wire`.) |
 | `bridge_overrides` | a run whose `Params` replace the agent's (`temperature` 0.2, `top_p` 0.9) with `temperature` 0.4 alone and whose `ToolChoice` forces any tool: the root's `weft.override.params` `{"temperature":0.4,"top_p":null}` (`null`: an agent knob the replacement leaves unset) and `weft.override.tool_choice` `any`, beside `weft.override.hash` (span attributes, no row field); and a bridged WARN under its `execute_tool` span (`otel.AppLogs(true)`, content on, a `Redact` over `otel.ContentLog`) with 125 attributes: the message redacted (`card [redacted]`), the first 120 kept, `weft.log.attrs_dropped` 5 (int) |
 | `bridge_stripped` | a bridged WARN on a content-off destination that opted in (`otel.NoContent()`, `otel.AppLogs(true)`): stored stripped — its message and string attribute values emptied, `weft.content` `stripped`, severity, span and the int attribute kept; the run itself content-off (`stripped`) |
-| `pool_child` | thread.analysts-pool's shape: a `thread` turn of investment-lead delegating through `pool.Wrap` (call `d1`) to market-analyst: the child session's turn `<child>-t1` carries its own `weft.session.id`, `weft.caller.run.id` (the lead's turn) and `weft.caller.call.id` `d1` as `caller_run_id` / `caller_call_id`, no `parent_run_id`, and the lineage `weft.session.parent` / `weft.session.parent_call` in `meta`; two sessions, each one turn of its own — the child's with `parent_session`, `parent_call` `d1` and `parent_run` (§6) |
+| `pool_child` | thread.analysts-pool's shape: a `thread` turn of investment-lead delegating through `pool.Wrap` (call `d1`) to market-analyst: the child session's turn `<child>-t1` carries its own `weft.session.id`, `weft.caller.run.id` (the lead's turn) and `weft.caller.call.id` `d1` as `caller_run_id` / `caller_call_id`, no `parent_run_id`, and the lineage `weft.session.parent` / `weft.session.parent_call` in `meta`; two sessions, each one turn of its own — the child's with `parent_session`, `parent_call` `d1` and `parent_run` (§6); its `thread_records` the lead session's `pool.delegate` and `pool.retire` (§4), filed under the delegating turn |
+| `thread_approvals` | a `thread` session (`WithRunMetadata` `arena.batch`, a public id) through every decision path, content on: a deny with a reason, a signature under a key the ring does not hold (`approval.refused` `bad_signature`), a signed approval (`via` `signed`, `key_id`), an approve-always minting a grant (`grant.mint` `via` `always`, under the parking run), a label; each request and decision filed under the run that parked its call, `who` and the reason under `content`; `arena.batch` in every run row's `meta` |
+| `thread_grants` | the decision chain: four grants minted before any run (held, then filed under the first run), a glob grant's `grant.use`, the approver's decision (`via` `approver`, `who` `policy-bot`), a deny-grant's refusal (`via` `grant`, its reason under `content`), a `MaxUses` grant's two uses and its `grant.expire` `max_uses`, a past-expiry grant's `grant.expire` `expiry`, a `grant.revoke` |
+| `thread_busy` | the busy policies: a steer `queued` and `delivered` (under the run that drained it), a steer `dropped` by `ClearQueue` (under the busy turn), queued sends `accepted` (their minted turns), an `interrupt` (under the felled run, `by_turn` the follow-up) and a rollback (`interrupt`, then `rewind` `rollback` under the run taken off the path); the interrupted runs read `failed` |
+| `thread_compaction` | a `pin`, a manual compaction whose summary is a model call — a summarizer `chat` span (§3; 1800 in, 60 out, step -1) under the run it concerns and the marker's `summarizer_usage` — an `uncompact`, a `SummarizeLeft` `branch` (`summarized`, its own summarizer span), a `label` and a `fork` |
+| `thread_pool` | a sync `thread/pool` delegation from a turn: `pool.delegate` and `pool.retire` (`done`, the child's usage) under the delegating run; the child session's own run, its `weft.session.parent` in `meta` |
+| `thread_content_off` | `thread_approvals` through a content-off destination: every thread record's `content` gone (`weft.content` `none` — no destination asked for content, so `thread` captured none), the ids, enums, the label's `name` and the session title kept |
 | `messages_lost` | the `tool_calls` run with its middle transcript batch dropped (the growth `messages` record at index 1, the assistant's tool call), every event and span kept: `message_count` 3 below `messages_emitted` 4 — `gap` (cause `messages_lost`, "1 of 4 transcript batches were lost"); every event stored, so no `events_lost` |
 
-`expect.json` is `{case, description, pending?, derived?, runs: [...]}`;
+`expect.json` is `{case, description, pending?, derived?, runs: [...],
+sessions?, thread_records?}` — `thread_records` the case's `thread`
+records (§4) as its `logs.json` carries them, `"<run id> <kind>
+<weft.content> <body without kind and at>"` in arrival order;
 each run lists every row field of §6 and `derived` (§9's mark, omitted
 when false — every weft run), its `chat` and `tools` lists, its `tree` (§6's run tree: each descendant run with its parent and span count, omitted for a run with none), and
 its `holes` — the run-level badge set as the test reads it from the row,

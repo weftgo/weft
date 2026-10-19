@@ -629,7 +629,10 @@ type Agent struct {
 	// records is the provider resolved at New (the option's, else the
 	// global one), what LoggerProvider returns.
 	records log.LoggerProvider
-	logger  *slog.Logger
+	// traces is the tracer provider resolved at New, the same way —
+	// what TracerProvider returns.
+	traces trace.TracerProvider
+	logger *slog.Logger
 	// content is the Content option's override of the capture question:
 	// nil means "as the logger in force says", resolved at each emission.
 	content *bool
@@ -687,6 +690,7 @@ func New(m Model, opts ...Option) *Agent {
 		lp = a.loggerProvider
 	}
 	a.records = lp
+	a.traces = tp
 	a.obs = observer{
 		tracer: tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(version)),
 		elog:   lp.Logger(instrumentationName, log.WithInstrumentationVersion(version)),
@@ -904,6 +908,27 @@ func (a *Agent) Logger() *slog.Logger {
 // (ADR 0028 §8) — emits through it, as Logger serves the same purpose
 // for log lines.
 func (a *Agent) LoggerProvider() log.LoggerProvider { return a.records }
+
+// TracerProvider returns the OpenTelemetry tracer provider the agent's
+// runs open their spans on: the TracerProvider option's value, or the
+// global provider resolved at New (which delegates, as LoggerProvider's
+// does). A satellite whose own spans must land beside the runs' —
+// weft/thread's summarizer calls (a chat span filed under the turn the
+// compaction concerns) — opens them through it.
+func (a *Agent) TracerProvider() trace.TracerProvider { return a.traces }
+
+// ContentCapture reports the agent's Content option: set is false when
+// none was given (capture is then "as the logger says", resolved per
+// emission), and capture is the option's value when it was. A
+// satellite emitting its own records beside the runs' — weft/thread's
+// session records — asks it, so Content(false) keeps their content
+// out exactly as it keeps the runs'.
+func (a *Agent) ContentCapture() (capture, set bool) {
+	if a.content == nil {
+		return false, false
+	}
+	return *a.content, true
+}
 
 // Params returns the agent's default sampling knobs — the Params
 // option's value, the zero value (every knob the adapter's own) when

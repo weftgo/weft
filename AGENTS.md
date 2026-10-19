@@ -83,7 +83,8 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.OnRunEnd(func(ctx context.Context, res *weft.RunResult, err error) {...}), // outcome observer: once per run, even on failure — the otel pipeline pairs it with Tap
     // weft.OnMessages(func(ctx context.Context, step int, msgs []weft.Message) {...}) is a RunOption — pass it to Generate/Stream, not New:
     //   the transcript observer — exact messages as they join, for incremental persistence
-    // In any observer: weft.AgentFromContext(ctx) → the running *Agent (nil outside a run); agt.Logger() → the run lines' sink.
+    // In any observer: weft.AgentFromContext(ctx) → the running *Agent (nil outside a run); agt.Logger() → the run lines' sink;
+    // agt.LoggerProvider() / agt.TracerProvider() / agt.ContentCapture() — what a satellite reporting beside the runs reads (weft/thread).
     weft.TracerProvider(tp),                   // OTel spans: invoke_agent › chat / execute_tool (default: the global provider; no-op until an SDK registers)
     weft.LoggerProvider(lp),                   // OTel records through the Logs API (ADR 0024): events, deltas, transcript batches; same default
     weft.Content(true),                        // records carry content: true always, false never; default: as the logger's Enabled answers
@@ -497,6 +498,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    before the run; turn.Wait() | WaitContext(ctx) | Done() | Events() | Outcome() | Next(); s.WaitIdle(ctx).
 //    Runs carry weft.session.id, weft.turn and, with thread.PublicID(id) (Create only), weft.public_id;
 //    once SetInfo named a title, weft.session.title (metadata: survives content-off; Studio titles the session with it).
+//    thread.WithRunMetadata(kv) (Create/Fork: into Header.RunMeta; Open: held over it; s.RunMeta()) stamps every
+//    turn's run — identity keys win, a Send's own RunOptions(weft.Metadata) wins per key.
 //    Busy (ADR 0019): thread.BusyPolicy(Queue | Reject → ErrBusy | Steer | Interrupt | Rollback), or
 //    thread.As(p) per Send; queued sends and steers are receipt entries, durable at acceptance —
 //    s.Queue(), s.ClearQueue(ctx) (their Turns end ErrDropped), s.Continue(ctx) runs what Open restored.
@@ -507,7 +510,16 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    ClearOldToolResults(n), BeforeCompact (thread.Proceed() | Cancel() | Replace(c)); overflow re-runs once.
 //    Each compaction emits a session marker record (kind compaction, informational, no messages) at
 //    ApplyCompaction, under the last run of this session that produced the context (held for the next run
-//    when none did); obsdb.DB.Compactions and the run page read it back.
+//    when none did); obsdb.DB.Compactions and the run page read it back. Its body names summarizer_model /
+//    summarizer_usage, and every summarizer model call (compaction, SummarizeLeft) is a chat span with
+//    weft.chat.role summarizer + its usage, under the turn in flight or the last run (never in the run's own usage).
+//    The state log as records (U12.1, record contract §4 kind thread, event weft.thread.<kind>): approval.request /
+//    decision (via, key_id, grant_id) / refused, grant.mint / use / revoke / expire, receipt (queued / accepted /
+//    delivered / deferred / dropped), interrupt, rewind, branch, uncompact, label, pin, fork, pool.delegate /
+//    retire — filed under the run the fact concerns (the entry's, else the turn in flight, else the last run;
+//    held for the next run), ids/enums/counts always, who/reasons/texts under the body's "content" (the agent's
+//    Content, else the destination's policy; weft/otel strips it, otel.ContentThread for Redact); label names
+//    are metadata. An index, not evidence (ADR 0021 §5); the timeline that reads them is U12.2's.
 //    Approvals (ADR 0021): s.Pending(); s.Decide(ctx, thread.Approve(id) | Deny | Resolve | ResolveError |
 //    ApproveAlways) → auto-resume (turn.Next()) or s.Resume(ctx); s.Grant, s.Revoke, thread.WithApprover(a,
 //    timeout), Quorum(n), RequestExpiry(d), OnRequest(fn), s.Audit(). Signed: NewKeyring + WithKeyring (+

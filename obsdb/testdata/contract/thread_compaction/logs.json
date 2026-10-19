@@ -1,0 +1,3215 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "contract-app"
+            }
+          },
+          {
+            "key": "weft.version",
+            "value": {
+              "stringValue": "v0.0.0-contract"
+            }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_start\",\"id\":\"01K00000000000000000000001-t1\",\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"agent\":\"research\",\"instructions_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180000000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180000000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.input",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Fetch the raft document.\"}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180001000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180001000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"01K00000000000000000000001-t1\",\"index\":0}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180002000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180002000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "prompt"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.prompt.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"text\":\"You are a research assistant.\"}"
+              },
+              "eventName": "weft.prompt",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180003000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000002",
+              "timeUnixNano": "1790847180003000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "tools"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.tools.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"tools\":[{\"name\":\"fetch_doc\",\"description\":\"Fetch a document.\",\"schema\":{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"description\":\"the topic\"}},\"required\":[\"topic\"]},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":false,\"source\":\"local\"}]}"
+              },
+              "eventName": "weft.tools",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180004000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000002",
+              "timeUnixNano": "1790847180004000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.request.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+              },
+              "eventName": "weft.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180005000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000002",
+              "timeUnixNano": "1790847180005000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"fetch_doc\",\"args\":{\"topic\":\"raft\"}}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180006000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180006000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "fetch_doc"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"01K00000000000000000000001-t1\",\"seq\":1,\"call_id\":\"call_1\",\"name\":\"fetch_doc\",\"args\":{\"topic\":\"raft\"}}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180007000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180007000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "fetch_doc"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_finish\",\"run_id\":\"01K00000000000000000000001-t1\",\"seq\":2,\"call_id\":\"call_1\",\"name\":\"fetch_doc\",\"content\":\"raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. \",\"is_error\":false}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180008000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180008000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"call_id\":\"call_1\",\"name\":\"fetch_doc\",\"content\":\"raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. \",\"is_error\":false}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180009000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180009000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.latency_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"01K00000000000000000000001-t1\",\"index\":0,\"reason\":\"tool_calls\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180010000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180010000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"01K00000000000000000000001-t1\",\"index\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180011000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180011000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.request.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+              },
+              "eventName": "weft.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180012000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000004",
+              "timeUnixNano": "1790847180012000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "delta"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "text_delta"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.delta.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"text_delta\",\"run_id\":\"01K00000000000000000000001-t1\",\"text\":\"Read raft; elections 150–300 ms.\"}"
+              },
+              "eventName": "weft.delta",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180013000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180013000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Read raft; elections 150–300 ms.\"}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180014000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180014000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "6"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.latency_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.ttft_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"01K00000000000000000000001-t1\",\"index\":1,\"reason\":\"stop\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1,\"ttft_ms\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180015000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180015000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "7"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"01K00000000000000000000001-t1\",\"usage\":{\"input_tokens\":20,\"output_tokens\":10},\"steps\":2,\"stopped_by\":\"final_answer\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180016000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180016000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_start\",\"id\":\"01K00000000000000000000001-t2\",\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"agent\":\"research\",\"instructions_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180017000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180017000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.messages.input",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Fetch the raft document.\"}]},{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"fetch_doc\",\"args\":{\"topic\":\"raft\"}}]},{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"call_id\":\"call_1\",\"name\":\"fetch_doc\",\"content\":\"raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. raft notes. \",\"is_error\":false}]},{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Read raft; elections 150–300 ms.\"}]},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Fetch the crdt document.\"}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180018000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180018000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"01K00000000000000000000001-t2\",\"index\":0}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180019000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180019000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "prompt"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.prompt.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"text\":\"You are a research assistant.\"}"
+              },
+              "eventName": "weft.prompt",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180020000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000006",
+              "timeUnixNano": "1790847180020000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "tools"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.tools.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"tools\":[{\"name\":\"fetch_doc\",\"description\":\"Fetch a document.\",\"schema\":{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"description\":\"the topic\"}},\"required\":[\"topic\"]},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":false,\"source\":\"local\"}]}"
+              },
+              "eventName": "weft.tools",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180021000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000006",
+              "timeUnixNano": "1790847180021000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.request.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":0,\"count\":5},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+              },
+              "eventName": "weft.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180022000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000006",
+              "timeUnixNano": "1790847180022000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"fetch_doc\",\"args\":{\"topic\":\"crdt\"}}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180023000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180023000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "fetch_doc"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"01K00000000000000000000001-t2\",\"seq\":1,\"call_id\":\"call_1\",\"name\":\"fetch_doc\",\"args\":{\"topic\":\"crdt\"}}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180024000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180024000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "fetch_doc"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_finish\",\"run_id\":\"01K00000000000000000000001-t2\",\"seq\":2,\"call_id\":\"call_1\",\"name\":\"fetch_doc\",\"content\":\"crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. \",\"is_error\":false}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180025000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180025000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"call_id\":\"call_1\",\"name\":\"fetch_doc\",\"content\":\"crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. crdt notes. \",\"is_error\":false}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180026000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180026000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.latency_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"01K00000000000000000000001-t2\",\"index\":0,\"reason\":\"tool_calls\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180027000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180027000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"01K00000000000000000000001-t2\",\"index\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180028000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180028000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.request.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":2,\"count\":7},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+              },
+              "eventName": "weft.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180029000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000008",
+              "timeUnixNano": "1790847180029000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "delta"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "text_delta"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.delta.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"text_delta\",\"run_id\":\"01K00000000000000000000001-t2\",\"text\":\"Read crdt; they converge.\"}"
+              },
+              "eventName": "weft.delta",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180030000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180030000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Read crdt; they converge.\"}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180031000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180031000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "6"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.latency_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.ttft_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"01K00000000000000000000001-t2\",\"index\":1,\"reason\":\"stop\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1,\"ttft_ms\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180032000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180032000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "7"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"01K00000000000000000000001-t2\",\"usage\":{\"input_tokens\":20,\"output_tokens\":10},\"steps\":2,\"stopped_by\":\"final_answer\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180033000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180033000000",
+              "traceId": "7ace0000000000000000000000000002"
+            }
+          ],
+          "scope": {
+            "name": "github.com/weftgo/weft/core",
+            "version": "v0.0.0-contract"
+          }
+        },
+        {
+          "logRecords": [
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "thread"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"entry\":\"e_thread_compaction_0012\",\"kind\":\"pin\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_compaction_0002\"}"
+              },
+              "eventName": "weft.thread.pin",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180034000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180034000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "compaction"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.compaction.scope",
+                  "value": {
+                    "stringValue": "session"
+                  }
+                },
+                {
+                  "key": "weft.compaction.hash",
+                  "value": {
+                    "stringValue": "3ee2cf489620873970c9fb47977c2d70d5d92624cd3f36ecc9609b498a205295"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"scope\":\"session\",\"hash\":\"3ee2cf489620873970c9fb47977c2d70d5d92624cd3f36ecc9609b498a205295\",\"entry\":\"e_thread_compaction_0013\",\"reason\":\"manual\",\"replaced\":7,\"entries\":2,\"messages_before\":8,\"messages_after\":3,\"tokens_before\":2600,\"tokens_after\":81,\"summarizer_model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"summarizer_usage\":{\"input_tokens\":1800,\"output_tokens\":60}}"
+              },
+              "eventName": "weft.compaction",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180035000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180035000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "thread"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"compaction\":\"e_thread_compaction_0013\",\"entry\":\"e_thread_compaction_0014\",\"from_entry\":\"e_thread_compaction_0013\",\"kind\":\"uncompact\",\"session\":\"01K00000000000000000000001\",\"to_entry\":\"e_thread_compaction_0012\"}"
+              },
+              "eventName": "weft.thread.uncompact",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180036000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180036000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "thread"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t2"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "2"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"branch_from\":\"e_thread_compaction_0006\",\"content\":{\"summary\":\"SUMMARY of the abandoned branch: crdt notes.\"},\"entry\":\"e_thread_compaction_0015\",\"from_entry\":\"e_thread_compaction_0012\",\"kind\":\"branch\",\"session\":\"01K00000000000000000000001\",\"summarized\":true,\"summarizer_model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"summarizer_usage\":{\"input_tokens\":900,\"output_tokens\":30},\"summary_entry\":\"e_thread_compaction_0016\",\"to_entry\":\"e_thread_compaction_0006\"}"
+              },
+              "eventName": "weft.thread.branch",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180037000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790847180037000000",
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "thread"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"entry\":\"e_thread_compaction_0017\",\"kind\":\"label\",\"name\":\"after-raft\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_compaction_0006\"}"
+              },
+              "eventName": "weft.thread.label",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180038000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180038000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "thread"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "research"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "1"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"entry\":\"e_thread_compaction_0006\",\"kind\":\"fork\",\"new_session\":\"01K00000000000000000000001_fork\",\"session\":\"01K00000000000000000000001\"}"
+              },
+              "eventName": "weft.thread.fork",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847180039000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847180039000000",
+              "traceId": "7ace0000000000000000000000000001"
+            }
+          ],
+          "scope": {
+            "name": "github.com/weftgo/weft/thread"
+          }
+        }
+      ]
+    }
+  ]
+}

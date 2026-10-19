@@ -1,0 +1,137 @@
+{
+  "case": "thread_pool",
+  "description": "a sync thread/pool delegation from a session's turn: pool.delegate (child session, under the delegating turn's run) and pool.retire (state done, the child's usage); the child session's own run",
+  "runs": [
+    {
+      "id": "01K00000000000000000000001-t1",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "lead",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 1,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:34:00Z",
+      "finished": "2026-10-01T09:34:00.025Z",
+      "last_seen": "2026-10-01T09:34:00.027Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "0020587b9e19e01303be742430daa5515342a97b09ca686ef15702cb21614fd7",
+      "catalog_hash": "9cdb70506db2311e887031625c7b9731fb7f1fcd30e52a41726ef85485b2f6da",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "research",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000002-t1",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "researcher",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000002",
+      "turn": 1,
+      "caller_run_id": "01K00000000000000000000001-t1",
+      "caller_call_id": "call_1",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000002",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.session.parent": "01K00000000000000000000001",
+        "weft.session.parent_call": "call_1"
+      },
+      "started": "2026-10-01T09:34:00.004Z",
+      "finished": "2026-10-01T09:34:00.016Z",
+      "last_seen": "2026-10-01T09:34:00.016Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "cd2d78c00f4e429fb28c3c8b4b793158c39327b4b7d527feedc721a86aa44384",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    }
+  ],
+  "sessions": [
+    {
+      "id": "01K00000000000000000000001",
+      "agent": "lead",
+      "turns": 1,
+      "first_prompt": "What is the answer?"
+    },
+    {
+      "id": "01K00000000000000000000002",
+      "agent": "researcher",
+      "turns": 1,
+      "first_prompt": "find the answer",
+      "parent_session": "01K00000000000000000000001",
+      "parent_call": "call_1",
+      "parent_run": "01K00000000000000000000001-t1"
+    }
+  ],
+  "thread_records": [
+    "01K00000000000000000000001-t1 pool.delegate full {\"call_id\":\"call_1\",\"child_session\":\"01K00000000000000000000002\",\"content\":{\"prompt\":\"find the answer\"},\"entry\":\"e_thread_pool_0004\",\"receipt_id\":\"e_thread_pool_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"accepted\"}",
+    "01K00000000000000000000001-t1 pool.retire full {\"child_session\":\"01K00000000000000000000002\",\"content\":{\"stop\":\"The answer is 42.\"},\"entry\":\"e_thread_pool_0006\",\"receipt_id\":\"e_thread_pool_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"done\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}"
+  ]
+}

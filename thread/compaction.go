@@ -622,11 +622,15 @@ func (s *Session) Uncompact(ctx context.Context) error {
 			if _, ok := s.byID[target]; !ok {
 				return fmt.Errorf("%w: session %s holds no entry %q to branch back to", ErrNoEntry, s.header.ID, target)
 			}
+			from, left := s.leaf, s.lastRunIDLocked()
 			if err := s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
 				return LeafEntry{ID: id, ParentID: parent, Created: created, Entry: target}
 			}); err != nil {
 				return err
 			}
+			// The undo's record, filed under the run on the compacted
+			// line: the compaction it undid.
+			s.reportNavLocked(recUncompact, left, from, map[string]any{"compaction": idOf(path[i])}, nil)
 			// Like any navigation off a parked tail, the undo may clear
 			// what held queued sends.
 			s.kickRunnerLocked()
@@ -988,17 +992,21 @@ func (s *Session) produceSummary(ctx context.Context, in SummaryInput) (Summary,
 // writes happen on the summary call. A max_tokens finish is
 // ErrSummaryTruncated — the text that fit under the cap is half a
 // summary, and storing it would silently lose the other half.
-func (s *Session) summarizeWith(ctx context.Context, m core.Model, in SummaryInput) (Summary, error) {
+func (s *Session) summarizeWith(ctx context.Context, m core.Model, in SummaryInput) (_ Summary, retErr error) {
 	input := in.Messages
 	if in.PrevSummary != "" {
 		input = append([]core.Message{summaryMessage(in.PrevSummary)}, in.Messages...)
 	}
 	if s.cfg.compaction.preferNative {
 		if nc := nativeOf(m); nc != nil {
+			start := time.Now()
 			msg, usage, err := nc.CompactNative(ctx, core.ModelRequest{
 				System:   in.SystemPrompt,
 				Messages: input,
 			}, in.Instructions)
+			// The provider call is a summarizer chat span whatever it
+			// answered: its tokens were spent (audit O15).
+			s.recordSummarizer(summarizerCall{start: start, end: time.Now(), model: core.InfoOf(m), usage: usage, err: err})
 			if err == nil && strings.TrimSpace(msg.Text()) != "" {
 				return Summary{Text: strings.TrimSpace(msg.Text()), Usage: usage, Model: core.InfoOf(m)}, nil
 			}
@@ -1025,6 +1033,13 @@ func (s *Session) summarizeWith(ctx context.Context, m core.Model, in SummaryInp
 	var usage core.Usage
 	var stop core.StopReason
 	finished := false
+	// The call is a summarizer chat span (audit O15): its model and
+	// usage, filed under the run the session names, whatever it
+	// answered — a refused or cut summary's tokens were spent too.
+	start := time.Now()
+	defer func() {
+		s.recordSummarizer(summarizerCall{start: start, end: time.Now(), model: core.InfoOf(m), usage: usage, err: retErr})
+	}()
 	for ev, err := range m.Stream(ctx, req) {
 		if err != nil {
 			return Summary{}, fmt.Errorf("thread: summarizer: %w", err)
@@ -1610,17 +1625,17 @@ func (s *Session) rateLimitAllows() bool {
 // history and could alone outgrow the window. A failure is the
 // Branch's error; it is not a compaction and does not reach
 // CompactFailed.
-func (s *Session) summarizeBranch(ctx context.Context, target string) (summary, fromEntry string, err error) {
+func (s *Session) summarizeBranch(ctx context.Context, target string) (sum Summary, fromEntry string, err error) {
 	s.mu.Lock()
 	view, err := s.contextViewLocked()
 	if err != nil {
 		s.mu.Unlock()
-		return "", "", err
+		return Summary{}, "", err
 	}
 	targetPath, err := s.pathLocked(target)
 	if err != nil {
 		s.mu.Unlock()
-		return "", "", err
+		return Summary{}, "", err
 	}
 	s.mu.Unlock()
 	leafPath := view.path
@@ -1649,15 +1664,15 @@ func (s *Session) summarizeBranch(ctx context.Context, target string) (summary, 
 		}
 	}
 	if len(sumMsgs) == 0 {
-		return "", "", fmt.Errorf("thread: SummarizeLeft with no branch to summarize: the leaf is on %q's path already", target)
+		return Summary{}, "", fmt.Errorf("thread: SummarizeLeft with no branch to summarize: the leaf is on %q's path already", target)
 	}
 	sumView, _ := summarizerView(sumMsgs)
 	cfg := s.cfg.compaction
-	sum, err := s.produceSummary(ctx, SummaryInput{
+	sum, err = s.produceSummary(ctx, SummaryInput{
 		Messages:     sumView,
 		MaxTokens:    cfg.maxTokens(),
 		Reason:       ReasonManual,
 		SystemPrompt: cfg.summarySystemPrompt(""),
 	})
-	return sum.Text, fromEntry, err
+	return sum, fromEntry, err
 }

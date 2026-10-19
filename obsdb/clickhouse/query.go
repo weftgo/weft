@@ -1846,6 +1846,9 @@ var contractKeys = []string{
 	// no Subagent child — the run row's CallerRunID / CallerCallID
 	// (migration 0023's restatement of both views).
 	"weft.caller.run.id", "weft.caller.call.id",
+	// U12.1 (audit O15): weft/thread's summarizer chat spans' role, a span
+	// attribute (migration 0024's restatement of the traces view).
+	"weft.chat.role",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

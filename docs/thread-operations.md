@@ -507,7 +507,15 @@ handler (or a pool child's turn) never carries the enclosing run's
 public id, fork origin or pool lineage as its own
 (`docs/record-contract.md` §2).
 
-One record of its own: every compaction that lands (threshold,
+A session's own tags ride every turn with `thread.WithRunMetadata(kv)`:
+written into the header at `Create` and `Fork` (`Header.RunMeta`; a fork
+takes its origin's under its own), held over the stored pairs for an
+`Open`'s life, stamped under the identity keys above (which win) and
+under a `Send`'s own `thread.RunOptions(weft.Metadata(...))` (which wins
+per key) — a tenant or a batch tag on every turn without threading a
+context through each `Send`.
+
+The compaction marker: every compaction that lands (threshold,
 `Compact`, `ApplyCompaction`, a trim, the overflow re-run) emits a
 record of kind `compaction` (event name `weft.compaction`, ADR 0028 §8)
 through the agent's `LoggerProvider`, at once, under the id of the last
@@ -519,7 +527,34 @@ replaced → summary entries and the estimated tokens before → after; no
 messages. A compaction of a context no run produced (entries appended
 directly to the store) is emitted under the next run the Session
 drives, or dropped at `Close` with a Debug line. `obsdb`'s
-`DB.Compactions` reads it back for Studio.
+`DB.Compactions` reads it back for Studio. Its body also names the
+summary's cost (`summarizer_model`, `summarizer_usage`), and the
+summarizer's model call itself — every compaction's and every
+`SummarizeLeft` branch summary's — is a `chat` span with
+`weft.chat.role = summarizer` and its usage, filed under the turn in
+flight or the last run, never folded into that run's own usage.
+
+The state log, as records. Beside the marker, the session reports every
+state fact it writes as a record of kind `thread` (event name
+`weft.thread.<kind>`, `docs/record-contract.md` §4): approval requests,
+decisions (with `via`, the key id, the grant that decided) and refused
+signatures; grants minted, used (with the use count), revoked and lapsed
+(`MaxUses` reached, or an `Expiry` the chain noticed passed); the busy
+policies' receipts (a steer queued, delivered, deferred or dropped; a
+send accepted, with the turn it was minted as); interrupts (the turn
+that felled the run) and rewinds (a rollback, an overflow re-run's
+branch-back); branches (with a summary's cost), uncompacts, labels,
+pins, forks; and `thread/pool` delegations and their settlements. Each
+is filed under the run it concerns — the run the entry names, else the
+turn in flight, else the last run on the leaf's line; with none yet
+(grants minted before the first turn) held for the next run, dropped at
+`Close` with a Debug line. Ids, enums and counts always; who decided,
+reasons, a steer's text and a summary only where content is on (the
+agent's `weft.Content`, else the destination's policy — a content-off
+destination receives the record without them); a label's name is
+metadata and always rides. The file stays the record: the exported copy
+is an index, not evidence (ADR 0021 §5), and an Observability
+destination that drops one changes nothing the session does.
 
 What the module logs on its own. Through the agent's logger
 (`weft.Logger`): `Warn` for a repaired load at `Open`, a step write

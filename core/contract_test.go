@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/codes"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/mw"
@@ -5973,5 +5974,31 @@ func TestRunLinkSubagentVsCaller(t *testing.T) {
 	}
 	if len(res.Steps[1].SubagentUsage) != 0 {
 		t.Errorf("the nested Generate's step recorded SubagentUsage %v: a caller-linked run is not rolled up", res.Steps[1].SubagentUsage)
+	}
+}
+
+// TestAgentReportsItsProviders pins the two accessors a satellite
+// reporting beside the runs reads (weft/thread's session records and
+// summarizer spans): TracerProvider is the option's provider (else the
+// global one resolved at New), and ContentCapture says whether Content
+// was given and what it said.
+func TestAgentReportsItsProviders(t *testing.T) {
+	m := wefttest.Script(wefttest.Say("ok"))
+	tp := tracenoop.NewTracerProvider()
+	agt := core.New(m, core.TracerProvider(tp))
+	if agt.TracerProvider() != tp {
+		t.Fatalf("TracerProvider() = %v, want the option's provider", agt.TracerProvider())
+	}
+	if core.New(m).TracerProvider() == nil {
+		t.Fatal("TracerProvider() with no option is nil, want the global provider")
+	}
+	if c, set := core.New(m).ContentCapture(); c || set {
+		t.Fatalf("ContentCapture() with no option = (%v, %v), want (false, false)", c, set)
+	}
+	if c, set := core.New(m, core.Content(false)).ContentCapture(); c || !set {
+		t.Fatalf("ContentCapture() under Content(false) = (%v, %v), want (false, true)", c, set)
+	}
+	if c, set := core.New(m, core.Content(true)).ContentCapture(); !c || !set {
+		t.Fatalf("ContentCapture() under Content(true) = (%v, %v), want (true, true)", c, set)
 	}
 }

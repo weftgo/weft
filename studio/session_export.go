@@ -63,7 +63,7 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 	ctx := r.Context()
 	det, err := s.db.Session(ctx, id)
 	if err != nil {
-		dbError(w, r, "session", id, err)
+		sessionReadError(w, r, id, err)
 		return
 	}
 	if pub := panelPublicID(r); pub != "" {

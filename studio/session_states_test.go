@@ -66,8 +66,10 @@ func TestSessionStatesAndFilters(t *testing.T) {
 	if got := list("/api/sessions?failed=true"); len(got) != 0 {
 		t.Errorf("failed=true = %+v; want none", got)
 	}
-	if got := list("/api/sessions?status=succeeded"); len(got) != 2 {
-		t.Errorf("status=succeeded = %+v; want both", got)
+	// status= is the newest turn's outcome, the session page's word: a
+	// parked newest turn is not succeeded (P9-pre-web-fix).
+	if got := list("/api/sessions?status=succeeded"); len(got) != 1 || got[0].ID != "s_plain" {
+		t.Errorf("status=succeeded = %+v; want s_plain alone", got)
 	}
 	if got := list("/api/sessions?status=failed"); len(got) != 0 {
 		t.Errorf("status=failed = %+v; want none", got)

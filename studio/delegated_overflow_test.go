@@ -203,6 +203,88 @@ func TestCallerLinkedScoped(t *testing.T) {
 	}
 }
 
+// TestDelegatedHiddenScoped (P9-pre-web-fix): a pool parent's session
+// read with a panel token of its public id, one of whose delegated
+// sessions carries another public id: the delegated rows are its own,
+// the other counted in a hidden hole (never named), and the delegated
+// cost is not known, the reason saying why — never "no delegation,
+// exactly $0". The server token sees both, no hole, cost known.
+func TestDelegatedHiddenScoped(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/hidden.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	seedRun(t, db, "s_p-t1", "pub_a", "s_p", "", nil)
+	child := func(id, pub string) {
+		seedRun(t, db, id+"-t1", pub, id, "", map[string]any{
+			"weft.session.parent": "s_p", "weft.session.parent_call": "d_" + id,
+			"weft.caller.run.id": "s_p-t1", "weft.caller.call.id": "d_" + id,
+		})
+	}
+	child("s_mine", "pub_a")
+	child("s_other", "pub_b")
+	h := Handler(DB(db), Token("srv"))
+	panel, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type hole struct {
+		Hole, Reason, Fix string
+		Count             int
+	}
+	type doc struct {
+		Delegated  []struct{ ID string } `json:"delegated"`
+		Holes      []hole                `json:"delegated_holes"`
+		CostUSD    *float64              `json:"delegated_sessions_cost_usd"`
+		CostKnown  bool                  `json:"delegated_sessions_cost_known"`
+		CostReason string                `json:"delegated_sessions_cost_reason"`
+	}
+	read := func(tok string) doc {
+		t.Helper()
+		code, _, body := getWith(t, h, "/studio/api/sessions/s_p", tok, "")
+		if code != 200 {
+			t.Fatalf("session: %d %s", code, body)
+		}
+		if tok == panel && strings.Contains(body, "s_other") {
+			t.Errorf("the hidden session is named to the panel token: %s", body)
+		}
+		var d doc
+		if err := json.Unmarshal([]byte(body), &d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	p := read(panel)
+	if len(p.Delegated) != 1 || p.Delegated[0].ID != "s_mine" {
+		t.Errorf("panel delegated = %+v, want [s_mine]", p.Delegated)
+	}
+	if len(p.Holes) != 1 || p.Holes[0].Hole != string(obsdb.HoleHidden) || p.Holes[0].Count != 1 || p.Holes[0].Fix == "" {
+		t.Errorf("panel delegated_holes = %+v, want one hidden hole, count 1", p.Holes)
+	}
+	if p.CostKnown || p.CostUSD != nil || !strings.Contains(p.CostReason, "another public id") {
+		t.Errorf("panel delegated cost = %v known %v reason %q; want unknown, the hidden session said", p.CostUSD, p.CostKnown, p.CostReason)
+	}
+	s := read("srv")
+	if len(s.Delegated) != 2 || len(s.Holes) != 0 || !s.CostKnown || s.CostUSD == nil {
+		t.Errorf("server delegated = %+v holes %+v known %v usd %v; want both, no hole, known", s.Delegated, s.Holes, s.CostKnown, s.CostUSD)
+	}
+	// The hidden session alone: no row of its own, still not "$0, known".
+	db2, err := sqlite.Open(t.TempDir() + "/hidden2.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db2.Close() })
+	db = db2
+	seedRun(t, db, "s_p-t1", "pub_a", "s_p", "", nil)
+	child("s_other", "pub_b")
+	h = Handler(DB(db), Token("srv"))
+	p = read(panel)
+	if len(p.Delegated) != 0 || len(p.Holes) != 1 || p.CostKnown || p.CostUSD != nil {
+		t.Errorf("only a hidden child: delegated %+v holes %+v known %v usd %v; want none listed, one hole, unknown", p.Delegated, p.Holes, p.CostKnown, p.CostUSD)
+	}
+}
+
 // failDeepSessions fails every delegated read below root's own level.
 type failDeepSessions struct {
 	obsdb.DB

@@ -108,6 +108,12 @@ type sessionEntry struct {
 	Fields        map[string]any `json:"fields"`
 	Content       map[string]any `json:"content,omitempty"`
 	ContentHidden bool           `json:"content_hidden,omitempty"`
+	// Actor is, on an approval.decision mark, the weft.approval.actor of
+	// the run it is filed under, else of the turn that resumed that run:
+	// metadata — an opaque id the app chose — so every identity reads it,
+	// as the run document's decided block's actor (decisions.go); the
+	// free-text who and reason stay in Content.
+	Actor string `json:"actor,omitempty"`
 }
 
 // timelineTurn is one turn on the timeline: its run, order, outcome and
@@ -243,7 +249,8 @@ func (s *Server) sessionEventsFor(w http.ResponseWriter, r *http.Request) (obsdb
 // (turns scoped to a panel token's public id) and ok. A session no turn
 // of which is stored still answers when it has events (a session of
 // session-level records alone, every one held at Close); otherwise 404
-// — for a panel token too, so the refusal never says whether it exists
+// — for a panel token the 403 another public id's session gets
+// (sessionReadError), so the refusal never says whether it exists
 // elsewhere.
 func (s *Server) sessionScopeFor(w http.ResponseWriter, r *http.Request, er obsdb.SessionEventReader, id string) (obsdb.SessionDetail, bool) {
 	if !s.scopeSessionID(w, r, id) {
@@ -259,12 +266,12 @@ func (s *Server) sessionScopeFor(w http.ResponseWriter, r *http.Request, er obsd
 			return obsdb.SessionDetail{}, false
 		}
 		if page.Total == 0 {
-			dbError(w, r, "session", id, err)
+			sessionReadError(w, r, id, err)
 			return obsdb.SessionDetail{}, false
 		}
 		det = obsdb.SessionDetail{SessionRow: obsdb.SessionRow{ID: id, PublicID: pub}}
 	case err != nil:
-		dbError(w, r, "session", id, err)
+		sessionReadError(w, r, id, err)
 		return obsdb.SessionDetail{}, false
 	}
 	if pub := panelPublicID(r); pub != "" && len(det.Runs) > 0 {
@@ -279,7 +286,8 @@ func (s *Server) sessionScopeFor(w http.ResponseWriter, r *http.Request, er obsd
 type markBuilder struct {
 	sessionID    string
 	turns        map[string]int
-	pub          string // a panel token's public id, "" for any other identity
+	actors       map[string]string // run id → its weft.approval.actor, else its resumer's
+	pub          string            // a panel token's public id, "" for any other identity
 	readsContent bool
 	hidden       int // marks of another public id, left out (counted by the backend)
 	contentHid   int // marks read whose content the identity may not read
@@ -308,9 +316,17 @@ func (mb *markBuilder) scope(r *http.Request, er obsdb.SessionEventReader) (visi
 }
 
 func (s *Server) newMarkBuilder(r *http.Request, det obsdb.SessionDetail) *markBuilder {
-	mb := &markBuilder{sessionID: det.ID, turns: map[string]int{}, pub: panelPublicID(r), readsContent: readsThreadContent(r)}
+	mb := &markBuilder{sessionID: det.ID, turns: map[string]int{}, actors: map[string]string{}, pub: panelPublicID(r), readsContent: readsThreadContent(r)}
 	for _, rr := range det.Runs {
 		mb.turns[rr.ID] = rr.Turn
+		if a := rr.Meta[approvalActorKey]; a != "" {
+			mb.actors[rr.ID] = a // a run's own actor wins over its resumer's
+		}
+	}
+	for _, rr := range det.Runs {
+		if a := rr.Meta[approvalActorKey]; a != "" && rr.ResumedFrom != "" && mb.actors[rr.ResumedFrom] == "" {
+			mb.actors[rr.ResumedFrom] = a
+		}
 	}
 	return mb
 }
@@ -334,6 +350,9 @@ func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
 			out.Turn = &n
 		} else if n := turnOf(mb.sessionID, id); n > 0 {
 			out.Turn = &n
+		}
+		if kind == "approval.decision" {
+			out.Actor = mb.actors[id]
 		}
 	}
 	if e.Content == string(obsdb.HoleStripped) {

@@ -8,7 +8,13 @@
 // rows' figures in lib/cost.ts's words, "—" with the reason unknown),
 // and its status and steps (U34-fix4, UX-S3-14: lib/status's word in
 // its palette role — a failed or parked subagent reads so, its node
-// stroked in the role's mark).
+// stroked in the role's mark). The nodes are one roving tab stop (the
+// loop graph's rule): ↑ ↓ through the nodes, ← → across the columns,
+// Home / End, the stop on the selected node; the drawing fits its pane,
+// never scrolling the page sideways beside the drawer.
+import { useRef, useState } from "react"
+import type { KeyboardEvent as ReactKeyboardEvent } from "react"
+
 import type { CostView } from "@/lib/cost"
 import type { CallGraph, GraphNode, GraphRow } from "@/lib/graph"
 import {
@@ -80,15 +86,71 @@ export function CallGraphView({
   const width = PAD * 2 + ncols * W + (ncols - 1) * GX
   const height = top + PAD + rows * H + (rows - 1) * GY
   const tone = (fails: number) => (fails ? "stroke-ev-error" : "stroke-border")
+  // ── One roving tab stop: column by column, top to bottom ──
+  const order = [...cols.entries()]
+    .sort(([a], [b]) => a - b)
+    .flatMap(([, list]) => list.map((n) => n.id))
+  const [focus, setFocus] = useState<string>()
+  const stop =
+    focus && order.includes(focus)
+      ? focus
+      : selected && order.includes(selected)
+        ? selected
+        : order[0]
+  const refs = useRef(new Map<string, SVGGElement>())
+  const move = (to: string | undefined) => {
+    if (!to) return
+    setFocus(to)
+    refs.current.get(to)?.focus()
+  }
+  // The node of the next column (dir) nearest this one's row.
+  const across = (id: string, dir: 1 | -1) => {
+    const p = at.get(id)
+    if (!p) return undefined
+    const x = p.x + dir * (W + GX)
+    const dy = (o: string) => Math.abs((at.get(o)?.y ?? 0) - p.y)
+    return order
+      .filter((o) => at.get(o)?.x === x)
+      .sort((a, b) => dy(a) - dy(b))[0]
+  }
+  const onKey = (n: GraphNode) => (e: ReactKeyboardEvent) => {
+    const k = e.key
+    if (k === "Enter" || k === " ") {
+      e.preventDefault()
+      onSelect(n)
+      return
+    }
+    const i = order.indexOf(n.id)
+    const to =
+      k === "ArrowDown"
+        ? order[i + 1]
+        : k === "ArrowUp"
+          ? order[i - 1]
+          : k === "ArrowRight"
+            ? across(n.id, 1)
+            : k === "ArrowLeft"
+              ? across(n.id, -1)
+              : k === "Home"
+                ? order[0]
+                : k === "End"
+                  ? order.at(-1)
+                  : undefined
+    if (to) {
+      e.preventDefault()
+      move(to)
+    }
+  }
   return (
     <div
-      className="overflow-auto rounded-lg border bg-background p-2 font-mono text-[11px]"
+      className="rounded-lg border bg-background p-2 font-mono text-[11px]"
       data-call-graph
     >
+      {/* Fitted: at most its own size, scaled down to its pane. */}
       <svg
-        width={width}
-        height={height}
+        width="100%"
         viewBox={`0 0 ${width} ${height}`}
+        style={{ maxWidth: width }}
+        className="block h-auto"
         role="group"
         aria-label="call graph"
       >
@@ -172,8 +234,12 @@ export function CallGraphView({
             <g
               key={n.id}
               transform={`translate(${p.x},${p.y})`}
+              ref={(el: SVGGElement | null) => {
+                if (el) refs.current.set(n.id, el)
+                else refs.current.delete(n.id)
+              }}
               role="button"
-              tabIndex={0}
+              tabIndex={n.id === stop ? 0 : -1}
               aria-pressed={on}
               // The name starts with the visible words, in their order
               // (axe label-content-name-mismatch): the glyph is aria-hidden.
@@ -181,13 +247,12 @@ export function CallGraphView({
               data-node={n.id}
               data-node-status={st?.status.key}
               className="group cursor-pointer outline-none"
-              onClick={() => onSelect(n)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault()
-                  onSelect(n)
-                }
+              onClick={() => {
+                setFocus(n.id)
+                onSelect(n)
               }}
+              onFocus={() => setFocus(n.id)}
+              onKeyDown={onKey(n)}
             >
               {/* Selected: the thread's 2px frame on the page's fill
                   (a status word in its ink clears 4.5:1 on paper; the

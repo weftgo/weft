@@ -565,6 +565,10 @@ export interface SessionDoc extends SessionRow {
   delegated?: SessionRow[]
   delegated_more?: boolean
   delegated_unknown?: boolean
+  /** The delegated sessions this token is not shown (another public
+   * id's, or none's): one hidden hole with their count — the delegated
+   * cost is then not known. Absent when none. */
+  delegated_holes?: StepHole[]
   /** Every session delegated under it, any depth: their usage and
    * cost, beside the session's own — never folded into usage or
    * cost_usd. */
@@ -629,6 +633,9 @@ export interface SessionMark {
    * recorded and readable (content_hidden says a read token's). */
   content?: Record<string, unknown>
   content_hidden?: boolean
+  /** An approval.decision's weft.approval.actor (the resume's
+   * metadata): every token reads it, as the run page's decided block. */
+  actor?: string
 }
 
 /** GET /api/sessions/{id}/timeline (capability "timeline", U12.2):
@@ -2304,6 +2311,57 @@ export function turnNeighboursQuery(session: string, turn: number) {
     queryKey: ["turn-neighbours", session, turn],
     staleTime: 30_000,
     queryFn: () => fetchTurnNeighbours(session, turn),
+  })
+}
+
+/** GET /api/sessions/{id}/entries: the timeline's marks paged
+ * (≤ 1,000 a page), total every mark the session holds. */
+export interface EntriesPage {
+  session_id: string
+  entries: SessionMark[]
+  total: number
+  offset: number
+  next_offset?: number
+}
+
+export function fetchSessionEntries(id: string, offset: number, limit = 1000) {
+  return get<EntriesPage>(
+    `sessions/${encodeURIComponent(id)}/entries?offset=${offset}&limit=${limit}`
+  )
+}
+
+/** The marks filed under one run past the timeline's 2,000-mark cap
+ * (it keeps the oldest): the entries paged newest first until a page
+ * holds a mark of that run and the next does not, at most 10 pages —
+ * a parked run's own approval.request records (its request expiry). */
+export async function fetchRunMarks(
+  session: string,
+  run: string
+): Promise<SessionMark[]> {
+  const first = await fetchSessionEntries(session, 0, 1)
+  const out: SessionMark[] = []
+  let seen = false
+  for (
+    let end = first.total, pages = 0;
+    end > 0 && pages < 10;
+    end -= 1000, pages++
+  ) {
+    const from = Math.max(0, end - 1000)
+    const page = await fetchSessionEntries(session, from, end - from)
+    const mine = page.entries.filter((m) => m.run_id === run)
+    out.unshift(...mine)
+    if (mine.length) seen = true
+    else if (seen) break
+  }
+  return out
+}
+
+/** The run's own marks: read only when the timeline was cut. */
+export function runMarksQuery(session: string, run: string) {
+  return queryOptions({
+    queryKey: ["session-timeline", session, "run", run],
+    staleTime: 5_000,
+    queryFn: () => fetchRunMarks(session, run),
   })
 }
 

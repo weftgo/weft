@@ -381,16 +381,22 @@ html[data-density="compact"] {
 .codewin-dot.on {
   background: var(--thread);
 }
-.codewin pre {
-  margin: 0;
-  padding: 0.625rem 0.75rem;
-  overflow: auto;
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  line-height: 1.55;
-  color: var(--code-ink);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+/* Layered: the tone utility codewin.tsx puts on the same <pre>
+   (text-code-lit on an error result, text-code-str on a non-JSON one)
+   must win over the default ink — an unlayered rule beats every
+   layered utility. */
+@layer components {
+  .codewin pre {
+    margin: 0;
+    padding: 0.625rem 0.75rem;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.55;
+    color: var(--code-ink);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
 }
 .codewin pre[data-folded] {
   /* a fade at the fold so the cut is visible */

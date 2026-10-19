@@ -8,7 +8,13 @@
 // and the links to the parking and resuming steps. Decision words are
 // lib/decisions.ts's (one vocabulary with the run page's parked and
 // resumed cards); plain TypeScript, no React.
-import { BUSY_CAUSE, ENDED_WORDS, OFF_PATH } from "./turn-chips"
+import {
+  BUSY_CAUSE,
+  ENDED_WORDS,
+  endedGlyph,
+  endedText,
+  OFF_PATH,
+} from "./turn-chips"
 import type {
   DecidedCall,
   DecisionDoc,
@@ -30,11 +36,9 @@ import { turnTag } from "./status"
 export const TRAIL_NOTE =
   "the trail is an index of the session log, not evidence — ADR 0021"
 
-/** The session page's views: lib/links.ts's and the approvals view
- * (U15.2-fix) — Studio's alone, so it lives here: links.ts is in the
- * devtools panel's graph, and a literal there would cost the panel its
- * mangled names (scripts/panel-mangle.ts). */
-export type SessionPageView = SessionView | "approvals"
+/** The session page's views: lib/links.ts's (the approvals view
+ * included, so sessionViewLink builds ?view=approvals). */
+export type SessionPageView = SessionView
 
 /** The session page's search: lib/links.ts's, the approvals view too. */
 export interface SessionPageSearch extends Omit<SessionSearch, "view"> {
@@ -48,10 +52,36 @@ export function sessionPageSearch(
   search: Record<string, unknown>
 ): SessionPageSearch {
   const out: SessionPageSearch = sessionSearch(search)
-  if (search.view === "approvals") out.view = "approvals"
   if (search.order === "oldest") out.order = "oldest"
   return out
 }
+
+/** parkedCallLink is a parked call's row on its run page: the parked
+ * run's last step (where the call was made), or — a resume that parked
+ * again before any step (core's resolvePending: steps 0) — its
+ * pre-step card. Without the turn (not listed) the call's row by its
+ * id alone, whichever step drew it. */
+export function parkedCallLink(
+  parked: { run_id: string; steps: number } | string,
+  call: string
+) {
+  if (typeof parked === "string") return runLink(parked, { sel: `c:${call}` })
+  return parked.steps > 0
+    ? runLink(parked.run_id, { step: parked.steps - 1, call })
+    : runLink(parked.run_id, { call, resumed: true })
+}
+
+/** pageView is the view a session page draws: a known view, else the
+ * timeline — at use too, since the router keeps a search key the
+ * route's validation dropped (?view=bogus draws the timeline, its tab
+ * the current one). */
+export const pageView = (v: unknown): SessionPageView =>
+  VIEWS.find((x) => x.view === v)?.view ?? "timeline"
+
+/** pageOrder is the table's order: oldest when the search says so,
+ * else newest (?order=bogus included). */
+export const pageOrder = (o: unknown): "newest" | "oldest" =>
+  o === "oldest" ? "oldest" : "newest"
 
 /** sessionPageLink is the session page in a view (sessionViewLink's,
  * the approvals view too). */
@@ -59,14 +89,7 @@ export function sessionPageLink(
   id: string,
   opts: { view?: SessionPageView; mark?: string; lanes?: string }
 ): Omit<SessionLink, "search"> & { search: SessionPageSearch } {
-  const { view, ...rest } = opts
-  const link = sessionViewLink(
-    id,
-    view === "approvals" ? rest : { ...rest, view }
-  )
-  return view === "approvals"
-    ? { ...link, search: { ...link.search, view } }
-    : link
+  return sessionViewLink(id, opts)
 }
 
 /** The session page's views, in the switcher's order, with titles. */
@@ -265,14 +288,23 @@ export function decisionOf(
     key_id: s("key_id") || undefined,
     grant_id: s("grant_id") || undefined,
     who: cs("who") || undefined,
-    who_hidden: m.content_hidden || undefined,
+    // The resume's weft.approval.actor (the mark's actor) is metadata,
+    // read by every token as the run page's decided block reads it:
+    // who is hidden only when nothing else names the decider.
+    who_hidden: (m.content_hidden && !m.actor) || undefined,
     reason: cs("reason") || undefined,
     result: cs("content") || undefined,
     at: m.fact_at ?? m.at,
   }
   return {
     c,
-    d: { run: m.run_id ?? "", at: m.at, source: "thread", calls: [c] },
+    d: {
+      run: m.run_id ?? "",
+      at: m.at,
+      actor: m.actor,
+      source: "thread",
+      calls: [c],
+    },
   }
 }
 
@@ -574,7 +606,10 @@ export function toolsByCall(
 
 /** The header's decision counts: "4 approvals (2 approved · 1 denied ·
  * 1 resolved)"; "" when the session decided nothing. */
-export function decisionsWords(marks: readonly SessionMark[]): string {
+export function decisionsWords(
+  marks: readonly SessionMark[],
+  cut = false
+): string {
   const by = new Map<string, number>()
   let n = 0
   for (const m of marks) {
@@ -585,13 +620,25 @@ export function decisionsWords(marks: readonly SessionMark[]): string {
   }
   if (!n) return ""
   const parts = [...by].map(([w, k]) => `${k} ${w}`)
-  return `${plural(n, "approval")} (${parts.join(" · ")})`
+  return `${floorOf(cut)}${plural(n, "approval")} (${parts.join(" · ")})`
 }
 
+/** A count over a cut mark list (the timeline's truncated hole: the
+ * oldest 2,000 kept) is a floor: "≥ ". */
+export const floorOf = (cut: boolean) => (cut ? "≥ " : "")
+
+/** cutOf says the timeline document was cut at its mark cap. */
+export const cutOf = (
+  doc: { holes?: readonly { hole: string }[] } | undefined
+) => !!doc?.holes?.some((h) => h.hole === "truncated")
+
 /** The header's grant count; "" when none was minted. */
-export function grantsWords(marks: readonly SessionMark[]): string {
+export function grantsWords(
+  marks: readonly SessionMark[],
+  cut = false
+): string {
   const n = marks.filter((m) => m.kind === "grant.mint").length
-  return n ? plural(n, "grant") : ""
+  return n ? `${floorOf(cut)}${plural(n, "grant")}` : ""
 }
 
 /** The shared time axis: every turn's bar as fractions of the session's
@@ -708,17 +755,10 @@ export function markDetail(
   if (m.lane === "approvals" && parked && call) {
     // A resume that parks again before any step (core's resolvePending:
     // steps 0) parked on its pre-step card, not on a step.
-    links.push(
-      parked.steps > 0
-        ? {
-            label: `parked in ${tag(parked.run_id)} · step ${parked.steps - 1}`,
-            link: runLink(parked.run_id, { step: parked.steps - 1, call }),
-          }
-        : {
-            label: `parked in ${tag(parked.run_id)} · ${PARKED_BEFORE_STEP}`,
-            link: runLink(parked.run_id, { call, resumed: true }),
-          }
-    )
+    links.push({
+      label: `parked in ${tag(parked.run_id)} · ${parked.steps > 0 ? `step ${parked.steps - 1}` : PARKED_BEFORE_STEP}`,
+      link: parkedCallLink(parked, call),
+    })
     const to = resumeOfTurn(parked.run_id, turns)
     if (to)
       links.push({
@@ -752,7 +792,14 @@ export const PARKED_BEFORE_STEP = "parked before step 0"
 /** The turn stepper's words (UX-B-21): a turn's run page walks its
  * session turn by turn — { and } (the run page's [ ] walk steps). */
 export const TURN_STEPPER = {
-  of: (i: number, n: number) => `turn ${i} of ${n}`,
+  /** The position among the session's recorded turns: i is one more
+   * than the turns recorded below it, so a session whose turn numbers
+   * skip (a turn number no run recorded) puts t6 fourth — said as
+   * such, never "turn 4" on t6. */
+  of: (i: number, n: number, turn?: number) =>
+    turn && turn !== i
+      ? `t${turn} · ${i} of ${n} recorded turns`
+      : `turn ${i} of ${n}`,
   prev: "the previous turn of this session ({)",
   next: "the next turn of this session (})",
   crumb: "sessions",
@@ -868,10 +915,12 @@ export const END_WORDS = {
   interrupted: ENDED_WORDS.interrupt,
   rolled_back: ENDED_WORDS.rollback,
   /** The run page's words before (or without) the timeline's mark. */
-  byNewer: "interrupted by a newer message",
+  byNewer: endedText("interrupt", "a newer message"),
   /** The run header's error block's label on such a run: the error is
    * the cancel the policy caused, not a failure. */
   label: "ended",
+  /** The disclosure over such a turn's raw error on the timeline. */
+  errorWord: "the cancel it caused",
   /** A call the cancel cut off (the story's "never completed"). */
   call: "cut off",
   callTitle:
@@ -922,6 +971,10 @@ export const UNNAMED_END: TurnEnd = {
     "a newer message (thread's Interrupt or Rollback busy policy) cancelled this turn: its context was cancelled on purpose, not a failure — the session's timeline names which",
   mark: "",
 }
+
+/** An end's glyph (lib/turn-chips.ts's): ↶ a rollback, ✗ an interrupt. */
+export const endGlyph = (end: Pick<TurnEnd, "kind">) =>
+  endedGlyph(end.kind === "rolled_back" ? "rollback" : "interrupt")
 
 /** The story's end line for such a run: "■ interrupted by t7 at step
  * 0" — never "the stream ended without run_finish". */
@@ -979,7 +1032,9 @@ export function turnEnds(
     out.set(m.run_id, {
       kind,
       by,
-      text: `${END_WORDS[kind]}${tag ? ` by ${tag}` : ""}${kind === "rolled_back" ? ` · ${OFF_PATH}` : ""}`,
+      // lib/turn-chips.ts's words: the panel's chip is this text
+      // behind its glyph.
+      text: endedText(str(m.fields.policy), tag || "a newer message"),
       title: END_TITLES[kind],
       mark: keys[i],
     })

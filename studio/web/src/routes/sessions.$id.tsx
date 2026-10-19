@@ -25,9 +25,9 @@ import { useCapabilities } from "@/hooks/use-capabilities"
 import { fetchSessionForks, nestExperiments } from "@/lib/experiments"
 import { absoluteTime, relativeTime, tokens, UNNAMED_AGENT } from "@/lib/format"
 import { IdChip, StatusChip, TitleText } from "@/components/studio/runs-table"
-import { SessionTurns } from "@/components/studio/session-turns"
-import { Button } from "@/components/ui/button"
+import { OrderSwitch, SessionTurns } from "@/components/studio/session-turns"
 import { NotFound } from "@/components/studio/not-found"
+import { LoadFailed } from "@/components/studio/empty-state"
 import { isNotFound } from "@/lib/not-found"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -51,6 +51,7 @@ import {
 import type { SessionPageView } from "@/lib/timeline"
 import { summarizerView } from "@/lib/cost"
 import {
+  cutOf,
   decisionsWords,
   exchangesWords,
   FORK_NO_PAGE,
@@ -60,6 +61,8 @@ import {
   forksWords,
   grantsWords,
   LIVE_WORDS,
+  pageOrder,
+  pageView,
   parseLanes,
   sessionPageLink,
   sessionPageSearch,
@@ -83,10 +86,12 @@ import { LineageLine } from "@/components/studio/lineage"
 import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { THREAD_LINK } from "@/lib/status-class"
-import { AWAITING_TITLE, DECIDE, TURN_ORDER } from "@/lib/session-states"
+import { AWAITING_TITLE, DECIDE } from "@/lib/session-states"
 import { SessionCounts } from "@/components/studio/session-state"
 import { SessionActions } from "@/components/studio/session-actions"
 import type { TurnOrder } from "@/lib/session-states"
+
+type LiveState = "off" | "on" | "down"
 
 export const Route = createFileRoute("/sessions/$id")({
   validateSearch: sessionPageSearch,
@@ -97,8 +102,8 @@ function SessionPage() {
   const { id } = Route.useParams()
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
-  const view: SessionPageView = search.view ?? "timeline"
-  const order: TurnOrder = search.order ?? "newest"
+  const view: SessionPageView = pageView(search.view)
+  const order: TurnOrder = pageOrder(search.order)
   const q = useQuery(sessionQuery(id))
   const meta = useQuery(metaQuery())
   const timelineCapable = !!meta.data?.capabilities.includes("timeline")
@@ -110,12 +115,21 @@ function SessionPage() {
   const qc = useQueryClient()
   const { has } = useCapabilities()
   const liveCapable = has("live")
-  const [liveState, setLiveState] = useState<"off" | "on" | "down">("off")
+  // The live state is the session's it was set for: another session's
+  // page starts off until its own stream opens.
+  const [liveOf, setLive] = useState<{ id: string; state: LiveState }>({
+    id,
+    state: "off",
+  })
+  const liveState: LiveState = liveOf.id === id ? liveOf.state : "off"
   useEffect(() => {
     if (!liveCapable) return
+    const setLiveState = (state: LiveState) => setLive({ id, state })
     const refetch = throttle(() => {
       void qc.invalidateQueries({ queryKey: ["session", id] })
       void qc.invalidateQueries({ queryKey: ["session-timeline", id] })
+      // A new turn moves every turn's stepper (turn n of m).
+      void qc.invalidateQueries({ queryKey: ["turn-neighbours", id] })
     }, 1000)
     const live = openLive({
       selector: { session: id },
@@ -184,18 +198,12 @@ function SessionPage() {
   if (q.isError) {
     if (isNotFound(q.error)) return <NotFound kind="session" id={id} />
     return (
-      <div className="mx-auto max-w-md space-y-3 py-24 text-center">
-        <p className="font-mono text-xs text-faint">{id}</p>
-        <p className="text-sm text-status-bad">{q.error.message}</p>
-        <div className="flex justify-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void q.refetch()}>
-            retry
-          </Button>
-          <Button variant="ghost" size="sm" render={<Link to="/sessions" />}>
-            back to sessions
-          </Button>
-        </div>
-      </div>
+      <LoadFailed
+        kind="session"
+        id={id}
+        error={q.error}
+        onRetry={() => void q.refetch()}
+      />
     )
   }
   const s = q.data
@@ -211,8 +219,18 @@ function SessionPage() {
   const marks = tl.data?.marks ?? []
   const tlTurns = tl.data?.turns ?? turns.map(turnOfRow)
   const sum = summarizerView(tl.data?.summarizer)
-  const decided = decisionsWords(marks)
-  const grants = grantsWords(marks)
+  // Past the mark cap the counts are floors and every view says so.
+  const cut = cutOf(tl.data)
+  const decided = decisionsWords(marks, cut)
+  const grants = grantsWords(marks, cut)
+  const holes =
+    tl.data && tl.data.holes.length > 0 ? (
+      <div className="space-y-1" data-timeline-holes>
+        {tl.data.holes.map((h) => (
+          <HoleBadge key={h.hole} {...h} detail />
+        ))}
+      </div>
+    ) : null
   const ids = turnIdsWords(tlTurns, marks)
   const forksOut = tl.data?.forks ?? []
   // A forked session's lineage (UX-B-07): its turns carry
@@ -372,6 +390,9 @@ function SessionPage() {
           <Link
             key={v.view}
             {...sessionPageLink(id, { view: v.view, lanes: search.lanes })}
+            // Exact: the timeline's link (no view) matches every view's
+            // search partially; the current tab is ours to say.
+            activeOptions={{ exact: true }}
             aria-current={view === v.view ? "page" : undefined}
             title={v.title}
             className={`rounded-sm border px-2 py-0.5 font-mono ${view === v.view ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
@@ -392,13 +413,7 @@ function SessionPage() {
               {tlNote}
             </p>
           ) : null}
-          {tl.data && tl.data.holes.length > 0 ? (
-            <div className="space-y-1" data-timeline-holes>
-              {tl.data.holes.map((h) => (
-                <HoleBadge key={h.hole} {...h} detail />
-              ))}
-            </div>
-          ) : null}
+          {holes}
           {tl.data ? (
             <LaneFilter
               lanes={lanes}
@@ -461,12 +476,18 @@ function SessionPage() {
               {tlNote}
             </p>
           ) : null}
+          {holes}
           {timelineCapable && tl.isPending ? (
             <div className="flex justify-center py-6">
               <Spinner />
             </div>
           ) : (
-            <SessionApprovals sessionID={id} turns={tlTurns} marks={marks} />
+            <SessionApprovals
+              sessionID={id}
+              turns={tlTurns}
+              marks={marks}
+              cut={cut}
+            />
           )}
         </>
       ) : (
@@ -479,6 +500,7 @@ function SessionPage() {
               {tlNote}
             </p>
           ) : null}
+          {holes}
           {timelineCapable && tl.isPending ? (
             <div className="flex justify-center py-6">
               <Spinner />
@@ -492,7 +514,9 @@ function SessionPage() {
           )}
         </>
       )}
-      {delegated.length > 0 || s.delegated_unknown ? (
+      {delegated.length > 0 ||
+      s.delegated_unknown ||
+      s.delegated_holes?.length ? (
         <DelegatedSessions doc={s} rows={delegated} />
       ) : null}
       {turns.length === 0 ? (
@@ -533,38 +557,6 @@ function SessionPage() {
   )
 }
 
-/** OrderSwitch is the table's order (UX-S3-16): newest first — the
- * devtools panel's order — or oldest first, one press apart. */
-function OrderSwitch({
-  order,
-  onChange,
-}: {
-  order: TurnOrder
-  onChange: (o: TurnOrder) => void
-}) {
-  return (
-    <div
-      className="flex items-center gap-1 text-xs"
-      role="group"
-      aria-label="turn order"
-      data-turn-order={order}
-    >
-      {(Object.keys(TURN_ORDER) as TurnOrder[]).map((o) => (
-        <button
-          key={o}
-          type="button"
-          aria-pressed={order === o}
-          title={TURN_ORDER[o].title}
-          onClick={() => onChange(o)}
-          className={`rounded-sm border px-2 py-0.5 font-mono ${order === o ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-        >
-          {TURN_ORDER[o].word}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 /** DelegatedSessions is the session page's delegated block (U14,
  * UX-B-05, UX-B-35): each session this one delegated, with the turn
  * and call that started it, its own turns, tokens and cost, and the
@@ -583,7 +575,7 @@ function DelegatedSessions({
         <span className="eyebrow" title={CHILD_TITLES.delegated}>
           {DELEGATED_BLOCK.eyebrow}
         </span>
-        {costCapable && rows.length > 0 ? (
+        {costCapable && (rows.length > 0 || doc.delegated_holes?.length) ? (
           <Cost
             fields={{
               cost_usd: doc.delegated_sessions_cost_usd ?? null,

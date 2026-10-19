@@ -75,6 +75,9 @@ interface SessionsSearch {
 const flag = (v: unknown) =>
   v === true || v === 1 || v === "1" || v === "true" ? true : undefined
 
+/** A next page's cursor and the window bound its first page read. */
+type SincePage = PageCursor & { since: string | undefined }
+
 export const Route = createFileRoute("/sessions/")({
   validateSearch: (search: Record<string, unknown>): SessionsSearch => ({
     agent:
@@ -176,18 +179,27 @@ function SessionsPage() {
   const q = useInfiniteQuery({
     queryKey: ["sessions", "infinite", filters],
     staleTime: 5_000,
-    initialPageParam: undefined as PageCursor | undefined,
-    queryFn: ({ pageParam }) =>
-      fetchSessions({
+    initialPageParam: undefined as SincePage | undefined,
+    queryFn: async ({ pageParam }) => {
+      // The window's bound is the first page's, carried by every next
+      // one: a bound recomputed per page would move under the cursor
+      // and skip rows. A refetch reads the first page anew, and so
+      // moves it on.
+      const since = pageParam ? pageParam.since : sinceOf(filters.since)
+      const page = await fetchSessions({
         ...filters,
-        // The window's bound as of this read (a refetch moves it on).
-        since: sinceOf(filters.since),
+        since,
         before: pageParam?.before,
         before_id: pageParam?.before_id,
-      }),
+      })
+      return { ...page, since }
+    },
     // The exact cursor (next_before + next_before_id); one that does
     // not move ends the list (never a page loop).
-    getNextPageParam: (last, _all, lastParam) => nextCursor(last, lastParam),
+    getNextPageParam: (last, _all, lastParam): SincePage | undefined => {
+      const c = nextCursor(last, lastParam)
+      return c && { ...c, since: last.since }
+    },
   })
   const sessions = q.data?.pages.flatMap((p) => p.sessions) ?? []
   const total = q.data?.pages[0]?.total ?? 0

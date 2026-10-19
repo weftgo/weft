@@ -1,6 +1,7 @@
 // Event summaries: one line per wire event for the replay gutter,
 // the raw explorer and the current-event readout. Pure functions.
-import type { Message, WireEvent } from "./api"
+import type { DecisionDoc, Message, WireEvent } from "./api"
+import { decidedCall } from "./decisions"
 import type { FoldedStep } from "./events"
 import { msText } from "./attempts"
 import { byteSize } from "./format"
@@ -433,21 +434,26 @@ export const NOT_EXECUTED = "not executed"
 export function toolsLine(
   step: AnswerStep,
   running = false,
-  parked: readonly { id: string }[] = []
+  parked: readonly { id: string }[] = [],
+  decided?: DecisionDoc
 ): string {
   const calls = step.toolCalls
   if (!calls.length) return "none — the model called no tool"
   const done = calls.filter((c) => c.finishPos !== undefined)
   const errors = done.filter((c) => c.result?.isError).length
   const unrun = calls.filter((c) => c.unrun).length
-  // A pending call never finished and was never cut (rule 11).
+  // A pending call never finished and was never cut (rule 11); one the
+  // run's decided block holds (a resume decided it) is decided, no
+  // longer held (the block holds the parked run's pending calls only).
   const held = calls.filter((c) => parked.some((p) => p.id == c.callId)).length
+  const dec = calls.filter((c) => decidedCall(decided, c.callId)).length
   const open = calls.length - done.length - unrun - held
   return [
     done.length || !(unrun || held) ? `${done.length} ran` : "",
     errors ? count(errors, "error") : "",
     unrun ? `${unrun} ${NOT_EXECUTED}` : "",
-    held ? `${held} ${AWAITING}` : "",
+    held - dec ? `${held - dec} ${AWAITING}` : "",
+    dec ? `${dec} decided` : "",
     open ? `${open} ${running ? "running" : "never finished"}` : "",
   ]
     .filter(Boolean)

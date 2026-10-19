@@ -17,6 +17,11 @@ import { statusClass } from "@/lib/status-class"
 import { StatusChip } from "@/components/studio/runs-table"
 
 export function SessionState({ row }: { row: SessionRow }) {
+  // The newest turn's outcome is the session page's word (a cancelled
+  // turn reads cancelled, a busy-policy end ended, a decided park
+  // decided) — the row's status says only failed or succeeded for them.
+  const last = row.outcomes?.at(-1)
+  const o = last && last !== row.status ? outcomeOf(last) : undefined
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
       {row.pending ? (
@@ -26,6 +31,15 @@ export function SessionState({ row }: { row: SessionRow }) {
           data-status="awaiting"
         >
           {awaitingWords(row.pending)}
+        </span>
+      ) : o ? (
+        <span
+          className={`font-mono text-xs ${statusClass(o.role).text}`}
+          title="the newest turn's outcome"
+          data-status={last}
+        >
+          <span aria-hidden>{o.glyph} </span>
+          {o.word}
         </span>
       ) : (
         <StatusChip row={row} />

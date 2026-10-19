@@ -142,6 +142,7 @@ import {
   offeredUnreadable,
   spansUnreadable,
   runChain,
+  NO_SEL,
 } from "@/lib/loopgraph"
 import type { GraphLevel } from "@/lib/loopgraph"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
@@ -1103,18 +1104,22 @@ function RunPage() {
       : undefined
   // While replaying, a row the playhead has not reached yet stays
   // selected (and says so below) when the whole run has it.
+  // Esc's ?sel=none (the loop graph's NO_SEL): nothing selected, and
+  // the landing rule below does not pick a row again.
   const selKey =
-    resolveRowSel(tree.rows, search.sel, id, search.step, spanParents) ??
-    (replaying && search.sel && fullSpans.some((s) => s.key === search.sel)
-      ? search.sel
-      : undefined) ??
-    stepKey ??
-    // A derived run's rows land by the same rule (its steps are drawn
-    // from its spans): where something went wrong, else step 0.
-    defaultRowSel(
-      tree.rows,
-      replaying || !run.data ? undefined : failedAtStep(run.data)
-    )
+    search.sel === NO_SEL
+      ? undefined
+      : (resolveRowSel(tree.rows, search.sel, id, search.step, spanParents) ??
+        (replaying && search.sel && fullSpans.some((s) => s.key === search.sel)
+          ? search.sel
+          : undefined) ??
+        stepKey ??
+        // A derived run's rows land by the same rule (its steps are drawn
+        // from its spans): where something went wrong, else step 0.
+        defaultRowSel(
+          tree.rows,
+          replaying || !run.data ? undefined : failedAtStep(run.data)
+        ))
   const selectedRow = treeRows.find((s) => s.key === selKey)
   // The story is the read mode of the same selection (§6.3): the step
   // the selected row is under is the card it highlights.
@@ -1396,12 +1401,23 @@ function RunPage() {
       }),
     [navigate]
   )
+  // The scrubber (its buttons, play, J / K) moves the selection with
+  // it: the step's own row, so no pressed node stays dimmed on the step
+  // before (a child loop's step is that row already).
   const setLoopStep = useCallback(
     (n: number | undefined) =>
       void navigate({
         search: (prev) =>
           focus === id
-            ? { ...prev, step: n, pane: undefined }
+            ? {
+                ...prev,
+                step: n,
+                sel:
+                  n === undefined
+                    ? prev.sel
+                    : (loop?.steps.find((st) => st.n === n)?.key ?? prev.sel),
+                pane: undefined,
+              }
             : // A child loop's step is its own step row, ?step= left the
               // root's (lib/waterfall.ts's s:<run>:<n>).
               {
@@ -1413,7 +1429,7 @@ function RunPage() {
               },
         replace: true,
       }),
-    [navigate, focus, id]
+    [navigate, focus, id, loop]
   )
   const setScale = useCallback(
     (to: RunScale) =>
@@ -1927,7 +1943,9 @@ function RunPage() {
                         onSelect={select}
                         onClear={() =>
                           void navigate({
-                            search: (prev) => ({ ...prev, sel: undefined }),
+                            // No selection until the next pick (NO_SEL):
+                            // never the landing rule's row again.
+                            search: (prev) => ({ ...prev, sel: NO_SEL }),
                             replace: true,
                           })
                         }

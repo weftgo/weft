@@ -156,7 +156,7 @@ export const PANEL_CSS = `
 .weft-fab-count { color: var(--weft-status-run-ink); font-variant-numeric: tabular-nums; }
 .weft-howto { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
 @media (prefers-reduced-motion: reduce) { .weft-dot.weft-run, .weft-fab-pulse { animation: none; } }
-.weft-head .weft-title { overflow: hidden; text-overflow: ellipsis; }
+.weft-head .weft-title, .weft-tv { overflow: hidden; text-overflow: ellipsis; }
 .weft-head .weft-grow { flex: 1; }
 .weft-switch { max-width: 40%; background: var(--weft-bg); color: var(--weft-dim); border: 1px solid var(--weft-line);
   border-radius: var(--weft-radius-sm); font: inherit; font-size: 11px; }
@@ -180,7 +180,7 @@ export const PANEL_CSS = `
   border-bottom: 1px solid var(--weft-line); padding: 7px 9px; cursor: pointer;
   color: var(--weft-fg); font: inherit;
 }
-.weft-turn:hover { background: var(--weft-bg3); }
+.weft-turn:hover, .weft-tl.weft-sel { background: var(--weft-bg3); }
 .weft-turn:hover .weft-when, .weft-turn.weft-sel .weft-when { color: var(--weft-dim); }
 .weft-turn.weft-sel { background: var(--weft-bg3); box-shadow: inset 2px 0 0 var(--weft-accent); }
 .weft-turn .weft-row1 { display: flex; gap: 6px; align-items: baseline; }
@@ -218,7 +218,7 @@ details[data-depth] { margin-left: -10px; }
 [data-key=ans] a { margin-right: 8px; color: var(--weft-accent); }
 @media (hover: hover) { .weft-ins:not(:hover):not(:focus-visible) { color: transparent; } }
 .weft-call { border-top: 1px dashed var(--weft-line); margin-top: 6px; padding-top: 6px; }
-.weft-call-h { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.weft-call-h, .weft-verdicts li { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
 .weft-call .weft-name { color: var(--weft-info); }
 .weft-call .weft-args, .weft-call .weft-res { color: var(--weft-dim); white-space: pre-wrap; word-break: break-word; }
 .weft-badge {
@@ -233,7 +233,7 @@ details[data-depth] { margin-left: -10px; }
 .weft-tag[data-tone=bad] { color: var(--weft-err); }
 .weft-note { color: var(--weft-dim); border: 1px dashed var(--weft-line); border-radius: var(--weft-radius);
   padding: 6px 9px; margin-bottom: 8px; }
-.weft-note.weft-warn { color: var(--weft-warn); border-color: var(--weft-warn); }
+.weft-note.weft-warn, .weft-warn-badge { color: var(--weft-warn); border-color: var(--weft-warn); }
 
 .weft-wf { margin: 4px 0 10px; }
 .weft-wf-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
@@ -246,7 +246,6 @@ ${toneRules()}
 ${decisionRules()}
 .weft-tl[role] { cursor: pointer; }
 .weft-tl[data-tone=step] .weft-wf-bar, .weft-tl[data-tone=never] .weft-wf-bar { background: color-mix(in srgb, var(--c) 60%, transparent); }
-.weft-tl.weft-sel { background: var(--weft-bg3); }
 .weft-tl .weft-wf-name { color: var(--c); }
 .weft-tl i { font-style: normal; display: inline-block; width: 2ch; }
 .weft-tl b { font-weight: normal; font-size: 10px; margin-left: 4px; }
@@ -281,7 +280,6 @@ ${decisionRules()}
 .weft-tn.weft-hit .weft-tk { color: var(--weft-fg); }
 .weft-tt { width: 14px; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; font: inherit; }
 .weft-tk { color: var(--weft-info); flex: none; }
-.weft-tv { overflow: hidden; text-overflow: ellipsis; }
 .weft-tc { margin-left: auto; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; font: inherit; }
 .weft-tmore { margin: 1px 0; }
 .weft-rq-head { margin-bottom: 6px; align-items: center; }
@@ -330,7 +328,7 @@ select.weft-input { width: auto; min-width: 120px; }
 .weft-tool { display: inline-flex; gap: 4px; align-items: baseline; margin-right: 10px;
   color: var(--weft-fg); cursor: pointer; }
 .weft-edit { display: block; margin: 3px 0; color: var(--weft-dim); }
-.weft-warn-badge { color: var(--weft-warn); border-color: var(--weft-warn); }
+.weft-tq-err, [data-weft-editable], [data-weft-handoff] { display: inline-block; min-width: 24px; min-height: 24px; }
 .weft-run-btn {
   background: var(--weft-accent); color: var(--weft-on-accent); border: none; border-radius: var(--weft-radius-sm);
   padding: 5px 12px; font: inherit; font-weight: 600; cursor: pointer;
@@ -360,7 +358,6 @@ select.weft-input { width: auto; min-width: 120px; }
 .weft-verb-t { font-weight: 600; margin-bottom: 6px; }
 .weft-ack { border: 1px solid var(--weft-line); border-radius: var(--weft-radius-sm); padding: 5px 8px; margin: 6px 0; }
 .weft-verdicts { list-style: none; margin: 4px 0 0; padding: 0; }
-.weft-verdicts li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .weft-v { font-weight: 600; }
 .weft-v-runs .weft-v { color: var(--weft-info); }
 .weft-v-parked .weft-v { color: var(--weft-warn); }

@@ -4,7 +4,7 @@
 import type { FlowPill } from "@/lib/trace"
 import { statusOf } from "@/lib/status"
 import { statusClass } from "@/lib/status-class"
-import { END_WORDS } from "@/lib/timeline"
+import { END_WORDS, endGlyph } from "@/lib/timeline"
 import type { TurnEnd } from "@/lib/timeline"
 
 export function FlowStrip({
@@ -29,7 +29,7 @@ export function FlowStrip({
   // cancelled run reads cancelled, not failed.
   const st = statusOf({ id: "", status: runStatus, error_type: errorType })
   const end = ended
-    ? `${ended.kind === "rolled_back" ? "↶" : "✗"} ${ended.text}`
+    ? `${endGlyph(ended)} ${ended.text}`
     : st.key === "running"
       ? "…"
       : st.key === "succeeded"

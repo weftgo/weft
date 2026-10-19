@@ -668,8 +668,11 @@ const MaxGaps = 1000
 // public id's), Lineage "child" the delegated sessions (ParentSession
 // set) and "fork" the forked ones (ForkedFrom set) — any other value
 // keeps none — and Since those last seen at or after it. Status keeps
-// the sessions whose SessionRow.Status (the newest turn's derived
-// status) is it: one of the four derived statuses; a read-time word
+// the sessions whose newest turn's outcome (OutcomeOf, the session
+// page's word) is it: one of the four derived statuses, so failed
+// leaves out a newest turn that was cancelled or busy-ended, and
+// succeeded one with pending calls (parked, decided or not), though
+// SessionRow.Status reads them failed and succeeded; a read-time word
 // (parked, cancelled) keeps none — Awaiting is the session's parked.
 type SessionQuery struct {
 	Agent, PublicID string

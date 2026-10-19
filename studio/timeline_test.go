@@ -312,10 +312,13 @@ func TestSessionTimelineScope(t *testing.T) {
 			t.Errorf("%s as another public id: %d, want 403", p, code)
 		}
 	}
-	// A session of runless marks alone is a 404 for a token of another
-	// public id: the refusal never says it exists.
-	if code, _, _ := getWith(t, h, "/studio/api/sessions/s_held/timeline", tok("pub_other", scopeRead), ""); code != http.StatusNotFound {
-		t.Errorf("s_held as another public id: %d, want 404", code)
+	// A session of runless marks alone is, for a token of another public
+	// id, the 403 an unknown session gets too: the refusal never says it
+	// exists.
+	for _, sid := range []string{"s_held", "s_never_stored"} {
+		if code, _, _ := getWith(t, h, "/studio/api/sessions/"+sid+"/timeline", tok("pub_other", scopeRead), ""); code != http.StatusForbidden {
+			t.Errorf("%s as another public id: %d, want 403", sid, code)
+		}
 	}
 	_, _, body = getWith(t, h, "/studio/api/sessions/s_acme/entries", tok("pub_acme", scopeRead), "")
 	if strings.Contains(body, "agent-7") || !strings.Contains(body, `"content_hidden":true`) {

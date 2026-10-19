@@ -43,6 +43,7 @@ import { runLink } from "@/lib/links"
 import {
   otherAgentTitle,
   startedTitle,
+  TURN_ORDER,
   turnGap,
   turnLinkLabel,
   turnsCaption,
@@ -70,9 +71,16 @@ export function SessionTurns({
   const clock = now ?? Date.now()
   const costCapable = useCostCapable()
   const sessionAgent = agent ?? (turns.length ? turns[0].agent : "")
-  // Titles and gaps read the turn before in run order; the rows are
-  // drawn in the order asked.
-  const rows = turns.map((r, i) => ({ r, prev: turns[i - 1] }))
+  // Titles and gaps read the turn before in run order — of the same
+  // thread session: a conversation's runs may span several sessions
+  // (or none), and a gap between two sessions' turns means nothing.
+  // The rows are drawn in the order asked.
+  const rows = turns.map((r, i) => {
+    let prev: RunRow | undefined
+    for (let j = i - 1; r.session_id && j >= 0 && !prev; j--)
+      if (turns[j].session_id === r.session_id) prev = turns[j]
+    return { r, prev }
+  })
   if (order === "newest") rows.reverse()
   return (
     <Table>
@@ -244,5 +252,38 @@ export function SessionTurns({
         })}
       </TableBody>
     </Table>
+  )
+}
+
+/** OrderSwitch is the turn table's order (UX-S3-16): newest first —
+ * the devtools panel's order — or oldest first, one press apart (the
+ * session table and the conversation page alike). */
+export function OrderSwitch({
+  order,
+  onChange,
+}: {
+  order: TurnOrder
+  onChange: (o: TurnOrder) => void
+}) {
+  return (
+    <div
+      className="flex items-center gap-1 text-xs"
+      role="group"
+      aria-label="turn order"
+      data-turn-order={order}
+    >
+      {(Object.keys(TURN_ORDER) as TurnOrder[]).map((o) => (
+        <button
+          key={o}
+          type="button"
+          aria-pressed={order === o}
+          title={TURN_ORDER[o].title}
+          onClick={() => onChange(o)}
+          className={`min-h-6 rounded-sm border px-2 py-0.5 font-mono ${order === o ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          {TURN_ORDER[o].word}
+        </button>
+      ))}
+    </div>
   )
 }

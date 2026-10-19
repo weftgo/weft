@@ -1561,12 +1561,18 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		hargs = append(hargs, obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled)
 	}
 	if q.Status != "" {
-		// The newest turn's derived status (sessionAggs' sNewest*,
-		// obsdb.DeriveStatus in SQL).
-		having = append(having, "multiIf(argMax(Failed, (Turn, Started)) = 1, 'failed',"+
-			" argMax(greatest(FinishedOK, RootEnded), (Turn, Started)) = 1, 'succeeded',"+
-			" toUnixTimestamp64Nano(argMax(LastSeen, (Turn, Started))) >= ?, 'running', 'interrupted') = ?")
-		hargs = append(hargs, time.Now().Add(-obsdb.InterruptedAfter).UnixNano(), string(q.Status))
+		// The newest turn's derived status as the session page reads it
+		// (obsdb.DeriveStatus, then obsdb.OutcomeOf's read-time words, in
+		// SQL; the SQLite backend's sessionStatusExpr): a cancelled or
+		// busy-ended turn is not failed, an open or decided park not
+		// succeeded.
+		const newest = "(Turn, Started, RunId)"
+		having = append(having, "multiIf(argMax(Failed, "+newest+") = 1 AND (argMax(CancelCause, "+newest+") = ? OR argMax(ErrorType, "+newest+") = ?), 'ended',"+
+			" argMax(Failed, "+newest+") = 1, 'failed',"+
+			" argMax(greatest(FinishedOK, RootEnded), "+newest+") = 1 AND argMax(Pending, "+newest+") > 0, 'pending',"+
+			" argMax(greatest(FinishedOK, RootEnded), "+newest+") = 1, 'succeeded',"+
+			" toUnixTimestamp64Nano(argMax(LastSeen, "+newest+")) >= ?, 'running', 'interrupted') = ?")
+		hargs = append(hargs, obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled, time.Now().Add(-obsdb.InterruptedAfter).UnixNano(), string(q.Status))
 	}
 	if q.Compacted {
 		// A compaction marker in weft_session_events (0025), the public

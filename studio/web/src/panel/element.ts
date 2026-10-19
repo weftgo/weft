@@ -80,7 +80,13 @@ import {
   usageKnown,
 } from "../lib/honesty"
 import type { HoleMark, ParkedKind } from "../lib/honesty"
-import { AWAITING, FILTER_KEYS, statusOf, turnTag } from "../lib/status"
+import {
+  AWAITING,
+  DECIDED_PARK,
+  FILTER_KEYS,
+  statusOf,
+  turnTag,
+} from "../lib/status"
 import { BUSY_CAUSE, TURN_CHIP } from "../lib/turn-chips"
 import {
   CALLS_HOLE,
@@ -3257,7 +3263,7 @@ export class WeftDevtools extends HTMLElement {
     for (const v of ["", ...FILTER_KEYS]) {
       option(
         st,
-        v === "resumed" ? "parked → (decided)" : v || "any status",
+        v === "resumed" ? DECIDED_PARK : v || "any status",
         { value: v },
         v === f.status
       )
@@ -6841,7 +6847,7 @@ function answerBlock(
   line("replied", repliedLine(step, running), false)
   line(
     "tools",
-    toolsLine(step, running, t.folded.pending),
+    toolsLine(step, running, t.folded.pending, t.doc?.decided),
     step.toolCalls.some((c) => c.result?.isError)
   )
   line("then", thenLine(step, run, next), v.bad)
@@ -7116,7 +7122,7 @@ function renderCall(
         "div",
         "weft-res weft-warn",
         t?.folded.pending.some((c) => c.id === call.callId)
-          ? parkWord(f, call.name, t.doc)
+          ? parkWord(f, call.name, t.doc, call.callId)
           : "never completed"
       )
     )

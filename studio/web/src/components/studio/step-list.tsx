@@ -15,7 +15,8 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { storyChildren } from "@/lib/delegation"
+import { CHILD_WORDS, childKind, storyChildren } from "@/lib/delegation"
+import type { ChildKind } from "@/lib/delegation"
 import { shared } from "@/lib/virtual"
 import { ChevronRight, Play } from "lucide-react"
 import {
@@ -281,18 +282,27 @@ function CallPill({
   state,
   step,
   child,
+  kind,
 }: {
   call: FoldedToolCall
   state: "running" | "done" | "never"
   step?: number
   child?: boolean
+  /** The run the call started, by kind: a pool.Wrap tool records the
+   * subagent source, but its child is a delegated session. */
+  kind?: ChildKind
 }) {
   const cards = useContext(CardsCtx)
   const ended = useBusyEndCtx()
   const approval = useContext(ApprovalCtx)?.get(call.callId)
   const cf = cards?.facts?.get(`${step}:${call.callId}`)
   const parked = state === "never" ? cards?.parked.get(call.callId) : undefined
-  const src = cards?.sources?.get(call.name)
+  const raw = cards?.sources?.get(call.name)
+  // lib/delegation's word for the run it started, not "subagent".
+  const src =
+    raw === "subagent" && kind && kind !== "subagent"
+      ? CHILD_WORDS[kind].one
+      : raw
   const exec =
     [execLine(cf), src && src !== "local" ? src : null]
       .filter(Boolean)
@@ -474,6 +484,7 @@ export function ToolCallRow({
             state={state}
             step={step}
             child={!!(child || call.childRunId)}
+            kind={child ? childKind(child) : undefined}
           />
           <span
             className="ml-auto font-mono text-[10px] text-muted-foreground"
@@ -1155,7 +1166,7 @@ export function RunCards({
   const probe = parkFacts.some(([, f]) => f?.park === "park_source")
   const parked = new Map(
     parkFacts.map(([c, f]) => {
-      const word = parkWord(f, c.name, doc, own)
+      const word = parkWord(f, c.name, doc, c.id, own)
       return [c.id, { word, hint: PARK_HINT[word] ?? "" }] as const
     })
   )

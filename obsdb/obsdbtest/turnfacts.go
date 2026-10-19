@@ -77,6 +77,10 @@ func sessionTurnFacts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			// Cancelled for another reason (thread.closed): counted apart,
 			// never a failure — the Failed filter skips it (U16-fix).
 			{sid: "s_tf_cancel", pub: "pub_tfx", n: 1, status: 2, extra: failed("thread.closed")},
+			// A newest turn that failed for real: the one Status failed
+			// keeps (P9-pre-web-fix).
+			{sid: "s_tf_bad", pub: "pub_tfb", n: 1, status: 1},
+			{sid: "s_tf_bad", pub: "pub_tfb", n: 2, status: 2, extra: map[string]any{"error.type": "model_error"}},
 		} {
 			add(tr)
 		}
@@ -115,6 +119,7 @@ func sessionTurnFacts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			"s_tf_child":  {ended: 1, outcomes: []obsdb.TurnOutcome{obsdb.OutcomeSucceeded, obsdb.OutcomeEnded}},
 			"s_tf_cancel": {cancelled: 1, outcomes: []obsdb.TurnOutcome{obsdb.OutcomeCancelled}},
 			"s_tf_long":   {pending: 3, failed: 1, outcomes: longStrip},
+			"s_tf_bad":    {failed: 1, outcomes: []obsdb.TurnOutcome{obsdb.OutcomeSucceeded, obsdb.OutcomeFailed}},
 		}
 		check := func(where string, r obsdb.SessionRow) {
 			t.Helper()
@@ -180,17 +185,22 @@ func sessionTurnFacts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"awaiting", obsdb.SessionQuery{Awaiting: true}, []string{"s_tf", "s_tf_long"}},
 			{"awaiting scoped", obsdb.SessionQuery{Awaiting: true, PublicID: "pub_tf"}, []string{"s_tf"}},
 			{"awaiting other scope", obsdb.SessionQuery{Awaiting: true, PublicID: "pub_tfc"}, nil},
-			{"failed", obsdb.SessionQuery{Failed: true}, []string{"s_tf", "s_tf_long"}},
+			{"failed", obsdb.SessionQuery{Failed: true}, []string{"s_tf", "s_tf_bad", "s_tf_long"}},
 			{"child", obsdb.SessionQuery{Lineage: obsdb.LineageChild}, []string{"s_tf_child"}},
 			{"fork", obsdb.SessionQuery{Lineage: obsdb.LineageFork}, []string{"s_tf_fork"}},
 			{"unknown lineage", obsdb.SessionQuery{Lineage: "cousin"}, nil},
 			{"since", obsdb.SessionQuery{Since: time.Now().Add(time.Hour)}, nil},
-			{"since old", obsdb.SessionQuery{Since: old}, []string{"s_tf", "s_tf_cancel", "s_tf_child", "s_tf_fork", "s_tf_long"}},
+			{"since old", obsdb.SessionQuery{Since: old}, []string{"s_tf", "s_tf_bad", "s_tf_cancel", "s_tf_child", "s_tf_fork", "s_tf_long"}},
 			{"compacted", obsdb.SessionQuery{Compacted: true}, nil},
-			// Status: the newest turn's derived status.
-			{"status succeeded", obsdb.SessionQuery{Status: obsdb.StatusSucceeded}, []string{"s_tf", "s_tf_fork", "s_tf_long"}},
-			{"status failed", obsdb.SessionQuery{Status: obsdb.StatusFailed}, []string{"s_tf_cancel", "s_tf_child"}},
-			{"status failed scoped", obsdb.SessionQuery{Status: obsdb.StatusFailed, PublicID: "pub_tfc"}, []string{"s_tf_child"}},
+			// Status: the newest turn's outcome, the session page's word —
+			// a parked newest turn (s_tf, s_tf_long) is not succeeded, a
+			// cancelled (s_tf_cancel) or busy-ended (s_tf_child) one not
+			// failed (P9-pre-web-fix).
+			{"status succeeded", obsdb.SessionQuery{Status: obsdb.StatusSucceeded}, []string{"s_tf_fork"}},
+			{"status failed", obsdb.SessionQuery{Status: obsdb.StatusFailed}, []string{"s_tf_bad"}},
+			{"status failed scoped", obsdb.SessionQuery{Status: obsdb.StatusFailed, PublicID: "pub_tfb"}, []string{"s_tf_bad"}},
+			{"status failed other scope", obsdb.SessionQuery{Status: obsdb.StatusFailed, PublicID: "pub_tfc"}, nil},
+			{"status cancelled keeps none", obsdb.SessionQuery{Status: obsdb.StatusCancelled}, nil},
 			{"status running", obsdb.SessionQuery{Status: obsdb.StatusRunning}, nil},
 			{"status parked keeps none", obsdb.SessionQuery{Status: obsdb.StatusParked}, nil},
 			{"failed and fork", obsdb.SessionQuery{Failed: true, Lineage: obsdb.LineageFork}, nil},
@@ -209,7 +219,8 @@ func sessionTurnFacts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 // SQL counts them equal obsdb.SessionTurnFacts over the session's runs
 // in Go (Session's), and SessionQuery's Awaiting and Failed filters
 // keep exactly the sessions whose Go facts say Pending > 0 and
-// FailedTurns > 0.
+// FailedTurns > 0, and its Status filter those whose newest outcome is
+// the word.
 func CheckTurnFactFilters(t *testing.T, db obsdb.DB) {
 	t.Helper()
 	all, err := db.Sessions(ctx(), obsdb.SessionQuery{Limit: 500})
@@ -217,6 +228,7 @@ func CheckTurnFactFilters(t *testing.T, db obsdb.DB) {
 		t.Fatal(err)
 	}
 	var awaiting, failed []string
+	byStatus := map[obsdb.Status][]string{}
 	for _, r := range all.Sessions {
 		det, err := db.Session(ctx(), r.ID)
 		if err != nil {
@@ -237,6 +249,10 @@ func CheckTurnFactFilters(t *testing.T, db obsdb.DB) {
 		if g.FailedTurns > 0 {
 			failed = append(failed, r.ID)
 		}
+		if n := len(g.Outcomes); n > 0 {
+			o := obsdb.Status(g.Outcomes[n-1])
+			byStatus[o] = append(byStatus[o], r.ID)
+		}
 	}
 	for _, c := range []struct {
 		name string
@@ -245,6 +261,10 @@ func CheckTurnFactFilters(t *testing.T, db obsdb.DB) {
 	}{
 		{"Awaiting", obsdb.SessionQuery{Awaiting: true, Limit: 500}, awaiting},
 		{"Failed", obsdb.SessionQuery{Failed: true, Limit: 500}, failed},
+		// Status: the newest turn's outcome (P9-pre-web-fix).
+		{"Status succeeded", obsdb.SessionQuery{Status: obsdb.StatusSucceeded, Limit: 500}, byStatus[obsdb.StatusSucceeded]},
+		{"Status failed", obsdb.SessionQuery{Status: obsdb.StatusFailed, Limit: 500}, byStatus[obsdb.StatusFailed]},
+		{"Status interrupted", obsdb.SessionQuery{Status: obsdb.StatusInterrupted, Limit: 500}, byStatus[obsdb.StatusInterrupted]},
 	} {
 		p, err := db.Sessions(ctx(), c.q)
 		if err != nil {

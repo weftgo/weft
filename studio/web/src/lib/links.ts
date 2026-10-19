@@ -202,8 +202,8 @@ export interface RunLink {
 
 /** The session page's views (U15.1): the timeline (turns × time with
  * the state log's marks, the default), the tree (branches and forks,
- * U15.2) and the table of turns. */
-export type SessionView = "timeline" | "tree" | "table"
+ * U15.2), the table of turns and the approvals (U15.2-fix). */
+export type SessionView = "timeline" | "tree" | "table" | "approvals"
 
 /** The session page's search, as sessions/$id validates it. */
 export interface SessionSearch {
@@ -533,7 +533,7 @@ export function sessionViewLink(
   opts: { view?: SessionView; mark?: string; lanes?: string }
 ): SessionLink {
   const search: SessionSearch = {}
-  if (opts.view === "tree" || opts.view === "table") search.view = opts.view
+  if (opts.view && opts.view !== "timeline") search.view = opts.view
   if (opts.mark) search.mark = opts.mark
   if (opts.lanes) search.lanes = opts.lanes
   return { to: "/sessions/$id", params: { id }, search }
@@ -544,7 +544,12 @@ export function sessionViewLink(
  * non-empty string (a number-looking entry id parses as a number). */
 export function sessionSearch(search: Record<string, unknown>): SessionSearch {
   const out: SessionSearch = {}
-  if (search.view === "tree" || search.view === "table") out.view = search.view
+  if (
+    search.view === "tree" ||
+    search.view === "table" ||
+    search.view === "approvals"
+  )
+    out.view = search.view
   const m = search.mark
   if (typeof m === "string" && m) out.mark = m
   else if (typeof m === "number") out.mark = String(m)

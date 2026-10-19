@@ -194,7 +194,7 @@ export function decidedResult(
 }
 
 /** decidedCall finds one parked call's decision in a block. */
-export const decidedCall = (d: DecisionDoc | undefined, id: string) =>
+export const decidedCall = (d: DecisionDoc | undefined, id?: string) =>
   d?.calls.find((c) => c.call_id === id)
 
 /** withoutDecided drops from a resume's steps the pre-step calls (the

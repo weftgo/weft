@@ -29,7 +29,12 @@ import type {
   TimelineTurn,
 } from "@/lib/api"
 import { queryClient } from "@/lib/query"
-import { markKeys, TRAIL_NOTE, UNLISTED_RUN } from "@/lib/timeline"
+import {
+  markKeys,
+  TRAIL_NOTE,
+  TURN_STEPPER,
+  UNLISTED_RUN,
+} from "@/lib/timeline"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
@@ -466,6 +471,10 @@ describe("a turn's run page in its session (UX-B-21)", () => {
       name: "the session's turns",
     })
     expect(stepper.textContent).toBe("‹ t3turn 4 of 6t5 ›")
+    // A session whose turn numbers skip: the position says it is one
+    // among the recorded turns, never "turn 4" on t6.
+    expect(TURN_STEPPER.of(4, 7, 6)).toBe("t6 · 4 of 7 recorded turns")
+    expect(TURN_STEPPER.of(4, 7, 4)).toBe("turn 4 of 7")
     const crumbs = container.querySelectorAll(`[data-crumb-session="${SID}"]`)
     expect(crumbs).toHaveLength(1)
     expect(crumbs[0].getAttribute("href")).toContain(`/sessions/${SID}`)

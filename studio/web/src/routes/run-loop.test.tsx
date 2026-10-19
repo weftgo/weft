@@ -47,7 +47,7 @@ import {
 } from "@/test/loop-fixtures"
 import type { FxRun } from "@/test/loop-fixtures"
 import { LoopGraphView } from "@/components/studio/loop-graph"
-import { loopGraph } from "@/lib/loopgraph"
+import { loopGraph, NO_SEL } from "@/lib/loopgraph"
 import { ALL_RUNS } from "@/lib/run-tree"
 import { treeRows } from "@/lib/waterfall-tree"
 import * as waterfallTree from "@/lib/waterfall-tree"
@@ -505,9 +505,7 @@ describe("a copied URL, the keyboard, axe", () => {
       expect(router.state.location.search).toMatchObject({ sel: "s0" })
     )
     key("Escape")
-    await waitFor(() =>
-      expect(router.state.location.search.sel).toBeUndefined()
-    )
+    await waitFor(() => expect(router.state.location.search.sel).toBe(NO_SEL))
     const res = await axe.run(loopOf()!)
     expect(
       res.violations.map(
@@ -1137,5 +1135,123 @@ describe("U34-fix2", () => {
     // The control: the next tool_start moves the loop — rebuilt.
     rec("event", cut, b.events[cut])
     await waitFor(() => expect(loopBuilds()).toBeGreaterThan(before))
+  })
+})
+
+// P9-pre-web-fix 16: the graph's keyboard and pointer, end to end.
+describe("the loop graph's selection, keyboard and targets", () => {
+  const pressed = () =>
+    Array.from(document.querySelectorAll("[data-loop-node]"))
+      .filter((n) => n.getAttribute("aria-pressed") === "true")
+      .map((n) => n.getAttribute("data-loop-node"))
+
+  it("J / K move the selection with the scrubber: no pressed node stays dimmed on the step before", async () => {
+    serve(STORM)
+    const { router } = renderApp(`/runs/${STORM.id}?scale=graph`)
+    await waitFor(() => expect(nodes()[0]).toEqual(["t:get_weather", "6", "0"]))
+    // A tool of step 0 pressed, then J to step 0, J again to step 1
+    // (which calls none of its tools).
+    fireEvent.click(node("t:get_weather"))
+    await waitFor(() => expect(pressed()).toEqual(["t:get_weather"]))
+    fireEvent.keyDown(window, { key: "j", bubbles: true })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        step: 0,
+        sel: "s0",
+      })
+    )
+    fireEvent.keyDown(window, { key: "j", bubbles: true })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        step: 1,
+        sel: "s1",
+      })
+    )
+    // The step's own row: the model pressed, never a dimmed tool.
+    await waitFor(() => expect(pressed()).toEqual(["model"]))
+    expect(node("t:get_weather").getAttribute("opacity")).toBe("0.3")
+    fireEvent.keyDown(window, { key: "k", bubbles: true })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        step: 0,
+        sel: "s0",
+      })
+    )
+  })
+
+  it("Esc means no selection: the landing rule never picks a row again until the next pick", async () => {
+    serve(FLAKY)
+    const { router } = renderApp(`/runs/${FLAKY.id}?scale=graph`)
+    await waitFor(() => expect(nodes()).toHaveLength(4))
+    // The landing rule pressed a node.
+    await waitFor(() => expect(pressed()).toHaveLength(1))
+    node("model").focus()
+    fireEvent.keyDown(node("model"), { key: "Escape" })
+    await waitFor(() => expect(router.state.location.search.sel).toBe(NO_SEL))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(pressed()).toEqual([])
+    // The next pick selects again.
+    fireEvent.click(node("t:tax_service"))
+    await waitFor(() => expect(pressed()).toEqual(["t:tax_service"]))
+  })
+
+  it("an edge is a 24 px click target selecting its first call; the tab stop starts on the selected node", async () => {
+    const b = serve(FLAKY)
+    const second = b.fold.steps[1].toolCalls[0].callId
+    const { router } = renderApp(
+      `/runs/${FLAKY.id}?scale=graph&sel=${encodeURIComponent(`c:1:${second}`)}`
+    )
+    await waitFor(() => expect(pressed()).toEqual(["t:inventory_api"]))
+    // The roving stop is the selected node, not the prompt.
+    const stops = Array.from(
+      document.querySelectorAll("[data-loop-node][tabindex='0']")
+    ).map((n) => n.getAttribute("data-loop-node"))
+    expect(stops).toEqual(["t:inventory_api"])
+    const hit = document.querySelector<SVGPathElement>(
+      '[data-loop-edge="model>t:shipping_quote"] [data-loop-edge-hit]'
+    )!
+    expect(Number(hit.getAttribute("stroke-width"))).toBeGreaterThanOrEqual(24)
+    expect(hit.getAttribute("pointer-events")).toBe("stroke")
+    fireEvent.click(hit)
+    await waitFor(() => expect(pressed()).toEqual(["t:shipping_quote"]))
+    expect(router.state.location.search.sel).toMatch(/^c:/)
+    // The model → end edge has one too.
+    expect(
+      document.querySelector(
+        '[data-loop-edge="model>end"] [data-loop-edge-hit]'
+      )
+    ).not.toBeNull()
+    // Fitted to its pane: never wider than the drawer leaves it.
+    expect(
+      document.querySelector("[data-loop-svg]")!.getAttribute("width")
+    ).toBe("100%")
+  })
+
+  it("the agents level is one tab stop, the arrows walk it", async () => {
+    serve(DIRECTOR)
+    renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll("[data-call-graph] [data-node]").length
+      ).toBeGreaterThan(1)
+    )
+    const all = Array.from(
+      document.querySelectorAll<SVGGElement>("[data-call-graph] [data-node]")
+    )
+    expect(all.filter((n) => n.getAttribute("tabindex") === "0")).toHaveLength(
+      1
+    )
+    const first = all.find((n) => n.getAttribute("tabindex") === "0")!
+    first.focus()
+    fireEvent.keyDown(first, { key: "End" })
+    expect(document.activeElement).not.toBe(first)
+    fireEvent.keyDown(document.activeElement!, { key: "Home" })
+    expect(document.activeElement).toBe(first)
+    expect(all.filter((n) => n.getAttribute("tabindex") === "0")).toHaveLength(
+      1
+    )
+    expect(
+      document.querySelector("[data-call-graph] svg")!.getAttribute("width")
+    ).toBe("100%")
   })
 })

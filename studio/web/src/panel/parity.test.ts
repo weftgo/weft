@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "../lib/api"
 import { ROLE } from "../lib/palette"
-import { STATUS, statusOf } from "../lib/status"
+import { AWAITING, STATUS, statusOf } from "../lib/status"
 import { statusClass } from "../lib/status-class"
 import { PANEL_CSS } from "./styles"
 import { clip, NO_CONTENT } from "../lib/title"
@@ -2262,6 +2262,72 @@ describe("decisions on both surfaces (U13.2)", () => {
     expect(studioDetail).toMatch(/ · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d \S+$/)
   })
 
+  // P9-pre-web-fix 2: the decided call's own row reads its outcome,
+  // never "awaiting a decision" (lib/cards.ts parkWord), and the
+  // answer's tools line leaves it out of the held count.
+  it("the decided call's row reads ✋ denied → t2 on both surfaces, never awaiting", async () => {
+    const WORD = "✋ denied → t2"
+    // The parked call started (its tool_start) and never finished.
+    const at = (pos: number, event: object) => ({ pos, time: T0, event })
+    const parkedEvents = pagedEvents([
+      at(0, {
+        type: "run_start",
+        id: APP_PARKED,
+        model: { provider: "demo", name: "ops" },
+        agent: "approvals-example",
+      }),
+      at(1, { type: "step_start", run_id: APP_PARKED, index: 0 }),
+      at(2, {
+        type: "tool_start",
+        run_id: APP_PARKED,
+        seq: 1,
+        call_id: APP_CALL.id,
+        name: APP_CALL.name,
+        args: APP_CALL.args,
+      }),
+      at(3, {
+        type: "step_finish",
+        run_id: APP_PARKED,
+        index: 0,
+        reason: "tool_calls",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+      at(4, {
+        type: "run_finish",
+        run_id: APP_PARKED,
+        usage: { input_tokens: 10, output_tokens: 5 },
+        steps: 1,
+        pending: [APP_CALL],
+      }),
+    ])
+    serveDecided(false).on(`GET runs/${APP_PARKED}/events`, parkedEvents)
+    const el = await panelSeen(APP_PARKED, PARKED_DECISION)
+    await vi.waitFor(
+      () =>
+        expect(
+          all(el, `.weft-call[data-key="${APP_CALL.id}"] .weft-res`).map(
+            (r) => r.textContent
+          )
+        ).toContain(WORD),
+      { timeout: 5_000 }
+    )
+    const panelTools = all(el, '[data-answer-line="tools"]').map(
+      (d) => d.textContent
+    )
+    await reset(el)
+    serveDecided(true).on(`GET runs/${APP_PARKED}/events`, parkedEvents)
+    renderApp(`/runs/${APP_PARKED}?view=story`)
+    await waitFor(() =>
+      expect(
+        document.querySelector(
+          `[data-call="${APP_CALL.id}"] [data-parked-call]`
+        )?.textContent
+      ).toBe(WORD)
+    )
+    cleanup()
+    expect(panelTools.join(" ")).not.toContain(AWAITING)
+  })
+
   // U13.2-fix 6: rw.support-desk itself — a plain Generate the arena
   // resumes with Approve, no actor, no denial — and the resumed card's
   // result line (fix 2): the refund ran before step 0, which no longer
@@ -3203,8 +3269,8 @@ describe("a resume and an experiment on both surfaces (U6-fix)", () => {
         tr.querySelector("[data-run-link]")!.textContent,
       ])
     )
-    expect(heads["s_01-t4"]).toBe(`t4${RESUME}`)
-    expect(heads["s_01-t3"]).toBe(`t3${PROMPT}`)
+    expect(heads["s_01-t4"]).toBe(`t4 ${RESUME}`)
+    expect(heads["s_01-t3"]).toBe(`t3 ${PROMPT}`)
   })
 
   // U7 (c1): turn numbers can have gaps — a queued turn's number is
@@ -3249,7 +3315,7 @@ describe("a resume and an experiment on both surfaces (U6-fix)", () => {
     const head = container.querySelector(
       '[data-turn="s_01-t5"] [data-run-link]'
     )
-    expect(head!.textContent).toBe(`t5${RESUME}`)
+    expect(head!.textContent).toBe(`t5 ${RESUME}`)
   })
 })
 

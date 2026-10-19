@@ -459,6 +459,11 @@ export const PROMPT = "prompt"
 export const MODEL = "model"
 export const END = "end"
 
+/** ?sel= after Esc: no selection, and the landing rule (the first
+ * failed row, else step 0) does not pick one again — until the next
+ * pick writes a row key over it. No row key is this word. */
+export const NO_SEL = "none"
+
 /** A run id's ancestors (core's id rule, <parent>/<step>/<call>), the
  * root first: the breadcrumb's runs, down to `run`, never above `root`. */
 export function runChain(root: string, run: string): string[] {

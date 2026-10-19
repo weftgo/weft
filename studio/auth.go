@@ -399,6 +399,21 @@ func (s *Server) scopeSessionID(w http.ResponseWriter, r *http.Request, sessionI
 	return true
 }
 
+// sessionReadError answers a session read route's failed read
+// (sessions/{id} and its timeline, entries and export): for a panel
+// token an unknown session is the 403 another public id's session gets
+// (scopeSessionID's), so the answer never says whether a session id
+// exists outside its scope; every other failure, and every other
+// identity, is dbError's. scopeSessionID itself lets an unknown id pass
+// — the live stream subscribes to a session nothing has stored yet.
+func sessionReadError(w http.ResponseWriter, r *http.Request, sessionID string, err error) {
+	if errors.Is(err, obsdb.ErrNotFound) && idFrom(r).panel != nil {
+		forbidden(w, r)
+		return
+	}
+	dbError(w, r, "session", sessionID, err)
+}
+
 // scopeSpans checks a whole trace: a trace that mixes public ids (or
 // holds none) is outside the token.
 func scopeSpans(w http.ResponseWriter, r *http.Request, spans []spanDTO) bool {

@@ -61,6 +61,8 @@ const H = 46
 const GY = 14
 const GX = 90
 const MAX_TOOLS = 12
+/** An edge's click target, in px: at least the 24 px WCAG 2.5.8 asks. */
+const HIT = 24
 
 /** The palette's roles as the literal classes Tailwind needs. */
 const STROKE: Record<EndTone | "error" | "idle", string> = {
@@ -201,8 +203,21 @@ export function LoopGraphView({
     ...offered.map((n) => `o:${n}`),
     END,
   ]
-  const [focus, setFocus] = useState<string>(selectedNode ?? PROMPT)
-  const stop = order.includes(focus) ? focus : (selectedNode ?? PROMPT)
+  // The stop is the last node focused, until the selection moves: then
+  // the selected node's (a landing that arrives after the first draw
+  // included), else the prompt.
+  const [focus, setFocus] = useState<string>()
+  const [focusAt, setFocusAt] = useState(selectedNode)
+  if (focusAt !== selectedNode) {
+    setFocusAt(selectedNode)
+    setFocus(undefined)
+  }
+  const stop =
+    focus && order.includes(focus)
+      ? focus
+      : selectedNode && order.includes(selectedNode)
+        ? selectedNode
+        : PROMPT
   const refs = useRef(new Map<string, SVGGElement>())
   // A never-called tool has no row to select: an insight naming one
   // focuses and marks its node — until any other selection (a node, an
@@ -306,6 +321,18 @@ export function LoopGraphView({
       data-focus-ring
     />
   )
+  // An edge's click target (WCAG 2.5.8): a transparent stroke HIT px
+  // wide over the drawn one, painted for the pointer only.
+  const hit = (d: string) => (
+    <path
+      d={d}
+      className="fill-none stroke-transparent"
+      strokeWidth={HIT}
+      pointerEvents="stroke"
+      aria-hidden
+      data-loop-edge-hit
+    />
+  )
   const dimmed = (id: string) =>
     lit !== undefined && !lit.has(id) && id !== MODEL ? 0.3 : 1
 
@@ -385,11 +412,15 @@ export function LoopGraphView({
           ))}
         </div>
       ) : null}
-      <div className="overflow-auto">
+      <div>
+        {/* Fitted: at most its own size, scaled down to its pane — the
+            page never scrolls sideways beside the drawer. */}
         <svg
-          width={width}
-          height={height}
+          width="100%"
           viewBox={`0 0 ${width} ${height}`}
+          style={{ maxWidth: width }}
+          className="block h-auto"
+          data-loop-svg
           role="group"
           aria-label="loop graph"
         >
@@ -426,13 +457,20 @@ export function LoopGraphView({
             strokeWidth={1.5}
           />
           {/* model → end */}
-          <path
-            d={`M${colX[1] + MW / 2},${modelY + H} L${colX[1] + MW / 2},${endY - 2}`}
-            className={`cursor-pointer fill-none ${STROKE[graph.end.tone === "ok" ? "idle" : graph.end.tone]}`}
-            strokeWidth={1.5}
+          <g
+            className="cursor-pointer"
             data-loop-edge="model>end"
             onClick={() => (lastKey ? select(lastKey) : undefined)}
-          />
+          >
+            <path
+              d={`M${colX[1] + MW / 2},${modelY + H} L${colX[1] + MW / 2},${endY - 2}`}
+              className={`fill-none ${STROKE[graph.end.tone === "ok" ? "idle" : graph.end.tone]}`}
+              strokeWidth={1.5}
+            />
+            {hit(
+              `M${colX[1] + MW / 2},${modelY + H} L${colX[1] + MW / 2},${endY - 2}`
+            )}
+          </g>
           {shown.map((t, i) => {
             const y = toolY(i) + H / 2
             const x2 = colX[2]
@@ -471,6 +509,9 @@ export function LoopGraphView({
                   strokeDasharray={back === "parked" ? "4 3" : undefined}
                   data-loop-result={back}
                 />
+                {/* The click target: both directions under one wide
+                    transparent stroke (the drawn edges are 1–3 px). */}
+                {hit(`M${mx},${my} C${c},${my} ${c},${y} ${x2},${y}`)}
                 <text
                   x={c}
                   y={(my + y) / 2 - 8}

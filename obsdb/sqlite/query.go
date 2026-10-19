@@ -60,6 +60,21 @@ const statusExpr = `CASE WHEN failed = 1 THEN 'failed'
 	WHEN last_seen_ns >= ? THEN 'running'
 	ELSE 'interrupted' END`
 
+// sessionStatusExpr is SessionQuery.Status's word for a session's newest
+// turn: statusExpr with obsdb.OutcomeOf's read-time outcomes set apart
+// first — failed with the busy cancel cause or the cancelled error type,
+// and succeeded with pending calls (an open or a decided park), each a
+// word no Status is, so no filter keeps them — and failed and succeeded
+// mean what the session page says.
+// Parameters: obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled, then
+// statusExpr's cutoff.
+const sessionStatusExpr = `CASE WHEN failed = 1 AND (cancel_cause = ? OR error_type = ?) THEN 'ended'
+	WHEN failed = 1 THEN 'failed'
+	WHEN (finished_ok = 1 OR root_ended = 1) AND pending > 0 THEN 'pending'
+	WHEN finished_ok = 1 OR root_ended = 1 THEN 'succeeded'
+	WHEN last_seen_ns >= ? THEN 'running'
+	ELSE 'interrupted' END`
+
 func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.RunPage{}, err
@@ -1242,16 +1257,19 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		hargs = append(hargs, obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled)
 	}
 	if q.Status != "" {
-		// The newest turn's derived status: sessionRowsSQL's read (r2).
+		// The newest turn's derived status as the session page reads it
+		// (obsdb.OutcomeOf over sessionRowsSQL's read, r2): a cancelled or
+		// busy-ended turn is not failed, an open or decided park not
+		// succeeded.
 		pubScope := ""
-		hargs = append(hargs, cutoff)
+		hargs = append(hargs, obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled, cutoff)
 		if q.PublicID != "" {
 			pubScope = ` AND r8.public_id = ? AND r8.public_id <> ''`
 			hargs = append(hargs, q.PublicID)
 		}
-		having = append(having, `(SELECT `+statusExpr+` FROM runs r8 WHERE r8.session_id = runs.session_id AND r8.session_id <> ''
+		having = append(having, `(SELECT `+sessionStatusExpr+` FROM runs r8 WHERE r8.session_id = runs.session_id AND r8.session_id <> ''
 			AND `+ownTurn("r8")+` AND r8.playground = 0`+pubScope+`
-			ORDER BY r8.turn DESC, r8.started_ns DESC LIMIT 1) = ?`)
+			ORDER BY r8.turn DESC, r8.started_ns DESC, r8.run_id DESC LIMIT 1) = ?`)
 		hargs = append(hargs, string(q.Status))
 	}
 	if q.Compacted {

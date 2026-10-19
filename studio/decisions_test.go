@@ -151,3 +151,59 @@ func TestDecisionsFromTranscript(t *testing.T) {
 		t.Errorf("derived = %v, want %s", got, want)
 	}
 }
+
+// TestTimelineDecisionActor (P9-pre-web-fix): a decision mark carries
+// the deciding resume's weft.approval.actor — metadata, as the run
+// document's decided block's actor — for every identity, a read-scoped
+// panel token included, while the free-text who and reason stay
+// content (hidden to it).
+func TestTimelineDecisionActor(t *testing.T) {
+	const sess = "01K00000000000000000000001"
+	h := decisionsServer(t, "thread_approvals")
+	decided, _ := runBlocks(t, h, sess+"-t1", "srv")
+	var d struct {
+		Actor string `json:"actor"`
+	}
+	decode(t, string(decided), &d)
+	if d.Actor == "" {
+		t.Fatalf("t1 decided names no actor: %s", decided)
+	}
+	read, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_thread_approvals", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tok := range []string{"srv", read} {
+		code, _, body := getWith(t, h, "/studio/api/sessions/"+sess+"/timeline", tok, "")
+		if code != http.StatusOK {
+			t.Fatalf("timeline: %d %s", code, body)
+		}
+		var v struct {
+			Marks []struct {
+				Kind          string `json:"kind"`
+				RunID         string `json:"run_id"`
+				Actor         string `json:"actor"`
+				ContentHidden bool   `json:"content_hidden"`
+			} `json:"marks"`
+		}
+		decode(t, body, &v)
+		found := false
+		for _, m := range v.Marks {
+			if m.Kind != "approval.decision" || (m.RunID != sess+"-t1" && m.RunID != sess+"-t2") {
+				continue
+			}
+			found = true
+			if m.Actor != d.Actor {
+				t.Errorf("token %q: t1's decision mark actor %q, want the decided block's %q", tok[:3], m.Actor, d.Actor)
+			}
+			if tok == read && !m.ContentHidden {
+				t.Errorf("read token: the decision's content is not hidden")
+			}
+		}
+		if !found {
+			t.Errorf("token %q: no decision mark for t1: %s", tok[:3], body)
+		}
+		if tok == read && strings.Contains(body, "need a photo") {
+			t.Errorf("read token: the deny reason leaked: %s", body)
+		}
+	}
+}

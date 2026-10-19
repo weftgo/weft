@@ -174,6 +174,32 @@ describe("the sessions list (S4.7)", () => {
     )
   })
 
+  // P9-pre-web-fix 9: the since chip's bound is the first page's —
+  // load more carries it, never a later "now" that skips rows.
+  it("load more keeps the first page's since bound", async () => {
+    const [first, second] = sessions.sessions
+    studio.on("GET sessions", (req) =>
+      req.query.get("before")
+        ? { total: 2, sessions: [second], next_before: null }
+        : {
+            total: 2,
+            sessions: [first],
+            next_before: "2026-10-01T08:59:00.123456789Z",
+          }
+    )
+    let now = Date.parse("2026-10-01T10:00:00Z")
+    vi.spyOn(Date, "now").mockImplementation(() => now)
+    renderApp("/sessions?since=1h")
+    expect(await screen.findByText(first.id)).toBeTruthy()
+    now += 60_000
+    fireEvent.click(screen.getByRole("button", { name: "load more" }))
+    expect(await screen.findByText(second.id)).toBeTruthy()
+    const [a, b] = studio.calls("GET sessions")
+    expect(a.query.get("since")).toBe("2026-10-01T09:00:00.000Z")
+    expect(b.query.get("since")).toBe(a.query.get("since"))
+    vi.mocked(Date.now).mockRestore()
+  })
+
   // The exact cursor: inside a group of threads sharing one last-seen
   // time the time stays and next_before_id moves — the pager sends it
   // back as before_id and does not mistake the repeated time for a

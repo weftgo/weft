@@ -7,9 +7,12 @@
 import type { RunRow, SessionRow, TurnOutcome } from "./api"
 import { absoluteTime, plural, relativeTime, spanMs } from "./format"
 import type { Role } from "./palette"
-import { AWAITING, STATUS } from "./status"
+import { AWAITING, DECIDED_PARK, STATUS } from "./status"
 import type { Status } from "./status"
-import { END_WORDS } from "./timeline"
+/** Either busy policy's end (an interrupt or a rollback): a count over
+ * both, and an outcome that names no policy (lib/turn-chips.ts's chips
+ * name which). */
+const ENDED_ANY = "ended by a newer message"
 
 /** One outcome's mark on the strip: a glyph, its word (the hover and
  * the strip's accessible text) and its colour role — red for a real
@@ -27,9 +30,10 @@ export const OUTCOME: Record<
     role: "interrupted",
   },
   cancelled: { glyph: "⊘", word: STATUS.cancelled.word, role: "cancelled" },
-  ended: { glyph: "✗", word: END_WORDS.byNewer, role: "resumed" },
+  // An interrupt or a rollback (the row's outcome names no policy).
+  ended: { glyph: "✗", word: ENDED_ANY, role: "resumed" },
   parked: { glyph: "⏸", word: AWAITING, role: "parked" },
-  resumed: { glyph: "⏸", word: "parked · decided", role: "resumed" },
+  resumed: { glyph: "⏸", word: DECIDED_PARK, role: "resumed" },
 }
 
 /** An outcome the strip does not know (a newer Studio's word): its
@@ -66,7 +70,7 @@ export function failedWords(n: number | undefined) {
   return n ? `${n}✗ ${STATUS.failed.word}` : ""
 }
 export function endedWords(n: number | undefined) {
-  return n ? `${n}✗ ${END_WORDS.interrupted}` : ""
+  return n ? `${n}✗ ${ENDED_ANY}` : ""
 }
 /** The other cancelled turns (thread.closed, studio.cancel, a
  * deadline; U16-fix): apart again, neutral, the strip's ⊘. */
@@ -213,7 +217,7 @@ export function turnGap(
       }
 }
 
-/** A turn link's accessible name (UX-B-40): "turn 3: Here is the photo
+/** A turn link's accessible name (UX-B-40): "t3: Here is the photo
  * of the cracked dripper (succeeded)", the status's detail after its
  * word — never the 30-character run id. */
 export function turnLinkLabel(
@@ -221,7 +225,7 @@ export function turnLinkLabel(
   title: string,
   s: Pick<Status, "word" | "detail">
 ): string {
-  const head = r.turn ? `turn ${r.turn}` : r.id
+  const head = r.turn ? `t${r.turn}` : r.id
   return `${head}: ${title} (${s.word}${s.detail ? ` · ${s.detail}` : ""})`
 }
 

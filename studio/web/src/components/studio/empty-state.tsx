@@ -6,7 +6,7 @@ import { Link } from "@tanstack/react-router"
 import { WeftMark } from "@/components/studio/weft-mark"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
-import { notFoundBack } from "@/lib/not-found"
+import { FORBIDDEN_NOTE, isForbidden, notFoundBack } from "@/lib/not-found"
 
 /**
  * LoadFailed is a detail page's read that failed with anything but a
@@ -20,23 +20,32 @@ export function LoadFailed({
   error,
   onRetry,
 }: {
-  kind: "run" | "trace"
+  kind: "run" | "trace" | "session"
   id: string
   error: Error
   onRetry: () => void
 }) {
   const back = notFoundBack(kind)
+  // A 403 answers the same next time: no retry, and the reason why.
+  const forbidden = isForbidden(error)
   return (
     <div
       className="mx-auto max-w-md space-y-3 py-24 text-center"
-      data-load-failed
+      data-load-failed={forbidden ? "forbidden" : ""}
     >
       <p className="font-mono text-xs text-faint">{id}</p>
       <p className="text-sm text-status-bad">{error.message}</p>
+      {forbidden ? (
+        <p className="text-xs text-muted-foreground" data-no-retry>
+          {FORBIDDEN_NOTE}
+        </p>
+      ) : null}
       <div className="flex justify-center gap-2">
-        <Button variant="outline" size="sm" onClick={onRetry}>
-          retry
-        </Button>
+        {forbidden ? null : (
+          <Button variant="outline" size="sm" onClick={onRetry}>
+            retry
+          </Button>
+        )}
         <Button variant="ghost" size="sm" render={<Link to={back.to} />}>
           {back.label}
         </Button>

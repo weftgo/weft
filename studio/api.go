@@ -893,6 +893,11 @@ type sessionDoc struct {
 	DelegatedMore    bool         `json:"delegated_more,omitempty"`
 	DelegatedUnknown bool         `json:"delegated_unknown,omitempty"`
 	DelegatedUsage   core.Usage   `json:"delegated_usage"`
+	// DelegatedHoles is the delegated block's holes (ADR 0028 §11's
+	// table): hidden, counted, when a panel token's scope left out
+	// sessions this one delegated (another public id's, or none) —
+	// never named, and the delegated cost then not known.
+	DelegatedHoles []stepHole `json:"delegated_holes,omitempty"`
 	delegatedSessionsFields
 }
 
@@ -2141,7 +2146,7 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	det, err := s.db.Session(r.Context(), id)
 	if err != nil {
-		dbError(w, r, "session", id, err)
+		sessionReadError(w, r, id, err)
 		return
 	}
 	pub := panelPublicID(r)
@@ -2185,7 +2190,8 @@ func (s *Server) delegatedSessions(ctx context.Context, id, pub string, doc *ses
 	var parts []runCost
 	var why string
 	walked := 0
-	allExact := true // every visited session's own cost reported its cache split exact
+	scopedTotal := -1 // the direct level's total in the request's scope, once read
+	allExact := true  // every visited session's own cost reported its cache split exact
 	// price costs one level's sessions in one batched read and folds
 	// them into the figures, in the order the level listed them.
 	price := func(depth int, rows []obsdb.SessionRow) {
@@ -2227,6 +2233,9 @@ walk:
 			}
 			if depth == 0 {
 				doc.DelegatedMore = page.Total > delegatedCap
+				if scopedTotal < 0 {
+					scopedTotal = page.Total
+				}
 			}
 			for _, sr := range page.Sessions {
 				if seen[sr.ID] {
@@ -2249,6 +2258,14 @@ walk:
 		}
 		price(depth, rows)
 		level = next
+	}
+	if hidden := s.hiddenDelegated(ctx, id, pub, scopedTotal); hidden > 0 {
+		h := hiddenDelegatedHole(hidden)
+		doc.DelegatedHoles = append(doc.DelegatedHoles, h)
+		if why != "" {
+			why += "; "
+		}
+		why += h.Reason
 	}
 	if len(parts) == 0 && why == "" {
 		zero := 0.0
@@ -2275,6 +2292,34 @@ walk:
 		out.CostUSD = &v
 	}
 	doc.delegatedSessionsFields = out
+}
+
+// hiddenDelegated is how many sessions id delegated directly that a
+// panel token's scope left out of its delegated block: the unscoped
+// total less the scoped one (callerLinked's rule). 0 for an unscoped
+// read, or when either total could not be read (the walk's own error
+// already says so).
+func (s *Server) hiddenDelegated(ctx context.Context, id, pub string, scopedTotal int) int {
+	if pub == "" || scopedTotal < 0 {
+		return 0
+	}
+	all, err := s.db.Sessions(ctx, obsdb.SessionQuery{Parents: []string{id}, Limit: 1})
+	if err != nil {
+		slog.DebugContext(ctx, "studio: a session's unscoped delegated count could not be read", "session", id, "err", err)
+		return 0
+	}
+	return max(all.Total-scopedTotal, 0)
+}
+
+// hiddenDelegatedHole is the hidden hole of a session document whose
+// n delegated sessions a panel token's scope left out: counted, never
+// named.
+func hiddenDelegatedHole(n int) stepHole {
+	r := fmt.Sprintf("%d delegated sessions carry another public id, or none: a panel token reads its own public id's sessions, so they are left out and the delegated figures do not cover them", n)
+	if n == 1 {
+		r = "1 delegated session carries another public id, or none: a panel token reads its own public id's sessions, so it is left out and the delegated figures do not cover it"
+	}
+	return stepHole{Hole: string(obsdb.HoleHidden), Reason: r, Fix: "open the session with the server (dev) token", Count: n}
 }
 
 // panelPublicID is the request's panel token's public id, "" for any

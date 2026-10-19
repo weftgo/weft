@@ -6,11 +6,12 @@
 // structured output. Read from what both clients already hold (the
 // run's spans, its request rows, its fold and transcript); the run
 // page and the devtools panel draw the same words from here (parity).
-import type { Part, Usage } from "./api"
+import type { DecisionDoc, Part, Usage } from "./api"
 import { attemptLabel, msText } from "./attempts"
+import { decidedCall, outcomeOf } from "./decisions"
 import type { FoldedRun, TranscriptBatch } from "./events"
 import { plural, tokens } from "./format"
-import { AWAITING } from "./status"
+import { AWAITING, turnTag } from "./status"
 
 type Attrs = Record<string, unknown>
 /** A span as these readers read it. */
@@ -103,13 +104,26 @@ const PARKED: Record<string, string | undefined> = {
  * breakpoints_own (own), else "paused by ParkSource"; a ParkOn the run
  * names in weft.playground.breakpoints is a breakpoint; an approval
  * gate, or a record from before U25 that names no source, awaits a
- * decision; a park rule says which. run is the run's row or doc. */
+ * decision; a park rule says which. run is the run's row or doc. A
+ * call its doc's decided block holds (the resume the record links)
+ * reads its outcome and the turn it resumed in — "✋ denied → t2" —,
+ * never awaiting (id: the call's id). */
 export function parkWord(
   f: CallFacts | undefined,
   tool: string,
-  run?: { meta?: Record<string, string>; playground?: boolean } | null,
+  run?: {
+    meta?: Record<string, string>
+    playground?: boolean
+    decided?: DecisionDoc
+  } | null,
+  id?: string,
   own = false
 ): string {
+  const c = decidedCall(run?.decided, id)
+  if (c) {
+    const o = outcomeOf(c.outcome)
+    return `${o.icon} ${o.word} → ${turnTag(run!.decided!.run)}`
+  }
   const p = f?.park ?? ""
   const bp = run?.meta?.["weft.playground.breakpoints"]
   if (p === "park_source")

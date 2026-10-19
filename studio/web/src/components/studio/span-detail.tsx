@@ -336,7 +336,8 @@ function Answer({
         toolsLine(
           step,
           running,
-          [...(parked?.keys() ?? [])].map((id) => ({ id }))
+          [...(parked?.keys() ?? [])].map((id) => ({ id })),
+          doc.decided
         ),
         step.toolCalls.length && !derived ? "tools" : undefined,
         step.toolCalls.some((c) => c.result?.isError)

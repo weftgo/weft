@@ -239,9 +239,11 @@ export function RunTitle({
         data-run-link={run.id}
       >
         {lead ? (
-          <span className="shrink-0 font-mono text-muted-foreground">
-            {lead}
-          </span>
+          <>
+            <span className="shrink-0 font-mono text-muted-foreground">
+              {lead}
+            </span>{" "}
+          </>
         ) : null}
         <TitleText t={t} />
         {t.kind === "id" ? <CopyId id={run.id} /> : null}

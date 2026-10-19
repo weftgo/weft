@@ -146,7 +146,7 @@ function TurnStepper({ doc }: { doc: RunDoc }) {
           ‹ t{at.prev_turn.turn}
         </Link>
       ) : null}
-      <span>{TURN_STEPPER.of(at.index, at.total)}</span>
+      <span>{TURN_STEPPER.of(at.index, at.total, doc.turn)}</span>
       {at.next_turn ? (
         <Link
           {...runLink(at.next_turn.id)}

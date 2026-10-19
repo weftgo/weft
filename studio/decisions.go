@@ -56,6 +56,11 @@ import (
 // two sides, name no one call's: readsThreadContent's rule). A read that fails is said (error, or a note when the
 // block still stands), never an empty list.
 
+// approvalActorKey is the run metadata naming who decided a resume's
+// calls (weft.approval.actor): an opaque id, metadata every identity
+// reads — the decided block's actor and a decision mark's.
+const approvalActorKey = "weft.approval.actor"
+
 // decisionsCap bounds the calls one decisions block lists (core's
 // weft.resume.calls cap; past it More counts the rest).
 const decisionsCap = 32
@@ -162,7 +167,7 @@ func (s *Server) runDecisions(r *http.Request, rec obsdb.RunRow, page *runPage) 
 
 // decisionsOf composes what resume applied to parked's calls.
 func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resume obsdb.RunRow) decisionDoc {
-	out := decisionDoc{At: resume.Started, Actor: resume.Meta["weft.approval.actor"], Calls: []decidedCall{}}
+	out := decisionDoc{At: resume.Started, Actor: resume.Meta[approvalActorKey], Calls: []decidedCall{}}
 	reads := readsThreadContent(r)
 	spans, err := s.db.RunSpans(ctx, resume.ID)
 	if err != nil {

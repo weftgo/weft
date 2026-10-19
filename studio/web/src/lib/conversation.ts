@@ -1,6 +1,7 @@
 // The conversation page (U16, UX-F-02): every run of a public id — the
 // handle the devtools panel follows — with its experiments nested under
-// their source turn, oldest first, live. A public id need not have a
+// their source turn, live; split oldest first (the run order titles and
+// gaps read), drawn newest first unless ?order=oldest. A public id need not have a
 // thread session (a harness, a non-thread app): /sessions/$id is the
 // session's page, /conversations/$id the public id's. Studio only.
 import type { RunRow } from "./api"

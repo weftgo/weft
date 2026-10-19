@@ -283,15 +283,20 @@ export const linkedHoles = (d: {
   )
 
 /** delegatedHoles is a session document's delegated block's holes:
- * the rows cut at 100 (truncated) and a failed read (not_recorded). */
+ * the rows cut at 100 (truncated), a failed read (not_recorded) and the
+ * server's own — the delegated sessions another public id holds, which
+ * a panel token is not shown (hidden, with their count). */
 export const delegatedHoles = (d: {
   delegated_more?: boolean
   delegated_unknown?: boolean
-}) =>
-  marks(
+  delegated_holes?: HoleMark[]
+}) => [
+  ...marks(
     d.delegated_more && ["truncated", DELEGATED_BLOCK.more],
     d.delegated_unknown && ["not_recorded", DELEGATED_BLOCK.unknown]
-  )
+  ),
+  ...(d.delegated_holes ?? []),
+]
 
 /** The meta keys a lineage line draws (never repeated as raw chips). */
 export const LINEAGE_KEYS: readonly string[] = [

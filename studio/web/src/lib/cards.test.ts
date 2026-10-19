@@ -201,6 +201,32 @@ describe("the run cards' facts (U25)", () => {
     )
   })
 
+  it("a decided parked call reads its outcome and the turn it resumed in, never awaiting", () => {
+    const decided = {
+      run: "s_a-t2",
+      at: "2026-10-01T09:00:00Z",
+      source: "resume_calls",
+      calls: [{ call_id: "r1", outcome: "denied" }],
+    }
+    const f = factsOf("appr.park").get("0:d1")
+    expect(parkWord(f, "deploy", { decided }, "r1")).toBe("✋ denied → t2")
+    // Another call of the same park, or no id: the park's own word.
+    expect(parkWord(f, "deploy", { decided }, "r2")).toBe(AWAITING)
+    expect(parkWord(f, "deploy", { decided })).toBe(AWAITING)
+    // summarize's tools line leaves the decided call out of its held count.
+    const step = {
+      toolCalls: [
+        { callId: "r1", name: "deploy" },
+        { callId: "r2", name: "deploy" },
+      ],
+    } as unknown as Parameters<typeof toolsLine>[0]
+    const parked = [{ id: "r1" }, { id: "r2" }]
+    expect(toolsLine(step, false, parked)).toBe(`2 ${AWAITING}`)
+    expect(toolsLine(step, false, parked, decided)).toBe(
+      `1 ${AWAITING} · 1 decided`
+    )
+  })
+
   it("appr.breakpoint-own: a ParkSource park is a breakpoint only on a playground run or a breakpoints_own runtime's", () => {
     const own = shape("appr.breakpoint-own")
     const f = factsOf("appr.breakpoint-own").get("0:b1")
@@ -213,7 +239,7 @@ describe("the run cards' facts (U25)", () => {
     expect(
       ownBreakpoints([{ service: own.run.service }], own.run.service)
     ).toBe(false)
-    expect(parkWord(f, "status", own.run, true)).toBe(BREAKPOINT)
+    expect(parkWord(f, "status", own.run, undefined, true)).toBe(BREAKPOINT)
     expect(parkWord(f, "status", { ...own.run, playground: true })).toBe(
       BREAKPOINT
     )

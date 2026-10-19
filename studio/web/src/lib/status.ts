@@ -97,6 +97,10 @@ export const STATUS: Record<StatusKey, StatusWords> = {
   },
 }
 
+/** A decided park as one word, no turn named — the panel's status
+ * filter and the sessions list's outcome strip: "parked → (decided)". */
+export const DECIDED_PARK = "parked → (decided)"
+
 /** The fields statusOf reads off a run row (or a session row: only its
  * status). */
 export interface StatusRow {

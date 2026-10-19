@@ -92,9 +92,9 @@ describe("SessionTurns", () => {
       (a) => a.textContent
     )
     expect(heads).toEqual([
-      "t1Book the 9:40 to Lyon",
-      "t2resume of t1 · 1 decided call",
-      `t3${first.agent} · (content not captured)`,
+      "t1 Book the 9:40 to Lyon",
+      "t2 resume of t1 · 1 decided call",
+      `t3 ${first.agent} · (content not captured)`,
     ])
     expect(
       [...container.querySelectorAll("[data-id-chip]")].map((n) =>

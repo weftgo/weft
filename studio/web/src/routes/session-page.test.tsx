@@ -161,7 +161,7 @@ describe("the words", () => {
         detail: "1 call decided · resumed in t2",
       })
     ).toBe(
-      "turn 1: Here is the photo (decided t2 · 1 call decided · resumed in t2)"
+      "t1: Here is the photo (decided t2 · 1 call decided · resumed in t2)"
     )
   })
   it("requestExpiries and expiryWords: open, then lapsed (lazy)", () => {
@@ -234,7 +234,7 @@ describe("the session table (UX-B-18/19/20/40, UX-S3-16)", () => {
     ).toBe("0.0021")
     // UX-B-40: the link's name is the turn and its prompt.
     expect(
-      screen.getByRole("link", { name: /^turn 3: Refund it to my card \(/ })
+      screen.getByRole("link", { name: /^t3: Refund it to my card \(/ })
     ).toBeTruthy()
     // UX-S3-16: oldest first is one press.
     fireEvent.click(screen.getByRole("button", { name: "oldest first" }))

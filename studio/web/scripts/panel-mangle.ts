@@ -588,11 +588,62 @@ export function checkFlows(
       t.flags & ts.TypeFlags.Object &&
       !t.getProperties().length &&
       !t.getCallSignatures().length &&
-      !t.getConstructSignatures().length &&
-      !checker.getIndexInfosOfType(t).length
-    )
-      return checker.typeToString(t)
+      !t.getConstructSignatures().length
+    ) {
+      // {} — or an index signature alone (Record<string, unknown>,
+      // { [k: string]: object }): no name of its own to hold the
+      // value's names by, unless the index type is itself internal.
+      const infos = checker.getIndexInfosOfType(t)
+      if (infos.every((i) => !mentions(i.type))) return checker.typeToString(t)
+    }
+    if (checker.isArrayType(t)) {
+      // unknown[], object[]: an element is held by no name either.
+      const el = checker.getTypeArguments(t as ts.TypeReference)[0] as
+        ts.Type | undefined
+      return el && !mentions(el) ? opaque(el) : null
+    }
     return null
+  }
+  /** stdCallArg: e is (inside an array literal or parentheses) an
+   * argument of a standard container's call or constructor — a
+   * WeakMap's object key, Promise.resolve's value: held by the
+   * container, read back typed. */
+  const stdCallArg = (e: ts.Node): boolean => {
+    let n: ts.Node = e
+    while (
+      ts.isParenthesizedExpression(n.parent) ||
+      ts.isArrayLiteralExpression(n.parent)
+    )
+      n = n.parent
+    const call = n.parent
+    if (!(ts.isCallExpression(call) || ts.isNewExpression(call))) return false
+    if (!call.arguments?.includes(n as ts.Expression)) return false
+    const d = checker.getResolvedSignature(call)?.getDeclaration()
+    if (!d || !d.getSourceFile().isDeclarationFile) return false
+    const p = ts.findAncestor(
+      d,
+      (q) => ts.isInterfaceDeclaration(q) || ts.isClassDeclaration(q)
+    )
+    return !!p?.name && STD_GENERICS.has(p.name.text)
+  }
+  /** narrowedBack: an assertion to an opaque type whose enclosing
+   * assertion names an internal type again (`x as unknown as T`). */
+  const narrowedBack = (e: ts.Node): boolean => {
+    let n: ts.Node = e.parent
+    while (
+      ts.isParenthesizedExpression(n) ||
+      ts.isAsExpression(n) ||
+      ts.isTypeAssertionExpression(n)
+    ) {
+      if (
+        (ts.isAsExpression(n) || ts.isTypeAssertionExpression(n)) &&
+        n.expression !== e &&
+        mentions(checker.getTypeFromTypeNode(n.type))
+      )
+        return true
+      n = n.parent
+    }
+    return false
   }
   /** typeParamIn: a type parameter (but the standard containers') t is
    * or carries as a type argument, else null. */
@@ -637,6 +688,33 @@ export function checkFlows(
       ) {
         const m = mentions(checker.getContextualType(n), false)
         if (m) say(n, `a value of type any fills ${m}`)
+      }
+      // Widening: an internal value held where its declared or
+      // contextual type (a declaration, an assignment, a return, an
+      // array element, a literal's property, an assertion) is opaque —
+      // unknown, any, object, {}, an index signature alone, a type
+      // parameter — loses the type every later sink would have named
+      // (`const u: unknown = g; JSON.stringify(u)`). An argument is the
+      // call rules' (below), a standard container's exempt.
+      if (
+        ts.isExpression(n) &&
+        !ts.isParenthesizedExpression(n.parent) &&
+        !(ts.isPropertyAssignment(n.parent) && n.parent.name === n) &&
+        !(
+          (ts.isCallExpression(n.parent) || ts.isNewExpression(n.parent)) &&
+          !!n.parent.arguments?.includes(n)
+        ) &&
+        !stdCallArg(n)
+      ) {
+        const m = mentions(checker.getTypeAtLocation(n))
+        const ctx = m ? checker.getContextualType(n) : undefined
+        const why = ctx && !mentions(ctx) ? opaque(ctx) : null
+        if (m && why && !narrowedBack(n)) say(n, `${m} widened to ${why}`)
+      }
+      // A template stringifies the value whole.
+      if (ts.isTemplateSpan(n)) {
+        const m = mentions(checker.getTypeAtLocation(n.expression))
+        if (m) say(n.expression, `${m} interpolated into a template`)
       }
       // A callback's internal-typed parameter its caller feeds any
       // (`.then((r: ExperimentResult) => …)` on a Promise<any>).

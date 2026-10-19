@@ -297,14 +297,17 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    (obsdb.SessionTurnFacts, both backends) pending (the newest turn an open park: the list's "⏸ awaiting a decision" and the header's
 //    //    decide…), failed_turns, ended_turns (thread's busy policy: never failures), cancelled_turns (another cancel: never failures, U16-fix),
 //    //    resumes, outcomes (the newest 40, the strip) and forked_from_session; ?awaiting=1 / failed=1 / compacted=1 / status= (the newest
-//    //    turn's, the four) / lineage=child|fork / since= — obsdb.SessionQuery Awaiting/Failed/Compacted/Status/Lineage/Since, a bad
+//    //    turn's outcome as the session page words it, the four — a cancelled or busy-ended turn is not failed, a parked one not succeeded) / lineage=child|fork / since= — obsdb.SessionQuery Awaiting/Failed/Compacted/Status/Lineage/Since, a bad
 //    //    value a 400; the UI page /conversations/$id is a public id's runs, experiments nested, live — lib/links.ts conversationLink),
 //    //    sessions/{id} (+ delegated: its delegated sessions,
-//    //    each with its cost; delegated_usage and delegated_sessions_cost_* the whole delegated tree's, beside its own, U14),
+//    //    each with its cost; delegated_usage and delegated_sessions_cost_* the whole delegated tree's, beside its own, U14; delegated_holes:
+//    //    one hidden hole counting the delegated sessions a panel token is not shown, the delegated cost then unknown with a reason;
+//    //    a panel token reads an unknown session id as it reads another public id's, 403 — sessions/{id}, its timeline, entries, export),
 //    //    sessions/{id}/timeline (U12.2, capability "timeline" — obsdb.SessionEventReader over the session_events index,
 //    //    SQLite 0022 / ClickHouse 0025, every thread record and compaction marker by session, a record filed under no run
 //    //    included: the turns in order, the marks in record-time order — kind, lane approvals|grants|compaction|steer_queue|
-//    //    branch_fork|pool(|other), run_id/turn (null: session-level), entry, fields, content (a read token: content_hidden) —
+//    //    branch_fork|pool(|other), run_id/turn (null: session-level), entry, fields, content (a read token: content_hidden), actor on a
+//    //    decision (the resume's weft.approval.actor: metadata, every token reads it) —
 //    //    ≤ 2,000, the lanes' counts, holes not_recorded (only when a turn parked or resumed: a plain send writes no
 //    //    record)/stripped/hidden (a panel token's counts exact, both routes alike)/truncated cause response_cap; summarizer on a turn and the
 //    //    session, U15.1: thread's summarizer calls priced at read time, never in usage — the page /sessions/$id draws it as its

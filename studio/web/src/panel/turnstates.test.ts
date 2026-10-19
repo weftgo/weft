@@ -529,12 +529,35 @@ describe("parity with Studio's session timeline (U16)", () => {
       ],
       rows.map(turnOfRow)
     )
-    const studioBy = /by (t\d+)/.exec(ends.get("s_01-t3")!.text)![1]
+    const end = ends.get("s_01-t3")!
     fakeStudio(r)
     const el = await mount()
+    // The whole words, one string (lib/turn-chips.ts endedText): the
+    // panel's chip is Studio's end text behind the same glyph.
+    const { endGlyph } = await import("../lib/timeline")
+    expect(end.text).toBe("interrupted by t4")
     expect(turnOf(el, "s_01-t3")!.querySelector(".weft-st")?.textContent).toBe(
-      TURN_CHIP.ended("interrupt", studioBy)
+      `${endGlyph(end)} ${end.text}`
     )
+    // A rollback's too, off path included.
+    const rb = turnEnds(
+      [
+        {
+          at: "2026-10-01T09:03:00Z",
+          record: "thread",
+          kind: "interrupt",
+          event: "weft.thread.interrupt",
+          lane: "steer_queue",
+          run_id: "s_01-t3",
+          turn: 3,
+          content_mark: "",
+          fields: { by_run: "s_01-t4", policy: "rollback" },
+        },
+      ],
+      rows.map(turnOfRow)
+    ).get("s_01-t3")!
+    expect(`${endGlyph(rb)} ${rb.text}`).toBe(TURN_CHIP.ended("rollback", "t4"))
+    expect(rb.text).toBe("rolled back by t4 · off path")
     expect(TREE_MARK.startsWith(TURN_CHIP.compacted)).toBe(true)
   })
 })

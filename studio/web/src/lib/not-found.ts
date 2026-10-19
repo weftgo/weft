@@ -15,6 +15,16 @@ export function isNotFound(err: unknown): boolean {
   return err instanceof ApiError && err.status === 404
 }
 
+/** isForbidden is the API's 403: this token's scope does not cover the
+ * thing (a panel token's other public id, a read token's content). */
+export function isForbidden(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403
+}
+
+/** Why a 403 offers no retry: reading again answers the same. */
+export const FORBIDDEN_NOTE =
+  "no retry: this token's scope does not cover it, and reading it again answers the same 403 — open it with a token whose scope does"
+
 /** The list each kind goes back to. */
 const BACK: Record<NotFoundKind, { to: string; label: string }> = {
   run: { to: runsLink().to, label: "back to runs" },

@@ -1,5 +1,6 @@
 // The conversation page (U16, UX-F-02): every run of a public id — what
-// the devtools panel follows — oldest first, the experiments taken from
+// the devtools panel follows — newest first like the panel and the
+// session table (?order=oldest one press away), the experiments taken from
 // a turn nested under it (lib/conversation.ts), the header's turns,
 // tokens and cost, the thread sessions carrying the public id linked
 // to their own pages, and the page live (a run frame of the public id
@@ -22,18 +23,24 @@ import {
   splitConversation,
 } from "@/lib/conversation"
 import { runLink, runsLink, sessionLink } from "@/lib/links"
-import { LIVE_WORDS } from "@/lib/timeline"
+import { LIVE_WORDS, pageOrder } from "@/lib/timeline"
 import { THREAD_LINK } from "@/lib/status-class"
 import { CostText, useCostCapable } from "@/components/studio/cost"
-import { SessionTurns } from "@/components/studio/session-turns"
+import { OrderSwitch, SessionTurns } from "@/components/studio/session-turns"
 import { SessionState } from "@/components/studio/session-state"
 import { Button } from "@/components/ui/button"
+import { FORBIDDEN_NOTE, isForbidden } from "@/lib/not-found"
 import { Spinner } from "@/components/ui/spinner"
 
 /** The runs one read takes (the API's page cap). */
 const LIMIT = 500
 
 export const Route = createFileRoute("/conversations/$id")({
+  // The turn table's order (UX-S3-16): newest first, as the panel and
+  // the session table; ?order=oldest the other (any other value reads
+  // newest).
+  validateSearch: (s: Record<string, unknown>): { order?: "oldest" } =>
+    s.order === "oldest" ? { order: "oldest" } : {},
   component: ConversationPage,
 })
 
@@ -68,6 +75,8 @@ function ConversationCost({ turns }: { turns: RunRow[] }) {
 
 function ConversationPage() {
   const { id } = Route.useParams()
+  const order = pageOrder(Route.useSearch().order)
+  const navigate = Route.useNavigate()
   const costCapable = useCostCapable()
   const runs = useQuery({
     queryKey: ["conversation", id],
@@ -129,9 +138,20 @@ function ConversationPage() {
       <div className="mx-auto max-w-md space-y-3 py-24 text-center">
         <p className="font-mono text-xs text-faint">{id}</p>
         <p className="text-sm text-status-bad">{runs.error.message}</p>
-        <Button variant="outline" size="sm" onClick={() => void runs.refetch()}>
-          retry
-        </Button>
+        {isForbidden(runs.error) ? (
+          // A 403 answers the same next time: no retry.
+          <p className="text-xs text-muted-foreground" data-no-retry>
+            {FORBIDDEN_NOTE}
+          </p>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void runs.refetch()}
+          >
+            retry
+          </Button>
+        )}
       </div>
     )
   const { turns, experiments, orphans } = split
@@ -222,9 +242,27 @@ function ConversationPage() {
       ) : null}
 
       {turns.length ? (
-        <div className="overflow-x-auto rounded-lg border bg-background">
-          <SessionTurns turns={turns} experiments={experiments} />
-        </div>
+        <>
+          <OrderSwitch
+            order={order}
+            onChange={(o) =>
+              void navigate({
+                search: (prev) => ({
+                  ...prev,
+                  order: o === "oldest" ? "oldest" : undefined,
+                }),
+                replace: true,
+              })
+            }
+          />
+          <div className="overflow-x-auto rounded-lg border bg-background">
+            <SessionTurns
+              turns={turns}
+              experiments={experiments}
+              order={order}
+            />
+          </div>
+        </>
       ) : (
         <p className="py-8 text-center font-mono text-xs text-faint">
           {CONVERSATION.empty}

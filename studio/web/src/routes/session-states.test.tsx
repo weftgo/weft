@@ -69,7 +69,7 @@ describe("the words (lib/session-states.ts)", () => {
   it("awaiting, failed apart from ended, exchanges, the strip's name", () => {
     expect(awaitingWords(1)).toBe(`⏸ ${AWAITING} · 1 call`)
     expect(failedWords(2)).toBe("2✗ failed")
-    expect(endedWords(2)).toBe("2✗ interrupted")
+    expect(endedWords(2)).toBe("2✗ ended by a newer message")
     expect(failedWords(0) + endedWords(undefined)).toBe("")
     expect(cancelledWords(1)).toBe("1⊘ cancelled")
     expect(cancelledWords(0)).toBe("")
@@ -82,7 +82,7 @@ describe("the words (lib/session-states.ts)", () => {
     )
     expect(exchangesOfRow({ turns: 1 })).toBe("1 turn")
     expect(stripLabel({ turns: 3, outcomes: ["succeeded", "ended"] })).toBe(
-      "outcomes of the newest 2 turns, oldest first: succeeded, interrupted by a newer message — 1 older not shown"
+      "outcomes of the newest 2 turns, oldest first: succeeded, ended by a newer message — 1 older not shown"
     )
   })
   it("conversationLink is the public id's page, the id one segment", () => {
@@ -138,7 +138,7 @@ describe("the sessions list's states", () => {
     const { container } = renderApp("/sessions")
     await screen.findByText(awaitingWords(1))
     const war = container.querySelector('[data-session-ended="2"]')
-    expect(war?.textContent).toBe("2✗ interrupted")
+    expect(war?.textContent).toBe("2✗ ended by a newer message")
     expect(war?.className).toContain("text-muted-foreground") // neutral, never red
     expect(
       container.querySelector('[data-session-failed="1"]')?.className
@@ -149,7 +149,7 @@ describe("the sessions list's states", () => {
     )!
     expect(strip.textContent).toBe("✓✓✓✗✓✗✓")
     expect(strip.getAttribute("aria-label")).toContain(
-      "interrupted by a newer message"
+      "ended by a newer message"
     )
     expect(screen.getByText("3 exchanges · 4 turns")).toBeTruthy()
     // A turn cancelled for another reason: apart from the failures,

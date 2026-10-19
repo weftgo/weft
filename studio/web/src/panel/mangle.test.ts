@@ -293,6 +293,26 @@ export {}
       "export function must(v: unknown): asserts v is TurnView[] { if (!v) throw 0 }",
       /type guard makes TurnView/,
     ],
+    // (h) P9-pre-web-fix 1: widened first, then sunk — an internal value
+    // held in an opaque declared or contextual type.
+    [
+      "const u: unknown = state; JSON.stringify(u)",
+      /PanelState widened to unknown/,
+    ],
+    ["let u: unknown; u = tree; void u", /TreeState widened to unknown/],
+    [
+      "export function f(): unknown { return turn }",
+      /TurnView widened to unknown/,
+    ],
+    [
+      "const o: Record<string, unknown> = { g: state }; void o",
+      /PanelState \(via \.g\) widened to Record<string, unknown>/,
+    ],
+    ["const a: unknown[] = [cur]; void a", /Cursor widened to unknown/],
+    ["const u: object = state; Object.keys(u)", /PanelState widened to object/],
+    ["void `${tree as unknown}`", /TreeState widened to unknown/],
+    ["void `${state}`", /PanelState interpolated into a template/],
+    ["export const f = (): {} => model", /PanelModel widened to \{\}/],
   ])("%s", (body, want) => {
     expect(() => analyze(body)).toThrow(want)
   })
@@ -334,6 +354,9 @@ export async function f() {
 export function isTree(v: TreeState | TurnView): v is TreeState { return "applied" in v }
 fmt(turn.folded)
 fmt({ folded: turn.folded })
+const held: TurnView[] = [turn]
+const byID: Record<string, TurnView> = { a: turn }
+void held, byID, \`\${turn.folded}\`
 `)
     expect(r.names).toEqual(
       expect.arrayContaining(["cursorAt", "tooNew", "turnList"])

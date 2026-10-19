@@ -34,6 +34,8 @@ import {
   CONTEXT_LANE,
   contextMarkLine,
   contextRows,
+  END_WORDS,
+  endGlyph,
   exchanges,
   FORK_NO_PAGE,
   forkWords,
@@ -478,7 +480,9 @@ export function EndChip({
   onSelect?: (key: string) => void
 }) {
   const cls =
-    "shrink-0 rounded-sm border px-1.5 py-px font-mono text-[11px] text-muted-foreground"
+    // It wraps at a phone's width rather than push the row sideways
+    // ("↶ rolled back by t9 · off path" is wider than 360 px leaves).
+    "min-h-6 min-w-0 max-w-full rounded-sm border px-1.5 py-px text-left font-mono text-[11px] break-words text-muted-foreground"
   return onSelect ? (
     <button
       type="button"
@@ -487,12 +491,12 @@ export function EndChip({
       onClick={() => onSelect(end.mark)}
       data-turn-end={end.kind}
     >
-      <span aria-hidden>{end.kind === "rolled_back" ? "↶ " : "✗ "}</span>
+      <span aria-hidden>{endGlyph(end)} </span>
       {end.text}
     </button>
   ) : (
     <span className={cls} title={end.title} data-turn-end={end.kind}>
-      <span aria-hidden>{end.kind === "rolled_back" ? "↶ " : "✗ "}</span>
+      <span aria-hidden>{endGlyph(end)} </span>
       {end.text}
     </span>
   )
@@ -572,7 +576,7 @@ function TurnRow({
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
         <Link
           {...runLink(t.run_id)}
-          className={`shrink-0 font-mono ${THREAD_LINK}`}
+          className={`inline-flex min-h-6 min-w-6 shrink-0 items-center font-mono ${THREAD_LINK}`}
           title={t.run_id}
           data-turn-link={t.run_id}
         >
@@ -635,13 +639,25 @@ function TurnRow({
           style={{ left: `${bar.left}%`, width: `${bar.width}%` }}
         />
       </div>
-      {row?.err ? (
+      {row?.err && end ? (
         // An interrupted turn's error is the cancel its policy caused:
-        // muted, never the failure red.
+        // the end's word, muted, the raw error one press away.
+        <details
+          className="col-start-2 font-mono text-[11px] text-muted-foreground"
+          data-turn-err="ended"
+        >
+          <summary className="cursor-pointer">
+            {endGlyph(end)} {end.text} · {END_WORDS.errorWord}
+          </summary>
+          <div className="break-words" title={row.err}>
+            {row.err}
+          </div>
+        </details>
+      ) : row?.err ? (
         <div
-          className={`col-start-2 truncate font-mono text-[11px] ${end ? "text-muted-foreground" : "text-status-bad"}`}
+          className="col-start-2 truncate font-mono text-[11px] text-status-bad"
           title={row.err}
-          data-turn-err={end ? "ended" : "failed"}
+          data-turn-err="failed"
         >
           {row.err}
         </div>
@@ -679,7 +695,7 @@ function MarkButton({
         type="button"
         aria-pressed={selected}
         onClick={() => onSelect(selected ? undefined : k)}
-        className={`flex w-full min-w-0 items-baseline gap-1.5 rounded-sm px-1.5 py-0.5 text-left font-mono text-[11px] hover:ring-1 hover:ring-border ${selected ? "ring-2 ring-thread-ink" : ""} ${muted ? DIMMED : ""}`}
+        className={`flex min-h-6 w-full min-w-0 items-baseline gap-1.5 rounded-sm px-1.5 py-1 text-left font-mono text-[11px] hover:ring-1 hover:ring-border ${selected ? "ring-2 ring-thread-ink" : ""} ${muted ? DIMMED : ""}`}
         data-mark={k}
         data-mark-kind={m.kind}
         data-mark-lane={m.lane}

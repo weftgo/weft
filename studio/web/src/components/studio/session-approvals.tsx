@@ -24,17 +24,21 @@ import { absoluteTime } from "@/lib/format"
 import { runLink, sessionViewLink } from "@/lib/links"
 import { turnTag } from "@/lib/status"
 import { THREAD_LINK, TONE_TEXT } from "@/lib/status-class"
-import { clockTime } from "@/lib/timeline"
+import { clockTime, floorOf, parkedCallLink } from "@/lib/timeline"
 import { HoleBadge } from "@/components/studio/hole-badge"
 
 export function SessionApprovals({
   sessionID,
   turns,
   marks,
+  cut = false,
 }: {
   sessionID: string
   turns: readonly TimelineTurn[]
   marks: readonly SessionMark[]
+  /** The marks were cut at the timeline's cap: the counts are floors
+   * (the page draws the truncated hole above). */
+  cut?: boolean
 }) {
   const decisions = decisionRows(marks, turns)
   const grants = grantRows(marks)
@@ -58,7 +62,8 @@ export function SessionApprovals({
       {decisions.length ? (
         <section className="space-y-1.5" aria-labelledby="approvals-decisions">
           <h2 id="approvals-decisions" className="eyebrow">
-            {APPROVALS.decisions} · {decisions.length}
+            {APPROVALS.decisions} · {floorOf(cut)}
+            {decisions.length}
           </h2>
           <div className="overflow-x-auto rounded-lg border bg-background">
             <table className="w-full min-w-[40rem] text-left font-mono text-[11px]">
@@ -78,6 +83,7 @@ export function SessionApprovals({
                     r={r}
                     sessionID={sessionID}
                     tag={tag}
+                    turns={turns}
                   />
                 ))}
               </tbody>
@@ -88,7 +94,8 @@ export function SessionApprovals({
       {grants.length ? (
         <section className="space-y-1.5" aria-labelledby="approvals-grants">
           <h2 id="approvals-grants" className="eyebrow">
-            {APPROVALS.grants} · {grants.length}
+            {APPROVALS.grants} · {floorOf(cut)}
+            {grants.length}
           </h2>
           <div className="overflow-x-auto rounded-lg border bg-background">
             <table className="w-full min-w-[40rem] text-left font-mono text-[11px]">
@@ -121,10 +128,12 @@ function DecisionTr({
   r,
   sessionID,
   tag,
+  turns,
 }: {
   r: DecisionRow
   sessionID: string
   tag: (run: string) => string
+  turns: readonly TimelineTurn[]
 }) {
   const o = rowOutcome(r)
   return (
@@ -178,7 +187,10 @@ function DecisionTr({
       <td className="px-2 py-1 whitespace-nowrap">
         {r.parked ? (
           <Link
-            {...runLink(r.parked, { call: r.call })}
+            {...parkedCallLink(
+              turns.find((t) => t.run_id === r.parked) ?? r.parked,
+              r.call
+            )}
             className={THREAD_LINK}
           >
             {tag(r.parked)}
@@ -239,7 +251,7 @@ function GrantTr({
                 {i ? ", " : ""}
                 {u.run ? (
                   <Link
-                    {...runLink(u.run, { call: u.call })}
+                    {...parkedCallLink(u.run, u.call)}
                     className={THREAD_LINK}
                   >
                     {u.call} ({tag(u.run)})

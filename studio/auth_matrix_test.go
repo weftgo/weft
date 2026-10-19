@@ -365,6 +365,18 @@ func TestAuthMatrix(t *testing.T) {
 			}
 		}
 	}
+	// sessionScoped: scoped, but a panel token's unknown session is the
+	// 403 another public id's gets (sessionReadError) — the answer never
+	// says whether a session id exists outside its scope.
+	sessionScoped := func(found int) func(kind, res string) int {
+		in := scoped(found)
+		return func(kind, res string) int {
+			if res == "missing" && kind != "server" {
+				return forbidden403
+			}
+			return in(kind, res)
+		}
+	}
 	// acting: scoped, and a read-scoped panel token is refused outright.
 	acting := func(found int) func(kind, res string) int {
 		in := scoped(found)
@@ -674,13 +686,17 @@ func TestAuthMatrix(t *testing.T) {
 				}
 				return forbidden403
 			}},
-		{name: "GET /api/sessions/{id}", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] }, resources: all, want: scoped(ok)},
+		{name: "GET /api/sessions/{id}", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] }, resources: all, want: sessionScoped(ok)},
 		// The session timeline and its entries (U12.2): sessions/{id}'s
 		// scope — a panel token reads its public id's session only (the
 		// marks of another public id inside it are a hidden hole, the
 		// content a read token's hidden too: TestSessionTimelineScope).
-		{name: "GET /api/sessions/{id}/timeline", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/timeline" }, resources: all, want: scoped(ok)},
-		{name: "GET /api/sessions/{id}/entries", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/entries?limit=10" }, resources: all, want: scoped(ok)},
+		{name: "GET /api/sessions/{id}/timeline", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/timeline" }, resources: all, want: sessionScoped(ok)},
+		{name: "GET /api/sessions/{id}/entries", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/entries?limit=10" }, resources: all, want: sessionScoped(ok)},
+		// The conversation export (UX-B-29): sessions/{id}'s scope, HEAD
+		// answering as GET does.
+		{name: "GET /api/sessions/{id}/export", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/export?format=jsonl" }, resources: all, want: sessionScoped(ok)},
+		{name: "HEAD /api/sessions/{id}/export", method: "HEAD", path: func(res string) string { return "/api/sessions/" + session[res] + "/export?format=jsonl" }, resources: all, want: sessionScoped(ok)},
 		// The tag filter (D6): the list's scoping, forced onto a panel
 		// token's public id.
 		{name: "GET /api/sessions?tag.<k>=<v>", method: "GET", path: fixed("/api/sessions?tag.tenant=acme"), resources: one, want: anyValid(ok)},

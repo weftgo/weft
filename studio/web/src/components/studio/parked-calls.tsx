@@ -48,6 +48,7 @@ import {
   runtimesQuery,
   sessionQuery,
   studioToken,
+  runMarksQuery,
   timelineQuery,
 } from "@/lib/api"
 import type {
@@ -453,8 +454,18 @@ function useRequestExpiries(doc: RunDoc) {
     ...timelineQuery(doc.session_id),
     enabled: on,
   })
+  // Past the timeline's mark cap (it keeps the oldest) the newest
+  // requests are cut: the run's own marks are read from /entries.
+  const cut = !!tl.data?.holes.some((h) => h.hole === "truncated")
+  const own = useQuery({
+    ...runMarksQuery(doc.session_id, doc.id),
+    enabled: on && cut,
+  })
   const exp = on
-    ? requestExpiries(tl.data?.marks ?? [], doc.id)
+    ? requestExpiries(
+        [...(tl.data?.marks ?? []), ...(cut ? (own.data ?? []) : [])],
+        doc.id
+      )
     : new Map<string, string>()
   const [now, setNow] = useState(() => Date.now())
   const ticking = [...exp.values()].some((e) => Date.parse(e) > now)

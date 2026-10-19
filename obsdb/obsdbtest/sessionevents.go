@@ -136,6 +136,33 @@ func sessionEvents(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if none, err := er.SessionEvents(ctx(), obsdb.SessionEventQuery{SessionID: "s_none"}); err != nil || len(none.Events) != 0 || none.Total != 0 {
 			t.Errorf("SessionEvents(s_none) = %+v, %v; want empty, no error", none, err)
 		}
+		// RunIDs: the named runs' events alone — Total and offsets count
+		// them alone, the runless record is under none, an unknown id
+		// selects nothing (Studio's decisions read t1 + t2, U13.2).
+		turns := func(q obsdb.SessionEventQuery) ([]string, int) {
+			t.Helper()
+			p, err := er.SessionEvents(ctx(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, e := range p.Events {
+				out = append(out, line(e))
+			}
+			return out, p.Total
+		}
+		if got, n := turns(obsdb.SessionEventQuery{SessionID: sid, RunIDs: []string{sid + "-t1", sid + "-t2", sid + "-t5"}}); !slices.Equal(got, []string{
+			"s_acme-t1 approval.request", "s_acme-t1 approval.decision",
+			"s_acme-t5 approval.request", "s_acme-t5 approval.decision", "s_acme-t5 grant.mint",
+		}) || n != 5 {
+			t.Errorf("SessionEvents(RunIDs t1, t2, t5) = %q (total %d), want t1's and t5's five", got, n)
+		}
+		if got, n := turns(obsdb.SessionEventQuery{SessionID: sid, RunIDs: []string{sid + "-t5"}, Offset: 1, Limit: 1}); !slices.Equal(got, []string{"s_acme-t5 approval.decision"}) || n != 3 {
+			t.Errorf("SessionEvents(RunIDs t5, offset 1, limit 1) = %q (total %d), want its decision of 3", got, n)
+		}
+		if got, n := turns(obsdb.SessionEventQuery{SessionID: sid, RunIDs: []string{"s_nope-t1"}}); len(got) != 0 || n != 0 {
+			t.Errorf("SessionEvents(RunIDs unknown) = %q (total %d), want none", got, n)
+		}
 
 		// The tag filter selects sessions, never turns: t6 carries no tag,
 		// the session still lists its six turns.

@@ -23,6 +23,7 @@ import { attemptLine, msText } from "@/lib/attempts"
 import { toolFailure } from "@/lib/error-kind"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "@/lib/events"
 import { spanMs, usageSummary } from "@/lib/format"
+import { AWAITING } from "@/lib/status"
 import { compareLink, runLink } from "@/lib/links"
 import {
   editPromptAndReplay,
@@ -149,7 +150,7 @@ function RunFacts({
       ) : null}
       {run.pending.length > 0 ? (
         <div className="rounded-md border border-ev-error/30 px-3 py-2 text-xs">
-          <span className="eyebrow">pending approval</span>
+          <span className="eyebrow">{AWAITING}</span>
           <ul className="mt-1 space-y-0.5 font-mono">
             {run.pending.map((p) => (
               <li key={p.id}>

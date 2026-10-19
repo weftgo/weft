@@ -999,7 +999,10 @@ ones, and on ClickHouse their `otel_logs` rows, included); ClickHouse's
 `thread_records` are read back through it per session on both backends
 (`checkSessionEvents`); obsdbtest's `SessionEvents` case pins the order,
 the runless record, the paging, the dedup, the same-time tie order, the
-`PublicID` filter, the tag filter, the deletions and the sweep.
+`PublicID` filter, the `RunIDs` filter (the named runs' events alone, a
+runless one under none, `Total` and the offsets counting them — what
+Studio's decisions read, U13.2), the tag filter, the deletions and the
+sweep.
 
 Studio derives two reads from it (U12.2): `GET
 /api/sessions/{id}/timeline` — the session's turns (`DB.Session`'s,
@@ -1053,28 +1056,56 @@ a parked run that `resumed_by` names and `resumes` on the run whose
 `resumed_from` names a park — the same block either side: `run` (the
 other run), `at` (the resume's start), `actor` (the resume's
 `weft.approval.actor`, metadata), `source`, `calls` (at most 32, `more`
-the rest) and `error` (a failed read, said, never an empty list). The
-calls are the resume's `weft.resume.calls` in call order (`source`
-`resume_calls`); a resume recorded without it reads them from its
-pre-step results — the step-0 output batches of tool messages before
-the model's first message — `DENIED: no decision` → `no_decision`,
-`DENIED: expired…` → `expired`, any other `DENIED: …` → `denied`, else
-`approved` (`source` `transcript`: a resolve is not told apart). Each
-call: `call_id`, `name` (the transcript's, else the `execute_tool`
-span's), `outcome` (`approved`, `denied`, `resolved`, `expired`,
-`no_decision` — a `denied` thread decided `via` `expiry`, or whose
-result reads `DENIED: expired`, is `expired`), `via` / `key_id` /
-`grant_id` / `at` from thread's `approval.decision` record filed under
-the parked run (§4; its body's `at`), else `weft.tool.approved_by` /
-`weft.grant.id` and a denied call's zero-length span start (§3), `who`
-(the record's `content.who`), and a denial's `reason` (the record's
-`content.reason`, else the result text after `DENIED: `). Who and the
-reason are content: a read-scoped panel token gets `who_hidden` and
-`reason_badge` `hidden`; a denial with no reason recorded (content off)
+the rest), `hole`, `notes` (the block's honesty lines: the parked run
+that could not be read beside a resume that could, thread's records
+that failed to read or lay past the read's cap) and `error` (a failed
+read, said, never an empty list). The calls are the resume's
+`weft.resume.calls` in call order (`source` `resume_calls`); a resume
+recorded without it reads them from its pre-step results — the step-0
+output batches of tool messages before the model's first message —
+`DENIED: no decision` → `no_decision`, `DENIED: expired…` → `expired`,
+any other `DENIED: …` → `denied`, else `approved` (`source`
+`transcript`, each call `derived` unless a thread record names its
+outcome: a resolve is otherwise not told apart); with no transcript
+either (content off before U13.1) from its step-0 `execute_tool` spans
+that a resume denied (`weft.tool.denied`, `denied_kind` `no_decision`
+→ `no_decision`) or that started before the first `chat` span
+(`approved`; `source` `spans`, each `derived`: a resolve has no span);
+with none of these `source` `none` and `hole` `not_recorded` — never an
+empty list without one. Each call: `call_id`, `name` (the transcript's,
+else the `execute_tool` span's), `outcome` (`approved`, `denied`,
+`resolved`, `expired`, `no_decision` — thread's record's `outcome` when
+one names the call: `approve` → `approved`, `deny` → `denied`, `resolve`
+/ `resolve_error` → `resolved`; a `denied` thread decided `via`
+`expiry`, or whose result reads `DENIED: expired`, is `expired`), `via`
+/ `key_id` / `grant_id` / `at` from thread's `approval.decision` records
+filed under the parked run or the resume (§4; read through
+`SessionEventQuery.RunIDs`, those two runs alone, at most 5,000 records,
+a note past them), folded as thread folds them (ADR 0021 §5): a deny
+resolves, a resolve resolves, approvals resolve together — every
+approver's `who` and `key_id` named, `" + "`-joined, in record order (a
+quorum: `alice + bob`, `k_alice + k_bob`) — and a deny or resolve beside
+an approval is a split verdict, `denied` `via` `quorum`, its reason the
+model-visible `DENIED: …` text of the transcript (the session's own
+expiry or interrupt beside an approval stays its own deny); else
+`weft.tool.approved_by` / `weft.grant.id` and a denied call's
+zero-length span start (§3; the flag read as a bool or the string
+`"true"`, `obsdb.AttrTrue`), `who` (the records' `content.who`), and a
+denial's `reason` (the record's `content.reason`, else the result text
+after `DENIED: `). The actor is metadata — an opaque id the app chose —
+and every identity reads it; thread's `who` and the reason are content:
+a read-scoped panel token gets `reason_badge` `hidden`, and
+`who_hidden` only when a `who` exists in content alone (the resume
+names no actor); a denial with no reason recorded (content off)
 `reason_badge` `not_recorded`. A panel token's resume of another public
 id is left out (no block). Studio's `TestRunDecisions` pins it over the
 `thread_approvals`, `thread_content_off`, `thread_grants`, `resumed` and
-`approval_denied` fixtures (`studio/testdata/api/decisions.golden.json`).
+`approval_denied` fixtures (`studio/testdata/api/decisions.golden.json`);
+`TestDecisionsSupportDesk` over `resumed` without its actor
+(rw.support-desk's own shape, `decisions_support_desk.golden.json`),
+`TestDecisionsWithoutResumeCalls` over those fixtures with
+`weft.resume.calls`, the transcript or the call ids left out and the
+denied flag stringified, and `TestFoldDecisions` the fold.
 
 **Manifests** (U27) are not derived from the records: a row's
 `manifest_hash` is the root span's `weft.manifest.hash` (§2), and a

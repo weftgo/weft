@@ -225,18 +225,20 @@ export function nextCursor(
   return next
 }
 
-/** GET /api/runs/{id} → RunDetail: the row and the subagent children,
- * joined by parent_call_id — each child's events load lazily. */
 /** One parked call's decision as a resume applied it (U13.2,
  * studio/decisions.go): outcome approved, denied, resolved, expired or
- * no_decision; via thread's (user, signed, grant, approver, quorum,
- * expiry, …) or the span's approved_by; who thread's content.who
- * (who_hidden for a read token); reason a denial's, else reason_badge
- * (hidden, not_recorded); at the decision's own time when recorded. */
+ * no_decision (derived: read from the result text or a span, not a
+ * decision record); via thread's (user, signed, grant, approver,
+ * quorum, expiry, …) or the span's approved_by; who thread's
+ * content.who — a quorum's approvers " + "-joined, as key_id their keys
+ * — (who_hidden for a read token when no actor names the decider);
+ * reason a denial's, else reason_badge (hidden, not_recorded); at the
+ * decision's own time when recorded. */
 export interface DecidedCall {
   call_id: string
   name?: string
   outcome: string
+  derived?: boolean
   via?: string
   key_id?: string
   grant_id?: string
@@ -249,9 +251,11 @@ export interface DecidedCall {
 
 /** The decisions one resume applied to one parked run: run the other
  * side (the resume on decided, the parked run on resumes), at the
- * resume's start, actor its weft.approval.actor, source resume_calls or
- * transcript (derived from the pre-step results), more the calls past
- * the cap, error a failed read. */
+ * resume's start, actor its weft.approval.actor (metadata), source
+ * resume_calls, transcript (the pre-step results), spans (the pre-step
+ * execute_tool spans) or none — then hole not_recorded —, more the
+ * calls past the cap, notes the block's honesty lines (a read beside it
+ * that failed, records past a cap), error a failed read. */
 export interface DecisionDoc {
   run: string
   at: string
@@ -259,9 +263,13 @@ export interface DecisionDoc {
   source: string
   calls: DecidedCall[]
   more?: number
+  hole?: string
+  notes?: string[]
   error?: string
 }
 
+/** GET /api/runs/{id} → RunDetail: the row and the subagent children,
+ * joined by parent_call_id — each child's events load lazily. */
 export interface RunDoc extends RunRow {
   children: RunRow[]
   /** On a parked run a resume names: each call's decision (U13.2). */
@@ -1664,7 +1672,7 @@ export function requestsQuery(runId: string) {
 // missing for a reason carries its badge, never just goes missing.
 
 /** ok (finished), error (the run failed or stopped reporting inside
- * it), parked (finished with a call awaiting approval), running.
+ * it), parked (finished with a call awaiting a decision), running.
  * not_started is reserved: the server does not produce it today. */
 export type StepStatus = "ok" | "error" | "parked" | "running" | "not_started"
 
@@ -2378,7 +2386,7 @@ export function experimentQuery(id: string) {
 }
 
 /** POST /api/runs/{id}/approvals: a parked runtime-started run's
- * continue / skip / resolve (ADR 0007's verbs, WEFT-DEVTOOLS §8.2). */
+ * approve / deny / resolve (ADR 0007's verbs, lib/decisions.ts's words). */
 export function postApproval(
   runID: string,
   body: {

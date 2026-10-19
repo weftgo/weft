@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
@@ -24,17 +25,25 @@ func (d *DB) SessionEvents(ctx context.Context, q obsdb.SessionEventQuery) (_ ob
 	if q.SessionID == "" {
 		return page, nil
 	}
+	where := `session_id = ? AND (? = '' OR public_id = ?)`
+	args := []any{q.SessionID, q.PublicID, q.PublicID}
+	if len(q.RunIDs) > 0 {
+		// q.RunIDs: the runs' events alone (a runless one is none of them).
+		where += ` AND run_id IN (?` + strings.Repeat(`, ?`, len(q.RunIDs)-1) + `)`
+		for _, id := range q.RunIDs {
+			args = append(args, id)
+		}
+	}
 	if err := d.reads.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM session_events WHERE session_id = ? AND (? = '' OR public_id = ?)`,
-		q.SessionID, q.PublicID, q.PublicID).Scan(&page.Total); err != nil {
+		`SELECT COUNT(*) FROM session_events WHERE `+where, args...).Scan(&page.Total); err != nil {
 		return obsdb.SessionEventPage{}, err
 	}
 	offset := max(q.Offset, 0)
 	rs, err := d.reads.QueryContext(ctx,
 		`SELECT run_id, kind, event_name, public_id, content, time_ns, body FROM session_events
-		WHERE session_id = ? AND (? = '' OR public_id = ?)
+		WHERE `+where+`
 		ORDER BY time_ns, run_id, kind, body LIMIT ? OFFSET ?`,
-		q.SessionID, q.PublicID, q.PublicID, q.PageLimit(), offset)
+		append(args, q.PageLimit(), offset)...)
 	if err != nil {
 		return obsdb.SessionEventPage{}, err
 	}

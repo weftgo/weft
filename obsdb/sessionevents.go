@@ -41,10 +41,14 @@ type SessionEventReader interface {
 // weft.public_id (a panel token's scope): the page, the offsets and
 // Total all count those alone. Offset is the number of events skipped
 // (pass the previous offset plus the page's length to continue); Limit:
-// 0 = 100, max MaxSessionEventLimit.
+// 0 = 100, max MaxSessionEventLimit. RunIDs, when set, keeps only the
+// events filed under one of those runs (a runless record is under none
+// of them) — one turn's facts without paging the whole session; the
+// page, the offsets and Total count those alone, as under PublicID.
 type SessionEventQuery struct {
 	SessionID string
 	PublicID  string
+	RunIDs    []string
 	Offset    int
 	Limit     int
 }

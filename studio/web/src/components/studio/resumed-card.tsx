@@ -2,13 +2,15 @@
 // calls — the parked turn's, each with its outcome, decider and reason
 // (lib/decisions.ts) — drawn before step 0, never inside it: the
 // approved calls ran before the model's first call, and step 0 no
-// longer draws them as its own (withoutDecided). The panel's turn view
-// draws the same card (parity.test.ts).
+// longer draws the ones this card lists (withoutDecided) — so an
+// approved or resolved row carries what the call left ("→ …",
+// decidedResult). The panel's turn view draws the same card
+// (parity.test.ts).
 import { Link } from "@tanstack/react-router"
 
 import { DecisionRow, DecisionsNote } from "@/components/studio/parked-calls"
 import type { RunDoc } from "@/lib/api"
-import { resumedHead } from "@/lib/decisions"
+import { decidedResult, resumedHead } from "@/lib/decisions"
 import type { FoldedToolCall } from "@/lib/events"
 import { runLink } from "@/lib/links"
 import { turnTag } from "@/lib/status"
@@ -31,14 +33,14 @@ export function ResumedCard({
     >
       <Link
         {...runLink(d.run)}
-        className="eyebrow hover:underline"
+        className="eyebrow underline decoration-thread-ink underline-offset-2 hover:decoration-2"
         data-resumed-from={d.run}
       >
         {resumedHead(d, from)}
       </Link>
       <ul className="mt-1 space-y-1">
         {d.calls.map((c) => {
-          const ran = calls?.find((x) => x.callId === c.call_id)?.result
+          const ran = decidedResult(c, calls)
           return (
             <li
               key={c.call_id}
@@ -47,9 +49,9 @@ export function ResumedCard({
             >
               {c.name || c.call_id}
               <DecisionRow c={c} d={d} />
-              {ran && (c.outcome === "approved" || c.outcome === "resolved") ? (
+              {ran ? (
                 <div className="truncate text-faint" data-resumed-result="">
-                  → {ran.content}
+                  → {ran}
                 </div>
               ) : null}
             </li>

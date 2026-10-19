@@ -2084,18 +2084,89 @@ describe("decisions on both surfaces (U13.2)", () => {
   // The parked call's row in the panel's approvals block (the resumed
   // card's rows carry no data-key).
   const PARKED_DECISION = `.weft-call[data-key="${APP_CALL.id}"] [data-weft-decision]`
-  const blocks = golden<Record<string, DecisionDoc>>("decisions")
-  const serveDecided = (studioMeta: boolean, read?: boolean) => {
+  const blocks = {
+    ...golden<Record<string, DecisionDoc>>("decisions"),
+    ...golden<Record<string, DecisionDoc>>("decisions_support_desk"),
+  }
+  // The decision time is each surface's own clock (Studio's local
+  // absoluteTime, the panel's UTC): compared without it.
+  const untimed = (s: string | null | undefined) =>
+    (s ?? "").split(" · ").slice(0, -1).join(" · ")
+  /** The refund rw.support-desk's resume runs before step 0, its result. */
+  const REFUND = "refund of 249.90 issued"
+  const serveDecided = (
+    studioMeta: boolean,
+    read?: boolean,
+    seed: "thread" | "support_desk" = "thread"
+  ) => {
     const fake = serveAppTurn(new FakeStudio(), { resumed: true, studioMeta })
-    // The fixture's parked call (call_deploy_1) stands for r1.
+    // The fixture's parked call (call_deploy_1) stands for r1 (the
+    // support desk's first call, its approved one).
     const call = (d: DecisionDoc) => ({
       ...d,
-      calls: d.calls.map((c) => ({ ...c, call_id: APP_CALL.id })),
+      calls: d.calls.slice(0, 1).map((c) => ({ ...c, call_id: APP_CALL.id })),
     })
     const t1 = call(
-      blocks[read ? "read_token_t1_decided" : "thread_t1_decided"]
+      blocks[
+        seed === "support_desk"
+          ? "support_desk_decided"
+          : read
+            ? "read_token_t1_decided"
+            : "thread_t1_decided"
+      ]
     )
-    const t2 = call(blocks.thread_t2_resumes)
+    const t2 = call(
+      blocks[
+        seed === "support_desk" ? "support_desk_resumes" : "thread_t2_resumes"
+      ]
+    )
+    if (seed === "support_desk") {
+      // The approved call ran before step 0's model call: its
+      // tool_start / tool_finish come before any step_start.
+      const at = (pos: number, event: object) => ({ pos, time: T0, event })
+      fake.on(
+        `GET runs/${APP_RESUMED}/events`,
+        pagedEvents([
+          at(0, {
+            type: "run_start",
+            id: APP_RESUMED,
+            model: { provider: "demo", name: "ops" },
+            agent: "approvals-example",
+          }),
+          at(1, {
+            type: "tool_start",
+            run_id: APP_RESUMED,
+            seq: 1,
+            call_id: APP_CALL.id,
+            name: APP_CALL.name,
+            args: APP_CALL.args,
+          }),
+          at(2, {
+            type: "tool_finish",
+            run_id: APP_RESUMED,
+            seq: 1,
+            call_id: APP_CALL.id,
+            name: APP_CALL.name,
+            content: REFUND,
+            is_error: false,
+          }),
+          at(3, { type: "step_start", run_id: APP_RESUMED, index: 0 }),
+          at(4, {
+            type: "step_finish",
+            run_id: APP_RESUMED,
+            index: 0,
+            reason: "stop",
+            usage: { input_tokens: 10, output_tokens: 5 },
+          }),
+          at(5, {
+            type: "run_finish",
+            run_id: APP_RESUMED,
+            usage: { input_tokens: 10, output_tokens: 5 },
+            steps: 1,
+          }),
+        ])
+      )
+    }
     fake
       .on(`GET runs/${APP_PARKED}`, {
         ...appParkedRow(),
@@ -2174,8 +2245,61 @@ describe("decisions on both surfaces (U13.2)", () => {
     ).not.toContain("approve")
     cleanup()
     expect([panel, studio]).toEqual([DONE_LINE, DONE_LINE])
-    expect(panelDetail).toBe(studioDetail)
-    expect(studioDetail).toMatch(/^via user · /)
+    expect(untimed(panelDetail)).toBe(untimed(studioDetail))
+    expect(untimed(studioDetail)).toBe("via user")
+    // Each surface's clock: the panel's UTC, Studio's local with its zone.
+    expect(panelDetail).toMatch(/ · \d\d:\d\d:\d\d UTC$/)
+    expect(studioDetail).toMatch(/ · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d \S+$/)
+  })
+
+  // U13.2-fix 6: rw.support-desk itself — a plain Generate the arena
+  // resumes with Approve, no actor, no denial — and the resumed card's
+  // result line (fix 2): the refund ran before step 0, which no longer
+  // draws it, so the card says what it left, on both surfaces.
+  it("rw.support-desk's shape: ✓ approved → t2, and t2's card carries the refund's result", async () => {
+    const LINE = "✓ approved → t2"
+    serveDecided(false, false, "support_desk")
+    let el = await panelSeen(APP_PARKED, PARKED_DECISION)
+    const dec = $(el, PARKED_DECISION)!
+    const panelParked = `${dec.firstChild?.textContent} → ${dec.querySelector("[data-weft-resumed]")?.textContent}`
+    await reset(el)
+    serveDecided(false, false, "support_desk")
+    el = await panelSeen(
+      APP_RESUMED,
+      "[data-weft-resumed-card] [data-weft-result]"
+    )
+    const card = $(el, "[data-weft-resumed-card]")!
+    const panelCard = [
+      card.querySelector("[data-weft-decision]")?.firstChild?.textContent,
+      card.querySelector("[data-weft-result]")?.textContent,
+    ]
+    // Step 0 no longer draws the call the card lists.
+    expect($(el, '.weft-step[data-key="s0"]')?.textContent ?? "").not.toContain(
+      REFUND
+    )
+    await reset(el)
+    serveDecided(true, false, "support_desk")
+    renderApp(`/runs/${APP_PARKED}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-decision-line]")).toBeTruthy()
+    )
+    const row = document.querySelector("[data-decision]")!
+    const studioParked = `${row.querySelector("[data-decision-line]")?.textContent} → ${row.querySelector("[data-resumed]")?.textContent}`
+    cleanup()
+    serveDecided(true, false, "support_desk")
+    renderApp(`/runs/${APP_RESUMED}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-resumed-result]")).toBeTruthy()
+    )
+    const sc = document.querySelector("[data-resumed-card]")!
+    const studioCard = [
+      sc.querySelector("[data-decision-line]")?.textContent,
+      sc.querySelector("[data-resumed-result]")?.textContent,
+    ]
+    cleanup()
+    expect([panelParked, studioParked]).toEqual([LINE, LINE])
+    expect(panelCard).toEqual(["✓ approved", `→ ${REFUND}`])
+    expect(studioCard).toEqual(panelCard)
   })
 
   it("the resume turn opens with the resumed-from card, before step 0, on both", async () => {
@@ -2222,6 +2346,7 @@ describe("decisions on both surfaces (U13.2)", () => {
     const panel = [
       $(el, PARKED_DECISION)!.firstChild?.textContent,
       $(el, `${PARKED_DECISION} [data-hole]`)?.getAttribute("data-hole"),
+      all(el, `${PARKED_DECISION} [data-hole]`).length,
     ]
     await reset(el)
     serveDecided(true, true)
@@ -2234,10 +2359,13 @@ describe("decisions on both surfaces (U13.2)", () => {
       document
         .querySelector("[data-decision] [data-hole]")
         ?.getAttribute("data-hole"),
+      document.querySelectorAll("[data-decision] [data-hole]").length,
     ]
     cleanup()
-    // The actor is metadata (weft.approval.actor), never content.
-    expect(panel).toEqual(["✋ denied · agent-7", "hidden"])
+    // The actor is metadata (weft.approval.actor), never content: it
+    // names the decider to every token, so only the reason is hidden —
+    // one badge, no who hole (U13.2-fix 3).
+    expect(panel).toEqual(["✋ denied · agent-7", "hidden", 1])
     expect(studio).toEqual(panel)
   })
 })

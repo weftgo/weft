@@ -426,6 +426,8 @@ describe("no panel-only badge strings", () => {
       "REPAIRED_RESULT — core's Repair text, matched to badge a synthesised result (UX-S1-08), not the hole",
     "decisions:derived from 's pre-step results":
       "decisionsNote — the run page's decisions note (U13.2): calls derived from the transcript, not the hole",
+    "decisions:derived from 's spans":
+      "decisionsNote — the decisions note (U13.2-fix): calls derived from the resume's spans, not the hole",
     "experiment-body:max_tokens must be ":
       "labOverrides — both drawers' option lab (plan F3): the server's refusal, naming the param, not the hole",
   }

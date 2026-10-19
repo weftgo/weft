@@ -3,7 +3,9 @@ package studio
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,21 +24,30 @@ import (
 //     (the invoke_agent span, U13.1) — else the resume's pre-step tool
 //     results (the step-0 output batches before the model's first
 //     message), outcome derived from the result text (source
-//     "transcript": a resolve then reads as approved);
-//   - the reason of a denial: thread's approval.decision content.reason,
-//     else the resume's DENIED result text after "DENIED: " (both under
-//     the content policy: absent content-off, reason_badge not_recorded);
-//   - who / via / key / grant / when: thread's approval.decision record
-//     filed under the parked run (via, key_id, grant_id, the body's at;
-//     who under content), else the resumed call's execute_tool span
-//     (weft.tool.approved_by, weft.grant.id; a denied call's zero-length
-//     span's start); the resume's weft.approval.actor (metadata) beside;
+//     "transcript": a resolve then reads as approved unless thread's
+//     record names it) — else the resume's step-0 execute_tool spans
+//     that ran before its first model call or were denied (source
+//     "spans": a resolve has none) — else no list at all: hole
+//     not_recorded, never an empty list without one;
+//   - the outcome, via / key / grant / when: thread's approval.decision
+//     records filed under the parked run or the resume (the body's
+//     outcome, via, key_id, grant_id, at; who under content), folded as
+//     thread folds them — every approver of a quorum named, a split
+//     verdict via quorum, its reason the model-visible DENIED text —
+//     else the resumed call's execute_tool span (weft.tool.approved_by,
+//     weft.grant.id; a denied call's zero-length span's start);
+//   - the reason of a denial: thread's content.reason, else the resume's
+//     DENIED result text after "DENIED: " (both under the content
+//     policy: absent content-off, reason_badge not_recorded);
+//   - the resume's weft.approval.actor: metadata — an opaque id the app
+//     chose — so every identity reads it;
 //   - expired: a deny thread decided via expiry, or a DENIED result
 //     reading "expired: …".
 //
 // A read-scoped panel token gets no who and no reason (reason_badge
-// hidden: readsThreadContent's rule). A read that fails is said
-// (error), never an empty list.
+// hidden; who_hidden only when no actor names the decider: readsThread
+// Content's rule). A read that fails is said (error, or a note when the
+// block still stands), never an empty list.
 
 // decisionsCap bounds the calls one decisions block lists (core's
 // weft.resume.calls cap; past it More counts the rest).
@@ -47,8 +58,10 @@ const decisionsCap = 32
 // the resume's `resumes` the parked run. At is the resume's start (the
 // moment it applied the decisions); Actor its weft.approval.actor
 // (metadata, never content). Source says where the calls come from:
-// resume_calls (weft.resume.calls) or transcript (derived from the
-// resume's pre-step results — older records).
+// resume_calls (weft.resume.calls), transcript (the resume's pre-step
+// results), spans (its pre-step execute_tool spans) or none — then Hole
+// is not_recorded. Notes are the block's honesty lines: a read that
+// failed beside it, decision records past the read's cap.
 type decisionDoc struct {
 	Run    string        `json:"run"`
 	At     time.Time     `json:"at"`
@@ -56,19 +69,25 @@ type decisionDoc struct {
 	Source string        `json:"source"`
 	Calls  []decidedCall `json:"calls"`
 	More   int           `json:"more,omitempty"`
+	Hole   string        `json:"hole,omitempty"`
+	Notes  []string      `json:"notes,omitempty"`
 	Error  string        `json:"error,omitempty"`
 }
 
 // decidedCall is one parked call's decision. Outcome is approved,
-// denied, resolved, expired or no_decision. Via is thread's via (user,
-// signed, grant, approver, quorum, expiry, …), else the span's
-// approved_by. Who is thread's content.who; Reason a denial's reason;
-// ReasonBadge why a denial has none (hidden, not_recorded). At is the
-// decision's own time when a record names one.
+// denied, resolved, expired or no_decision; Derived says it was read
+// from the result text or a span, not from a decision record (a resolve
+// is then not told apart). Via is thread's via (user, signed, grant,
+// approver, quorum, expiry, …), else the span's approved_by. Who is
+// thread's content.who — every approver of a quorum, " + "-joined, as
+// KeyID their keys; Reason a denial's reason; ReasonBadge why a denial
+// has none (hidden, not_recorded). At is the decision's own time when a
+// record names one.
 type decidedCall struct {
 	CallID      string     `json:"call_id"`
 	Name        string     `json:"name,omitempty"`
 	Outcome     string     `json:"outcome"`
+	Derived     bool       `json:"derived,omitempty"`
 	Via         string     `json:"via,omitempty"`
 	KeyID       string     `json:"key_id,omitempty"`
 	GrantID     string     `json:"grant_id,omitempty"`
@@ -97,7 +116,7 @@ func (s *Server) runDecisions(r *http.Request, rec obsdb.RunRow, page *runPage) 
 	pub := panelPublicID(r)
 	if rec.ResumedBy != "" && rec.Pending > 0 {
 		if det, err := s.db.Run(ctx, rec.ResumedBy); err != nil {
-			page.Decided = &decisionDoc{Run: rec.ResumedBy, Calls: []decidedCall{}, Error: err.Error()}
+			page.Decided = &decisionDoc{Run: rec.ResumedBy, Calls: []decidedCall{}, Error: "the resume: " + err.Error()}
 		} else if inScope(pub, det.RunRow) {
 			d := s.decisionsOf(ctx, r, rec, det.RunRow)
 			d.Run = det.ID
@@ -106,14 +125,23 @@ func (s *Server) runDecisions(r *http.Request, rec obsdb.RunRow, page *runPage) 
 	}
 	if rec.ResumedFrom != "" {
 		parked := obsdb.RunRow{ID: rec.ResumedFrom}
+		var note string
 		if det, err := s.db.Run(ctx, rec.ResumedFrom); err == nil {
 			if !inScope(pub, det.RunRow) {
 				return
 			}
 			parked = det.RunRow
+		} else {
+			// The calls are the resume's own records; the parked run
+			// only scopes thread's decision records — the resume's
+			// session stands in for it, said.
+			note = "the parked run could not be read: " + err.Error()
 		}
 		d := s.decisionsOf(ctx, r, parked, rec)
 		d.Run = rec.ResumedFrom
+		if note != "" {
+			d.Notes = append([]string{note}, d.Notes...)
+		}
 		page.Resumes = &d
 	}
 }
@@ -135,6 +163,8 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 	results, names := preStepResults(batches)
 	byCall := map[string]obsdb.Span{}
 	var calls string
+	var firstChat time.Time
+	var step0 []obsdb.Span
 	for _, sp := range spans {
 		if attrString(sp.Attrs, "weft.run.id") != "" && attrString(sp.Attrs, "weft.run.id") != resume.ID {
 			continue
@@ -144,10 +174,15 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 			if v := attrString(sp.Attrs, "weft.resume.calls"); v != "" {
 				calls = v
 			}
+		case strings.HasPrefix(sp.Name, "chat"):
+			if spanStep(sp) == 0 && (firstChat.IsZero() || sp.Start.Before(firstChat)) {
+				firstChat = sp.Start
+			}
 		case strings.HasPrefix(sp.Name, "execute_tool"):
 			if id := attrString(sp.Attrs, "gen_ai.tool.call.id"); id != "" {
 				if _, seen := byCall[id]; !seen && spanStep(sp) == 0 {
 					byCall[id] = sp
+					step0 = append(step0, sp)
 				}
 				if names[id] == "" {
 					names[id] = attrString(sp.Attrs, "gen_ai.tool.name")
@@ -155,7 +190,8 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 			}
 		}
 	}
-	if calls != "" {
+	switch {
+	case calls != "":
 		out.Source = "resume_calls"
 		for _, kv := range strings.Split(calls, ",") {
 			if rest, ok := strings.CutPrefix(kv, "…+"); ok {
@@ -165,17 +201,44 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 			id, kind, _ := strings.Cut(kv, "=")
 			out.Calls = append(out.Calls, decidedCall{CallID: id, Outcome: kindOutcome(kind)})
 		}
-	} else {
+	case len(results.order) > 0:
 		out.Source = "transcript"
 		for _, res := range results.order {
-			out.Calls = append(out.Calls, decidedCall{CallID: res, Outcome: derivedOutcome(results.by[res])})
+			out.Calls = append(out.Calls, decidedCall{CallID: res, Outcome: derivedOutcome(results.by[res]), Derived: true})
+		}
+	default:
+		// No weft.resume.calls and no pre-step results (an older core
+		// with content off): the step-0 execute_tool spans that ran
+		// before the first model call, or that a resume denied.
+		out.Source = "spans"
+		slices.SortStableFunc(step0, func(a, b obsdb.Span) int { return a.Start.Compare(b.Start) })
+		for _, sp := range step0 {
+			denied := obsdb.AttrTrue(sp.Attrs, "weft.tool.denied")
+			if !denied && (firstChat.IsZero() || !sp.Start.Before(firstChat)) {
+				continue // the model's own call, or no model call to place it before
+			}
+			c := decidedCall{CallID: attrString(sp.Attrs, "gen_ai.tool.call.id"), Outcome: outcomeApproved, Derived: true}
+			if denied {
+				c.Outcome = outcomeDenied
+				if attrString(sp.Attrs, "weft.tool.denied_kind") == outcomeNoDecision {
+					c.Outcome = outcomeNoDecision
+				}
+			}
+			out.Calls = append(out.Calls, c)
+		}
+		if len(out.Calls) == 0 {
+			out.Source = "none"
+			out.Hole = string(obsdb.HoleNotRecorded)
 		}
 	}
 	if len(out.Calls) > decisionsCap {
 		out.More += len(out.Calls) - decisionsCap
 		out.Calls = out.Calls[:decisionsCap]
 	}
-	recs := s.threadDecisions(ctx, parked)
+	recs, note := s.threadDecisions(ctx, parked, resume)
+	if note != "" {
+		out.Notes = append(out.Notes, note)
+	}
 	for i := range out.Calls {
 		c := &out.Calls[i]
 		c.Name = names[c.CallID]
@@ -183,21 +246,22 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 		if sp, ok := byCall[c.CallID]; ok {
 			c.Via = attrString(sp.Attrs, "weft.tool.approved_by")
 			c.GrantID = attrString(sp.Attrs, "weft.grant.id")
-			if v, _ := sp.Attrs["weft.tool.denied"].(bool); v && !sp.Start.IsZero() {
+			if obsdb.AttrTrue(sp.Attrs, "weft.tool.denied") && !sp.Start.IsZero() {
 				at := sp.Start.UTC()
 				c.At = &at
 			}
 		}
-		if hasRes && c.Outcome == outcomeDenied && strings.HasPrefix(res.Content, deniedPrefix+"expired") {
-			c.Outcome = outcomeExpired
-		}
 		var reason string
-		if rec, ok := recs[c.CallID]; ok {
+		if rec, ok := recs[c.CallID]; ok && rec.outcome != "" {
+			if c.Outcome != outcomeNoDecision {
+				// The record names the decision (a resolve reads resolved).
+				c.Outcome, c.Derived = rec.outcome, false
+			}
 			if rec.via != "" {
 				c.Via = rec.via
 			}
-			if rec.keyID != "" {
-				c.KeyID = rec.keyID
+			if k := strings.Join(rec.keys, " + "); k != "" {
+				c.KeyID = k
 			}
 			if rec.grantID != "" {
 				c.GrantID = rec.grantID
@@ -208,14 +272,20 @@ func (s *Server) decisionsOf(ctx context.Context, r *http.Request, parked, resum
 			if rec.via == "expiry" && c.Outcome == outcomeDenied {
 				c.Outcome = outcomeExpired
 			}
-			if rec.who != "" {
-				if reads {
-					c.Who = rec.who
-				} else {
+			if len(rec.who) > 0 {
+				switch {
+				case reads:
+					c.Who = strings.Join(rec.who, " + ")
+				case out.Actor == "":
+					// The actor is metadata and names the decider; a who
+					// in content alone is hidden from this token.
 					c.WhoHidden = true
 				}
 			}
-			reason = rec.reason
+			reason = rec.reason // a split verdict's is the transcript's (below)
+		}
+		if hasRes && c.Outcome == outcomeDenied && strings.HasPrefix(res.Content, deniedPrefix+"expired") {
+			c.Outcome = outcomeExpired
 		}
 		if c.Outcome != outcomeDenied && c.Outcome != outcomeExpired {
 			continue // no_decision is its own reason (rule 12)
@@ -334,38 +404,121 @@ func preStepResults(batches []obsdb.TranscriptBatch) (preStepSet, map[string]str
 	return out, names
 }
 
-// threadDecision is one approval.decision thread filed under a parked run.
+// rawDecision is one approval.decision record of a call, as thread
+// filed it (record contract §4).
+type rawDecision struct {
+	outcome, via, keyID, grantID, who, reason string
+	at                                        *time.Time
+}
+
+// threadDecision is a call's decision records folded as thread folds
+// them (effectiveDecision, ADR 0021 §5): outcome the verdict's
+// (approved, denied, resolved; "" while none resolves the call), who /
+// keys every decider the verdict stands on, in record order — each
+// approver of a quorum — and a split verdict via quorum with no reason
+// of its own (the model saw thread's; the transcript's text names it).
 type threadDecision struct {
-	via, keyID, grantID, who, reason string
-	at                               *time.Time
+	outcome, via, grantID, reason string
+	who, keys                     []string
+	at                            *time.Time
+}
+
+// foldDecisions folds one call's records in order: a deny resolves
+// (beside an approve a split verdict, unless the session's own expiry or
+// interrupt), one resolve resolves (beside an approve or another
+// resolve a split verdict), approvals resolve together.
+func foldDecisions(ds []rawDecision) threadDecision {
+	verdict := func(outcome string, by []rawDecision) threadDecision {
+		last := by[len(by)-1]
+		v := threadDecision{outcome: outcome, via: last.via, reason: last.reason, at: last.at}
+		for _, d := range by {
+			if d.who != "" && !slices.Contains(v.who, d.who) {
+				v.who = append(v.who, d.who)
+			}
+			if d.keyID != "" && !slices.Contains(v.keys, d.keyID) {
+				v.keys = append(v.keys, d.keyID)
+			}
+			if d.grantID != "" {
+				v.grantID = d.grantID
+			}
+		}
+		return v
+	}
+	split := func(by []rawDecision) threadDecision {
+		v := verdict(outcomeDenied, by)
+		v.via, v.reason = "quorum", ""
+		return v
+	}
+	var approves []rawDecision
+	resolved := -1
+	for i, d := range ds {
+		switch d.outcome {
+		case "deny":
+			if len(approves) > 0 && d.via != "expiry" && d.via != "interrupt" {
+				return split(ds[:i+1])
+			}
+			return verdict(outcomeDenied, []rawDecision{d})
+		case "resolve", "resolve_error":
+			if resolved >= 0 || len(approves) > 0 {
+				return split(ds[:i+1])
+			}
+			resolved = i
+		case "approve":
+			if resolved >= 0 {
+				return split(ds[:i+1])
+			}
+			approves = append(approves, d)
+		}
+	}
+	switch {
+	case resolved >= 0:
+		return verdict(outcomeResolved, ds[resolved:resolved+1])
+	case len(approves) > 0:
+		return verdict(outcomeApproved, approves)
+	}
+	return threadDecision{}
 }
 
 // threadDecisionPages bounds the session-event pages one decisions read
-// scans for a parked turn's approval.decision records.
+// takes of the parked run's and the resume's events.
 const threadDecisionPages = 5
 
 // threadDecisions reads the approval.decision records thread filed under
-// the parked run (record contract §4), by call id — the last one of a
-// call wins (a quorum's final verdict). None for a run of no session, or
-// a database without the session index.
-func (s *Server) threadDecisions(ctx context.Context, parked obsdb.RunRow) map[string]threadDecision {
+// the parked run or the resume (record contract §4; the session index
+// narrowed to those two runs), folded per call id. None for a run of no
+// session, or a database without the session index. note says the
+// records past the read's cap, when there are any.
+func (s *Server) threadDecisions(ctx context.Context, parked, resume obsdb.RunRow) (map[string]threadDecision, string) {
 	out := map[string]threadDecision{}
 	er, ok := s.db.(obsdb.SessionEventReader)
-	if !ok || parked.SessionID == "" {
-		return out
+	sid := parked.SessionID
+	if sid == "" {
+		sid = resume.SessionID
 	}
-	q := obsdb.SessionEventQuery{SessionID: parked.SessionID, Limit: obsdb.MaxSessionEventLimit}
+	if !ok || sid == "" {
+		return out, ""
+	}
+	runs := []string{resume.ID}
+	if parked.ID != "" && parked.ID != resume.ID {
+		runs = append(runs, parked.ID)
+	}
+	q := obsdb.SessionEventQuery{SessionID: sid, RunIDs: runs, Limit: obsdb.MaxSessionEventLimit}
+	byCall := map[string][]rawDecision{}
+	var order []string
+	note := ""
 	for range threadDecisionPages {
 		page, err := er.SessionEvents(ctx, q)
 		if err != nil {
-			return out
+			note = "thread's decision records could not be read: " + err.Error()
+			break
 		}
 		for _, e := range page.Events {
-			if e.RunID != parked.ID || obsdb.SessionEventKind(e) != "approval.decision" {
+			if obsdb.SessionEventKind(e) != "approval.decision" {
 				continue
 			}
 			var body struct {
 				CallID  string `json:"call_id"`
+				Outcome string `json:"outcome"`
 				Via     string `json:"via"`
 				KeyID   string `json:"key_id"`
 				GrantID string `json:"grant_id"`
@@ -378,20 +531,29 @@ func (s *Server) threadDecisions(ctx context.Context, parked obsdb.RunRow) map[s
 			if json.Unmarshal(e.Body, &body) != nil || body.CallID == "" {
 				continue
 			}
-			d := threadDecision{via: body.Via, keyID: body.KeyID, grantID: body.GrantID,
+			d := rawDecision{outcome: body.Outcome, via: body.Via, keyID: body.KeyID, grantID: body.GrantID,
 				who: body.Content.Who, reason: body.Content.Reason}
 			if t, err := time.Parse(time.RFC3339Nano, body.At); err == nil {
 				t = t.UTC()
 				d.at = &t
 			}
-			out[body.CallID] = d
+			if _, seen := byCall[body.CallID]; !seen {
+				order = append(order, body.CallID)
+			}
+			byCall[body.CallID] = append(byCall[body.CallID], d)
 		}
 		q.Offset += len(page.Events)
 		if len(page.Events) == 0 || q.Offset >= page.Total {
 			break
 		}
+		if q.Offset < page.Total && q.Offset >= threadDecisionPages*obsdb.MaxSessionEventLimit {
+			note = fmt.Sprintf("thread's records past the first %d of these runs' %d were not read: a decision there is not shown", q.Offset, page.Total)
+		}
 	}
-	return out
+	for _, id := range order {
+		out[id] = foldDecisions(byCall[id])
+	}
+	return out, note
 }
 
 // attrString reads a string attribute, "" when absent or not a string.

@@ -1,1 +1,0 @@
-import{Ki as e,Wi as t,t as n}from"./title-C2I76EBu.js";var r=e(t(),1);function i(e){let t=n(e);(0,r.useEffect)(()=>{typeof document<`u`&&(document.title=t)},[t])}export{i as t};

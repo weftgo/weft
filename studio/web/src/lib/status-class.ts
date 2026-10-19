@@ -35,3 +35,10 @@ export const TONE_TEXT: Record<keyof typeof TONE, string> = {
   running: "text-status-run-ink",
   never: "text-ev-error",
 }
+
+/** A small thread link inside a toned line (U34-fix3's treatment, the
+ * decided / resumed cards' links, U13.2): foreground text, the underline
+ * always on in the thread colour — never told apart by its colour alone
+ * against the line's (axe link-in-text-block, both themes). */
+export const THREAD_LINK =
+  "text-foreground underline decoration-thread-ink underline-offset-2 hover:decoration-2"

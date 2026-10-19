@@ -15,8 +15,11 @@
 // running app turn sits beside (AppSteer). Cancel is never offered on
 // an app turn: the runtime refuses it.
 import { BREAKPOINT } from "@/lib/cards"
+import { absoluteTime } from "@/lib/format"
 import {
+  CALLS_HOLE,
   DECIDE_FIELD,
+  WHO_HOLE,
   decidedCall,
   decisionDetail,
   decisionLine,
@@ -27,7 +30,7 @@ import {
   VERB_TITLE,
 } from "@/lib/decisions"
 import { HoleBadge } from "@/components/studio/hole-badge"
-import { TONE_TEXT } from "@/lib/status-class"
+import { THREAD_LINK, TONE_TEXT } from "@/lib/status-class"
 import { useEffect, useId, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -214,7 +217,7 @@ function VerbLine({
           {" · "}
           <Link
             {...runLink(w.resumed)}
-            className="text-thread-ink hover:underline"
+            className={THREAD_LINK}
             data-resumed={w.resumed}
           >
             resumed as {w.resumed}
@@ -299,27 +302,30 @@ export function DecisionRow({
           <HoleBadge hole={c.reason_badge} {...REASON_HOLE[c.reason_badge]} />
         </>
       ) : null}
+      {c.who_hidden ? (
+        <>
+          {" "}
+          <HoleBadge hole="hidden" {...WHO_HOLE} />
+        </>
+      ) : null}
       {to ? (
         <>
           {" → "}
-          <Link
-            {...runLink(to)}
-            className="text-thread-ink hover:underline"
-            data-resumed={to}
-          >
+          <Link {...runLink(to)} className={THREAD_LINK} data-resumed={to}>
             {turnTag(to)}
           </Link>
         </>
       ) : null}
       <div className="text-faint" data-decision-detail="">
-        {decisionDetail(c, d)}
+        {decisionDetail(c, d, absoluteTime)}
       </div>
     </div>
   )
 }
 
-/** The decisions block's honesty line (a failed read, the cap, a
- * derived list), when it has one. */
+/** The decisions block's honesty line (a failed read, the server's
+ * notes, the cap, a derived list) and its not_recorded hole when no
+ * record names its calls, when it has either. */
 export function DecisionsNote({
   d,
   resume,
@@ -328,8 +334,10 @@ export function DecisionsNote({
   resume: string
 }) {
   const note = decisionsNote(d, resume)
-  return note ? (
+  return note || d.hole ? (
     <p className="mt-1 text-status-int" data-decisions-note="">
+      {d.hole ? <HoleBadge hole={d.hole} {...CALLS_HOLE} /> : null}
+      {d.hole && note ? " " : null}
       {note}
     </p>
   ) : null
@@ -572,11 +580,7 @@ export function ParkedCalls({
       ) : shown === "resumed" && next ? (
         <p className="mt-1 text-faint" data-app-owned="resumed">
           {"decided — "}
-          <Link
-            {...runLink(next)}
-            className="text-thread-ink hover:underline"
-            data-resumed={next}
-          >
+          <Link {...runLink(next)} className={THREAD_LINK} data-resumed={next}>
             resumed as {next}
           </Link>
         </p>
@@ -590,7 +594,7 @@ export function ParkedCalls({
           {`${SUBAGENT_CALL} `}
           <Link
             {...runLink(doc.parent_run_id)}
-            className="text-thread-ink hover:underline"
+            className={THREAD_LINK}
             data-parent-turn={doc.parent_run_id}
           >
             {doc.parent_run_id}
@@ -607,7 +611,7 @@ export function ParkedCalls({
           {`${POOL_CHILD} `}
           <Link
             {...sessionLink(poolParent(doc))}
-            className="text-thread-ink hover:underline"
+            className={THREAD_LINK}
             data-parent-session={poolParent(doc)}
           >
             {poolParent(doc)}
@@ -617,7 +621,7 @@ export function ParkedCalls({
               {` ${POOL_CHILD_TURN} `}
               <Link
                 {...runLink(doc.parent_run_id)}
-                className="text-thread-ink hover:underline"
+                className={THREAD_LINK}
                 data-parent-turn={doc.parent_run_id}
               >
                 {doc.parent_run_id}

@@ -34,8 +34,11 @@ import {
 import type { HoleMark, ParkedKind } from "../lib/honesty"
 import { AWAITING, FILTER_KEYS, statusOf, turnTag } from "../lib/status"
 import {
+  CALLS_HOLE,
   DECIDE_FIELD,
   decidedCall,
+  decidedResult,
+  WHO_HOLE,
   decisionDetail,
   decisionLine,
   decisionsNote,
@@ -524,7 +527,7 @@ export interface KnownScope {
  * reading running there and the run the scope pins. */
 export interface DevtoolsEvents {
   /** A run started (status "running") or changed status — "succeeded",
-   * "failed", "parked" (succeeded with calls awaiting approval),
+   * "failed", "parked" (succeeded with calls awaiting a decision),
    * "interrupted" — once per transition. step: the run's last step
    * ordinal the panel knows (G1's ordinal). */
   run: {
@@ -4816,7 +4819,7 @@ export class WeftDevtools extends HTMLElement {
 
   /** experimentResult is §3's Result pane: the label (`t3·x1`), the
    * stream in place, the inline diff against the source turn, and —
-   * when the run parked — the approval controls (continue / skip /
+   * when the run parked — the approval controls (approve / deny /
    * resolve, the runtime-started run's own verbs). */
   private experimentResult(s: PanelState): HTMLElement {
     const r = s.result
@@ -5356,19 +5359,28 @@ export class WeftDevtools extends HTMLElement {
       const card = el("div", "weft-step", undefined, {
         "data-weft-resumed-card": res.run,
       })
-      const go = el("button", "weft-btn", resumedHead(res, turnTag(res.run)))
-      on(go, "click", () => this.go(this.model?.select(res.run, true)))
-      card.appendChild(el("div", "weft-step-h", [go]))
+      card.appendChild(
+        el("div", "weft-step-h", [
+          this.runBtn(resumedHead(res, turnTag(res.run)), res.run),
+        ])
+      )
       const b = el("div", "weft-step-b")
-      for (const c of res.calls)
-        b.appendChild(
-          el("div", "weft-call", [
-            el("span", "weft-name", c.name || c.call_id),
-            this.decision(c, res),
-          ])
-        )
-      const note = decisionsNote(res, turnTag(t.id))
-      if (note) b.appendChild(el("div", "weft-note weft-warn", note))
+      const pre = t.folded.steps[0]?.toolCalls
+      for (const c of res.calls) {
+        const row = el("div", "weft-call", [
+          el("span", "weft-name", c.name || c.call_id),
+          this.decision(c, res),
+        ])
+        // What an approved / resolved call left: step 0 no longer draws it.
+        const ran = decidedResult(c, pre)
+        if (ran)
+          row.appendChild(
+            el("div", "weft-reason", `→ ${ran}`, { "data-weft-result": "" })
+          )
+        b.appendChild(row)
+      }
+      const note = this.decisionsNote(res, turnTag(t.id))
+      if (note) b.appendChild(note)
       card.appendChild(b)
       wrap.appendChild(card)
     }
@@ -5707,13 +5719,12 @@ export class WeftDevtools extends HTMLElement {
       body.appendChild(row)
     }
     if (dec) {
-      const note = decisionsNote(dec, turnTag(dec.run))
-      if (note) body.appendChild(el("div", "weft-note weft-warn", note))
+      const note = this.decisionsNote(dec, turnTag(dec.run))
+      if (note) body.appendChild(note)
     } else if (next) {
-      const go = el("button", "weft-btn", `resumed as ${next}`, {
+      const go = this.runBtn(`resumed as ${next}`, next, {
         "data-weft-resumed": next,
       })
-      on(go, "click", () => this.go(this.model?.select(next, true)))
       body.appendChild(
         el("div", "weft-note", [document.createTextNode("decided — "), go], {
           "data-weft-app-owned": "resumed",
@@ -5752,15 +5763,36 @@ export class WeftDevtools extends HTMLElement {
     })
     if (c.reason_badge)
       box.append(" ", badge(c.reason_badge, REASON_HOLE[c.reason_badge]))
-    if (to) {
-      const go = el("button", "weft-btn", turnTag(to), {
-        "data-weft-resumed": to,
-      })
-      on(go, "click", () => this.go(this.model?.select(to, true)))
-      box.append(" → ", go)
-    }
+    if (c.who_hidden) box.append(" ", badge("hidden", WHO_HOLE))
+    if (to)
+      box.append(
+        " → ",
+        this.runBtn(turnTag(to), to, { "data-weft-resumed": to })
+      )
     box.appendChild(el("div", "weft-reason", decisionDetail(c, d)))
     return box
+  }
+
+  /** runBtn is a button that opens a run in the panel (the decided and
+   * resumed cards' links). */
+  private runBtn(
+    label: string,
+    id: string,
+    attrs?: Record<string, string>
+  ): HTMLElement {
+    const go = el("button", "weft-btn", label, attrs)
+    on(go, "click", () => this.go(this.model?.select(id, true)))
+    return go
+  }
+
+  /** decisionsNote is a decisions block's honesty line and its
+   * not_recorded hole — Studio's DecisionsNote — or null. */
+  private decisionsNote(d: DecisionDoc, resume: string): HTMLElement | null {
+    const note = decisionsNote(d, resume)
+    if (!note && !d.hole) return null
+    const n = el("div", "weft-note weft-warn", note)
+    if (d.hole) n.prepend(badge(d.hole, CALLS_HOLE), " ")
+    return n
   }
 
   /** appSaid is one app-turn verb's state under its call: in flight,
@@ -5772,13 +5804,13 @@ export class WeftDevtools extends HTMLElement {
     const box = el("div", w.bad ? "weft-note weft-warn" : "weft-note", w.text, {
       "data-weft-app-verb": v.state,
     })
-    if (w.resumed) {
-      const go = el("button", "weft-btn", `resumed as ${w.resumed}`, {
-        "data-weft-resumed": w.resumed,
-      })
-      on(go, "click", () => this.go(this.model?.select(w.resumed!, true)))
-      box.append(" · ", go)
-    }
+    if (w.resumed)
+      box.append(
+        " · ",
+        this.runBtn(`resumed as ${w.resumed}`, w.resumed, {
+          "data-weft-resumed": w.resumed,
+        })
+      )
     return box
   }
 

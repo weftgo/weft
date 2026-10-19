@@ -23,18 +23,24 @@ func (d *DB) SessionEvents(ctx context.Context, q obsdb.SessionEventQuery) (_ ob
 	if q.SessionID == "" {
 		return page, nil
 	}
+	where := `SessionId = ? AND (? = '' OR PublicId = ?)`
+	args := []any{q.SessionID, q.PublicID, q.PublicID}
+	if len(q.RunIDs) > 0 {
+		// q.RunIDs: the runs' events alone (a runless one is none of them).
+		where += ` AND RunId IN (?)`
+		args = append(args, q.RunIDs)
+	}
 	var total uint64
 	if err := d.conn.QueryRow(ctx,
-		`SELECT count() FROM weft_session_events FINAL WHERE SessionId = ? AND (? = '' OR PublicId = ?)`,
-		q.SessionID, q.PublicID, q.PublicID).Scan(&total); err != nil {
+		`SELECT count() FROM weft_session_events FINAL WHERE `+where, args...).Scan(&total); err != nil {
 		return obsdb.SessionEventPage{}, err
 	}
 	page.Total = int(total)
 	rs, err := d.conn.Query(ctx,
 		`SELECT RunId, Kind, EventName, PublicId, Content, Time, Body FROM weft_session_events FINAL
-		WHERE SessionId = ? AND (? = '' OR PublicId = ?)
+		WHERE `+where+`
 		ORDER BY Time, RunId, Kind, Body LIMIT ? OFFSET ?`,
-		q.SessionID, q.PublicID, q.PublicID, q.PageLimit(), max(q.Offset, 0))
+		append(args, q.PageLimit(), max(q.Offset, 0))...)
 	if err != nil {
 		return obsdb.SessionEventPage{}, err
 	}

@@ -2063,7 +2063,7 @@ export class PanelModel {
   }
 
   /** decide answers one parked call of the experiment's run with the
-   * approval verbs (continue / skip / resolve, ADR 0007) and follows
+   * approval verbs (approve / deny / resolve, ADR 0007) and follows
    * the resumed run in the same result pane. The run's pending set is
    * read again from its stored events first: a call that is not in it
    * is not sent. With several calls parked the runtime holds each

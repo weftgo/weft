@@ -1,0 +1,36 @@
+{
+  "support_desk_decided": {
+    "run": "a1100000000000000000000000000002",
+    "at": "2026-10-01T09:21:00.008Z",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "call_1",
+        "name": "submit_output",
+        "outcome": "approved"
+      },
+      {
+        "call_id": "call_2",
+        "name": "add_note",
+        "outcome": "resolved"
+      }
+    ]
+  },
+  "support_desk_resumes": {
+    "run": "a1100000000000000000000000000001",
+    "at": "2026-10-01T09:21:00.008Z",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "call_1",
+        "name": "submit_output",
+        "outcome": "approved"
+      },
+      {
+        "call_id": "call_2",
+        "name": "add_note",
+        "outcome": "resolved"
+      }
+    ]
+  }
+}

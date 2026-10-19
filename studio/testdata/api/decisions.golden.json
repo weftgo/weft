@@ -77,7 +77,6 @@
         "name": "issue_refund",
         "outcome": "denied",
         "via": "user",
-        "who_hidden": true,
         "reason_badge": "hidden",
         "at": "2026-10-01T09:00:00Z"
       }

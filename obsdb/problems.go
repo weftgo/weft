@@ -254,7 +254,14 @@ func CountProblems(tokens []string) Problems {
 
 // attrTrue reports a boolean attribute set true — a bool, or the
 // string "true" a store that stringifies attributes reads back.
-func attrTrue(m map[string]any, k string) bool {
+func attrTrue(m map[string]any, k string) bool { return AttrTrue(m, k) }
+
+// AttrTrue reports a boolean span or record attribute set true: a bool
+// true, or the string "true" a store that stringifies attributes reads
+// back (ClickHouse's Map(String, String) behind a stock collector). A
+// reader of a weft flag — weft.tool.denied, weft.tool.approved — takes
+// it through here, so both spellings read the same.
+func AttrTrue(m map[string]any, k string) bool {
 	switch v := m[k].(type) {
 	case bool:
 		return v

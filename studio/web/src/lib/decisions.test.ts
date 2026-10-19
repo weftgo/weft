@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest"
 
 import type { DecisionDoc } from "./api"
 import {
+  decidedResult,
   decider,
   decisionDetail,
   decisionLine,
@@ -98,9 +99,16 @@ describe("the resumed card and its note", () => {
     expect(decisionsNote({ ...d, more: 3 }, "t2")).toBe(
       "3 more calls not listed"
     )
-    expect(decisionsNote({ ...d, source: "transcript" }, "t2")).toContain(
-      "derived from t2's pre-step results"
-    )
+    expect(
+      decisionsNote(
+        {
+          ...d,
+          source: "transcript",
+          calls: [{ ...d.calls[0], derived: true }],
+        },
+        "t2"
+      )
+    ).toContain("derived from t2's pre-step results")
     expect(decisionsNote({ ...d, error: "boom" }, "t2")).toBe(
       "the decisions could not be read: boom"
     )
@@ -123,11 +131,118 @@ describe("the resumed card and its note", () => {
       ],
     }
     expect(withoutDecided(f, {}).steps[0].toolCalls).toHaveLength(3)
+    // The card lists r1: r2 is no call of its, so step 0 keeps it.
     expect(
       withoutDecided(f, {
         resumes: g.thread_t2_resumes,
       }).steps[0].toolCalls.map((c) => c.callId)
+    ).toEqual(["r2", "sub", "m1"])
+    expect(
+      withoutDecided(f, {
+        resumes: {
+          ...g.thread_t2_resumes,
+          calls: [{ call_id: "r2", outcome: "approved" }],
+        },
+      }).steps[0].toolCalls.map((c) => c.callId)
     ).toEqual(["sub", "m1"])
+  })
+
+  // U13.2-fix 1: only the calls the block lists leave step 0.
+  it("a block that lists none (a pre-U13.1 / content-off read, a failed read) or stops at its cap leaves the rest in step 0", () => {
+    const f = {
+      steps: [
+        {
+          index: 0,
+          toolCalls: [
+            { callId: "a", resumed: true },
+            { callId: "b", resumed: true },
+          ],
+        },
+      ],
+    }
+    const ids = (d: DecisionDoc) =>
+      withoutDecided(f, { resumes: d }).steps[0].toolCalls.map((c) => c.callId)
+    const base: DecisionDoc = {
+      run: "t1",
+      at: "2026-10-01T09:00:00Z",
+      source: "none",
+      calls: [],
+      hole: "not_recorded",
+    }
+    // (a) no list: both calls stay, and the block says why (its hole).
+    expect(ids(base)).toEqual(["a", "b"])
+    // (b) a failed read: the error is said, the calls stay.
+    expect(ids({ ...base, hole: undefined, error: "boom" })).toEqual(["a", "b"])
+    expect(decisionsNote({ ...base, error: "boom" }, "t2")).toBe(
+      "the decisions could not be read: boom"
+    )
+    // (c) past the cap: the listed call goes, the unlisted one stays.
+    const capped = {
+      ...base,
+      hole: undefined,
+      source: "resume_calls",
+      calls: [{ call_id: "a", outcome: "approved" }],
+      more: 1,
+    }
+    expect(ids(capped)).toEqual(["b"])
+    expect(decisionsNote(capped, "t2")).toBe("1 more call not listed")
+  })
+
+  it("the server's notes, a derived outcome and a spans-derived list are said", () => {
+    const d = g.thread_t2_resumes
+    expect(
+      decisionsNote(
+        { ...d, notes: ["the parked run could not be read: gone"] },
+        "t2"
+      )
+    ).toBe("the parked run could not be read: gone")
+    // A transcript-sourced block whose every outcome a record named: no caveat.
+    expect(decisionsNote({ ...d, source: "transcript" }, "t2")).toBe("")
+    expect(
+      decisionsNote(
+        { ...d, source: "spans", calls: [{ ...d.calls[0], derived: true }] },
+        "t2"
+      )
+    ).toBe("derived from t2's spans: a resolved call has none")
+  })
+
+  it("an expired row says expired once; Studio's clock is the caller's", () => {
+    const d = g.thread_t1_decided
+    const c = {
+      ...d.calls[0],
+      outcome: "expired",
+      reason: "expired: no decision before 09:00",
+    }
+    expect(decisionLine(c, d)).toBe(
+      "⌛ expired · agent-7 · 'no decision before 09:00'"
+    )
+    expect(decisionDetail(d.calls[0], d, () => "local")).toBe(
+      "via user · local"
+    )
+  })
+
+  it("an approved or resolved row carries what the call left; a denial none", () => {
+    const calls = [
+      { callId: "r1", result: { content: "refund of 249.90 issued" } },
+    ]
+    expect(decidedResult({ call_id: "r1", outcome: "approved" }, calls)).toBe(
+      "refund of 249.90 issued"
+    )
+    expect(decidedResult({ call_id: "r1", outcome: "denied" }, calls)).toBe("")
+    expect(decidedResult({ call_id: "zz", outcome: "resolved" }, calls)).toBe(
+      ""
+    )
+  })
+})
+
+describe("rw.support-desk's shape (U13.2-fix 6)", () => {
+  const sd = golden<Record<string, DecisionDoc>>("decisions_support_desk")
+  it("a plain Generate resumed with Approve, no actor: ✓ approved → <run>", () => {
+    const d = sd.support_desk_decided
+    expect(decisionLine(d.calls[0], d, turnTag(d.run))).toBe(
+      `✓ approved → ${turnTag(d.run)}`
+    )
+    expect(decisionLine(d.calls[1], d)).toBe("↩ resolved")
   })
 })
 

@@ -71,6 +71,20 @@ export const REASON_HOLE: Record<string, { reason: string; fix: string }> = {
   },
 }
 
+/** Who decided, when only thread's content names it (no actor
+ * metadata) and the reader may not read content: the hidden badge. */
+export const WHO_HOLE = {
+  reason: "who decided is content: a read-scoped token does not read it",
+  fix: "",
+}
+
+/** A block whose calls no record names (hole not_recorded): no
+ * weft.resume.calls, no pre-step result, no decided span. */
+export const CALLS_HOLE = {
+  reason: "no record names the decided calls",
+  fix: "record the resume with a current weft core",
+}
+
 /** The decider a call names: thread's who, else the signing key, else
  * the resume's one actor (weft.approval.actor — several are the run's,
  * not this call's). "" when nothing names one. */
@@ -89,19 +103,27 @@ export function decisionLine(
 ): string {
   const o = outcomeOf(c.outcome)
   const parts = [`${o.icon} ${o.word}`, decider(c, d)]
-  if (c.reason) parts.push(`'${c.reason}'`)
+  // An expired row says "expired" once: thread's reason opens with it.
+  const why =
+    c.outcome === "expired" ? c.reason?.replace(/^expired: /, "") : c.reason
+  if (why) parts.push(`'${why}'`)
   return parts.filter(Boolean).join(" · ") + (to ? ` → ${to}` : "")
 }
 
-/** How and when: "via signed · key k_alice · grant e_… · 09:00:00 UTC"
- * — the decision's own time when a record names one, else the resume's
- * start (UTC: the same words on both surfaces and in any zone). */
-export function decisionDetail(c: DecidedCall, d: DecisionDoc): string {
+/** How and when: "via signed · key k_alice · grant e_… · <time>" — the
+ * decision's own time when a record names one, else the resume's start;
+ * time the surface's clock (Studio's absoluteTime, local with its zone;
+ * the panel's UTC by default). */
+export function decisionDetail(
+  c: DecidedCall,
+  d: DecisionDoc,
+  time: (iso: string) => string = (iso) => `${iso.slice(11, 19)} UTC`
+): string {
   return [
     c.via && `via ${c.via}`,
     c.key_id && c.key_id !== c.who && `key ${c.key_id}`,
     c.grant_id && `grant ${c.grant_id}`,
-    `${(c.at || d.at).slice(11, 19)} UTC`,
+    time(c.at || d.at),
   ]
     .filter(Boolean)
     .join(" · ")
@@ -113,35 +135,55 @@ export function resumedHead(d: DecisionDoc, from: string): string {
   return `resumed from ${from} · ${plural(n, "decided call")}`
 }
 
-/** The block's honesty line, when it has one: a failed read, calls past
- * the cap, or calls derived from the pre-step results. */
+/** The block's honesty line, when it has one: a failed read, the
+ * server's notes (a read beside it that failed, records past a cap),
+ * calls past the cap, or outcomes derived rather than recorded. */
 export function decisionsNote(d: DecisionDoc, resume: string): string {
   if (d.error) return `the decisions could not be read: ${d.error}`
   return [
+    ...(d.notes ?? []),
     d.more ? `${plural(d.more, "more call")} not listed` : "",
-    d.source === "transcript"
-      ? `derived from ${resume}'s pre-step results: a resolve reads approved`
+    d.calls.some((c) => c.derived)
+      ? d.source === "spans"
+        ? `derived from ${resume}'s spans: a resolved call has none`
+        : `derived from ${resume}'s pre-step results: a resolve reads approved`
       : "",
   ]
     .filter(Boolean)
     .join(" · ")
 }
 
+/** What an approved or resolved call left (the fold's pre-step call's
+ * result): the resumed card's "→ …" line under its row on both
+ * surfaces — step 0 no longer draws the call. "" when none. */
+export function decidedResult(
+  c: DecidedCall,
+  calls: { callId: string; result?: { content: string } }[] | undefined
+): string {
+  return c.outcome === "approved" || c.outcome === "resolved"
+    ? (calls?.find((x) => x.callId === c.call_id)?.result?.content ?? "")
+    : ""
+}
+
 /** decidedCall finds one parked call's decision in a block. */
 export const decidedCall = (d: DecisionDoc | undefined, id: string) =>
   d?.calls.find((c) => c.call_id === id)
 
-/** withoutDecided drops a resume's pre-step calls (the fold's resumed
- * calls: the decided ones, executed before step 0's model call) from
- * its steps once the resumed card draws them — never inside step 0 —
- * keeping a call that owns a child run (its block is the story's). A
- * run with no resumes block is unchanged. */
+/** withoutDecided drops from a resume's steps the pre-step calls (the
+ * fold's resumed calls, executed before step 0's model call) the
+ * resumed card lists — never inside step 0 — and only those: a call the
+ * block does not list (past its cap, a failed or unrecorded read) stays
+ * where the fold put it, and a call that owns a child run keeps its
+ * block (the story's). A run with no resumes block is unchanged. */
 export function withoutDecided<
-  TStep extends { toolCalls: { resumed?: boolean; childRunId?: string }[] },
+  TStep extends {
+    toolCalls: { callId: string; resumed?: boolean; childRunId?: string }[]
+  },
   TFold extends { steps: TStep[] },
 >(f: TFold, doc: { resumes?: DecisionDoc } | null | undefined): TFold {
-  if (!doc?.resumes) return f
-  const keep = (c: TStep["toolCalls"][number]) => !c.resumed || !!c.childRunId
+  const ids = new Set(doc?.resumes?.calls.map((c) => c.call_id))
+  const keep = (c: TStep["toolCalls"][number]) =>
+    !c.resumed || !!c.childRunId || !ids.has(c.callId)
   return {
     ...f,
     steps: f.steps.map((s) =>

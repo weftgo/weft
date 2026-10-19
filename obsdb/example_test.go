@@ -15,6 +15,18 @@ import (
 // statuses and the read-time parked and cancelled are filters; any other
 // word is an error naming them, never an empty list. A read-time word
 // narrows its derived status (Stored) with a condition of its own.
+// A weft flag read the same in both spellings: the bool a fixture or
+// the OTLP wire carries, and the string "true" a store that stringifies
+// attributes (ClickHouse behind a stock collector) reads back.
+func ExampleAttrTrue() {
+	fmt.Println(
+		obsdb.AttrTrue(map[string]any{"weft.tool.denied": true}, "weft.tool.denied"),
+		obsdb.AttrTrue(map[string]any{"weft.tool.denied": "true"}, "weft.tool.denied"),
+		obsdb.AttrTrue(map[string]any{}, "weft.tool.denied"),
+	)
+	// Output: true true false
+}
+
 func ExampleParseStatus() {
 	st, err := obsdb.ParseStatus("parked")
 	fmt.Println(st, st.Stored(), err)
@@ -310,9 +322,18 @@ func ExampleSessionEventReader() {
 		fmt.Printf("%q %s\n", e.RunID, obsdb.SessionEventKind(e))
 	}
 	fmt.Println(page.Total)
+	// RunIDs narrows the read to the named runs' events (one turn's
+	// decisions); the runless record is under none of them.
+	turn, err := db.(obsdb.SessionEventReader).SessionEvents(context.Background(),
+		obsdb.SessionEventQuery{SessionID: "s_1", RunIDs: []string{"s_1-t1"}})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(turn.Total)
 	// Output:
 	// "s_1-t1" approval.request
 	// "s_1-t1" approval.decision
 	// "" grant.revoke
 	// 3
+	// 2
 }

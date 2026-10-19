@@ -610,7 +610,10 @@ ignore it.
 
 1. **Tool error = data the model sees; run error = Go error.** A handler
    error, panic, unknown tool, or bad arguments becomes
-   `ToolResultPart{IsError: true}`; siblings keep running. Model
+   `ToolResultPart{IsError: true}`; siblings keep running. So does a
+   panic in the returned error's own methods (`Error`, `Is`, `As`,
+   `ErrorType`): the loop reads them contained, as the tool's failure,
+   with or without a tracer. Model
    failure, context cancellation, `MaxSteps`, and a malformed
    tool-source snapshot (`ErrDuplicateTool`, `ErrNilTool`) return an
    error, always `*RunError` with the partial transcript in `.Result`.

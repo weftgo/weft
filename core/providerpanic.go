@@ -26,8 +26,11 @@ import (
 // nothing. User code — tool handlers, middleware, PrepareStep, taps and
 // OnRunEnd observers, and the methods of the errors they return (Error,
 // ErrorType, Is, As, read before the contained span calls) — is not
-// covered here; each keeps its own rule. A span is ended even when an
-// attribute call on it panicked: End is contained on its own.
+// covered here; each keeps its own rule: a tool error's methods are read
+// once by the loop, contained as the tool's failure (settleToolError,
+// AGENTS rule 1); a model or run error's are read as they always were. A
+// span is ended even when an attribute call on it panicked: End is
+// contained on its own.
 
 // The provider kinds a run warns about, as bits of recorder.warned.
 const (
@@ -104,9 +107,10 @@ func (o *observer) startSpan(ctx context.Context, rec *recorder, name string, op
 }
 
 // spanRecording is span.IsRecording, contained: a panic reads as a
-// span that records nothing. The loop asks it before reading a user
-// error's facts (Error, ErrorType, Is, As), which run outside the
-// containment: a panic in them is the error's, kept as it always was.
+// span that records nothing. The loop asks it before reading a model or
+// run error's facts (Error, Is), which run outside the containment: a
+// panic in them is the error's, kept as it always was. A tool error's
+// facts arrive already read, contained (toolFailure).
 func (r *recorder) spanRecording(ctx context.Context, span trace.Span) (ok bool) {
 	defer r.containTraces(ctx)
 	return span.IsRecording()

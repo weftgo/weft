@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"maps"
 	"os"
-	"os/exec"
 	"reflect"
 	"regexp"
 	"runtime"
@@ -6496,6 +6495,104 @@ func TestProviderAttributePanicsStillEndEverySpan(t *testing.T) {
 	}
 }
 
+// A tool error whose own methods panic — Error, Is, ErrorType, read by
+// the loop for the result text, the park check and error.type — is the
+// tool's failure (rule 1, P9-errortype): the call's result is the
+// contained-panic error result naming the panic, the span reads
+// error.type panic with the layer that returned the error, siblings keep
+// running, the run continues, and nothing is counted or named as a
+// provider panic. The same result with no tracer: the error is read
+// whether or not a span records it (observability never changes
+// behaviour), and on the Timeout path alike.
+func TestToolErrorMethodPanicsAreErrorResults(t *testing.T) {
+	fails := func(name string, err error, opts ...core.ToolOption) *core.ToolDef {
+		return core.Tool(name, "Fails.", func(context.Context, struct{}) (string, error) { return "", err }, opts...)
+	}
+	wrap := core.WrapTools(func(next core.ToolCaller) core.ToolCaller {
+		return func(ctx context.Context, call core.ToolCallPart) (string, error) {
+			out, err := next(ctx, call)
+			if call.Name == "wrapped" && err != nil {
+				return out, fmt.Errorf("mw: %w", err)
+			}
+			return out, err
+		}
+	})
+	ok := core.Tool("ok", "Works.", func(context.Context, struct{}) (string, error) { return "fine", nil })
+	cases := []struct{ tool, panic, layer string }{
+		{"type_panics", "panicTypeErr.ErrorType", "handler"},
+		{"msg_panics", "panicMsgErr.Error", "handler"},
+		{"is_panics", "panicIsErr.Is", "handler"},
+		{"timed_type_panics", "panicTypeErr.ErrorType", "handler"},
+		{"wrapped", "panicTypeErr.ErrorType", "middleware"},
+	}
+	for _, traced := range []bool{true, false} {
+		t.Run(fmt.Sprintf("traced=%v", traced), func(t *testing.T) {
+			var logs bytes.Buffer
+			tp := newRecProvider()
+			calls := []wefttest.Call{{Name: "ok"}}
+			for _, c := range cases {
+				calls = append(calls, wefttest.Call{Name: c.tool})
+			}
+			opts := []core.Option{
+				core.Name("a"), wrap, ok,
+				fails("type_panics", panicTypeErr{}), fails("msg_panics", panicMsgErr{}), fails("is_panics", panicIsErr{}),
+				fails("timed_type_panics", panicTypeErr{}, core.Timeout(time.Minute)), fails("wrapped", panicTypeErr{}),
+				core.Logger(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))),
+			}
+			if traced {
+				opts = append(opts, core.TracerProvider(tp))
+			}
+			agt := core.New(wefttest.Script(wefttest.ToolCalls(calls...), wefttest.Say("done")), opts...)
+			var res *core.RunResult
+			var err error
+			func() {
+				defer func() {
+					if p := recover(); p != nil {
+						t.Fatalf("Generate panicked: %v", p)
+					}
+				}()
+				res, err = agt.Generate(context.Background(), core.Prompt("x"))
+			}()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Text() != "done" {
+				t.Errorf("text = %q: the run did not continue", res.Text())
+			}
+			results := map[string]core.ToolResultPart{}
+			for _, m := range res.Messages {
+				for _, p := range m.Content {
+					if r, ok := p.(core.ToolResultPart); ok {
+						results[r.Name] = r
+					}
+				}
+			}
+			if r := results["ok"]; r.IsError || r.Content != "fine" {
+				t.Errorf("sibling = %+v, want fine", r)
+			}
+			for _, c := range cases {
+				want := fmt.Sprintf("tool %q panicked: %s", c.tool, c.panic)
+				if r := results[c.tool]; !r.IsError || r.Content != want {
+					t.Errorf("%s: result = %+v, want the error result %q", c.tool, r, want)
+				}
+				if !traced {
+					continue
+				}
+				attrs := tp.find(t, "execute_tool "+c.tool).attrsMap()
+				if attrs["error.type"] != "panic" || attrs["weft.panic.layer"] != c.layer {
+					t.Errorf("%s: error.type %q, weft.panic.layer %q; want panic, %s", c.tool, attrs["error.type"], attrs["weft.panic.layer"], c.layer)
+				}
+			}
+			if n := agt.TapPanics(); n != 0 {
+				t.Errorf("TapPanics = %d, want 0: a tool error's panic is no provider's", n)
+			}
+			if logs.Len() != 0 {
+				t.Errorf("a tool error's panic named as a provider's: %s", logs.String())
+			}
+		})
+	}
+}
+
 // panicMsgErr's Error panics; panicIsErr's Is does; panicTypeErr's
 // ErrorType does. They are the user's errors, not the provider's.
 type panicMsgErr struct{}
@@ -6512,10 +6609,11 @@ type panicTypeErr struct{}
 func (panicTypeErr) Error() string     { return "typed" }
 func (panicTypeErr) ErrorType() string { panic("panicTypeErr.ErrorType") }
 
-// An error whose own methods panic is the user's, read outside the
+// A model error whose own methods panic is the user's, read outside the
 // provider containment (P9-core-panic-fix): it behaves exactly as before
 // the containment (88833750), under a recording tracer — never counted
-// or named as a provider panic.
+// or named as a provider panic. A tool error's are the tool's failure:
+// TestToolErrorMethodPanicsAreErrorResults (P9-errortype).
 func TestUserErrorPanicsAreNotProviderPanics(t *testing.T) {
 	run := func(t *testing.T, err error, opts ...core.Option) (panicked any, agt *core.Agent, warns string, runErr error) {
 		t.Helper()
@@ -6562,25 +6660,6 @@ func TestUserErrorPanicsAreNotProviderPanics(t *testing.T) {
 		}
 		if warns != "" {
 			t.Errorf("a user error's panic named as a provider's: %s", warns)
-		}
-	})
-	// A tool error whose ErrorType panics crashes the process, from the
-	// tool goroutine, as it always did: run in a child process.
-	t.Run("ErrorType", func(t *testing.T) {
-		if os.Getenv("WEFT_P9_TOOL_ERRORTYPE") == "1" {
-			bad := core.Tool("bad", "Fails.", func(context.Context, struct{}) (string, error) { return "", panicTypeErr{} })
-			agt := core.New(wefttest.Script(
-				wefttest.ToolCalls(wefttest.Call{Name: "bad", Args: `{}`}), wefttest.Say("done"),
-			), core.Name("a"), core.TracerProvider(newRecProvider()), bad)
-			_, _ = agt.Generate(context.Background(), core.Prompt("x"))
-			fmt.Println("survived")
-			return
-		}
-		cmd := exec.Command(os.Args[0], "-test.run=^TestUserErrorPanicsAreNotProviderPanics$/^ErrorType$")
-		cmd.Env = append(os.Environ(), "WEFT_P9_TOOL_ERRORTYPE=1")
-		out, err := cmd.CombinedOutput()
-		if err == nil || !strings.Contains(string(out), "panic: panicTypeErr.ErrorType") || strings.Contains(string(out), "survived") {
-			t.Errorf("want the process to crash on panicTypeErr.ErrorType; err %v, output:\n%s", err, out)
 		}
 	})
 }

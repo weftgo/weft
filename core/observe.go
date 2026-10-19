@@ -596,7 +596,7 @@ type toolStartFacts struct {
 	approvedBy, grantID string
 }
 
-func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, facts toolStartFacts) (context.Context, func(res ToolResultPart, park string, err error, cut int, retry retryMark, end time.Time)) {
+func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, facts toolStartFacts) (context.Context, func(res ToolResultPart, park string, fail toolFailure, cut int, retry retryMark, end time.Time)) {
 	ctx, span := o.startSpan(ctx, rec, spanName(semconv.GenAIOperationNameExecuteTool, c.Name),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
@@ -631,25 +631,19 @@ func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, f
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}()
-	return ctx, func(res ToolResultPart, park string, err error, cut int, retry retryMark, end time.Time) {
+	return ctx, func(res ToolResultPart, park string, fail toolFailure, cut int, retry retryMark, end time.Time) {
 		pending := park != ""
 		if end.IsZero() {
 			end = time.Now()
 		}
 		dur := end.Sub(start)
 		recording := rec.spanRecording(ctx, span)
-		// The error's facts are read before the provider containment:
-		// its methods (ErrorType, As, Is) are the user's, and a panic in
-		// them is the error's, not the provider's.
-		var errType, panicLayer, inputKind string
-		if recording && !pending && err != nil {
-			errType = toolErrorType(err)
-			var pe *toolPanicError
-			if errors.As(err, &pe) {
-				panicLayer = pe.layer
-			}
-			inputKind = inputErrorKind(err)
-		}
+		// The error's facts were read by the loop, contained with the
+		// call (settleToolError): its methods (ErrorType, As, Is) are
+		// the tool's, and a panic in them is the tool's failure — the
+		// facts are the contained panic's — never the provider's.
+		errType, panicLayer, inputKind := fail.errType, fail.panicLayer, fail.inputKind
+		err := fail.err
 		func() {
 			defer rec.containTraces(ctx)
 			if !recording {

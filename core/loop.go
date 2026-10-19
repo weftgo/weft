@@ -1180,10 +1180,10 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			callCtx, endTool := a.obs.tool(callCtx, rec, c, startSeq, toolStartFacts{timeout: a.callTimeout(def), queue: queue, contentOff: a.content != nil && !*a.content,
 				approvedBy: prov.by, grantID: prov.grant})
 			var retry bool
-			var callErr error
+			var fail toolFailure
 			var cut int
 			var park string
-			outcomes[i], park, retry, cut, callErr = a.callTool(callCtx, call, def, parkSet)
+			outcomes[i], park, retry, cut, fail = a.callTool(callCtx, call, def, parkSet)
 			parked[i] = park != ""
 			retriedAt[i] = retry
 			if retry && retryBase != nil {
@@ -1192,9 +1192,9 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 				// ToolFinish below is not delayed.
 				at := time.Now()
 				res, c := outcomes[i], cut
-				endRetry[i] = func(m retryMark) { endTool(res, "", callErr, c, m, at) }
+				endRetry[i] = func(m retryMark) { endTool(res, "", fail, c, m, at) }
 			} else {
-				endTool(outcomes[i], park, callErr, cut, retryMark{}, time.Time{})
+				endTool(outcomes[i], park, fail, cut, retryMark{}, time.Time{})
 			}
 			if parked[i] {
 				return
@@ -1585,16 +1585,20 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handle
 			return def.invoke(ctx, call.Args, strict)
 		}
 		// Every return path leaves the mark right: a normal return
-		// notes nothing; a panic is noted with its value and goes on
-		// unwinding unchanged (the same value re-raised), so a
-		// middleware that recovers it sees what the handler threw.
+		// notes the error the handler returned (the layer a panic in
+		// its methods is attributed to, settleToolError); a panic is
+		// noted with its value and goes on unwinding unchanged (the
+		// same value re-raised), so a middleware that recovers it sees
+		// what the handler threw.
 		defer func() {
 			if p := recover(); p != nil {
 				mark.note(p)
 				panic(p)
 			}
 		}()
-		return def.invoke(ctx, call.Args, strict)
+		out, err := def.invoke(ctx, call.Args, strict)
+		mark.err = err
+		return out, err
 	}
 	c := base
 	if def != nil {
@@ -1618,12 +1622,14 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handle
 // ErrApprovalRequired is the one non-result: the call is reported
 // pending instead. The chain's error is returned beside the result —
 // folded into the result's text for the model, but typed for the
-// observer's error.type (ADR 0016) — and is nil on success and on a
-// parked call's pending report.
+// observer's error.type (ADR 0016) — and is zero on success and on a
+// parked call's pending report. Every fact of it the loop and the
+// observer read is read once, contained (settleToolError): a panic in
+// the error's own methods is the tool's failure too.
 //
 // cut is the bytes the result cap removed from the content (0 when it
 // cut nothing): the observer's weft.tool.truncated_bytes.
-func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet *parkRule) (res ToolResultPart, park string, retry bool, cut int, err error) {
+func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet *parkRule) (res ToolResultPart, park string, retry bool, cut int, fail toolFailure) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
 	resultCap := a.resultCap
 	timeout := a.toolTimeout
@@ -1645,31 +1651,88 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, p
 	fn := a.chain(def, strict, parkSet, mark)
 	var out string
 	if timeout <= 0 {
-		out, err = invokeContained(ctx, fn, call, mark)
+		out, fail = invokeContained(ctx, fn, call, mark)
 	} else {
-		out, err = invokeWithTimeout(ctx, fn, call, timeout, mark)
+		out, fail = invokeWithTimeout(ctx, fn, call, timeout, mark)
 	}
-	if err != nil {
-		if errors.Is(err, ErrApprovalRequired) {
+	if fail.err != nil {
+		if fail.park {
 			park = mark.parkedBy
 			if park == "" {
 				park = parkByMiddleware
 			}
-			return res, park, false, 0, nil
+			return res, park, false, 0, toolFailure{}
 		}
 		res.IsError = true
-		res.Content = err.Error()
-		// Counted while the error is still an error, through errors.As,
-		// so a middleware-produced RETRY counts exactly like a
-		// handler's (the chain's outcome is what the loop sees).
-		var te *ToolError
-		if errors.As(err, &te) && te.Code == CodeRetry {
-			return res, "", true, 0, err
-		}
-		return res, "", false, 0, err
+		res.Content = fail.text
+		return res, "", fail.retry, 0, fail
 	}
 	res.Content = out
-	return res, "", false, 0, nil
+	return res, "", false, 0, toolFailure{}
+}
+
+// toolFailure is a failed call's error with every fact the loop and the
+// observer read of it: read once, by settleToolError, so a panic in the
+// error's own methods (Error, Is, As, ErrorType — user code) is
+// contained with the call's other failures instead of crashing the
+// process from the tool goroutine (AGENTS rule 1, P9-errortype). The
+// zero value is a call that did not fail.
+type toolFailure struct {
+	err error
+	// park: the error wraps ErrApprovalRequired — the call is pending,
+	// not failed. deadline: it matches context.DeadlineExceeded (the
+	// Timeout path names it). retry: a RETRY ToolError, counted through
+	// errors.As so a middleware's counts like a handler's (the chain's
+	// outcome is what the loop sees).
+	park, deadline, retry bool
+	// text is the result the model sees (Error()).
+	text string
+	// errType, panicLayer and inputKind are the execute_tool span's
+	// error.type, weft.panic.layer and weft.tool.input_error.
+	errType, panicLayer, inputKind string
+}
+
+// settleToolError reads err's facts. A panic while reading them is the
+// tool's failure: the facts become those of the contained-panic error
+// (the same "tool X panicked: v" result a handler's panic gets),
+// attributed to the handler when err is the error the handler returned
+// and to the middleware otherwise. Read whether or not a span records
+// the call, so the model sees the same result with or without a tracer
+// (observability never changes behaviour, ADR 0016).
+func settleToolError(name string, err error, mark *handlerMark) (f toolFailure) {
+	defer func() {
+		if p := recover(); p != nil {
+			layer := panicLayerMiddleware
+			if mark.returned(err) {
+				layer = panicLayerHandler
+			}
+			f = readToolError(&toolPanicError{name: name, value: p, layer: layer})
+		}
+	}()
+	return readToolError(err)
+}
+
+// readToolError is settleToolError's reading, uncontained: on core's
+// own errors (a contained panic, a timeout, the run's cancellation) it
+// cannot panic — fmt contains a panic in a panic value's String or
+// Error. Its order is the loop's: the park check, the text, the RETRY
+// code, then the span's facts.
+func readToolError(err error) toolFailure {
+	f := toolFailure{err: err, park: errors.Is(err, ErrApprovalRequired)}
+	if f.park {
+		return f
+	}
+	f.text = err.Error()
+	var te *ToolError
+	f.retry = errors.As(err, &te) && te.Code == CodeRetry
+	f.deadline = errors.Is(err, context.DeadlineExceeded)
+	f.errType = toolErrorType(err)
+	var pe *toolPanicError
+	if errors.As(err, &pe) {
+		f.panicLayer = pe.layer
+	}
+	f.inputKind = inputErrorKind(err)
+	return f
 }
 
 // callTimeout is the deadline a call to def runs under: its own
@@ -1716,11 +1779,22 @@ const (
 )
 
 // invokeContained runs the chain, turning a panic — in the handler or
-// in middleware — into an error. Containment sits outside the chain by
-// design: no middleware can turn a panic into a run failure. mark
-// is the chain's handler mark (chain): set when the panic unwound
-// through the handler; nil reads as middleware.
-func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart, mark *handlerMark) (out string, err error) {
+// in middleware — into an error, and settles the chain's error
+// (settleToolError: a panic in its methods is contained too).
+// Containment sits outside the chain by design: no middleware can turn
+// a panic into a run failure. mark is the chain's handler mark (chain):
+// set when the panic unwound through the handler; nil reads as
+// middleware.
+func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart, mark *handlerMark) (string, toolFailure) {
+	out, err := invokeChain(ctx, fn, call, mark)
+	if err != nil {
+		return out, settleToolError(call.Name, err, mark)
+	}
+	return out, toolFailure{}
+}
+
+// invokeChain is invokeContained's containment of the chain itself.
+func invokeChain(ctx context.Context, fn ToolCaller, call ToolCallPart, mark *handlerMark) (out string, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			layer := panicLayerMiddleware
@@ -1747,9 +1821,19 @@ type handlerMark struct {
 	// parked the call (parkByApproval, or the park rule's); a parked
 	// call whose base never ran was parked by a middleware.
 	parkedBy string
+	// err is the error the handler returned (nil: none, or it never
+	// returned).
+	err error
 }
 
 func (m *handlerMark) note(p any) { m.panicked, m.value = true, p }
+
+// returned reports whether err is the error the handler returned — the
+// layer a panic in its methods belongs to. An uncomparable error value
+// of the handler's type reads as the handler's (samePanicValue's rule).
+func (m *handlerMark) returned(err error) bool {
+	return m != nil && m.err != nil && samePanicValue(err, m.err)
+}
 
 // from reports whether the recovered value p is the handler's panic.
 // A value of an uncomparable type (a slice, a map) cannot be compared:
@@ -1786,33 +1870,36 @@ func samePanicValue(p, q any) (same bool) {
 // passes, the call is recorded as timed out and the handler's goroutine
 // is abandoned — a hung tool must not hang the run. A cancellation of
 // the run's own ctx is reported as that cancellation, not as a timeout.
-func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, timeout time.Duration, mark *handlerMark) (string, error) {
+func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, timeout time.Duration, mark *handlerMark) (string, toolFailure) {
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	type outcome struct {
-		out string
-		err error
+		out  string
+		fail toolFailure
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		out, err := invokeContained(tctx, fn, call, mark)
-		done <- outcome{out, err}
+		out, fail := invokeContained(tctx, fn, call, mark)
+		done <- outcome{out, fail}
 	}()
-	timedOut := func() error {
-		return &toolTimeoutError{name: call.Name, d: timeout}
+	// The timeout and the run's cancellation are core's own errors:
+	// read uncontained, they cannot panic.
+	timedOut := func() toolFailure {
+		return readToolError(&toolTimeoutError{name: call.Name, d: timeout})
 	}
 	select {
 	case o := <-done:
 		// A handler that honoured the deadline returns
 		// DeadlineExceeded itself; name the timeout rather than
-		// echoing the context error.
-		if o.err != nil && errors.Is(o.err, context.DeadlineExceeded) && ctx.Err() == nil && tctx.Err() != nil {
+		// echoing the context error. The match was read in the
+		// handler's goroutine, contained (settleToolError).
+		if o.fail.deadline && ctx.Err() == nil && tctx.Err() != nil {
 			return "", timedOut()
 		}
-		return o.out, o.err
+		return o.out, o.fail
 	case <-tctx.Done():
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return "", readToolError(err)
 		}
 		return "", timedOut()
 	}

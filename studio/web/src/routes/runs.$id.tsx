@@ -26,7 +26,12 @@
 // refresh every 2 s while running as the poll-shaped fallback.
 import { storyChildren } from "@/lib/delegation"
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  Link,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Columns2, Rows3 } from "lucide-react"
 
@@ -108,8 +113,23 @@ import type { Scale } from "@/lib/waterfall"
 // The ?tree=1 read: the descendant rules too (lib/waterfall-tree.ts).
 import { treeRows as waterfallRows } from "@/lib/waterfall-tree"
 import type { FoldedRun } from "@/lib/events"
-import { callGraph, catalogSources, GRAPH_HINT, nodeOfRun } from "@/lib/graph"
+import { callGraph, catalogSources, nodeOfRun } from "@/lib/graph"
 import { CallGraphView } from "@/components/studio/call-graph"
+import { LoopGraphView } from "@/components/studio/loop-graph"
+import {
+  callOf,
+  callStepper,
+  catalogTools,
+  DEEP_HANDOFF_DEPTH,
+  LEVEL_HINT,
+  LEVELS,
+  levelOf,
+  LOOP_HINT,
+  loopGraph,
+  nodeOfKey,
+  runChain,
+} from "@/lib/loopgraph"
+import type { GraphLevel } from "@/lib/loopgraph"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import { FlowStrip } from "@/components/studio/flow-strip"
 import { RunHeader, runPlace } from "@/components/studio/run-header"
@@ -176,7 +196,7 @@ const dataOf = <T,>(rs: { data?: T }[]) => rs.map((r) => r.data)
 
 /** The scales the switch offers, in its order. */
 const SCALES = ["time", "order", "graph"] as const
-const scaleHint = (a: RunScale) => (a === "graph" ? GRAPH_HINT : SCALE_HINT[a])
+const scaleHint = (a: RunScale) => (a === "graph" ? LOOP_HINT : SCALE_HINT[a])
 
 /** How long after the end the run page waits for the run's
  * invoke_agent span (an OTLP exporter's batch lands after run_finish). */
@@ -229,6 +249,8 @@ export const Route = createFileRoute("/runs/$id")({
     // The run tree's scale (U8.2, UX-A-02: both values round-trip); a
     // pre-U8.2 link's ?axis=time|events reads as time|order.
     scale: scaleOf(search.scale) ?? scaleOf(search.axis),
+    // The graph's level (U34): the loop (absent) or the agents' call graph.
+    level: levelOf(search.level) === "agents" ? "agents" : undefined,
     // The tree's dim filters (UX-A-04): written in DIMS's order.
     dim: dimParam(parseDim(search.dim)),
     t:
@@ -252,6 +274,7 @@ function RunPage() {
   const { id } = Route.useParams()
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/runs/$id" })
+  const router = useRouter()
   // A step's pane (A6.2) lives on its story card: ?pane= opens there.
   const view: View =
     search.view ??
@@ -628,19 +651,33 @@ function RunPage() {
   // time — the order scale and its playhead have nothing to show. Asked
   // for time without spans, the run reads on the order scale.
   const derived = isDerived(run.data)
+  // The graph (U34) reads the run tree's rows: the spans' with spans, a
+  // span-less run's fold on the order scale.
   const scale: RunScale =
-    derived && haveTime
-      ? search.scale === "graph"
-        ? "graph"
-        : "time"
-      : haveTime
-        ? (search.scale ?? "time")
-        : "order"
-  // The tree's own scale: the graph reads (and selects in) the time
-  // scale's rows.
-  const treeScale: Scale = scale === "graph" ? "time" : scale
+    search.scale === "graph" && (haveTime || !derived)
+      ? "graph"
+      : derived && haveTime
+        ? "time"
+        : haveTime
+          ? search.scale === "graph"
+            ? "time"
+            : (search.scale ?? "time")
+          : "order"
+  // The tree's own scale: the graph reads (and selects in) its rows.
+  const treeScale: Scale =
+    scale === "graph" ? (haveTime ? "time" : "order") : scale
+  // The scales offered: all three with spans, order and graph without;
+  // a derived run's spans are its one scale beside the graph.
+  const scales: readonly RunScale[] = derived
+    ? haveTime
+      ? ["time", "graph"]
+      : []
+    : haveTime
+      ? SCALES
+      : ["order", "graph"]
   // The scale switch (and its t key) is offered when there is a choice.
-  const scaled = haveTime && !derived
+  const scaled = scales.length > 1
+  const level: GraphLevel = search.level ?? "loop"
 
   // The child subtree in place (U9.2, UX-A-01): a child run row stays
   // one row until expanded; its rows (and its children's, lazily — drawn
@@ -1072,7 +1109,7 @@ function RunPage() {
   )
   const graph = useMemo(
     () =>
-      scale === "graph"
+      scale === "graph" && level === "agents"
         ? callGraph(
             treeSpansAll,
             id,
@@ -1082,7 +1119,97 @@ function RunPage() {
             (r) => r === id
           )
         : undefined,
-    [scale, treeSpansAll, id, sources]
+    [scale, level, treeSpansAll, id, sources]
+  )
+  // The loop graph (U34): every child expanded (a subagent expands in
+  // place: its loop is drawn from the same rows), on the tree's scale.
+  const loopOn = scale === "graph" && level === "loop"
+  const graphRows = useMemo(
+    () =>
+      loopOn
+        ? waterfallRows({ ...treeInput, expanded: ALL_RUNS }, treeScale).rows
+        : [],
+    [loopOn, treeInput, treeScale]
+  )
+  // The loop drawn: the selected row's run (a subagent expanded by
+  // selecting its run), at most DEEP_HANDOFF_DEPTH levels down.
+  const selGraphRow = graphRows.find((r) => r.key === selKey)
+  const focusChain = useMemo(() => {
+    const c = runChain(id, selGraphRow?.runId ?? id)
+    return c.slice(0, DEEP_HANDOFF_DEPTH + 1)
+  }, [id, selGraphRow?.runId])
+  const focus = focusChain.at(-1) ?? id
+  const argsByRun = useMemo(() => {
+    const out = new Map<string, unknown>()
+    const put = (r: string, f: FoldedRun) => {
+      for (const st of f.steps)
+        for (const c of st.toolCalls) out.set(`${r}\n${c.callId}`, c.args)
+    }
+    if (!loopOn) return out
+    put(id, linkedFold)
+    for (const [r, f] of childFolds) put(r, f)
+    return out
+  }, [loopOn, id, linkedFold, childFolds])
+  const loop = useMemo(() => {
+    if (!loopOn) return undefined
+    const own = focus === id
+    const kid = own
+      ? undefined
+      : (childDocs.find((d) => d?.id === focus) ??
+        run.data?.children.find((c) => c.id === focus))
+    return loopGraph(graphRows, focus, {
+      stoppedBy: own ? run.data?.stopped_by : kid?.stopped_by,
+      status: own ? viewStatus : (kid?.status ?? childStatus.get(focus)),
+      pending: own ? atPlayhead.pending : undefined,
+      argsOf: (call) => argsByRun.get(`${focus}\n${call}`),
+      // Only this run's catalog is read (U9.2-fix W5's rule): a child's
+      // offered tools are a hole, never "none".
+      catalog: own ? catalogTools(requests?.steps) : null,
+      usage: own ? run.data?.usage : kid?.usage,
+    })
+  }, [
+    loopOn,
+    focus,
+    id,
+    childDocs,
+    run.data,
+    graphRows,
+    viewStatus,
+    childStatus,
+    atPlayhead.pending,
+    argsByRun,
+    requests?.steps,
+  ])
+  const loopCall = loop ? callOf(loop, selKey) : undefined
+  const loopCrumbs = useMemo(
+    () =>
+      focusChain.map((r) => ({
+        run: r,
+        label:
+          graphRows.find(
+            (x) => x.runId === r && (x.kind === "run" || x.kind === "child")
+          )?.label ?? r,
+      })),
+    [focusChain, graphRows]
+  )
+  const setLevel = useCallback(
+    (to: GraphLevel) =>
+      void navigate({
+        search: (prev) => ({
+          ...prev,
+          level: to === "agents" ? "agents" : undefined,
+        }),
+        replace: true,
+      }),
+    [navigate]
+  )
+  const setLoopStep = useCallback(
+    (n: number | undefined) =>
+      void navigate({
+        search: (prev) => ({ ...prev, step: n, pane: undefined }),
+        replace: true,
+      }),
+    [navigate]
   )
   const setScale = useCallback(
     (to: RunScale) =>
@@ -1166,13 +1293,24 @@ function RunPage() {
           } else if (++tries < 10) requestAnimationFrame(focusBox)
         }
         requestAnimationFrame(focusBox)
+      } else if (
+        (e.key === "j" || e.key === "k") &&
+        view === "waterfall" &&
+        loop
+      ) {
+        // The loop's step scrubber: J / K move between its steps.
+        const ns = loop.steps.map((st) => st.n)
+        const i = ns.indexOf(search.step ?? -1)
+        const next =
+          e.key === "j" ? ns[i + 1] : i < 0 ? ns.at(-1) : ns[Math.max(i - 1, 0)]
+        if (next !== undefined) setLoopStep(next)
       } else if ((e.key === "j" || e.key === "k") && view === "waterfall") {
         const i = treeRows.findIndex((s) => s.key === selKey)
         const next = treeRows.at(e.key === "j" ? i + 1 : Math.max(i - 1, 0))
         if (next) select(next.key)
       } else if (e.key === "t" && view === "waterfall" && scaled) {
         // The scale (§6.1's key; s is the story's): time → order → graph.
-        setScale(SCALES[(SCALES.indexOf(scale) + 1) % SCALES.length])
+        setScale(scales[(scales.indexOf(scale) + 1) % scales.length])
       }
     }
     window.addEventListener("keydown", onKey)
@@ -1186,7 +1324,11 @@ function RunPage() {
     select,
     scaled,
     scale,
+    scales,
     setScale,
+    loop,
+    search.step,
+    setLoopStep,
   ])
 
   // A row's WARN / ERROR tick: a click opens its drawer's Logs tab.
@@ -1373,7 +1515,7 @@ function RunPage() {
                   data-scale={scale}
                 >
                   <span className="text-faint">scale:</span>
-                  {SCALES.map((a) => (
+                  {scales.map((a) => (
                     <button
                       key={a}
                       type="button"
@@ -1387,6 +1529,31 @@ function RunPage() {
                       onClick={() => setScale(a)}
                     >
                       {a}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {view === "waterfall" && scale === "graph" ? (
+                <div
+                  className="flex items-center gap-1 font-mono text-[11px]"
+                  role="group"
+                  aria-label="level"
+                  data-level={level}
+                >
+                  {LEVELS.map((l) => (
+                    <button
+                      key={l}
+                      type="button"
+                      aria-pressed={level === l}
+                      className={`rounded-md border px-2 py-1 ${
+                        level === l
+                          ? "border-thread/60 bg-secondary"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title={LEVEL_HINT[l]}
+                      onClick={() => setLevel(l)}
+                    >
+                      {l}
                     </button>
                   ))}
                 </div>
@@ -1528,7 +1695,29 @@ function RunPage() {
                     className={`grid items-start gap-3 ${gridCols}`}
                     data-trace-grid={layout}
                   >
-                    {graph ? (
+                    {loop ? (
+                      <LoopGraphView
+                        graph={loop}
+                        chain={loopCrumbs}
+                        depth={focusChain.length - 1}
+                        selectedNode={nodeOfKey(loop, selKey, selGraphRow)}
+                        step={search.step}
+                        onSelect={select}
+                        onClear={() =>
+                          void navigate({
+                            search: (prev) => ({ ...prev, sel: undefined }),
+                            replace: true,
+                          })
+                        }
+                        onStep={setLoopStep}
+                        onFocusRun={(r) => select(`r:${r}`)}
+                        openRun={(r) =>
+                          router.history.createHref(
+                            router.buildLocation(runLink(r)).publicHref
+                          )
+                        }
+                      />
+                    ) : graph ? (
                       <CallGraphView
                         graph={graph}
                         selected={nodeOfRun(graph, selectedRow?.runId)?.id}
@@ -1628,6 +1817,48 @@ function RunPage() {
                       />
                     )}
                     <div className={stickyDetail}>
+                      {loop && loopCall && loopCall.tool.calls.length > 1 ? (
+                        <div
+                          className="mb-2 flex items-center gap-1 font-mono text-[11px]"
+                          role="group"
+                          aria-label={loopCall.tool.name}
+                          data-call-stepper
+                        >
+                          <button
+                            type="button"
+                            className="rounded-md border px-1.5 py-0.5 disabled:opacity-40"
+                            aria-label="previous call"
+                            disabled={loopCall.i === 0}
+                            onClick={() =>
+                              select(loopCall.tool.calls[loopCall.i - 1].key)
+                            }
+                          >
+                            ‹
+                          </button>
+                          <span data-call-of>
+                            {callStepper(
+                              loopCall.i,
+                              loopCall.tool.calls.length
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded-md border px-1.5 py-0.5 disabled:opacity-40"
+                            aria-label="next call"
+                            disabled={
+                              loopCall.i === loopCall.tool.calls.length - 1
+                            }
+                            onClick={() =>
+                              select(loopCall.tool.calls[loopCall.i + 1].key)
+                            }
+                          >
+                            ›
+                          </button>
+                          <span className="text-faint">
+                            · {loopCall.tool.name}
+                          </span>
+                        </div>
+                      ) : null}
                       {/* The story's run cards (U25) — park words, tool
                           limits, typed child outcomes — for the drawer's
                           call rows too: one source (P8-gate-fix). */}

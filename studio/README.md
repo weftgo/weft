@@ -1061,8 +1061,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 265,006 B raw / 88,835 B gzip
-(86.8 KiB, the bundle of the ledger's row "P9-trim"; 9,469 B — 9.2 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 267,092 B raw / 89,609 B gzip
+(87.5 KiB, the bundle of the ledger's row "U34 loop line"; 8,695 B — 8.5 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1762,7 +1762,28 @@ running child has no span yet and reads running —, `hidden`). **whole
 trace ↗** opens `/traces/<trace id>` with the selection kept, the run's
 own rows always run-qualified (the trace page keys bare only its own
 root run, and reads that root's qualified keys back). The third scale,
-`?scale=graph` (`src/lib/graph.ts`, inline SVG), is the call graph over
+`?scale=graph`, is the loop graph (U34, `src/lib/loopgraph.ts` +
+`components/studio/loop-graph.tsx`, inline SVG, no layout library): the
+selected run's loop off the run tree's rows — the spans on a run with
+them, the fold on a span-less one (the switch then offers order and
+graph) — prompt → model ⇄ one node per tool (its calls ×N, failures ✗,
+denials ✋, parks ⏸ with a dashed result edge, the slowest and p50 on
+hover; MCP tools in an `mcp:<server>` frame; at most 12, then `+N
+tools`), the end in the stopped-by words, the tools the request catalog
+offered and the run never called dashed below (a child run's catalog is
+not read here: none drawn, never "none"). Above it, at most three
+insights, each selecting its node — the run's budget end (max_steps,
+loop_detected, usage_limit, model_retries_exceeded), the output limit, a
+repeated identical call (the fold's arguments; content-off, none
+claimed), a tool that always failed, the tools never called. A subagent
+node expands in place (⊕, or → on it): its own loop, with the breadcrumb
+`director › ops-manager`, three levels deep, then `open run ↗`. Below,
+the step scrubber (`?step=`, J / K, ▶ play at 0.8 s per step, off under
+reduced motion) lights only that step's edges. A node is a button on
+one roving tab stop (→ follows the calls, ← back, ↑ ↓ along the tools,
+Enter selects, Esc clears); it selects in `?sel=` — a tool its first
+call's row, with `‹ call i of n ›` above the drawer walking every call.
+`?level=agents` is the call graph (`src/lib/graph.ts`) over
 the same spans: one node per agent (its runs, the slowest, failures,
 tokens when the spans carry them) in call-depth columns, one per MCP
 server (a tool whose request-catalog source starts `mcp`, the run's own

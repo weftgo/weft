@@ -237,7 +237,7 @@ describe("the child subtree in place (the Done line)", () => {
 describe("the graph scale (§6.2)", () => {
   it("draws the three agents with their edge counts, the selection shared with the tree", async () => {
     serve()
-    const { router } = renderApp(`/runs/${DIR}?scale=graph`)
+    const { router } = renderApp(`/runs/${DIR}?scale=graph&level=agents`)
     await waitFor(() =>
       expect(document.querySelector("[data-call-graph]")).not.toBeNull()
     )

@@ -468,7 +468,13 @@ describe("review fixes: what a draw touches", () => {
     const el = await mount({ ...BASE, "data-position": "right-dock" })
     const tail = FakeEventSource.last("run=s_01-t1")!
     const card = $(el, '.weft-step[data-weft-step="1"]')!
-    const w = watch(el, (n) => card.contains(n))
+    // The loop line (U34) counts the calls: it changes with them too.
+    const w = watch(
+      el,
+      (n) =>
+        card.contains(n) ||
+        !!(n instanceof Element ? n : n.parentElement)?.closest(".weft-loop")
+    )
     tail.emit("record", {
       run_id: "s_01-t1",
       kind: "event",

@@ -140,6 +140,7 @@ import {
   OPS,
   SPANS as DIR_SPANS,
 } from "../test/director-fixture"
+import { build as buildLoop, FLAKY as LOOP_FLAKY } from "../test/loop-fixtures"
 import {
   UL,
   UL_BODIES,
@@ -4044,5 +4045,116 @@ describe("the run cards' facts on both surfaces (U25)", () => {
     )
     expect(studio).toEqual(["child failed"])
     expect(panel).toEqual(studio)
+  })
+})
+
+// U34 (WEFT-LOOP-GRAPH.md §4, §6): the panel's loop line and Studio's
+// loop graph read one model (lib/loopgraph.ts's core) off the same run
+// tree rows: on rw.flaky-infra the same tools in the same order, the
+// same counts and failure marks, the same ending; a chip selects its
+// step, and graph ⤢ lands Studio's graph on that step.
+describe("the loop line on both surfaces (U34)", () => {
+  const rOK = golden<{ runs: RunRow[] }>("runs").runs.find(
+    (r) => r.id === "r_ok"
+  )!
+  const b = buildLoop(LOOP_FLAKY)
+  const row: RunRow = {
+    ...rOK,
+    id: LOOP_FLAKY.id,
+    agent: LOOP_FLAKY.agent,
+    steps: 3,
+    stopped_by: "final_answer",
+  }
+  const doc = {
+    ...row,
+    trace_id: "t1",
+    children: [],
+    holes: [],
+  } as unknown as RunDoc
+  const serveLoop = (meta: Record<string, unknown>) =>
+    new FakeStudio()
+      .on("GET meta", meta)
+      .on("GET runs", { total: 1, runs: [row], next_before: null })
+      .on(`GET runs/${row.id}`, doc)
+      .on(
+        `GET runs/${row.id}/events`,
+        pagedEvents(
+          b.events.map((event, pos) => ({ pos, time: rOK.started, event })),
+          { done: true }
+        )
+      )
+      .on(`GET runs/${row.id}/transcript`, { messages: [] })
+      .on(`GET runs/${row.id}/spans`, { spans: b.spans })
+      .install()
+
+  it("rw.flaky-infra: the same tools, counts, marks and end; graph ⤢ carries the chip's step", async () => {
+    serveLoop(META)
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+    })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(1), {
+      timeout: 5_000,
+    })
+    click(all(el, ".weft-turn")[0])
+    await vi.waitFor(() => expect($(el, ".weft-loop")).toBeTruthy(), {
+      timeout: 5_000,
+    })
+    const chips = () => all(el, ".weft-loop button") as HTMLElement[]
+    const panel = chips().map((c) => c.textContent)
+    const tones = chips().map((c) => c.getAttribute("data-tone"))
+    // A chip selects its step; the hand-off follows the selection.
+    click(chips().at(-1))
+    const link = () => new URL($(el, ".weft-loop a")!.getAttribute("href")!)
+    await vi.waitFor(() => expect(link().searchParams.get("step")).toBe("2"), {
+      timeout: 5_000,
+    })
+    const to = link()
+    expect(to.searchParams.get("scale")).toBe("graph")
+    expect(to.hash).toBe("")
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serveLoop(golden<Record<string, unknown>>("meta"))
+    renderApp(`/runs/${row.id}${to.search}`)
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-loop-node^='t:']").length).toBe(4)
+    )
+    const studio = [
+      ...Array.from(
+        document.querySelectorAll<SVGElement>("[data-loop-node^='t:']")
+      ).map(
+        (n) =>
+          `${n.getAttribute("data-loop-node")!.slice(2)} ${n.getAttribute("data-marks")}`
+      ),
+      `→ ${document.querySelector("[data-loop-end]")!.getAttribute("data-word")}`,
+    ]
+    expect(panel).toEqual([
+      "inventory_api ×2 ✗",
+      "shipping_quote ×1 ✗",
+      "legacy_billing ×1 ✗",
+      "tax_service ×1 ✗",
+      "→ the model answered",
+    ])
+    expect(studio).toEqual(panel)
+    expect(tones).toEqual(["error", "error", "error", "error", "ok"])
+    // The same selection: step 2 is the scrubber's, its row selected.
+    expect(
+      document
+        .querySelector('[data-loop-step="2"]')!
+        .getAttribute("aria-pressed")
+    ).toBe("true")
+    expect(
+      document
+        .querySelector('[data-loop-node="model"]')!
+        .getAttribute("aria-pressed")
+    ).toBe("true")
   })
 })

@@ -69,6 +69,9 @@ export interface RunSearch {
   /** The run tree's scale: time (spans) or order (positions, replay), or graph.
    * A pre-U8.2 ?axis=time|events is read as time|order, never written. */
   scale?: RunScale
+  /** The graph scale's level (U34): absent, the loop (lib/loopgraph.ts);
+   * agents, the call graph of agents and MCP servers (lib/graph.ts). */
+  level?: "agents"
   /** The run tree's dim filters (§6.1, UX-A-04): errors, slow, tools,
    * comma-separated — rows no filter keeps dim, never hide. */
   dim?: string

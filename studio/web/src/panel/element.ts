@@ -213,6 +213,12 @@ import {
   UNTIMED_PENDING_HINT,
   waterfallRows,
 } from "../lib/waterfall"
+import {
+  GRAPH_HANDOFF,
+  LOOP_LABEL,
+  loopChips,
+  loopCore,
+} from "../lib/loopgraph"
 import { PANEL_CSS } from "./styles"
 import { nextTheme, resolveTheme, themeSetting, ThemeWatch } from "./theme"
 import {
@@ -5281,6 +5287,16 @@ export class WeftDevtools extends HTMLElement {
     }
     const ids = this.turnLinks(t, s)
     if (ids) wrap.appendChild(ids)
+    const row0 = this.rowOf(t.id)
+    const loop = loopLine(
+      t,
+      row0?.stopped_by ?? t.doc?.stopped_by,
+      row0?.status ?? t.doc?.status,
+      s.selectedStep,
+      this.base,
+      (n) => this.model?.selectStep(n)
+    )
+    if (loop) wrap.appendChild(loop)
     const prompt = turnPromptOf(t.transcript)
     const ed = this.edCtx(s, t)
     // Step 0's prompt is a user edit's (plan F2): editable in place.
@@ -6182,6 +6198,59 @@ export function readStep(view: FoldedRun, selected: number | null): number {
     : -1
 }
 
+/** A turn's run tree (lib/waterfall.ts): the Timeline's rows, and the
+ * loop line's. */
+const turnRows = (t: TurnView) =>
+  waterfallRows({
+    runId: t.id,
+    status: t.doc?.status,
+    spans: t.spans,
+    fold: t.folded,
+    total: (t.events.at(-1)?.pos ?? 0) + 1,
+    agents: new Map((t.doc?.children ?? []).map((c) => [c.id, c.agent])),
+  })
+
+/** The loop in one line (U34, WEFT-LOOP-GRAPH.md §4): lib/loopgraph.ts's
+ * model over the Timeline's rows, Studio's counts — each tool with its
+ * marks (a click selects its first call's step, as a step card's does),
+ * the end in the U3 words, and "graph ⤢" to Studio's loop at the
+ * selection. */
+function loopLine(
+  t: TurnView,
+  by: string | undefined,
+  status: string | undefined,
+  sel: number | null | undefined,
+  base: string,
+  pick: (step: number) => void
+): HTMLElement | null {
+  const g = loopCore(turnRows(t).rows, t.id, {
+    stoppedBy: by,
+    status,
+    pending: t.folded.pending,
+  })
+  if (g.last === undefined) return null
+  const box = el("div", "weft-loop", `${LOOP_LABEL} ◆ ⇄`)
+  for (const c of loopChips(g)) {
+    const b = el("button", "weft-btn", c.text, {
+      type: "button",
+      "data-tone": c.tone,
+    })
+    if (c.step !== undefined) on(b, "click", () => pick(c.step!))
+    box.appendChild(b)
+  }
+  box.appendChild(
+    el("a", "weft-btn", GRAPH_HANDOFF, {
+      href: href(
+        base,
+        runLink(t.id, { scale: "graph", step: sel ?? undefined })
+      ),
+      ...NEW_TAB,
+      "data-weft-handoff": t.id,
+    })
+  )
+  return box
+}
+
 /** renderTimeline is the Timeline tab (D4, U8.3): lib/waterfall.ts's
  * run tree — Studio's run page's rows, one level deep: the run, its
  * steps, their model calls and tools (and the spans under them), each
@@ -6198,14 +6267,7 @@ export function renderTimeline(
   sel?: number | null,
   endpoint?: string
 ): HTMLElement {
-  const wf = waterfallRows({
-    runId: t.id,
-    status: t.doc?.status,
-    spans: t.spans,
-    fold: t.folded,
-    total: (t.events.at(-1)?.pos ?? 0) + 1,
-    agents: new Map((t.doc?.children ?? []).map((c) => [c.id, c.agent])),
-  })
+  const wf = turnRows(t)
   const time = wf.scale === "time"
   const end = wf.domain[1]
   const box = el("div", "weft-timeline", undefined, {

@@ -244,9 +244,14 @@ describe("?scale=order on a run without spans", () => {
     expect(
       rows().filter((n) => n.hasAttribute("data-critical")).length
     ).toBeGreaterThan(0)
-    // No spans: no scale switch, and the replay bar (the order scale's
+    // No spans: the switch offers order and the loop graph (U34: the
+    // graph reads the fold), and the replay bar (the order scale's
     // playhead) is there.
-    expect(document.querySelector("[data-scale]")).toBeNull()
+    expect(
+      Array.from(
+        document.querySelectorAll<HTMLElement>("[data-scale] button")
+      ).map((b) => b.textContent)
+    ).toEqual(["order", "graph"])
     expect(document.body.textContent).not.toContain("past the playhead")
     // A ?scale=time without spans reads the order scale too.
     renderApp(`/runs/${DIR}?scale=time`)

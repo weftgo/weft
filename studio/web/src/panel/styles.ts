@@ -190,6 +190,10 @@ ${statusRules()}
 .weft-step-b { padding: 7px 9px; white-space: pre-wrap; word-break: break-word; }
 .weft-note, .weft-stream, [data-key=text] { font-family: var(--weft-font-prose); }
 .weft-reason { color: var(--weft-faint); margin-top: 4px; }
+.weft-loop { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; color: var(--weft-dim); }
+.weft-loop [data-tone=error] { color: var(--weft-warn); }
+.weft-loop [data-tone=parked] { color: var(--weft-parked); }
+.weft-loop [data-tone=bad] { color: var(--weft-err); }
 details.weft-collapsible > summary {
   cursor: pointer; color: var(--weft-dim); padding: 3px 0; list-style: none;
 }

@@ -365,7 +365,7 @@ describe("the waterfall tree (P8-pre-web #3)", () => {
 describe("the call graph (U9.2-fix W5, W6)", () => {
   it("nodes take a focus ring, axe finds nothing; a child run's MCP calls are said not shown", async () => {
     serve()
-    renderApp(`/runs/${DIR}?scale=graph`)
+    renderApp(`/runs/${DIR}?scale=graph&level=agents`)
     await waitFor(() =>
       expect(document.querySelector("[data-call-graph]")).not.toBeNull()
     )

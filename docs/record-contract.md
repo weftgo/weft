@@ -124,7 +124,7 @@ reads them from:
 | `weft.session.title` | `thread` (`SetInfo`'s title) | the session's title (`Session.Title`) as the turn started, absent before one was set — a label, not content: it survives a content-off destination (the `session_title` fixture). A fork carries the newest title on the copied path at the fork point (a title set after the fork point, or on another branch, is not carried); the title is the newest across the whole entry tree, so a `Branch` back past a `SetInfo` keeps the newer title; a held compaction marker (no run of the session produced the context) goes out under the next run's own metadata, and the fallback for a run this Session did not see (before a reopen, or past its recent-runs list) stamps the title current when emitted | `meta`; the session row's `title` (§6) |
 | `weft.session.forked_from` | `thread` (`Fork`) | `<origin session>#<entry id>` | `meta` |
 | `weft.turn.parent` | `thread` | the turn whose line this turn continues (its `weft.turn`, as a string), set only when that is not the session's newest turn — the first turn after a navigation (`Branch`, `Uncompact`, a rollback, an overflow re-run's branch-back) took the leaf off the newest line; `"0"` when the line it continues holds no turn of the session; absent for a linear turn (UX-E-20; the `thread_branches` fixture) | `meta` |
-| `weft.session.branch` | `thread` | the branch the turn's line descends from: the label (`Label`) on the entry the newest navigation on its path went to — an app-chosen name, metadata — else that navigation's leaf entry id; on every turn of that line, absent on a line no navigation made (`thread_branches`; after a rollback, `thread_busy`'s last turn) | `meta` |
+| `weft.session.branch` | `thread` | the branch the turn's line descends from: the label (`Label`) on the entry the newest navigation on its path went to — an app-chosen name, metadata — else that navigation's leaf entry id; on every turn of that line, absent on a line no navigation made — a failed send's leaf move back (`LeafEntry.Abandoned`) is none (`thread_branches`; after a rollback, `thread_busy`'s last turn) | `meta` |
 | any caller key | `thread.WithRunMetadata` | a session's run metadata: written into the header at `Create` and `Fork` (`Header.RunMeta`, a fork taking its origin's under its own), held over it at `Open`, stamped on every turn's run under the session's identity keys (which win) and under a `Send`'s own `thread.RunOptions(core.Metadata(...))` (which wins per key); a record filed under a run the Session did not see stamps it too (the `thread_approvals` fixture's `arena.batch`) | `meta` |
 | `weft.session.parent` | `thread/pool` | the parent session of a pool child | `meta` |
 | `weft.session.parent_call` | `thread/pool` | the parent's tool call that spawned it, when known | `meta` |
@@ -290,10 +290,12 @@ child of that run's `invoke_agent` span when the Session saw the run;
 with no run yet, or when the turn in flight has not reported yet (the
 pre-run trigger's compaction, before the turn's run starts), held with
 its recorded times and opened under that run when it reports — in its
-trace, never a trace of its own (the `thread_summarizer` fixture); one
-still held at `Close` for a run that never reported opens under it
-without a parent, one held for no run is dropped with a Debug line (a
-span with no run would read as a run of its own). Its usage is never
+trace, never a trace of its own (the `thread_summarizer` fixture). One
+whose run ended without reporting — found stale when a later run
+reports, or still held at `Close` — is dropped with a Debug line, as
+one held for no run is: with no span of its run to open under it would
+be a root span in a trace of its own, read as a run (its usage is then
+in no `summarizer_usage`). Its usage is never
 part of the run's own (the `invoke_agent` span's) usage, and it gives
 the run row nothing: no `provider`, `model`, `trace_id` or `meta`
 (ClickHouse's 0024 guards the traces view; SQLite takes those from the

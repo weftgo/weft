@@ -212,11 +212,19 @@ type BranchSummaryEntry struct {
 // LeafEntry moves the session's leaf to an existing entry — branch
 // navigation without a rewrite (ADR 0011 §3). The next entry attaches
 // to Entry, and the model's context is rebuilt from there.
+//
+// Abandoned marks the one leaf entry that is no navigation: a failed
+// or refused send's settlement, moving the leaf back to where that send
+// found it (the failed prompt or receipts left on a line of their own).
+// A reader naming the branch a turn descends from (weft.session.branch,
+// record contract §2) skips it. A session written before the field
+// carries none, and reads its abandon moves as navigations.
 type LeafEntry struct {
-	ID       string    `json:"id"`
-	ParentID string    `json:"parent,omitempty"`
-	Created  time.Time `json:"created"`
-	Entry    string    `json:"entry"`
+	ID        string    `json:"id"`
+	ParentID  string    `json:"parent,omitempty"`
+	Created   time.Time `json:"created"`
+	Entry     string    `json:"entry"`
+	Abandoned bool      `json:"abandoned,omitempty"`
 }
 
 // LabelEntry names an entry — bookmarks, checkpoints, a UI's anchors.

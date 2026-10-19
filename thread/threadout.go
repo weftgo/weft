@@ -153,26 +153,17 @@ func (s *Session) flushHeldLocked(rctx context.Context, runID string, md map[str
 }
 
 // sealHeldLocked is Close's share of the record family: every record
-// still held goes out as a held record (closeItemLocked), and the held
-// summarizer calls that wait for a run are returned to be opened under
-// it, spanless, once s.mu is released; the ones that wait for no run
-// are dropped — a span with no run would read as a run of its own —
-// and counted, with the records the bound pushed out, in the Debug
-// line. Callers hold s.mu.
-func (s *Session) sealHeldLocked() (sums []summarizerCall, sumMD []map[string]string, dropped int) {
+// still held goes out as a held record (closeItemLocked); the records
+// the bound pushed out are counted (dropped). The held summarizer
+// calls are dropped and counted (sums): a call held for no run, or for
+// a run that never reported by Close, has no span to open under, and
+// one opened bare would be a root span in a trace of its own — read as
+// a run (record contract §3). Callers hold s.mu.
+func (s *Session) sealHeldLocked() (sums, dropped int) {
 	for _, h := range s.heldRecs {
 		s.queueRecLocked(s.closeItemLocked(h))
 	}
-	dropped = s.heldDropped
-	for _, c := range s.heldSummaries {
-		if c.run == "" {
-			dropped++
-			continue
-		}
-		n, _ := runSeq(s.header.ID, c.run)
-		sums = append(sums, c)
-		sumMD = append(sumMD, s.unseenRunMetadataLocked(n))
-	}
+	dropped, sums = s.heldDropped, len(s.heldSummaries)
 	s.heldRecs, s.heldDropped, s.heldSummaries = nil, 0, nil
-	return sums, sumMD, dropped
+	return sums, dropped
 }

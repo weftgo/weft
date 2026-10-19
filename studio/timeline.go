@@ -219,8 +219,7 @@ func (s *Server) sessionScopeFor(w http.ResponseWriter, r *http.Request, er obsd
 		return obsdb.SessionDetail{}, false
 	}
 	if pub := panelPublicID(r); pub != "" && len(det.Runs) > 0 {
-		det.Runs = withPublicID(det.Runs, pub)
-		det.SessionRow = scopedSessionRow(det.SessionRow, det.Runs, pub)
+		s.scopeSessionDetail(r.Context(), &det, pub)
 	}
 	return det, true
 }

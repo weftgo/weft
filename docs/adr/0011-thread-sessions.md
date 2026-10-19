@@ -560,7 +560,7 @@ older reader can safely ignore is added without a version.
 | `turn` | 1 | — | `run_id`, `usage`, *`stop_reason`*, *`steps`*, *`err`*, *`pending`* (tool-call parts), *`canceled`*, *`policy`*, *`rerun`*, *`last_input`*, *`late_steps`* | no |
 | `compaction` | 1 | — (5 with `trim`) | `first_kept`, `tokens_before`, *`summary`*, *`reason`* (`manual`, `threshold`, `overflow`, `from_hook`, `trim`), *`summarizer_usage`*, *`summarizer_model`*, *`files_read`*, *`files_modified`* (read, never written), *`pinned`*, *`range_hash`*, *`trim`* = `{stubs: [{entry, call_id, content, is_error}]}` | the summary |
 | `branch_summary` | 1 | — | `summary`, `from_entry` | yes |
-| `leaf` | 1 | — | `entry` (the entry the leaf moves to; empty is the root) | no |
+| `leaf` | 1 | — | `entry` (the entry the leaf moves to; empty is the root), *`abandoned`* (`true` on a failed or refused send's leaf move back — no navigation: it names no branch) | no |
 | `label` | 1 | — | `entry`, `name` | no |
 | `info` | 1 | — | *`title`*, *`meta`* | no |
 | `custom` | 1 | — | `kind`, *`data`* (any JSON) | no |

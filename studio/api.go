@@ -730,6 +730,11 @@ type sessionRow struct {
 	LastSeen  time.Time  `json:"last_seen"`
 	Status    string     `json:"status"`
 	Usage     core.Usage `json:"usage"`
+	// SummarizerUsage is what weft/thread's summarizer model calls cost
+	// the session (obsdb.SessionRow.SummarizerUsage, record contract §6):
+	// apart from usage, never folded into it nor priced here (U15.1).
+	// Absent when the session summarized nothing.
+	SummarizerUsage *core.Usage `json:"summarizer_usage,omitempty"`
 	// Title is the newest turn's weft.session.title (thread's Title, a
 	// label that survives content-off; obsdb.SessionRow.Title), absent
 	// when none was set. FirstPrompt is the first turn's prompt_preview,
@@ -763,8 +768,14 @@ type sessionRow struct {
 }
 
 func sessRow(r obsdb.SessionRow) sessionRow {
+	var sum *core.Usage
+	if r.SummarizerUsage != (core.Usage{}) {
+		u := r.SummarizerUsage
+		sum = &u
+	}
 	return sessionRow{
-		ID: r.ID, PublicID: r.PublicID, Agent: r.Agent, Turns: r.Turns,
+		SummarizerUsage: sum,
+		ID:              r.ID, PublicID: r.PublicID, Agent: r.Agent, Turns: r.Turns,
 		FirstSeen: r.FirstSeen, LastSeen: r.LastSeen,
 		Status: string(r.Status), Usage: r.Usage,
 		Title: r.Title, FirstPrompt: r.FirstPrompt, ContentOff: r.ContentOff,
@@ -1810,8 +1821,7 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		// list's rule): a run of another app sharing the session id — a
 		// derived run whose gen_ai.conversation.id collides — is neither
 		// listed nor summed (docs/record-contract.md §9).
-		det.Runs = withPublicID(det.Runs, pub)
-		det.SessionRow = scopedSessionRow(det.SessionRow, det.Runs, pub)
+		s.scopeSessionDetail(r.Context(), &det, pub)
 	}
 	doc := sessionDoc{sessionRow: sessRow(det.SessionRow), Runs: make([]runRow, 0, len(det.Runs))}
 	sc, c, _ := s.sessionCost(r.Context(), id, pub)
@@ -1934,15 +1944,44 @@ func withPublicID(runs []obsdb.RunRow, pub string) []obsdb.RunRow {
 	return out
 }
 
+// scopeSessionDetail narrows a session's detail to a panel token's
+// public id: its turns (withPublicID) and its row (scopedSessionRow).
+// The row's summarizer_usage is obsdb's over every run of the session
+// id; when a turn of another public id shares it (a colliding derived
+// run), the figure is re-read in pub's scope — the session list's own
+// query (SessionQuery.PublicID, the id as its Q) — and is absent when
+// that read fails or finds nothing, never another scope's.
+func (s *Server) scopeSessionDetail(ctx context.Context, det *obsdb.SessionDetail, pub string) {
+	all := len(det.Runs)
+	det.Runs = withPublicID(det.Runs, pub)
+	det.SessionRow = scopedSessionRow(det.SessionRow, det.Runs, pub)
+	if len(det.Runs) == all {
+		return
+	}
+	det.SummarizerUsage = core.Usage{}
+	page, err := s.db.Sessions(ctx, obsdb.SessionQuery{PublicID: pub, Q: det.ID, Limit: 500})
+	if err != nil {
+		return
+	}
+	for _, sr := range page.Sessions {
+		if sr.ID == det.ID {
+			det.SummarizerUsage = sr.SummarizerUsage
+			return
+		}
+	}
+}
+
 // scopedSessionRow recomputes a session row over the turns a panel
 // token sees (turns, those with pub only): obsdb's SessionRow is a
 // GROUP BY over every run of the session id, which a run of another
 // app can share. The same aggregates as the database's: the turn
 // count, first/last seen, summed usage, MAX(agent), and the newest
 // turn's status (by turn, then start), the newest titled turn's title
-// and the first turn's prompt preview and content-off mark.
+// and the first turn's prompt preview and content-off mark. The
+// summarizer usage is row's, carried as is: it is not a turn aggregate
+// (scopeSessionDetail re-reads it when row's scope is wider than pub's).
 func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) obsdb.SessionRow {
-	out := obsdb.SessionRow{ID: row.ID, PublicID: pub}
+	out := obsdb.SessionRow{ID: row.ID, PublicID: pub, SummarizerUsage: row.SummarizerUsage}
 	var newest, first, titled *obsdb.RunRow
 	later := func(a, b *obsdb.RunRow) bool { // a after b, by turn then start
 		return a.Turn > b.Turn || (a.Turn == b.Turn && a.Started.After(b.Started))

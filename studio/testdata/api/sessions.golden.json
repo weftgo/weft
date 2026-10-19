@@ -13,6 +13,10 @@
         "input_tokens": 18,
         "output_tokens": 6
       },
+      "summarizer_usage": {
+        "input_tokens": 120,
+        "output_tokens": 7
+      },
       "first_prompt": "Where is order 42?",
       "cost_usd": null,
       "cost_known": false,

@@ -262,6 +262,24 @@ func fixtureDB(t *testing.T) obsdb.DB {
 	}
 	failEvents, failSpans := stampSession(failEvents, []obsdb.Span{
 		fxSpanRec("r_fail", failAt(0), failAt(2*time.Second), 2, "wefttest: injected provider 500", 8, 2)}, "r_fail")
+	// A thread summarizer call filed under r_fail (record contract §3):
+	// its usage is the session row's summarizer_usage (§6), never r_fail's.
+	failSpans = append(failSpans, obsdb.Span{
+		TraceID: fxTrace, SpanID: "0203040506070810", ParentSpanID: "0203040506070809",
+		Name: "chat summary-mini", Kind: 3,
+		Start: failAt(1500 * time.Millisecond), End: failAt(1600 * time.Millisecond), StatusCode: 1,
+		Service: "studio-test",
+		Attrs: map[string]any{
+			"gen_ai.operation.name":      "chat",
+			obsdb.AttrChatRole:           obsdb.ChatRoleSummarizer,
+			"weft.run.id":                "r_fail",
+			"gen_ai.provider.name":       "xai",
+			"gen_ai.request.model":       "summary-mini",
+			"gen_ai.usage.input_tokens":  int64(120),
+			"gen_ai.usage.output_tokens": int64(7),
+		},
+		Resource: map[string]any{"service.name": "studio-test"},
+	})
 	if err := db.Write(ctx, obsdb.Batch{Records: failEvents, Spans: failSpans}); err != nil {
 		t.Fatal(err)
 	}

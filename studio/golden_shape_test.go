@@ -204,8 +204,11 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// fixture's orphan trace pins the missing root's null and badge.
 		// The real run failed nothing (failed_runs is omitted at 0).
 		{"traces.golden.json", "/api/traces", []string{".traces[].root=<nil>", ".traces[].badge", ".traces[].reason", ".traces[].fix", ".traces[].failed_runs"}},
-		{"sessions.golden.json", "/api/sessions", []string{".sessions[].cost_usd=<nil>"}},
-		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".cost_usd=<nil>", ".runs[].cost_usd=<nil>"}},
+		// The fixture's s_orders holds a thread summarizer span (§3); this
+		// run summarized nothing, so its sessions carry no summarizer_usage
+		// (TestSessionSummarizerUsage pins it from obsdb, scoped and not).
+		{"sessions.golden.json", "/api/sessions", []string{".sessions[].cost_usd=<nil>", ".sessions[].summarizer_usage"}},
+		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".summarizer_usage"}},
 		{"public.golden.json", "/api/public/pub_x", nil},
 		{"session-public-id.golden.json", "/api/sessions/s_x/public_id", nil},
 		// The step goldens are recorded from TestStepRoute's real run;

@@ -1742,7 +1742,7 @@ func (s *Session) sealLocked(ctx context.Context) error {
 	s.pendingMarkers = nil
 	// The thread records still held go out now, as held records, and
 	// Close waits for the emitter below (threadout.go).
-	heldSums, heldSumMD, heldDropped := s.sealHeldLocked()
+	heldSums, heldDropped := s.sealHeldLocked()
 	queued := s.queue
 	s.queue = nil
 	w, _ := s.st.(*leased)
@@ -1763,8 +1763,9 @@ func (s *Session) sealLocked(ctx context.Context) error {
 		s.agent.Logger().Debug("thread: session records dropped at close: no run to report them under",
 			"session", s.header.ID, "records", heldDropped)
 	}
-	if len(heldSums) > 0 {
-		s.emitHeldSummaries(context.Background(), "", nil, heldSums, heldSumMD)
+	if heldSums > 0 {
+		s.agent.Logger().Debug("thread: summarizer spans dropped at close: their run never reported",
+			"session", s.header.ID, "spans", heldSums)
 	}
 	// Every record decided before the seal has reached the provider when
 	// Close returns — unless ctx ends first.

@@ -3,7 +3,12 @@ package obsdb_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -19,15 +24,19 @@ import (
 // the OTLP record (run id, kind, weft.content, the body without kind and
 // at). A compaction marker is in the index too (kind compaction) and not
 // in thread_records, so it is skipped here; the conformance table
-// (obsdbtest's SessionEvents) pins it. Real records from real thread
-// sessions, through both backends.
+// (obsdbtest's SessionEvents) pins it. Every other session the backend
+// could have filed one under — each weft.session.id the case's input
+// carries, each session it lists, and the empty id — must hold no
+// thread record: a backend storing one where the expectation names none
+// fails too. Real records from real thread sessions, through both
+// backends.
 func checkSessionEvents(t *testing.T, backend, dir string, db obsdb.DB, want []string) {
 	t.Helper()
-	if len(want) == 0 {
-		return
-	}
 	er, ok := db.(obsdb.SessionEventReader)
 	if !ok {
+		if len(want) == 0 {
+			return
+		}
 		t.Fatalf("%s: the backend reads no session events", backend)
 	}
 	bySession := map[string][]string{}
@@ -44,6 +53,23 @@ func checkSessionEvents(t *testing.T, backend, dir string, db obsdb.DB, want []s
 			order = append(order, body.Session)
 		}
 		bySession[body.Session] = append(bySession[body.Session], l)
+	}
+	// The sessions no line names: an empty expectation for each.
+	others := map[string]bool{"": true}
+	for _, sid := range inputSessionIDs(t, dir) {
+		others[sid] = true
+	}
+	page, err := db.Sessions(context.Background(), obsdb.SessionQuery{Limit: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range page.Sessions {
+		others[r.ID] = true
+	}
+	for _, sid := range slices.Sorted(maps.Keys(others)) {
+		if _, named := bySession[sid]; !named {
+			order = append(order, sid)
+		}
 	}
 	for _, sid := range order {
 		var got []string
@@ -77,7 +103,49 @@ func checkSessionEvents(t *testing.T, backend, dir string, db obsdb.DB, want []s
 		if !slices.Equal(got, bySession[sid]) {
 			g, _ := json.MarshalIndent(got, "", "  ")
 			w, _ := json.MarshalIndent(bySession[sid], "", "  ")
-			t.Errorf("%s: session %s's events differ from %s/expect.json's thread_records\n got: %s\nwant: %s", backend, sid, dir, g, w)
+			t.Errorf("%s: session %q's events differ from %s/expect.json's thread_records\n got: %s\nwant: %s", backend, sid, dir, g, w)
 		}
 	}
+}
+
+// inputSessionIDs is every weft.session.id value the case's OTLP input
+// (logs.json, traces.json) carries, as an attribute anywhere in it.
+func inputSessionIDs(t *testing.T, dir string) []string {
+	t.Helper()
+	seen := map[string]bool{}
+	var walk func(v any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			if x["key"] == "weft.session.id" {
+				if val, ok := x["value"].(map[string]any); ok {
+					if sid, ok := val["stringValue"].(string); ok {
+						seen[sid] = true
+					}
+				}
+			}
+			for _, y := range x {
+				walk(y)
+			}
+		case []any:
+			for _, y := range x {
+				walk(y)
+			}
+		}
+	}
+	for _, name := range []string{"logs.json", "traces.json"} {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc any
+		if err := json.Unmarshal(b, &doc); err != nil {
+			t.Fatalf("%s/%s: %v", dir, name, err)
+		}
+		walk(doc)
+	}
+	return slices.Sorted(maps.Keys(seen))
 }

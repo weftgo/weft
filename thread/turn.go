@@ -471,7 +471,7 @@ func (s *Session) abandonLocked(ctx context.Context, prev string, receipts ...st
 	if err == nil && parent != prev {
 		var id string
 		if id, err = s.mintCheckedLocked(entries); err == nil {
-			entries = append(entries, LeafEntry{ID: id, ParentID: parent, Created: now, Entry: prev})
+			entries = append(entries, LeafEntry{ID: id, ParentID: parent, Created: now, Entry: prev, Abandoned: true})
 		}
 	}
 	if err == nil && len(entries) > 0 {
@@ -1379,7 +1379,9 @@ var sessionOwnedKeys = []string{
 // continues holds no turn of this session; absent for a linear turn.
 // weft.session.branch names the navigation the turn's line descends from
 // — the label on the entry it went to (Label), else the leaf entry's id
-// — on every turn of that line; absent on a line no navigation made.
+// — on every turn of that line; absent on a line no navigation made. A
+// failed send's leaf move (abandonLocked, LeafEntry.Abandoned) is no
+// navigation: it names nothing.
 const (
 	turnParentKey    = "weft.turn.parent"
 	sessionBranchKey = "weft.session.branch"
@@ -1416,7 +1418,7 @@ func (s *Session) branchMetadataLocked() (parent, branch string) {
 	}
 	for i := len(s.order) - 1; i >= 0; i-- {
 		le, ok := s.order[i].(LeafEntry)
-		if !ok || !inPath[le.Entry] {
+		if !ok || le.Abandoned || !inPath[le.Entry] { // a failed send's settlement is no navigation
 			continue
 		}
 		branch = le.ID

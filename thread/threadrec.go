@@ -736,17 +736,16 @@ func (s *Session) emitSummarizer(ctx context.Context, runID string, md map[strin
 	span.End(trace.WithTimestamp(c.end))
 }
 
-// emitHeldSummaries opens held summarizer spans: mine under the run
-// reporting on rctx, stale ones — their run ended without reporting —
-// under their own run, spanless, with stale's metadata (md[i]).
-func (s *Session) emitHeldSummaries(rctx context.Context, runID string, mine, stale []summarizerCall, staleMD []map[string]string) {
+// emitHeldSummaries opens held summarizer spans under the run
+// reporting on rctx. The stale ones — their run ended without
+// reporting — are never opened: with no span to open under they would
+// be root spans of traces of their own (seeRun and Close drop them with
+// a Debug line).
+func (s *Session) emitHeldSummaries(rctx context.Context, runID string, mine []summarizerCall) {
 	ctx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(rctx))
 	md := core.MetadataFromContext(rctx)
 	for _, c := range mine {
 		s.emitSummarizer(ctx, runID, md, c)
-	}
-	for i, c := range stale {
-		s.emitSummarizer(context.Background(), c.run, staleMD[i], c)
 	}
 }
 

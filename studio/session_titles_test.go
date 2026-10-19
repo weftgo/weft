@@ -146,3 +146,113 @@ func TestScopedSessionRowContentOffGate(t *testing.T) {
 		}
 	}
 }
+
+// A session row serves obsdb's SessionRow.SummarizerUsage as
+// summarizer_usage (record contract §6), apart from usage and unpriced:
+// on the list, on the document and — scoped to its public id's turns —
+// on a panel token's document, where a colliding turn of another public
+// id sharing the session id adds nothing; absent when nothing was
+// summarized.
+func TestSessionSummarizerUsage(t *testing.T) {
+	const serverTok = "srv-token"
+	db, err := sqlite.Open(t.TempDir() + "/summ.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	seedRun(t, db, "conv_s-t1", "pub_a", "conv_s", "", nil)
+	seedRun(t, db, "conv_s-t2", "pub_b", "conv_s", "", nil) // collides: another app's
+	seedRun(t, db, "conv_u-t1", "pub_a", "conv_u", "", nil)
+	seedRun(t, db, "conv_n-t1", "pub_a", "conv_n", "", nil) // summarized nothing
+	now := time.Now().UTC()
+	summ := func(run, spanID string, in, out int64) obsdb.Span {
+		return obsdb.Span{
+			TraceID: "0102030405060708090a0b0c0d0e0f99", SpanID: spanID, Name: "chat summary-mini", Kind: 3,
+			Start: now, End: now.Add(time.Millisecond), StatusCode: 1, Service: "svc",
+			Attrs: map[string]any{
+				"gen_ai.operation.name": "chat", obsdb.AttrChatRole: obsdb.ChatRoleSummarizer,
+				"weft.run.id": run, "gen_ai.usage.input_tokens": in, "gen_ai.usage.output_tokens": out,
+			},
+			Resource: map[string]any{"service.name": "svc"},
+		}
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{
+		summ("conv_s-t1", "00000000000000a1", 100, 5),
+		summ("conv_s-t2", "00000000000000a2", 40, 2),
+		summ("conv_u-t1", "00000000000000a3", 30, 3),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	srv := New(DB(db), Token(serverTok))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	type usage struct {
+		In  int `json:"input_tokens"`
+		Out int `json:"output_tokens"`
+	}
+	type row struct {
+		ID    string `json:"id"`
+		Usage usage  `json:"usage"`
+		Summ  *usage `json:"summarizer_usage"`
+	}
+	read := func(path, tok string, into any) {
+		t.Helper()
+		code, out := b4Do(t, http.MethodGet, ts.URL+path, tok, "")
+		if code != http.StatusOK {
+			t.Fatalf("GET %s = %d %s", path, code, out)
+		}
+		if err := json.Unmarshal([]byte(out), into); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var page struct {
+		Sessions []row `json:"sessions"`
+	}
+	read("/api/sessions", serverTok, &page)
+	got := map[string]row{}
+	for _, r := range page.Sessions {
+		got[r.ID] = r
+	}
+	if r := got["conv_s"]; r.Summ == nil || *r.Summ != (usage{140, 7}) || r.Usage != (usage{2, 2}) {
+		t.Errorf("list conv_s = %+v (summarizer %v), want summarizer 140/7 apart from usage 2/2", r, r.Summ)
+	}
+	if r := got["conv_n"]; r.ID == "" || r.Summ != nil {
+		t.Errorf("list conv_n = %+v, want listed with no summarizer_usage", r)
+	}
+	var doc row
+	read("/api/sessions/conv_s", serverTok, &doc)
+	if doc.Summ == nil || *doc.Summ != (usage{140, 7}) {
+		t.Errorf("doc conv_s summarizer_usage = %v, want 140/7", doc.Summ)
+	}
+	panel := mintPanel(t, ts.URL, serverTok, "pub_a")
+	for _, c := range []struct {
+		id   string
+		want *usage
+	}{
+		{"conv_s", &usage{100, 5}}, // pub_b's colliding turn's summary is not pub_a's
+		{"conv_u", &usage{30, 3}},  // every turn pub_a's: carried as is
+		{"conv_n", nil},
+	} {
+		doc = row{}
+		read("/api/sessions/"+c.id, panel, &doc)
+		if (doc.Summ == nil) != (c.want == nil) || (c.want != nil && *doc.Summ != *c.want) {
+			t.Errorf("panel doc %s summarizer_usage = %v, want %v", c.id, doc.Summ, c.want)
+		}
+	}
+	page.Sessions = nil
+	read("/api/sessions", panel, &page)
+	seen := false
+	for _, r := range page.Sessions {
+		if r.ID == "conv_s" {
+			seen = true
+			if r.Summ == nil || *r.Summ != (usage{100, 5}) {
+				t.Errorf("panel list conv_s summarizer_usage = %v, want 100/5", r.Summ)
+			}
+		}
+	}
+	if !seen {
+		t.Error("panel list: conv_s not listed")
+	}
+}

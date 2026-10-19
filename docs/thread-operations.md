@@ -535,7 +535,9 @@ summarizer's model call itself — every compaction's and every
 `SummarizeLeft` branch summary's — is a `chat` span with
 `weft.chat.role = summarizer` and its usage, filed under the turn in
 flight or the last run (a compaction the pre-run trigger makes waits for
-that turn's run to start and opens under it), never folded into that
+that turn's run to start and opens under it; one whose run ends, or
+the Session closes, before that run reports is dropped with a Debug
+line, never opened as a trace of its own), never folded into that
 run's own usage: `obsdb`'s session row counts it apart, as
 `SummarizerUsage`.
 

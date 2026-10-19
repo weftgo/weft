@@ -86,8 +86,8 @@ const maxSights = 4
 // every observed batch; cheap when nothing waits.
 func (s *Session) seeRun(rctx context.Context, runID string) {
 	var pending []*compactionMarker
-	var sums, staleSums []summarizerCall
-	var staleMD []map[string]string
+	var sums []summarizerCall
+	staleSums := 0
 	s.locked(func() {
 		if n := len(s.sights); n == 0 || s.sights[n-1].id != runID {
 			s.sights = slices.DeleteFunc(s.sights, func(r runSight) bool { return r.id == runID })
@@ -104,18 +104,23 @@ func (s *Session) seeRun(rctx context.Context, runID string) {
 			s.flushHeldLocked(rctx, runID, core.MetadataFromContext(rctx), mine, stale)
 		}
 		if len(s.heldSummaries) > 0 {
-			sums, staleSums = s.takeHeldSummariesLocked(runID)
-			for _, c := range staleSums {
-				n, _ := runSeq(s.header.ID, c.run)
-				staleMD = append(staleMD, s.unseenRunMetadataLocked(n))
-			}
+			var stale []summarizerCall
+			sums, stale = s.takeHeldSummariesLocked(runID)
+			staleSums = len(stale)
 		}
 	})
 	for _, m := range pending {
 		s.emitMarker(rctx, runID, nil, m)
 	}
-	if len(sums)+len(staleSums) > 0 {
-		s.emitHeldSummaries(rctx, runID, sums, staleSums, staleMD)
+	if len(sums) > 0 {
+		s.emitHeldSummaries(rctx, runID, sums)
+	}
+	if staleSums > 0 {
+		// Held for a run that ended without reporting: no span of it to
+		// open under, and one opened bare would be a root span in a trace
+		// of its own, read as a run (record contract §3).
+		s.agent.Logger().Debug("thread: summarizer spans dropped: their run ended without reporting",
+			"session", s.header.ID, "spans", staleSums)
 	}
 }
 

@@ -1,9 +1,12 @@
 package thread_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -227,6 +230,93 @@ func TestPreRunCompactionSummarizerUnderTheRun(t *testing.T) {
 	rp.shutdown(t)
 }
 
+// lockedBuf is a log sink safe for the Session's goroutines.
+type lockedBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// A pre-run summarizer call held for a run that ends without reporting
+// (it fails before any message joins) is dropped with a Debug line —
+// when a later run reports (stale) or at Close — never opened bare: it
+// would be a root span in a trace of its own, read as a run (record
+// contract §3).
+func TestHeldSummarizerOfAnUnreportedRunIsDropped(t *testing.T) {
+	for _, c := range []struct {
+		name, line string
+		later      bool
+	}{
+		{"stale", "summarizer spans dropped: their run ended without reporting", true},
+		{"close", "summarizer spans dropped at close: their run never reported", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rp := newRecPipe(t)
+			logs := &lockedBuf{}
+			fetch := core.Tool("fetch_doc", "Fetch a document.", func(_ context.Context, in struct {
+				Topic string `json:"topic"`
+			}) (string, error) {
+				return strings.Repeat(in.Topic+" notes. ", 400), nil
+			})
+			agt := rp.agent("research", wefttest.Script(
+				wefttest.ToolCalls(wefttest.Call{Name: "fetch_doc", Args: `{"topic":"raft"}`}),
+				wefttest.Say("Read raft."),
+				wefttest.Say("SUMMARY: raft read.").WithUsage(core.Usage{InputTokens: 900, OutputTokens: 30}),
+				wefttest.Say("Paxos next."),
+			), fetch, core.MaxSteps(5),
+				core.Logger(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))))
+			var fired atomic.Bool
+			ctx := context.Background()
+			s, err := thread.Create(ctx, thread.Memory(), agt, thread.ContextWindow(64_000), thread.KeepRecent(10),
+				thread.TriggerFunc(func(in thread.TriggerInput) bool { return in.Estimated > 0 && fired.CompareAndSwap(false, true) }))
+			if err != nil {
+				t.Fatal(err)
+			}
+			recSendWait(t, s, "Fetch the raft document.")
+			// The second turn's run fails before it reports (a raised
+			// MaxSteps is refused before any model call), after the pre-run
+			// trigger's compaction held its summarizer call for it.
+			second, err := s.Send(ctx, core.User("What next?"), thread.RunOptions(core.MaxSteps(50)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := second.Wait(); !errors.Is(err, core.ErrInvalidRunOption) {
+				t.Fatalf("second turn: err = %v, want ErrInvalidRunOption", err)
+			}
+			if !fired.Load() {
+				t.Fatal("the pre-run trigger never fired")
+			}
+			if c.later {
+				recSendWait(t, s, "And then?")
+			}
+			if err := s.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := rp.p.ForceFlush(ctx); err != nil {
+				t.Fatal(err)
+			}
+			for _, sp := range rp.on.summarizerSpans() {
+				t.Errorf("summarizer span opened: run %s parent %v", spanAttr(sp, "weft.run.id").AsString(), sp.Parent())
+			}
+			if !strings.Contains(logs.String(), c.line) {
+				t.Errorf("no Debug line %q; logs:\n%s", c.line, logs.String())
+			}
+			rp.shutdown(t)
+		})
+	}
+}
+
 // The sre-grants chain resumes every approved call with its provenance:
 // the execute_tool span names approved_by grant (and the grant) or
 // approver; a call a person approved reads user.
@@ -310,6 +400,87 @@ func TestTurnsNameTheirBranch(t *testing.T) {
 	r3 := recSendWait(t, s, "Seville instead.")
 	r4 := recSendWait(t, s, "Add Cádiz.")
 	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := rp.p.ForceFlush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		id, parent, branch string
+	}{{r1.ID, "", ""}, {r2.ID, "", ""}, {r3.ID, "1", "via-spain"}, {r4.ID, "", "via-spain"}} {
+		run, err := rp.p.LocalDB().Run(ctx, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Meta["weft.turn.parent"] != c.parent || run.Meta["weft.session.branch"] != c.branch {
+			t.Errorf("run %s meta %v; want weft.turn.parent %q weft.session.branch %q", c.id, run.Meta, c.parent, c.branch)
+		}
+	}
+	rp.shutdown(t)
+}
+
+// A failed send's leaf move (abandonLocked: the prompt written, its
+// flush refused, the leaf moved back) is no navigation: the turns after
+// it on an un-navigated line carry no weft.session.branch, and on a
+// branched line they keep the branch the real navigation named
+// (record contract §2). The move is marked on its entry, so a reopened
+// Session reads it the same.
+func TestAbandonedSendNamesNoBranch(t *testing.T) {
+	rp := newRecPipe(t)
+	agt := rp.agent("trip", wefttest.Script(wefttest.Say("Lisbon."), wefttest.Say("Porto."), wefttest.Say("Seville."), wefttest.Say("Cádiz.")))
+	ctx := context.Background()
+	st := &faultStorage{Storage: thread.Memory()}
+	failNext := func(text string) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		st.flushFailAfter = func(es []thread.Entry) bool {
+			return hasEntry(es, func(e thread.Entry) bool {
+				m, ok := e.(thread.MessageEntry)
+				return ok && m.Message.Text() == text
+			})
+		}
+	}
+	s, err := thread.Create(ctx, st, agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r1 := recSendWait(t, s, "Plan Lisbon.")
+	after := s.Leaf()
+	failNext("Fails.")
+	if _, err := s.Send(ctx, core.User("Fails.")); err == nil {
+		t.Fatal("Send with a refused prompt flush succeeded")
+	}
+	r2 := recSendWait(t, s, "Add Porto.")
+	if err := s.Branch(ctx, after); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Label(ctx, after, "via-spain"); err != nil {
+		t.Fatal(err)
+	}
+	r3 := recSendWait(t, s, "Seville instead.")
+	failNext("Fails again.")
+	if _, err := s.Send(ctx, core.User("Fails again.")); err == nil {
+		t.Fatal("Send with a refused prompt flush succeeded")
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	abandoned := 0
+	for _, e := range s.Entries() {
+		if le, ok := e.(thread.LeafEntry); ok && le.Abandoned {
+			abandoned++
+		}
+	}
+	if abandoned != 2 {
+		t.Errorf("abandoned leaf entries = %d, want 2 (one per failed send)", abandoned)
+	}
+	// Reopened: the marks are on the entries, not in memory.
+	s2, err := thread.Open(ctx, st, s.ID(), agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r4 := recSendWait(t, s2, "Add Cádiz.")
+	if err := s2.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := rp.p.ForceFlush(ctx); err != nil {

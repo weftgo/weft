@@ -12,7 +12,7 @@
 //      the main switch; where Studio does not answer, the panel
 //      removes itself silently (no console, one request, no retries).
 import { debugForced, readConfig } from "./config"
-import { WeftDevtools } from "./element"
+import { panelsOnPage, WeftDevtools } from "./element"
 
 declare global {
   interface Window {
@@ -45,7 +45,7 @@ function watchWeft(): void {
     try {
       // Duck-typed: the registered class may be another copy of this
       // module's (the script included twice, a hot reload).
-      for (const n of Array.from(document.querySelectorAll("weft-devtools")))
+      for (const n of panelsOnPage())
         (n as Partial<Pick<WeftDevtools, "rescan">>).rescan?.()
     } catch {
       // the page's assignment must go through

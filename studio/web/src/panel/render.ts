@@ -20,6 +20,10 @@ export function el(
   return n
 }
 
+/** NEW_TAB is a link's attributes for a new tab (Studio, a hand-off),
+ * in the order every link sets them. */
+export const NEW_TAB = { target: "_blank", rel: "noopener" }
+
 /** h is el with the attributes first: h("div", { role: "list" }, kids). */
 export const h = (
   tag: string,

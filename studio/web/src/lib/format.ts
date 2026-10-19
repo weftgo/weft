@@ -55,6 +55,11 @@ export function duration(started: string, finished: string | null): string {
 /** plural is a count with its noun in the right number: "1 run",
  * "2 runs" (many given where "s" does not make it). One helper for
  * every lib module (P8-pre-web: four local copies before). */
+/** ordinalOf is a whole, non-negative number, else undefined (a step
+ * ordinal a host or a link names). */
+export const ordinalOf = (n: unknown): number | undefined =>
+  typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined
+
 export const plural = (k: number, one: string, many = one + "s") =>
   `${k} ${k === 1 ? one : many}`
 

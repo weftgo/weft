@@ -10,7 +10,7 @@ import type {
   RunRow,
   Transcript,
 } from "../lib/api"
-import { labOverrides } from "../lib/experiment-body"
+import { FORK_NEEDS, labOverrides } from "../lib/experiment-body"
 import { editsProblem, wireEdits } from "../lib/edits"
 import type { ReplayEdit } from "../lib/edits"
 import type { LabFields } from "../lib/experiment-body"
@@ -250,7 +250,7 @@ export function draftProblem(draft: ExperimentDraft): string | null {
     draft.thread === "fork" &&
     !(draft.runId && draft.input.trim() && draft.step === 0)
   )
-    return "fork continues the conversation in a new session: it needs a source run, an input, and step 0"
+    return FORK_NEEDS
   const names = Object.keys(draft.tools)
   if (names.length && !names.some((n) => draft.tools[n]))
     return "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)"

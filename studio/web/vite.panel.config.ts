@@ -21,6 +21,7 @@ import {
   normalizeStamp,
   readLedger,
 } from "./scripts/panel-budget.ts"
+import { analyzeMangle } from "./scripts/panel-mangle.ts"
 
 /** §5.1's budget: panel.js is ≤ the ledger's cap in gzip bytes —
  * panel-budget.json's "cap", 96 KiB (98,304 B) since phase 7 (audit §10
@@ -30,6 +31,10 @@ import {
  * integer (the check fails closed). */
 const ledger = readLedger()
 const PANEL_GZIP_BUDGET = ledger.cap
+
+/** The member names panel.js mangles (P9-trim): computed from the
+ * source on every build, never a committed list that could go stale. */
+const mangle = analyzeMangle()
 
 /** panelBudget fails the build — loudly, before anything is copied
  * into the committed dist — when the artifact is not the one file
@@ -178,7 +183,21 @@ export default defineConfig({
         // (`sourcemap: false` above): the bundle is unreadable in a host
         // page's devtools — the accepted cost; the source is
         // studio/web/src/panel.
-        minify: true,
+        // P9-trim's property lever: oxc's full minifier (what `true`
+        // is: compress, mangle, codegen) plus mangleProps over the names
+        // scripts/panel-mangle.ts proves are the bundle's own — the
+        // element's and the internal classes' members, PanelState's —
+        // never a name a response, the DOM, storage, a host's options or
+        // the host API carries; the libs' short names are never emitted.
+        minify: {
+          compress: true,
+          mangle: true,
+          codegen: true,
+          mangleProps: {
+            include: new RegExp(`^(?:${mangle.names.join("|")})$`),
+            reserved: mangle.reserved,
+          },
+        },
         // The `/* @__PURE__ */` annotations Vite keeps for an es lib are
         // dropped (P8-fix-a, −116 B gzip): panel.js is a side-effect
         // bundle (it defines the element), never tree-shaken by a host's

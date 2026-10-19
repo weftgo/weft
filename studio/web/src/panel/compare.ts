@@ -20,7 +20,7 @@ import {
 } from "../lib/stepdiff"
 import type { DiffDoc, SideView } from "../lib/stepdiff"
 import { badge, holeBadges, holeLine } from "./badges"
-import { el } from "./render"
+import { el, NEW_TAB } from "./render"
 
 /** sideMarks is one side's marks and holes, labelled a or b. */
 function sideMarks(which: string, side: SideView): HTMLElement | null {
@@ -53,8 +53,7 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
   })
   const link = el("a", "weft-btn", "⤢", {
     href: href(base, compareLink(v.a.run_id, [v.b.run_id], v.markers.at(0))),
-    target: "_blank",
-    rel: "noopener",
+    ...NEW_TAB,
     "aria-label": `open the step compare of ${v.a.run_id} and ${v.b.run_id} in Studio`,
   })
   box.appendChild(
@@ -73,8 +72,7 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
         // The marker is a link to the step, as Studio's: the compared run's.
         const a = el("a", undefined, markerWords(r), {
           href: href(base, runLink(v.b.run_id, { step: r.step })),
-          target: "_blank",
-          rel: "noopener",
+          ...NEW_TAB,
         })
         list.appendChild(
           el("li", undefined, [a], { "data-weft-diff-marker": String(r.step) })

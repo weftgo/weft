@@ -1415,7 +1415,7 @@ export class PanelModel {
       // the page.
       return {
         steps: new Map(),
-        error: err instanceof Error ? err.message : String(err),
+        error: messageOf(err),
       }
     }
   }

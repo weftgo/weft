@@ -26,6 +26,7 @@
 // globals — plain values and strings.
 
 import type { ReplayVerb } from "./replay"
+import { ordinalOf } from "./format"
 import { serializeScope } from "./scope"
 import type { Scope } from "./scope"
 
@@ -389,7 +390,7 @@ export type StudioLink =
 
 /** A whole, non-negative number, or undefined. */
 function ordinal(n: number | undefined): number | undefined {
-  return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined
+  return ordinalOf(n)
 }
 
 /** runLink is a run page: the run, and optionally the step (its

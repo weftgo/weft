@@ -4,6 +4,7 @@ import type { Message, WireEvent } from "./api"
 import type { FoldedStep } from "./events"
 import { msText } from "./attempts"
 import { AWAITING } from "./status"
+import { CHIP_CATALOG, CHIP_PROMPT_CHANGED } from "./request-pane"
 import { endCard, failedAtStep, stopDetail, stoppedByWords } from "./stopped-by"
 
 export type EventKind =
@@ -391,8 +392,8 @@ export function sentLine(s: SentFacts | undefined): string {
       ? ` (${s.count - s.prevCount} new)`
       : ""
   const marks = [
-    s.promptChanged ? "prompt changed at this step" : "",
-    s.catalogChanged ? "catalog changed at this step" : "",
+    s.promptChanged ? CHIP_PROMPT_CHANGED : "",
+    s.catalogChanged ? CHIP_CATALOG : "",
   ].filter(Boolean)
   return [
     `${count(s.count, "message")}${fresh}`,

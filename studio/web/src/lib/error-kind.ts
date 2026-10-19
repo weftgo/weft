@@ -11,7 +11,7 @@
 // their words here and nowhere else.
 
 /** A kind's words: the chip's text, its one-line hint, its tone. */
-import { plural } from "./format"
+import { ordinalOf, plural } from "./format"
 
 export interface KindWords {
   word: string
@@ -386,8 +386,7 @@ interface FactSpan {
 
 const factStr = (v: unknown) => (typeof v === "string" && v ? v : undefined)
 const factNum = (v: unknown) => {
-  const k = typeof v === "string" ? Number(v) : v
-  return typeof k === "number" && Number.isInteger(k) && k >= 0 ? k : undefined
+  return ordinalOf(typeof v === "string" ? Number(v) : v)
 }
 
 /** toolFactsOf indexes a run's own execute_tool spans by call id: each

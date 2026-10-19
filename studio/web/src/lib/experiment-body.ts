@@ -21,6 +21,11 @@ import type { TranscriptBatch } from "@/lib/events"
 import { editsProblem, kindOf, putEdit, wireEdits } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 
+/** A fork's precondition, in the words both forms refuse it with
+ * (lib/experiment-body.ts here, the panel's draftProblem). */
+export const FORK_NEEDS =
+  "fork continues the conversation in a new session: it needs a source run, an input, and step 0"
+
 export type Engine = "live" | "scripted"
 export type SideEffects = "substitute" | "park" | "allow"
 export type ThreadMode = "ephemeral" | "fork"
@@ -172,9 +177,7 @@ export function buildRunBody(opts: {
       "a run needs an input, or a source run to take the turn from"
     )
   if (variant.thread === "fork" && !(sourceRunID && input && fromStep === 0))
-    throw new Error(
-      "fork continues the conversation in a new session: it needs a source run, an input, and step 0"
-    )
+    throw new Error(FORK_NEEDS)
   const held = editsProblem(variant.thread, fromStep, opts.edits)
   if (held) throw new Error(held)
   const body: PlaygroundRunBody = {

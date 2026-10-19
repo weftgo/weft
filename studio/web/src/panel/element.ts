@@ -74,6 +74,7 @@ import {
   FORK_EDITS,
   impliedFromStep,
   kindOf,
+  markLine,
   putEdit,
   schemaOf,
   userMessagesOf,
@@ -167,6 +168,7 @@ import {
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import {
   duration,
+  ordinalOf,
   plural,
   relativeTime,
   stepCount,
@@ -196,7 +198,7 @@ import {
 } from "../lib/delegation"
 import { clip as clipTitle, turnLabel, turnTitle } from "../lib/title"
 import type { Scope } from "../lib/scope"
-import { el, fmtJSON, on, patch } from "./render"
+import { el, fmtJSON, NEW_TAB, on, patch } from "./render"
 import {
   depthWord,
   extent,
@@ -612,9 +614,20 @@ function scopeForm(o: MountOptions): string {
   return o.publicId ? serializeScope({ publicId: o.publicId }) : ""
 }
 
+/** panelsOnPage is every <weft-devtools> in the document (another
+ * copy of this module's included). */
+export const panelsOnPage = () =>
+  Array.from(document.querySelectorAll("weft-devtools"))
+
+/** turnsAndExperiments is every run row the panel holds: the turns,
+ * then each experiment's runs. */
+const turnsAndExperiments = (s: PanelState) => [
+  ...s.turns,
+  ...[...s.experiments.values()].flat(),
+]
+
 /** stepOrdinal is a host-given step: a non-negative integer, else none. */
-const stepOrdinal = (n: unknown): number | undefined =>
-  typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined
+const stepOrdinal = ordinalOf
 
 /** How the renderers remember which <details> the user opened. */
 interface OpenState {
@@ -1300,7 +1313,7 @@ export class WeftDevtools extends HTMLElement {
 
   /** publisherConnected: the panel whose API api is is still connected. */
   private publisherConnected(api: object): boolean {
-    return Array.from(document.querySelectorAll("weft-devtools")).some(
+    return panelsOnPage().some(
       (n) => n !== this && (n as Partial<WeftDevtools>).apiObjIs?.(api) === true
     )
   }
@@ -1320,7 +1333,7 @@ export class WeftDevtools extends HTMLElement {
       if (!isPlainObject(ns) || ns.devtools !== this.apiObj || !this.apiObj)
         return
       delete ns.devtools
-      const other = Array.from(document.querySelectorAll("weft-devtools")).find(
+      const other = panelsOnPage().find(
         (n) =>
           n !== this &&
           n.isConnected &&
@@ -1410,7 +1423,7 @@ export class WeftDevtools extends HTMLElement {
     const baseline = this.evBaseline
     this.evBaseline = false
     const pin = m.narrowing.run ?? ""
-    for (const r of [...s.turns, ...[...s.experiments.values()].flat()]) {
+    for (const r of turnsAndExperiments(s)) {
       const status = eventStatus(r)
       const prev = this.evStatus.get(r.id)
       if (prev === status) continue
@@ -2712,7 +2725,7 @@ export class WeftDevtools extends HTMLElement {
   private turnPick(s: PanelState): HTMLElement | null {
     // The filter narrows the dropdown as it does the column; the
     // selected turn stays listed (it is what the select shows).
-    const rows = [...s.turns, ...[...s.experiments.values()].flat()].filter(
+    const rows = turnsAndExperiments(s).filter(
       (r) => r.id === s.selected || this.match(r)
     )
     if (!rows.length) return null
@@ -2790,11 +2803,7 @@ export class WeftDevtools extends HTMLElement {
     s: PanelState,
     running?: RunRow
   ): HTMLElement {
-    const r =
-      running ??
-      [...s.turns, ...[...s.experiments.values()].flat()].find(
-        (x) => x.id === s.selected
-      )
+    const r = running ?? turnsAndExperiments(s).find((x) => x.id === s.selected)
     if (r) {
       const known = usageKnown(r.status)
       fab.appendChild(
@@ -2955,8 +2964,7 @@ export class WeftDevtools extends HTMLElement {
       if (u) {
         const a = el("a", "weft-chip weft-tag weft-unp", u.text, {
           href: href(this.base, settingsLink(u.models[0])),
-          target: "_blank",
-          rel: "noopener",
+          ...NEW_TAB,
           title: `${u.title} · price in Studio`,
           "data-weft-unpriced": "",
         })
@@ -2969,8 +2977,7 @@ export class WeftDevtools extends HTMLElement {
     if (s.turns.length && s.selected) {
       const a = el("a", "weft-btn", "⤢", {
         href: studioLink(this.base, s.selected, this.stepNow(s)),
-        target: "_blank",
-        rel: "noopener",
+        ...NEW_TAB,
         title: "open in Studio (run, and the step you are reading)",
         "aria-label": "open in Studio",
         "data-w": "Studio",
@@ -3429,8 +3436,7 @@ export class WeftDevtools extends HTMLElement {
           ? { type: "button" }
           : {
               href: href(this.base, runLink(src, { step: n })),
-              target: "_blank",
-              rel: "noopener",
+              ...NEW_TAB,
             }),
       }
     )
@@ -4889,8 +4895,7 @@ export class WeftDevtools extends HTMLElement {
     if (r.runID) {
       const save = el("a", "weft-btn", SAVE_TEST_LABEL, {
         href: href(this.base, saveTestLink(r.runID)),
-        target: "_blank",
-        rel: "noopener",
+        ...NEW_TAB,
         title: SAVE_TEST_TITLE,
       })
       head.appendChild(save)
@@ -4954,8 +4959,7 @@ export class WeftDevtools extends HTMLElement {
       const mk = (text: string, url: string, label: string, attr: string) => {
         const a = el("a", "weft-btn", text, {
           href: url,
-          target: "_blank",
-          rel: "noopener",
+          ...NEW_TAB,
           "aria-label": label,
           [attr]: "",
         })
@@ -5270,8 +5274,7 @@ export class WeftDevtools extends HTMLElement {
       const n = this.rowOf(t.id)?.steps ?? t.doc?.steps ?? 0
       const a = el("a", undefined, `${stepCount(n)} · open in Studio ⤢`, {
         href: studioLink(this.base, t.id, 0),
-        target: "_blank",
-        rel: "noopener",
+        ...NEW_TAB,
         "data-weft-derived-handoff": t.id,
       })
       wrap.appendChild(el("div", "weft-note", [a]))
@@ -5440,8 +5443,7 @@ export class WeftDevtools extends HTMLElement {
       box.appendChild(
         el("a", "weft-chip", SAVE_TEST_LABEL, {
           href: href(this.base, saveTestLink(t.id)),
-          target: "_blank",
-          rel: "noopener",
+          ...NEW_TAB,
           title: SAVE_TEST_TITLE,
           "data-weft-save-test": t.id,
         })
@@ -5456,8 +5458,7 @@ export class WeftDevtools extends HTMLElement {
     ) =>
       el("a", "weft-chip", label, {
         href: url,
-        target: "_blank",
-        rel: "noopener",
+        ...NEW_TAB,
         title,
         [attr]: id,
       })
@@ -5890,8 +5891,7 @@ export class WeftDevtools extends HTMLElement {
               el("span", undefined, "child's history unreachable · "),
               el("a", undefined, "open in Studio (⤢)", {
                 href: studioLink(this.base, id),
-                target: "_blank",
-                rel: "noopener",
+                ...NEW_TAB,
                 "data-weft-handoff": id,
               }),
             ])
@@ -6167,9 +6167,7 @@ export function linkedStep(s: PanelState): number | undefined {
   if (s.selectedStep != null) return s.selectedStep
   const t = s.turn
   if (!t || t.id !== s.selected) return undefined
-  const row = [...s.turns, ...[...s.experiments.values()].flat()].find(
-    (r) => r.id === t.id
-  )
+  const row = turnsAndExperiments(s).find((r) => r.id === t.id)
   const running = (row?.status ?? t.doc?.status) === "running"
   return running ? t.folded.steps.at(-1)?.index : undefined
 }
@@ -6266,8 +6264,7 @@ export function renderTimeline(
       name.appendChild(
         el("a", undefined, "⤢", {
           href: href(endpoint, runLink(t.id, { sel: r.key })),
-          target: "_blank",
-          rel: "noopener",
+          ...NEW_TAB,
           title: "open in Studio",
           "data-weft-handoff": r.child.runId,
         })
@@ -6412,7 +6409,7 @@ export function renderFolded(
             `· insert a message before step ${step.index}`,
             { "data-key": `ins${step.index}` }
           ),
-          `a message inserted before step ${step.index}`
+          markLine({ what: "insert", step: step.index })
         )
       )
     wrap.appendChild(
@@ -6449,7 +6446,7 @@ export function renderFolded(
             "data-key": `ins${max}`,
           }
         ),
-        `a message inserted before step ${max}`
+        markLine({ what: "insert", step: max })
       )
     )
   return wrap
@@ -6521,8 +6518,7 @@ function renderStep(
     head.appendChild(
       el("a", undefined, "📄 ⤢", {
         href: href(ctx.endpoint, logsLink(ctx.runId, step.index)),
-        target: "_blank",
-        rel: "noopener",
+        ...NEW_TAB,
         title: "app logs in Studio",
         "data-weft-logs": String(step.index),
       })
@@ -6761,8 +6757,7 @@ function answerBlock(
       el("div", "weft-reason", [
         el("a", undefined, `${DRAWER_TAB_LABEL.raw} ⤢`, {
           href: href(endpoint, runLink(t.id, { sel: `s${n}`, tab: "raw" })),
-          target: "_blank",
-          rel: "noopener",
+          ...NEW_TAB,
           title: "open in Studio",
           "data-weft-handoff": t.id,
         }),
@@ -6901,8 +6896,7 @@ function renderCall(
               resumed: call.resumed,
             })
           ),
-          target: "_blank",
-          rel: "noopener",
+          ...NEW_TAB,
           title: `open this call in Studio (step ${stepIndex})`,
           "data-weft-call-link": call.callId,
         })
@@ -6942,8 +6936,7 @@ function renderCall(
             href: sess
               ? href(ctx.endpoint, sessionLink(sess))
               : studioLink(ctx.endpoint, call.childRunId),
-            target: "_blank",
-            rel: "noopener",
+            ...NEW_TAB,
             title: sess ? `${OPEN_SESSION} ${sess}` : call.childRunId,
             "data-weft-subagent-link": call.childRunId,
           })
@@ -7144,8 +7137,7 @@ function childRow(t: TurnView, id: string) {
 function handOff(endpoint: string, runId: string): HTMLElement {
   return el("a", "weft-btn", "open in Studio ⤢", {
     href: studioLink(endpoint, runId),
-    target: "_blank",
-    rel: "noopener",
+    ...NEW_TAB,
     title: `open the child run ${runId} in Studio`,
     "data-weft-handoff": runId,
   })

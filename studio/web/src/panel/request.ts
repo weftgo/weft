@@ -60,7 +60,7 @@ import { bytes } from "../lib/summarize"
 import { badge, requestCapped, requestHole } from "./badges"
 import type { BadgeNote } from "./badges"
 import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
-import { el, on } from "./render"
+import { el, NEW_TAB, on } from "./render"
 import { href, runLink } from "../lib/links"
 import type { PanelRequests, TurnView } from "./state"
 import { treeView } from "./tree"
@@ -684,8 +684,7 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
           d.base,
           runLink(t.id, { step, view: "story", pane: "wire" })
         ),
-        target: "_blank",
-        rel: "noopener",
+        ...NEW_TAB,
         title: "the step's wire request and response, in Studio",
         "data-weft-wire-link": "",
       })

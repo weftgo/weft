@@ -41,7 +41,25 @@
 //     element's fire, the Raw tab's treeView) — except where the sink's
 //     own parameter declares an internal type (treeView's TreeState);
 //   - a for…in over one, or one spread into an object literal whose
-//     contextual type contains no internal type.
+//     contextual type contains no internal type;
+//   - (P9-trim2-fix) one passed as an argument to a parameter typed
+//     unknown, any, object, {} or a bare type parameter (fmtJSON,
+//     render.ts stringify, a generic helper: what it does with the
+//     names is unknown to the checker) — the standard containers' own
+//     type parameters (Array, Map, Set, WeakMap, WeakSet, Promise and
+//     their constructors, STD_GENERICS) excepted: they hold the value
+//     and hand it back typed, never read its names;
+//   - one returned by a call through its signature's type parameter
+//     (panelGet<T> / panelPost<T> / panelPut<T>: the response's JSON,
+//     whether T is written or inferred from an internal contextual
+//     type), the same containers excepted;
+//   - a user-defined type guard (`v is X`, `asserts v is X`) whose X is
+//     or contains one, over a parameter whose type does not: it makes
+//     one of a parsed or fetched value.
+//
+// INTERNAL_TYPES and INTERNAL_CLASSES name declarations (file#Name), so
+// a wire interface elsewhere that shares a listed name is not internal;
+// a listed declaration missing from the graph fails the analysis.
 //
 // vite.panel.config.ts passes the names as mangleProps' include and
 // `reserved` as the names it may never emit (the short members the DOM
@@ -90,8 +108,18 @@ export const RESERVED = [
 /** The bundle's internal classes: an instance of one is made by the
  * element and held in a private field, never handed to a host (no
  * event detail, no host API return, no global) — so every member, not
- * only a private one, is the bundle's own name. */
-export const INTERNAL_CLASSES = ["PanelModel", "ThemeWatch", "Push"]
+ * only a private one, is the bundle's own name.
+ *
+ * This list and INTERNAL_TYPES name a declaration, never a bare name:
+ * "<file relative to studio/web>#<Name>". A wire interface elsewhere in
+ * src/ that shares a listed name (a Cursor, a Lane, a Geometry) is not
+ * internal; a listed key with no such declaration in the graph fails
+ * the analysis (a moved or renamed type is re-listed, never dropped). */
+export const INTERNAL_CLASSES = [
+  "src/panel/state.ts#PanelModel",
+  "src/panel/theme.ts#ThemeWatch",
+  "src/panel/layout.ts#Push",
+]
 
 /** The bundle's internal object shapes, each built by the panel's own
  * code from its own values and read only there: never parsed from a
@@ -114,27 +142,82 @@ export const INTERNAL_CLASSES = ["PanelModel", "ThemeWatch", "Push"]
  * (the dock's computed box — the stored Layout stays verbatim).
  * A type that starts crossing one of those lines comes off this list. */
 export const INTERNAL_TYPES = [
-  "PanelState",
-  "TurnView",
-  "ExperimentResult",
-  "TreeState",
-  "RequestTabDeps",
-  "HeaderRungOptions",
-  "MarkerRungOptions",
-  "ChildView",
-  "Lane",
-  "Cursor",
-  "EventWalk",
-  "OpenState",
-  "AckCatalog",
-  "ReplayCtx",
-  "FoldCtx",
-  "EdCtx",
-  "TreeCtx",
-  "TurnWords",
-  "PanelPreview",
-  "Geometry",
+  "src/panel/state.ts#PanelState",
+  "src/panel/state.ts#TurnView",
+  "src/panel/playground.ts#ExperimentResult",
+  "src/panel/tree.ts#TreeState",
+  "src/panel/request.ts#RequestTabDeps",
+  "src/panel/detect.ts#HeaderRungOptions",
+  "src/panel/markers.ts#MarkerRungOptions",
+  "src/panel/state.ts#ChildView",
+  "src/panel/state.ts#Lane",
+  "src/panel/state.ts#Cursor",
+  "src/panel/state.ts#EventWalk",
+  "src/panel/element.ts#OpenState",
+  "src/panel/element.ts#AckCatalog",
+  "src/panel/element.ts#ReplayCtx",
+  "src/panel/element.ts#FoldCtx",
+  "src/panel/element.ts#EdCtx",
+  "src/panel/tree.ts#TreeCtx",
+  "src/panel/playground.ts#TurnWords",
+  "src/panel/editor.ts#PanelPreview",
+  "src/panel/layout.ts#Geometry",
 ]
+
+/** The lists an analysis reads: INTERNAL_TYPES and INTERNAL_CLASSES,
+ * their keys relative to base (studio/web). A test passes its own. */
+export interface InternalLists {
+  types: string[]
+  classes: string[]
+  base: string
+}
+
+/** Internal: the lists resolved against declarations. */
+interface Internal {
+  /** d is a listed interface. */
+  type: (d: ts.Node) => boolean
+  /** d is a listed class. */
+  cls: (d: ts.Node) => boolean
+  /** d is either. */
+  any: (d: ts.Node) => boolean
+}
+
+function internalOf(lists: InternalLists): Internal {
+  const types = new Set(lists.types)
+  const classes = new Set(lists.classes)
+  const key = (d: ts.Node, name: string) =>
+    `${relative(lists.base, d.getSourceFile().fileName).replace(/\\/g, "/")}#${name}`
+  const type = (d: ts.Node) =>
+    ts.isInterfaceDeclaration(d) && types.has(key(d, d.name.text))
+  const cls = (d: ts.Node) =>
+    ts.isClassDeclaration(d) && !!d.name && classes.has(key(d, d.name.text))
+  return { type, cls, any: (d) => type(d) || cls(d) }
+}
+
+/** The standard containers whose type parameters hold an internal
+ * value and hand it back typed, never reading its names: a value of an
+ * internal type may be stored in, and come back out of, one of these
+ * (new Map<string, Lane>(), set.add(view), Promise.all([...]),
+ * xs.map(...)). Any other type parameter — an own generic helper, a
+ * library's — is opaque to checkFlows. */
+const STD_GENERICS = new Set([
+  "Array",
+  "ReadonlyArray",
+  "ArrayConstructor",
+  "Map",
+  "ReadonlyMap",
+  "MapConstructor",
+  "WeakMap",
+  "WeakMapConstructor",
+  "Set",
+  "ReadonlySet",
+  "SetConstructor",
+  "WeakSet",
+  "WeakSetConstructor",
+  "Promise",
+  "PromiseLike",
+  "PromiseConstructor",
+])
 
 export interface MangleAnalysis {
   /** The names mangleProps may rename, sorted. */
@@ -147,12 +230,12 @@ export interface MangleAnalysis {
 }
 
 /** isMember: a declaration whose name is the bundle's own to rename. */
-function isMember(d: ts.Declaration): boolean {
+function isMemberOf(d: ts.Declaration, internal: Internal): boolean {
   if (
     (ts.isPropertySignature(d) || ts.isMethodSignature(d)) &&
     ts.isInterfaceDeclaration(d.parent)
   )
-    return INTERNAL_TYPES.includes(d.parent.name.text)
+    return internal.type(d.parent)
   if (
     !ts.isPropertyDeclaration(d) &&
     !ts.isMethodDeclaration(d) &&
@@ -171,18 +254,27 @@ function isMember(d: ts.Declaration): boolean {
       return false
   const cls = ts.isParameter(d) ? d.parent.parent : d.parent
   if (!ts.isClassDeclaration(cls)) return false
-  if (cls.name && INTERNAL_CLASSES.includes(cls.name.text)) return true
+  if (internal.cls(cls)) return true
   return (flags & ts.ModifierFlags.Private) !== 0
 }
 
 /** analyzeMangle walks the panel entry's module graph (src/panel/main.ts,
  * the graph the panel build bundles) and returns the safe set; it
- * throws on an internal type's value-level reflection (checkFlows).
- * root bounds the graph's own files (src/; a test passes its own). */
+ * throws on an internal type's value-level reflection (checkFlows) and
+ * on a listed internal declaration the graph does not hold.
+ * root bounds the graph's own files (src/; a test passes its own, and
+ * its own lists). */
 export function analyzeMangle(
   entry = resolve(web, "src/panel/main.ts"),
-  root = resolve(web, "src")
+  root = resolve(web, "src"),
+  lists: InternalLists = {
+    types: INTERNAL_TYPES,
+    classes: INTERNAL_CLASSES,
+    base: web,
+  }
 ): MangleAnalysis {
+  const internal = internalOf(lists)
+  const isMember = (d: ts.Declaration) => isMemberOf(d, internal)
   const cfg = ts.readConfigFile(resolve(web, "tsconfig.json"), (p) =>
     ts.sys.readFile(p)
   )
@@ -198,7 +290,30 @@ export function analyzeMangle(
   const rel = (f: ts.SourceFile, n: ts.Node) =>
     `${relative(web, f.fileName)}:${f.getLineAndCharacterOfPosition(n.getStart(f)).line + 1}`
 
-  const flows = checkFlows(checker, files, own, rel)
+  // Every listed declaration is in the graph: a key that names none is
+  // a stale list (a moved or renamed type), never silently nothing.
+  const found = new Set<string>()
+  const lookFor = (n: ts.Node) => {
+    if (
+      (ts.isInterfaceDeclaration(n) || ts.isClassDeclaration(n)) &&
+      n.name &&
+      internal.any(n)
+    )
+      found.add(
+        `${relative(lists.base, n.getSourceFile().fileName).replace(/\\/g, "/")}#${n.name.text}`
+      )
+    ts.forEachChild(n, lookFor)
+  }
+  for (const f of files) lookFor(f)
+  const missing = [...lists.types, ...lists.classes].filter(
+    (k) => !found.has(k)
+  )
+  if (missing.length)
+    throw new Error(
+      `panel-mangle: INTERNAL_TYPES / INTERNAL_CLASSES name a declaration the panel's graph does not hold (file#Name, relative to studio/web) — re-list the moved or renamed type:\n  ${missing.join("\n  ")}`
+    )
+
+  const flows = checkFlows(checker, files, own, rel, internal)
   if (flows.length)
     throw new Error(
       `panel-mangle: an internal type's names would be filled from outside the bundle or read by reflection — build the value instead, or take the type off INTERNAL_TYPES / INTERNAL_CLASSES:\n  ${flows.join("\n  ")}`
@@ -302,7 +417,7 @@ export function analyzeMangle(
         ts.isPropertyAccessExpression(parent) &&
         parent.expression.kind !== ts.SyntaxKind.ThisKeyword &&
         ts.isClassDeclaration(cls) &&
-        !(cls.name && INTERNAL_CLASSES.includes(cls.name.text))
+        !internal.cls(cls)
       ) {
         keep(o.name, `${where}: read off another instance than this`)
         break
@@ -343,6 +458,8 @@ const SINK_CALLS = new Set([
   "Object.values",
   "Object.assign",
   "Object.fromEntries",
+  "Object.getOwnPropertyNames",
+  "Reflect.ownKeys",
   "treeView",
 ])
 const SINK_METHODS = new Set([
@@ -360,9 +477,12 @@ export function checkFlows(
   checker: ts.TypeChecker,
   files: ts.SourceFile[],
   own: Set<ts.SourceFile>,
-  rel: (f: ts.SourceFile, n: ts.Node) => string
+  rel: (f: ts.SourceFile, n: ts.Node) => string,
+  internal: Internal
 ): string[] {
-  const internal = new Set([...INTERNAL_TYPES, ...INTERNAL_CLASSES])
+  /** listed: s is declared by a listed interface or class. */
+  const listed = (s: ts.Symbol | undefined) =>
+    !!s && (s.declarations ?? []).some((d) => internal.any(d))
   const ownDecl = (s: ts.Symbol) =>
     (s.declarations ?? []).some((d) => own.has(d.getSourceFile()))
   /** mentions: the internal type t is or contains — through a union, an
@@ -381,8 +501,8 @@ export function checkFlows(
   ): string | null => {
     if (!t || seen.has(t) || depth > 4) return null
     seen.add(t)
-    const s = t.aliasSymbol ?? t.getSymbol()
-    if (s && internal.has(s.name) && ownDecl(s)) return s.name
+    for (const s of [t.aliasSymbol, t.getSymbol()])
+      if (s && listed(s)) return s.name
     if (t.isUnionOrIntersection())
       for (const u of t.types) {
         const m = mentions(u, classes, seen, depth + 1)
@@ -432,7 +552,70 @@ export function checkFlows(
       ts.Type | undefined
     return !!el && (el.flags & ts.TypeFlags.Any) !== 0
   }
+  /** stdParam: a type parameter one of STD_GENERICS (a lib declaration)
+   * declares, its own or one of its methods'. */
+  const stdParam = (t: ts.Type): boolean => {
+    for (const d of t.getSymbol()?.declarations ?? []) {
+      if (own.has(d.getSourceFile()) || !d.getSourceFile().isDeclarationFile)
+        continue
+      // From d itself: a container's polymorphic `this` is declared by
+      // the interface (Map's set returns this).
+      const p = ts.findAncestor(
+        d,
+        (q) => ts.isInterfaceDeclaration(q) || ts.isClassDeclaration(q)
+      )
+      if (p?.name && STD_GENERICS.has(p.name.text)) return true
+    }
+    return false
+  }
+  /** opaque: why a parameter's declared type says nothing of an
+   * internal value's names (unknown, any, object, {}, a bare type
+   * parameter but the standard containers'), else null. */
+  const opaque = (t: ts.Type): string | null => {
+    if (t.isUnion()) {
+      for (const u of t.types) {
+        const w = opaque(u)
+        if (w) return w
+      }
+      return null
+    }
+    if (t.flags & ts.TypeFlags.Any) return "any"
+    if (t.flags & ts.TypeFlags.Unknown) return "unknown"
+    if (t.flags & ts.TypeFlags.NonPrimitive) return "object"
+    if (t.flags & ts.TypeFlags.TypeParameter)
+      return stdParam(t) ? null : `type parameter ${checker.typeToString(t)}`
+    if (
+      t.flags & ts.TypeFlags.Object &&
+      !t.getProperties().length &&
+      !t.getCallSignatures().length &&
+      !t.getConstructSignatures().length &&
+      !checker.getIndexInfosOfType(t).length
+    )
+      return checker.typeToString(t)
+    return null
+  }
+  /** typeParamIn: a type parameter (but the standard containers') t is
+   * or carries as a type argument, else null. */
+  const typeParamIn = (t: ts.Type, depth = 0): string | null => {
+    if (depth > 4) return null
+    if (t.flags & ts.TypeFlags.TypeParameter)
+      return stdParam(t) ? null : checker.typeToString(t)
+    const inner = [
+      ...(t.isUnionOrIntersection() ? t.types : []),
+      ...(t.aliasTypeArguments ?? []),
+      ...(t.flags & ts.TypeFlags.Object &&
+      (t as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference
+        ? checker.getTypeArguments(t as ts.TypeReference)
+        : []),
+    ]
+    for (const u of inner) {
+      const w = typeParamIn(u, depth + 1)
+      if (w) return w
+    }
+    return null
+  }
   const out: string[] = []
+  const sunk = new Set<ts.Node>()
   for (const f of files) {
     const say = (n: ts.Node, what: string) =>
       out.push(
@@ -499,12 +682,63 @@ export function checkFlows(
               mentions(checker.getTypeFromTypeNode(pd.type))
             )
               return
+            sunk.add(a)
             say(
               a,
               `${m} handed to ${ts.isNewExpression(n) ? "new " : ""}${text}`
             )
           })
         }
+        const sig = checker.getResolvedSignature(n)
+        const decl = sig?.getDeclaration()
+        if (sig && decl) {
+          // An argument to a parameter the callee declares opaque: what
+          // it does with the names (stringify them, walk them) the
+          // checker cannot see.
+          ;(n.arguments ?? []).forEach((a, i) => {
+            if (sunk.has(a)) return
+            const m = mentions(checker.getTypeAtLocation(a))
+            if (!m) return
+            const ps = decl.parameters
+            if (!ps.length) return
+            const pd = ps[Math.min(i, ps.length - 1)]
+            let pt = checker.getTypeAtLocation(pd)
+            if (pd.dotDotDotToken)
+              pt =
+                checker.isArrayType(pt) || checker.isTupleType(pt)
+                  ? (checker.getTypeArguments(pt as ts.TypeReference)[0] ?? pt)
+                  : pt
+            const why = opaque(pt)
+            if (why) say(a, `${m} passed to ${text}'s parameter typed ${why}`)
+          })
+          // A return through the signature's type parameter: the caller
+          // names what comes back (panelGet<T>'s response JSON).
+          const declared = checker.getSignatureFromDeclaration(decl)
+          const tp = declared && typeParamIn(declared.getReturnType())
+          if (tp) {
+            const m = mentions(sig.getReturnType(), false)
+            if (m)
+              say(n, `${m} returned through ${text}'s type parameter ${tp}`)
+          }
+        }
+      }
+      // A user-defined type guard makes an internal type of a value no
+      // internal type describes (a parsed or fetched one).
+      if (ts.isTypePredicateNode(n) && n.type) {
+        const m = mentions(checker.getTypeFromTypeNode(n.type), false)
+        const fn = n.parent
+        const pname = n.parameterName
+        const p =
+          ts.isIdentifier(pname) && ts.isFunctionLike(fn)
+            ? fn.parameters.find(
+                (q) => ts.isIdentifier(q.name) && q.name.text === pname.text
+              )
+            : undefined
+        if (m && !(p && mentions(checker.getTypeAtLocation(p), false)))
+          say(
+            n,
+            `a type guard makes ${m} of a value no internal type describes`
+          )
       }
       if (ts.isForInStatement(n)) {
         const m = mentions(checker.getTypeAtLocation(n.expression))

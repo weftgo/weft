@@ -141,27 +141,52 @@ export interface TreeState { applied: string; open: Set<string> }
 export interface ExperimentResult { commandID: string; runs: string[] }
 export interface PanelState { turnList: string[]; tooNew: boolean }
 export interface TurnView { folded: number }
+export interface Cursor { cursorAt: number }
 export class PanelModel { rowOf(id: string) { return id } }
 export function treeView(root: unknown, st: TreeState, name: string): string {
   return String(root) + st.applied + name
 }
 `
+  // A wire shape that shares an internal type's name (P9-trim2-fix 1):
+  // the lists name declarations, so this one is not internal.
+  const WIRE = `export interface Cursor { before: string; beforeId: string }
+`
   const HEAD = `import { treeView } from "./types"
-import type { TreeState, ExperimentResult, PanelState, TurnView, PanelModel } from "./types"
+import type { TreeState, ExperimentResult, PanelState, TurnView, PanelModel, Cursor } from "./types"
+import type { Cursor as WireCursor } from "./wire"
 declare const s: string
 declare const state: PanelState
 declare const tree: TreeState
 declare const turn: TurnView
 declare const model: PanelModel
+declare const cur: Cursor
 declare const el: HTMLElement
+declare function fmt(v: unknown): string
+declare function fmtAny(v: any): string
+declare function fmtObj(v: object): string
+declare function fmtEmpty(v: {}): string
+declare function fmtGen<T>(v: T): string
+declare function fmtRest(...vs: unknown[]): string
+declare function panelGet<T>(path: string): Promise<T>
 export {}
 `
-  const analyze = (body: string) => {
+  const LISTS = {
+    types: [
+      "types.ts#TreeState",
+      "types.ts#ExperimentResult",
+      "types.ts#PanelState",
+      "types.ts#TurnView",
+      "types.ts#Cursor",
+    ],
+    classes: ["types.ts#PanelModel"],
+  }
+  const analyze = (body: string, lists = LISTS) => {
     const dir = mkdtempSync(join(tmpdir(), "panel-mangle-"))
     try {
       writeFileSync(join(dir, "types.ts"), TYPES)
+      writeFileSync(join(dir, "wire.ts"), WIRE)
       writeFileSync(join(dir, "main.ts"), HEAD + body)
-      return analyzeMangle(join(dir, "main.ts"), dir)
+      return analyzeMangle(join(dir, "main.ts"), dir, { ...lists, base: dir })
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -222,8 +247,97 @@ export {}
       "const o: Record<string, unknown> = { ...state }; void o",
       /PanelState spread into an object no internal type describes/,
     ],
+    // (d) P9-trim2-fix 2a: an argument to an opaque parameter.
+    ["fmt(state)", /PanelState passed to fmt's parameter typed unknown/],
+    ["fmtAny(tree)", /TreeState passed to fmtAny's parameter typed any/],
+    ["fmtObj(turn)", /TurnView passed to fmtObj's parameter typed object/],
+    ["fmtEmpty(cur)", /Cursor passed to fmtEmpty's parameter typed \{\}/],
+    [
+      "fmtGen({ at: 1, views: [turn] })",
+      /TurnView \(via \.views\) passed to fmtGen's parameter typed type parameter T/,
+    ],
+    [
+      'fmtRest("x", model)',
+      /PanelModel passed to fmtRest's parameter typed unknown/,
+    ],
+    [
+      "console.log(state)",
+      /PanelState passed to console\.log's parameter typed any/,
+    ],
+    ["String(cur)", /Cursor passed to String's parameter typed any/],
+    // (e) 2b: a return through the callee's type parameter.
+    [
+      'export const f = () => panelGet<ExperimentResult>("x")',
+      /ExperimentResult returned through panelGet's type parameter T/,
+    ],
+    [
+      'export async function f() { const r: PanelState = await panelGet("x"); return r }',
+      /PanelState returned through panelGet's type parameter T/,
+    ],
+    // (f) 2c: more reflection.
+    ["Reflect.ownKeys(state)", /PanelState handed to Reflect\.ownKeys/],
+    [
+      "Object.getOwnPropertyNames(tree)",
+      /TreeState handed to Object\.getOwnPropertyNames/,
+    ],
+    // (g) 2d: a type guard that makes one of an outside value.
+    [
+      "export function isState(v: unknown): v is PanelState { return !!v }",
+      /type guard makes PanelState/,
+    ],
+    [
+      "export function isCur(v: WireCursor): v is WireCursor & Cursor { return !!v }",
+      /type guard makes Cursor/,
+    ],
+    [
+      "export function must(v: unknown): asserts v is TurnView[] { if (!v) throw 0 }",
+      /type guard makes TurnView/,
+    ],
   ])("%s", (body, want) => {
     expect(() => analyze(body)).toThrow(want)
+  })
+
+  it("names an internal type by its declaration: a same-named wire shape stays verbatim and may be parsed", () => {
+    const r = analyze(`
+const w: WireCursor = JSON.parse(s)
+const n: number = cur.cursorAt
+void w.before, w.beforeId, n
+`)
+    expect(r.names).toContain("cursorAt")
+    expect(r.names).not.toContain("before")
+    expect(r.names).not.toContain("beforeId")
+  })
+
+  it("fails on a listed declaration the graph does not hold (a moved or renamed type)", () => {
+    expect(() =>
+      analyze("void 0", { ...LISTS, types: [...LISTS.types, "wire.ts#Lane"] })
+    ).toThrow(/does not hold[\s\S]*wire\.ts#Lane/)
+    // A bare name is no key.
+    expect(() =>
+      analyze("void 0", { ...LISTS, classes: ["PanelModel"] })
+    ).toThrow(/does not hold[\s\S]*PanelModel/)
+  })
+
+  it("lets the standard containers hold and return an internal value", () => {
+    const r = analyze(`
+export async function f() {
+  const m = new Map<string, TurnView>()
+  m.set("a", turn).set("b", turn)
+  const got: TurnView | undefined = m.get("a")
+  const set = new Set([turn])
+  set.add(turn)
+  const all: TurnView[] = await Promise.all([Promise.resolve(turn), turn])
+  const xs: PanelState[] = [state].map((x) => x).filter((x) => !!x)
+  const w = new WeakMap<object, TreeState>([[el, tree]])
+  return [got, set, all, xs, w, Array.from(set)]
+}
+export function isTree(v: TreeState | TurnView): v is TreeState { return "applied" in v }
+fmt(turn.folded)
+fmt({ folded: turn.folded })
+`)
+    expect(r.names).toEqual(
+      expect.arrayContaining(["cursorAt", "tooNew", "turnList"])
+    )
   })
 
   it("passes code that builds the value and reads it by its own names", () => {

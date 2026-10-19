@@ -1648,7 +1648,7 @@ func (s *Session) resumeLinkLocked() (parkedRun, actor string) {
 		if !ok {
 			continue
 		}
-		for _, who := range decisionActors(d, ds) {
+		for _, who := range decisionActors(d, ds, s.cfg.quorum) {
 			if !slices.Contains(actors, who) {
 				actors = append(actors, who)
 			}
@@ -1658,12 +1658,14 @@ func (s *Session) resumeLinkLocked() (parkedRun, actor string) {
 }
 
 // decisionActors names who decided one call, as approvalActorKey reads
-// it: each decision's signing key id, else its Who. An approval is every
-// approval recorded for the call — under a Quorum(n > 1) each approver
-// who counted toward it, sorted and deduped (the decisions are in
-// arrival order, which says nothing about who decided) — any other
-// effective decision its own actor. "" names nobody and is left out.
-func decisionActors(d ApprovalDecisionEntry, ds []ApprovalDecisionEntry) []string {
+// it: each decision's signing key id, else its Who. An approval is the
+// approvals that counted toward the quorum — in arrival order up to the
+// n-th distinct approver (effectiveDecision's approverIdentity), so a
+// late extra approval recorded after the quorum was met names nobody —
+// named sorted and deduped (arrival order says nothing about who
+// decided); any other effective decision its own actor. "" names nobody
+// and is left out.
+func decisionActors(d ApprovalDecisionEntry, ds []ApprovalDecisionEntry, quorum int) []string {
 	actorOf := func(d ApprovalDecisionEntry) string {
 		if d.KeyID != "" {
 			return d.KeyID
@@ -1676,10 +1678,19 @@ func decisionActors(d ApprovalDecisionEntry, ds []ApprovalDecisionEntry) []strin
 		}
 		return nil
 	}
+	quorum = max(quorum, 1)
 	var out []string
+	counted := map[string]bool{}
 	for _, a := range ds {
 		if a.Outcome != OutcomeApprove {
 			continue
+		}
+		id := approverIdentity(a)
+		if !counted[id] {
+			if len(counted) == quorum {
+				continue // past the quorum: this approval decided nothing
+			}
+			counted[id] = true
 		}
 		if who := actorOf(a); who != "" && !slices.Contains(out, who) {
 			out = append(out, who)

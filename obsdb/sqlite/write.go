@@ -61,7 +61,16 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 			return err
 		}
 		if w.RunID != "" {
-			runIDs.touch(w.RunID).applySpan(s, w)
+			// A summarizer span (weft/thread's compaction or branch-summary
+			// call, weft.chat.role) is stored — the summarizer usage reads
+			// sum the spans table — but is never the run's own fact: filed
+			// under the last run, it must not move that run's last_seen
+			// (a finished run stays as it ended, an interrupted one stays
+			// interrupted, Retain's clock does not restart), nor recreate a
+			// deleted run's row. ClickHouse's 0024 traces view skips it alike.
+			if attrString(s.Attrs, obsdb.AttrChatRole) == "" {
+				runIDs.touch(w.RunID).applySpan(s, w)
+			}
 		} else if obsdb.StockCandidate(s) && !seenTrace[s.TraceID] {
 			seenTrace[s.TraceID] = true
 			stockTraces = append(stockTraces, s.TraceID)
@@ -572,13 +581,10 @@ func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 	u.applyIdentity(w, obsdb.Record{})
 	u.seeStart(s.Start)
 	u.seeTime(s.End)
-	// A summarizer span (weft/thread's compaction or branch-summary call,
-	// weft.chat.role) adds nothing to the run's meta: its metadata is the
-	// session's view of the run, not the run's — ClickHouse's 0024 the same.
-	if s.Attrs != nil && attrString(s.Attrs, "weft.chat.role") == "" {
-		for k, v := range obsdb.MetaOf(s.Attrs) {
-			u.mergeMeta(k, v)
-		}
+	// A summarizer span never reaches here (Write skips it): every span
+	// folded is the run's own.
+	for k, v := range obsdb.MetaOf(s.Attrs) {
+		u.mergeMeta(k, v)
 	}
 	// The identity a span carries beside the records' (contract §6): the
 	// manifest hash from its attributes — so a run whose records were

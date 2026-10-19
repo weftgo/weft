@@ -1,12 +1,14 @@
 package studio
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/weftgo/weft/obsdb"
 )
@@ -16,12 +18,14 @@ import (
 //	GET /api/sessions/{id}/export?format=jsonl
 //
 // A session as one JSON-lines download, read from obsdb's tables and
-// nothing else (the run export's rule: data, never a write). The lines,
-// in order:
+// nothing else (the run export's rule: data, never a write), streamed:
+// each line goes out as it is read, so the server holds one turn's
+// export at a time, never the file. The lines, in order:
 //
-//   - one "session" record: the format (weft.session.export/1), the
-//     session's id, public id, agent and turn count, and how many of
-//     its turns the file carries;
+//   - one "session" record, from the reads made before the first byte:
+//     the format (weft.session.export/1), the session's id, public id,
+//     agent, its turn count and the state-log marks in the token's
+//     scope (what the file can hold, before either cap);
 //   - every turn's run export, oldest turn first, exactly as
 //     GET /api/runs/{id}/export?format=jsonl writes it (each turn's
 //     lines begin with its own "run" record, so a reader groups the
@@ -33,15 +37,29 @@ import (
 //     (timelineMarkCap at most), when the database reads session
 //     events;
 //   - one "session_hole" record per hole: truncated (cause
-//     response_cap) past either cap, the timeline's not_recorded /
-//     stripped / hidden, and not_recorded naming obsdb.SessionEventReader
-//     when the database cannot read the state log.
+//     response_cap) past the turn cap, the mark cap or the byte cap
+//     (sessionExportByteCap, 64 MiB: a turn or mark line that would
+//     pass it is not written, nor anything of its kind after it); a
+//     plain truncated hole when a read failed after the first byte (the
+//     status was already sent: the lines before it are whole); the
+//     timeline's not_recorded / stripped / hidden; and not_recorded
+//     naming obsdb.SessionEventReader when the database cannot read
+//     the state log;
+//   - one "session_end" record, last: turns_exported, marks_exported
+//     and bytes (the lines before it). A file without it was cut in
+//     transit.
+//
+// The turns' rows come from the Session read and their children from
+// one obsdb.TreeReader.ChildRuns read for them all (the per-turn Run
+// read only without a TreeReader), priced on one coster; each turn's
+// events, transcript, compactions, spans and requests are its own reads.
 //
 // jsonl is the only format: a session is many runs, and the per-run
 // json, otlp and wefttest exports stay the run page's. The scope is the
 // session document's: a panel token reads its public id's turns and
 // marks only; a read-scoped token's turns carry the request block
-// badged hidden, as the run export's jsonl does.
+// badged hidden, as the run export's jsonl does, and its marks
+// content_hidden.
 
 // sessionExportVersion names the session export's line shape.
 const sessionExportVersion = "weft.session.export/1"
@@ -49,7 +67,84 @@ const sessionExportVersion = "weft.session.export/1"
 // sessionExportTurnCap bounds the turns one session export reads.
 var sessionExportTurnCap = 200
 
+// sessionExportByteCap bounds the bytes of one session export's turn
+// and mark lines: 64 MiB. The holes and the session_end line close the
+// file past it. A variable for tests.
+var sessionExportByteCap = 64 << 20
+
 var sessionExportFormat = exportFormat{ext: "session.jsonl", contentType: "application/x-ndjson"}
+
+// sessionStream writes the export's lines: the download headers before
+// the first, the byte count after each.
+type sessionStream struct {
+	w       http.ResponseWriter
+	r       *http.Request
+	id      string
+	started bool
+	bytes   int
+	err     error // the first write error: the client went away
+}
+
+func (st *sessionStream) start() {
+	if st.started {
+		return
+	}
+	st.started = true
+	w := st.w
+	w.Header().Set("Content-Type", sessionExportFormat.contentType)
+	w.Header().Set("Content-Disposition", contentDisposition(st.id, sessionExportFormat))
+	w.WriteHeader(http.StatusOK)
+}
+
+// line renders {"record": kind, …v's fields}.
+func sessionLine(kind string, v any) ([]byte, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, len(b)+len(kind)+16)
+	out = append(out, `{"record":`...)
+	out = append(out, strconv.Quote(kind)...)
+	if len(b) > 2 {
+		out = append(out, ',')
+		out = append(out, b[1:]...)
+	} else {
+		out = append(out, '}')
+	}
+	return append(out, '\n'), nil
+}
+
+func (st *sessionStream) write(b []byte) {
+	st.start()
+	if st.err != nil {
+		return
+	}
+	if _, err := st.w.Write(b); err != nil {
+		st.err = err
+		return
+	}
+	st.bytes += len(b)
+}
+
+// fits is whether n more bytes stay within sessionExportByteCap.
+func (st *sessionStream) fits(n int) bool { return st.bytes+n <= sessionExportByteCap }
+
+// byteCapHole is the truncated hole the byte cap leaves, naming what of
+// kind it stopped.
+func byteCapHole(what string, left int) stepHole {
+	return stepHole{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
+		Reason: fmt.Sprintf("the export reached its %d MiB cap: %d %s after it are not in this file — nothing was lost", sessionExportByteCap>>20, left, what),
+		Fix:    "export the later turns one by one: GET /api/runs/{id}/export?format=jsonl; page the marks: GET /api/sessions/{id}/entries",
+		Count:  left}
+}
+
+// readFailedHole is the hole a read failing after the first byte
+// leaves: the status was sent, so the file says it.
+func readFailedHole(what string, err error) stepHole {
+	return stepHole{Hole: string(obsdb.HoleTruncated),
+		Reason: "a read failed mid-export (" + what + ": " + err.Error() + "): the lines before this one are whole, the rest are not in this file",
+		Fix:    "export again"}
+}
 
 // serveSessionExport answers GET /api/sessions/{id}/export?format=jsonl.
 func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id string) {
@@ -69,55 +164,121 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 	if pub := panelPublicID(r); pub != "" {
 		s.scopeSessionDetail(ctx, &det, pub)
 	}
-	hideRequests := !readsPrompts(r)
-	var turns bytes.Buffer
-	exported := 0
-	var holes []stepHole
-	for i, rr := range det.Runs {
-		if i >= sessionExportTurnCap {
-			holes = append(holes, stepHole{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
-				Reason: fmt.Sprintf("the session has %d turns; this export carries the first %d — nothing was lost", len(det.Runs), sessionExportTurnCap),
-				Fix:    "export the later turns one by one: GET /api/runs/{id}/export?format=jsonl",
-				Count:  len(det.Runs) - sessionExportTurnCap})
-			break
+	// The state log's scope before the first byte: its count is the
+	// head's, and a failure here is still an error status.
+	er, hasMarks := s.db.(obsdb.SessionEventReader)
+	var mb *markBuilder
+	var visible, all int
+	if hasMarks {
+		mb = s.newMarkBuilder(r, det)
+		if visible, all, err = mb.scope(r, er); err != nil {
+			dbError(w, r, "session events", id, err)
+			return
 		}
-		x, err := s.collectExport(ctx, rr.ID, hideRequests)
+	}
+	st := &sessionStream{w: w, r: r, id: id}
+	head, err := sessionLine("session", struct {
+		Format    string `json:"format"`
+		SessionID string `json:"session_id"`
+		PublicID  string `json:"public_id,omitempty"`
+		Agent     string `json:"agent"`
+		Turns     int    `json:"turns"`
+		Marks     int    `json:"marks"`
+	}{sessionExportVersion, det.ID, det.PublicID, det.Agent, len(det.Runs), visible})
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "internal", "export session "+id+": "+err.Error())
+		return
+	}
+	if r.Method == http.MethodHead {
+		st.start()
+		return
+	}
+	st.write(head)
+
+	var holes []stepHole
+	turns := det.Runs
+	if len(turns) > sessionExportTurnCap {
+		holes = append(holes, stepHole{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
+			Reason: fmt.Sprintf("the session has %d turns; this export carries the first %d — nothing was lost", len(det.Runs), sessionExportTurnCap),
+			Fix:    "export the later turns one by one: GET /api/runs/{id}/export?format=jsonl",
+			Count:  len(det.Runs) - sessionExportTurnCap})
+		turns = turns[:sessionExportTurnCap]
+	}
+	hideRequests := !readsPrompts(r)
+	c := s.coster(ctx)
+	kids, batched := exportTurnChildren(ctx, s.db, c, turns)
+	exported, failed := 0, false
+	for i, rr := range turns {
+		if st.err != nil {
+			return // the client went away
+		}
+		var x *runExport
+		if batched {
+			x, err = s.collectExportOf(ctx, c, obsdb.RunDetail{RunRow: rr, Children: kids[rr.ID]}, hideRequests)
+		} else {
+			x, err = s.collectExport(ctx, rr.ID, hideRequests)
+		}
 		if errors.Is(err, obsdb.ErrNotFound) {
 			continue // deleted between the reads
 		}
 		if err != nil {
-			dbError(w, r, "turn", rr.ID, err)
-			return
+			holes = append(holes, readFailedHole("turn "+rr.ID, err))
+			failed = true
+			break
 		}
 		x.spans = spansFor(r, x.spans)
 		b, err := x.jsonl()
 		if err != nil {
-			writeError(w, r, http.StatusInternalServerError, "internal", "export turn "+rr.ID+": "+err.Error())
-			return
+			holes = append(holes, readFailedHole("turn "+rr.ID, err))
+			failed = true
+			break
 		}
-		turns.Write(b)
+		if !st.fits(len(b)) {
+			holes = append(holes, byteCapHole("turns", len(turns)-i))
+			if visible > 0 {
+				holes = append(holes, byteCapHole("marks", visible))
+			}
+			failed = true // past the cap: no mark line either
+			break
+		}
+		st.write(b)
 		exported++
 	}
-	var marks []sessionEntry
-	if er, ok := s.db.(obsdb.SessionEventReader); ok {
-		mb := s.newMarkBuilder(r, det)
-		visible, all, err := mb.scope(r, er)
-		if err != nil {
-			dbError(w, r, "session events", id, err)
-			return
-		}
-		read := 0
+	marks := 0
+	switch {
+	case hasMarks && !failed:
+		read, stopped := 0, false
+	pages:
 		for read < timelineMarkCap && read < visible {
 			page, err := er.SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: id, PublicID: mb.pub, Offset: read,
 				Limit: min(obsdb.MaxSessionEventLimit, timelineMarkCap-read)})
 			if err != nil {
-				dbError(w, r, "session events", id, err)
-				return
+				holes = append(holes, readFailedHole("session events", err))
+				stopped = true
+				break
 			}
-			for _, e := range page.Events {
-				if m, ok := mb.mark(e); ok {
-					marks = append(marks, m)
+			for j, e := range page.Events {
+				m, ok := mb.mark(e)
+				if !ok {
+					continue
 				}
+				// Wrapped: a mark has a "record" field of its own (thread |
+				// compaction), the line's kind beside it.
+				b, err := sessionLine("session_mark", struct {
+					Mark sessionEntry `json:"mark"`
+				}{m})
+				if err != nil {
+					holes = append(holes, readFailedHole("session mark", err))
+					stopped = true
+					break pages
+				}
+				if !st.fits(len(b)) {
+					holes = append(holes, byteCapHole("marks", visible-read-j))
+					stopped = true
+					break pages
+				}
+				st.write(b)
+				marks++
 			}
 			read += len(page.Events)
 			if len(page.Events) == 0 {
@@ -125,59 +286,77 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 			}
 		}
 		truncatedAt := 0
-		if visible > read {
+		if visible > read && !stopped {
 			truncatedAt = read
 		}
 		holes = append(holes, mb.holes(det.Runs, all, truncatedAt, false)...)
-	} else {
+	case !hasMarks:
 		holes = append(holes, stepHole{Hole: string(obsdb.HoleNotRecorded),
 			Reason: "the session's state log is not in this export: " + offTimeline,
 			Fix:    "serve Studio over obsdb/sqlite or obsdb/clickhouse"})
 	}
-
-	var out bytes.Buffer
-	line := func(kind string, v any) error {
-		b, err := json.Marshal(v)
-		if err != nil {
-			return err
-		}
-		out.WriteString(`{"record":` + strconv.Quote(kind))
-		if len(b) > 2 {
-			out.WriteByte(',')
-			out.Write(b[1:])
-		} else {
-			out.WriteByte('}')
-		}
-		out.WriteByte('\n')
-		return nil
-	}
-	err = line("session", struct {
-		Format        string `json:"format"`
-		SessionID     string `json:"session_id"`
-		PublicID      string `json:"public_id,omitempty"`
-		Agent         string `json:"agent"`
-		Turns         int    `json:"turns"`
-		TurnsExported int    `json:"turns_exported"`
-		Marks         int    `json:"marks"`
-	}{sessionExportVersion, det.ID, det.PublicID, det.Agent, len(det.Runs), exported, len(marks)})
-	out.Write(turns.Bytes())
-	for _, m := range marks {
-		if err == nil {
-			// Wrapped: a mark has a "record" field of its own (thread |
-			// compaction), the line's kind beside it.
-			err = line("session_mark", struct {
-				Mark sessionEntry `json:"mark"`
-			}{m})
-		}
-	}
 	for _, h := range holes {
-		if err == nil {
-			err = line("session_hole", h)
+		if b, err := sessionLine("session_hole", h); err == nil {
+			st.write(b)
 		}
 	}
-	if err != nil {
-		writeError(w, r, http.StatusInternalServerError, "internal", "export session "+id+": "+err.Error())
-		return
+	end, err := sessionLine("session_end", struct {
+		TurnsExported int `json:"turns_exported"`
+		MarksExported int `json:"marks_exported"`
+		Bytes         int `json:"bytes"`
+	}{exported, marks, st.bytes})
+	if err == nil {
+		st.write(end)
 	}
-	writeDownload(w, r, id, sessionExportFormat, out.Bytes())
+	if st.err != nil {
+		slog.DebugContext(ctx, "studio: a session export's client went away", "session", id, "err", st.err)
+	}
+}
+
+// exportTurnChildren reads the turns' children in one
+// obsdb.TreeReader.ChildRuns read and primes c with their subagent
+// trees (one read per level for every turn at once), so each turn's
+// export reads no row and no cost tree of its own. ok false — no
+// TreeReader, or the read failed or passed its cap — leaves each turn
+// to collectExport's own Run read.
+func exportTurnChildren(ctx context.Context, db obsdb.DB, c *coster, turns []obsdb.RunRow) (map[string][]obsdb.RunRow, bool) {
+	tr, ok := db.(obsdb.TreeReader)
+	if !ok || len(turns) == 0 {
+		return nil, false
+	}
+	ids := make([]string, len(turns))
+	for i, t := range turns {
+		ids[i] = t.ID
+	}
+	kids, err := tr.ChildRuns(ctx, ids)
+	if err != nil {
+		slog.DebugContext(ctx, "studio: a session export's turn children could not be read at once; reading each turn", "err", err)
+		return nil, false
+	}
+	var all []obsdb.RunRow
+	for _, id := range ids {
+		c.prime(id, kids[id])
+		all = append(all, subagents(id, c.kids[id])...)
+	}
+	c.primeTrees(all)
+	return kids, true
+}
+
+// contentDisposition is writeDownload's attachment header for id.
+func contentDisposition(id string, f exportFormat) string {
+	name := id + "." + f.ext
+	ascii := strings.Map(func(c rune) rune {
+		if c == '/' || c == '\\' || c == '"' || c < 0x20 || c >= 0x7f {
+			return '_'
+		}
+		return c
+	}, name)
+	cd := `attachment; filename="` + ascii + `"`
+	for _, c := range name {
+		if c >= 0x80 {
+			cd += "; filename*=UTF-8''" + rfc5987(strings.ReplaceAll(name, "/", "_"))
+			break
+		}
+	}
+	return cd
 }

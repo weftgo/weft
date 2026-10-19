@@ -99,7 +99,7 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 	now := time.Now()
 	rq := q.RunQuery
 	rq.Before, rq.BeforeID = time.Time{}, ""
-	inner, innerArgs := runsInner(rq)
+	inner, innerArgs := runsInner(rq, d.runsCut(ctx))
 
 	// The cheap filters, over the grouped rows.
 	var cheap []string

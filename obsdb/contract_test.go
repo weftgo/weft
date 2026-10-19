@@ -2149,7 +2149,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "queue_breakpoints",
-			desc: "the phase 8 facts run_cards does not hold: a step's two calls under Parallelism(1), the first holding the one slot 30 ms, so the second's execute_tool span carries weft.tool.queue_ms (int, the wait rounded up; the generator sets it to 1) and the first's none; and a playground run's breakpoint park — the runtime's metadata weft.playground true and weft.playground.breakpoints refund_order (comma-joined, sorted) on every record and span, the call parked through ParkOn (weft.tool.pending.source park_on): what reads a park_on park named there as a breakpoint, not an approval gate",
+			desc: "the phase 8 facts run_cards does not hold: a step's two calls under Parallelism(1), the first holding the one slot 30 ms, so the second's execute_tool span carries weft.tool.queue_ms (int, the wait rounded up; the generator sets it to 1) and the first's none; and a playground run's breakpoint park — the runtime's metadata weft.playground true and weft.playground.breakpoints refund_order (comma-joined, sorted) on every record and span, the call parked through ParkOn (weft.tool.pending.source park_on): what reads a park_on park named there as a breakpoint, not an approval gate; then the playground's continue, as weft/runtime resumes a runtime-started run (core.ApproveBy(call, \"runtime\", \"\"), core.ResumeOf the parked run, the same playground metadata): the resumed refund_order call's execute_tool span carries weft.tool.approved_by runtime and no weft.grant.id, the resume's row resumed_from the parked run",
 			dest: content,
 			run:  runQueueBreakpoints,
 		},
@@ -2277,13 +2277,22 @@ func runQueueBreakpoints(t *testing.T, ctx context.Context, p *otel.Pipeline, _ 
 		return "refunded " + in.OrderID, nil
 	})
 	debugged := pipelineAgent(p, "support", wefttest.Script(
-		wefttest.ToolCalls(wefttest.Call{Name: "refund_order", Args: `{"order_id":"8"}`})), refund)
-	return append(ids, mustRun(t, ctx, debugged, core.Prompt("Refund order 8."),
-		core.ParkOn("refund_order"),
-		core.Metadata(map[string]string{
-			"weft.playground":             "true",
-			"weft.playground.breakpoints": "refund_order",
-		})).ID)
+		wefttest.ToolCalls(wefttest.Call{Name: "refund_order", Args: `{"order_id":"8"}`}),
+		wefttest.Say("Order 8 is refunded.")), refund)
+	playground := core.Metadata(map[string]string{
+		"weft.playground":             "true",
+		"weft.playground.breakpoints": "refund_order",
+	})
+	parked := mustRun(t, ctx, debugged, core.Prompt("Refund order 8."), core.ParkOn("refund_order"), playground)
+	if len(parked.Pending) != 1 {
+		t.Fatalf("the breakpoint run parked %d calls, want 1", len(parked.Pending))
+	}
+	// The playground's continue on a runtime-started run, as
+	// weft/runtime's executor resumes it (approvedByRuntime): the
+	// approval names its provenance, runtime, and no grant.
+	resumed := mustRun(t, ctx, debugged, core.Messages(parked.Messages...),
+		core.ApproveBy(parked.Pending[0].ID, "runtime", ""), core.ResumeOf(parked.ID), playground)
+	return append(ids, parked.ID, resumed.ID)
 }
 
 // namedModel gives a scripted model its own identity: the fallback's

@@ -33,7 +33,9 @@ func exportLines(t *testing.T, body string) ([]string, []map[string]any) {
 // TestSessionExport pins GET /api/sessions/{id}/export (UX-B-29): one
 // "session" line, then each turn's run export in turn order (each
 // beginning with its "run" record), then the state log's marks in
-// record-time order, then the holes; served as <session>.session.jsonl.
+// record-time order, then the holes, then one "session_end" line with
+// the counts; served as <session>.session.jsonl, streamed (no
+// Content-Length).
 func TestSessionExport(t *testing.T) {
 	h := Handler(DB(timelineDB(t)))
 	code, hdr, body := get(t, h, "/studio/api/sessions/s_acme/export?format=jsonl")
@@ -52,8 +54,16 @@ func TestSessionExport(t *testing.T) {
 	}
 	head := lines[0]
 	if head["format"] != sessionExportVersion || head["session_id"] != "s_acme" || head["public_id"] != "pub_acme" ||
-		head["turns"] != float64(6) || head["turns_exported"] != float64(6) || head["marks"] != float64(12) {
+		head["turns"] != float64(6) || head["marks"] != float64(12) {
 		t.Errorf("session line = %v", head)
+	}
+	end := lines[len(lines)-1]
+	if kinds[len(kinds)-1] != "session_end" || end["turns_exported"] != float64(6) || end["marks_exported"] != float64(12) ||
+		end["bytes"] != float64(len(body)-len(lastLine(body))) {
+		t.Errorf("last line = %v (of %d bytes), want session_end with 6 turns, 12 marks and the bytes before it", end, len(body))
+	}
+	if cl := hdr.Get("Content-Length"); cl != "" {
+		t.Errorf("Content-Length = %q: the export streams", cl)
 	}
 	var runs []string
 	for _, l := range lines {
@@ -69,7 +79,7 @@ func TestSessionExport(t *testing.T) {
 	if firstMark < 0 {
 		t.Fatalf("no session_mark line: %v\n%s", kinds, body[:min(len(body), 400)])
 	}
-	for i, k := range kinds[firstMark:] {
+	for i, k := range kinds[firstMark : len(kinds)-1] {
 		if k != "session_mark" && k != "session_hole" {
 			t.Fatalf("line %d after the marks is %q", firstMark+i, k)
 		}
@@ -121,8 +131,8 @@ func TestSessionExportCapAndScope(t *testing.T) {
 			n++
 		}
 	}
-	if n != 2 || lines[0]["turns_exported"] != float64(2) {
-		t.Errorf("capped export: %d run lines, head %v; want 2", n, lines[0])
+	if n != 2 || lines[len(lines)-1]["turns_exported"] != float64(2) {
+		t.Errorf("capped export: %d run lines, end %v; want 2", n, lines[len(lines)-1])
 	}
 	if !strings.Contains(body, `"record":"session_hole","hole":"truncated","cause":"response_cap"`) {
 		t.Errorf("capped export: no truncated hole: %s", body)
@@ -133,5 +143,65 @@ func TestSessionExportCapAndScope(t *testing.T) {
 	code, _, body = getWith(t, h, "/studio/api/sessions/s_acme/export", tok("pub_acme", scopeRead), "")
 	if code != http.StatusOK || strings.Contains(body, "agent-7") || !strings.Contains(body, `"content_hidden":true`) {
 		t.Errorf("read token = %d, content leaked or not marked hidden: %s", code, body)
+	}
+	// A read token's turns carry the request block hidden, as the run
+	// export's jsonl does, and no request line.
+	kinds, _ = exportLines(t, body)
+	if slices.Contains(kinds, "request") || !strings.Contains(body, `"record":"badge","block":"requests","badge":"hidden"`) {
+		t.Errorf("read token: request lines %v or no hidden requests badge: %s", slices.Contains(kinds, "request"), body[:min(len(body), 600)])
+	}
+}
+
+// lastLine is body's last line, its newline included.
+func lastLine(body string) string {
+	i := strings.LastIndex(strings.TrimSuffix(body, "\n"), "\n")
+	return body[i+1:]
+}
+
+// TestSessionExportByteCap (P9-pre-go-fix2): past sessionExportByteCap
+// the export stops before the turn that would pass it — every turn it
+// carries whole — and says so: a truncated hole, cause response_cap,
+// counting the turns left, one for the marks, and the session_end line
+// still closes the file under the cap's bytes.
+func TestSessionExportByteCap(t *testing.T) {
+	h := Handler(DB(timelineDB(t)))
+	_, _, whole := get(t, h, "/studio/api/sessions/s_acme/export")
+	kinds, _ := exportLines(t, whole)
+	// The cap just past the head and the first two turns: the bytes
+	// before the third turn's run line.
+	cap, turns := 0, 0
+	raw := strings.SplitAfter(whole, "\n")
+	for i, k := range kinds {
+		if k == "run" {
+			if turns++; turns == 3 {
+				break
+			}
+		}
+		cap += len(raw[i])
+	}
+	defer func(n int) { sessionExportByteCap = n }(sessionExportByteCap)
+	sessionExportByteCap = cap + 10
+	code, _, body := get(t, h, "/studio/api/sessions/s_acme/export")
+	if code != http.StatusOK {
+		t.Fatalf("export: %d %s", code, body)
+	}
+	kinds, lines := exportLines(t, body)
+	runs := 0
+	for _, k := range kinds {
+		if k == "run" {
+			runs++
+		}
+		if k == "session_mark" {
+			t.Errorf("a mark line past the cap")
+		}
+	}
+	end := lines[len(lines)-1]
+	capped := len(body[:strings.Index(body, `{"record":"session_hole"`)]) // the head and turn lines: what the cap bounds
+	if runs != 2 || kinds[len(kinds)-1] != "session_end" || end["turns_exported"] != float64(2) || capped > sessionExportByteCap {
+		t.Errorf("capped at %d bytes: %d turns in %d bytes, end %v; want 2 turns whole under the cap and the session_end line", sessionExportByteCap, runs, capped, end)
+	}
+	if !strings.Contains(body, `"record":"session_hole","hole":"truncated","cause":"response_cap","reason":"the export reached its 0 MiB cap: 4 turns after it`) ||
+		!strings.Contains(body, `12 marks after it are not in this file`) {
+		t.Errorf("capped export: no byte-cap holes: %s", body[strings.LastIndex(body, `"record":"run"`):])
 	}
 }

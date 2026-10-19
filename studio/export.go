@@ -295,22 +295,8 @@ func otlpOf(runs []*runExport) ([]byte, error) {
 // with non-ASCII characters also gets RFC 6266's filename* — the UTF-8
 // name, percent-encoded — which browsers prefer.
 func writeDownload(w http.ResponseWriter, r *http.Request, id string, f exportFormat, body []byte) {
-	name := id + "." + f.ext
-	ascii := strings.Map(func(c rune) rune {
-		if c == '/' || c == '\\' || c == '"' || c < 0x20 || c >= 0x7f {
-			return '_'
-		}
-		return c
-	}, name)
-	cd := `attachment; filename="` + ascii + `"`
-	for _, c := range name {
-		if c >= 0x80 {
-			cd += "; filename*=UTF-8''" + rfc5987(strings.ReplaceAll(name, "/", "_"))
-			break
-		}
-	}
 	w.Header().Set("Content-Type", f.contentType)
-	w.Header().Set("Content-Disposition", cd)
+	w.Header().Set("Content-Disposition", contentDisposition(id, f))
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodHead {
@@ -484,7 +470,14 @@ func (s *Server) collectExport(ctx context.Context, id string, hidden bool) (*ru
 	if err != nil {
 		return nil, err
 	}
-	c := s.coster(ctx)
+	return s.collectExportOf(ctx, s.coster(ctx), det, hidden)
+}
+
+// collectExportOf is collectExport over a run already read — its row
+// and its children — priced on c: the session export reads its turns'
+// rows and children in batches and shares one coster across them.
+func (s *Server) collectExportOf(ctx context.Context, c *coster, det obsdb.RunDetail, hidden bool) (_ *runExport, err error) {
+	id := det.ID
 	c.prime(det.ID, det.Children)
 	c.primeTrees(c.kids[det.ID]) // the scope's children (prime)
 	// A panel token's export lists its public id's children only

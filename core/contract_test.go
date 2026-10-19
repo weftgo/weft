@@ -6131,7 +6131,18 @@ func TestRunLinkJudgeInsideSubagentChild(t *testing.T) {
 	obs := []core.Option{core.TracerProvider(tp), core.LoggerProvider(lp)}
 	judge := core.New(wefttest.Script(
 		wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"),
+		wefttest.Say("ok"), wefttest.Say("ok"),
 	), append(obs, core.Name("judge"))...)
+	// The child's own tool starts a run on its call's ctx: caller-linked
+	// to the child (its run, its call c_l), never a parent link.
+	worker := core.New(wefttest.Script(wefttest.Say("looked up")), append(obs, core.Name("worker"))...)
+	lookup := core.Tool("lookup", "Look up.", func(ctx context.Context, _ struct{}) (string, error) {
+		res, err := worker.Generate(ctx, core.Prompt("look it up"))
+		if err != nil {
+			return "", err
+		}
+		return res.Text(), nil
+	})
 	var mu sync.Mutex
 	var judgeErrs []error
 	runJudge := func(ctx context.Context, where string) {
@@ -6146,7 +6157,10 @@ func TestRunLinkJudgeInsideSubagentChild(t *testing.T) {
 		}
 	}
 	var tapCall core.Call
-	child := core.New(wefttest.Script(wefttest.Say("child done")), append(obs, core.Name("child"),
+	child := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup", Args: `{}`, ID: "c_l"}),
+		wefttest.Say("child done"),
+	), append(obs, core.Name("child"), lookup,
 		core.WrapModel(judged("child-model")),
 		core.PrepareStep(func(ctx context.Context, _ int, req core.ModelRequest) (core.ModelRequest, error) {
 			runJudge(ctx, "child-prepare")
@@ -6179,7 +6193,7 @@ func TestRunLinkJudgeInsideSubagentChild(t *testing.T) {
 	tp.mu.Lock()
 	spans := append([]*recSpan(nil), tp.spans...)
 	tp.mu.Unlock()
-	judges := 0
+	judges, workers := 0, 0
 	for _, s := range spans {
 		a := s.attrsMap()
 		if !strings.HasPrefix(s.name, "invoke_agent ") {
@@ -6197,11 +6211,21 @@ func TestRunLinkJudgeInsideSubagentChild(t *testing.T) {
 			if a["weft.parent.run.id"] != "p1" || a["weft.parent.call.id"] != "c_r" || a["weft.caller.run.id"] != "" {
 				t.Errorf("child span link = %v, want parent p1/c_r alone", a)
 			}
+		case "worker":
+			workers++
+			if a["weft.caller.run.id"] != "p1/0/c_r" || a["weft.caller.call.id"] != "c_l" ||
+				a["weft.parent.run.id"] != "" || a["weft.parent.call.id"] != "" {
+				t.Errorf("the child's tool's run link = %v, want caller p1/0/c_r / c_l and no parent", a)
+			}
 		}
 	}
-	// parent-model ×2 (two parent steps), child-model, child-prepare, child-tap, child-end.
-	if judges != 6 {
-		t.Errorf("judge runs = %d, want 6", judges)
+	if workers != 1 {
+		t.Errorf("worker runs = %d, want 1", workers)
+	}
+	// parent-model ×2 (two parent steps), child-model ×2 and
+	// child-prepare ×2 (two child steps), child-tap, child-end.
+	if judges != 8 {
+		t.Errorf("judge runs = %d, want 8", judges)
 	}
 	lp.mu.Lock()
 	defer lp.mu.Unlock()

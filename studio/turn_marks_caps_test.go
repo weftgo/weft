@@ -3,6 +3,7 @@ package studio
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -171,5 +172,39 @@ func TestRunsTurnMarksPastTheCaps(t *testing.T) {
 	}
 	if p := read(pt, "/api/runs?public_id=pub_many&limit=5"); len(p.Runs) == 0 || p.Runs[0].SessionCompactions != 1 {
 		t.Errorf("a panel token's narrowed page = %+v; want its marks", p.Runs)
+	}
+}
+
+// failEvents fails every SessionEvents read: the turn marks' first page.
+type failEvents struct{ obsdb.DB }
+
+func (f failEvents) SessionEvents(context.Context, obsdb.SessionEventQuery) (obsdb.SessionEventPage, error) {
+	return obsdb.SessionEventPage{}, errors.New("session events unreadable")
+}
+
+// TestRunsTurnMarksReadFails (P9-pre-go-fix2): a SessionEvents read
+// that fails on its first page leaves the session's turns unmarked and
+// says so — the turn_marks_capped hole counting them — never a page
+// that reads as fully marked.
+func TestRunsTurnMarksReadFails(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/fail.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	seedRun(t, db, "s_f-t1", "pub_f", "s_f", "", nil)
+	seedRun(t, db, "s_f-t2", "pub_f", "s_f", "", map[string]any{"weft.turn": "2"})
+	h := Handler(DB(failEvents{db}))
+	_, _, body := get(t, h, "/studio/api/runs?session=s_f")
+	var page struct {
+		Runs   []json.RawMessage `json:"runs"`
+		Capped *treeHole         `json:"turn_marks_capped"`
+	}
+	decode(t, body, &page)
+	if len(page.Runs) != 2 {
+		t.Fatalf("s_f's page = %s; want its two turns", body)
+	}
+	if c := page.Capped; c == nil || c.Hole != "truncated" || c.Count != 2 {
+		t.Errorf("turn_marks_capped = %+v; want truncated counting the 2 unmarked turns", c)
 	}
 }

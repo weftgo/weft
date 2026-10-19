@@ -1656,8 +1656,8 @@ the table scrolls inside its own frame, never the page;
 against the base run `a`, drawn in the first column; `step` highlights
 and scrolls to that ordinal's row; a mark the side's holes already
 carry is drawn once, as its badge; a system prompt withheld from a read
-token is the `hidden` badge in its cell, beside the state the hashes
-gave) — reached from the
+token — the side's `system_hidden` — is the `hidden` badge in its cell,
+beside the state the hashes gave) — reached from the
 run header ("compare with source" for a replayed run, via
 `weft.forked_from`, and "compare with…"), the replay drawer's finished
 result, and the playground (every finished variant against the source
@@ -2604,7 +2604,11 @@ longer run's last — the ordinal is the alignment key — `{step, changed,
 a, b, changes, unknown}`, each side the step as `runs/{id}/steps/{n}` assembles
 it, reduced to `{status, system_hash, system, tool_calls: [{name,
 args}], tool_results: [{call_id, name, content, is_error}], text,
-usage, marks, holes}`, or `null` on the side whose run has no such
+usage, marks, holes, system_hidden?}` — `system_hidden: true` when
+the step's request block is withheld from the token (a read-scoped
+panel token: `system` null), the one field that says so; a `hidden`
+hole on the side keeps its `count` (child runs the token's scope left
+out) and never means the prompt is hidden —, or `null` on the side whose run has no such
 step (`changes: ["missing"]`); `changes` lists what differs, in the
 order `system` (by hash when both sides have one), `tool_calls`
 (`name(args)`, the args canonicalised: keys sorted), `tool_results`
@@ -2679,6 +2683,40 @@ hides), the tree at `?view=tree`, the context lane, the page live on
 every decision and grant —, a compaction placed by time at the turn
 that started on it, a busy policy's interrupt / rollback neutral on the
 run page),
+`sessions/{id}/export?format=jsonl` (UX-B-29: the conversation as one
+download, `<session>.session.jsonl`, `Content-Type:
+application/x-ndjson`, streamed — no `Content-Length`, each line sent
+as it is read, one turn held at a time. Lines, each
+`{"record": <kind>, …}`: one `session` line first (`format`
+`weft.session.export/1`, `session_id`, `public_id`, `agent`, `turns`
+the session's turn count, `marks` the state-log marks in the token's
+scope — counts from the reads made before the first byte); every turn's
+run export oldest first, exactly as `runs/{id}/export?format=jsonl`
+writes it (each beginning with its `run` line); one `session_mark` line
+per state-log mark, `{"record":"session_mark","mark":…}` with the mark
+as the timeline serves it, in record-time order; one `session_hole`
+line per hole; one `session_end` line last, `{turns_exported,
+marks_exported, bytes}` (the bytes before it) — a file without it was
+cut in transit. Caps: 200 turns, 2,000 marks, and 64 MiB of turn and
+mark lines (`sessionExportByteCap`; the holes and `session_end` close
+the file past it) — a line that would pass a cap is not written, nor
+any of its kind after it. Holes: `truncated` with `cause:
+"response_cap"` past each cap (`count` the turns or marks left out);
+a plain `truncated` when a read fails after the first byte (the status
+was sent: the lines before it are whole); the timeline's
+`not_recorded` / `stripped` / `hidden`; `not_recorded` naming
+`obsdb.SessionEventReader` when the database cannot read the state
+log. The turns' children are read in one `ChildRuns` read for all
+turns (a TreeReader's), each turn's events, transcript, compactions,
+spans and requests by its own reads. `format` other than `jsonl` is
+400 (a single turn's json, otlp or wefttest export is the run's route).
+Scope: `sessions/{id}`'s — a panel token reads its public id's session
+only (another's 403) and its public id's turns and marks; a
+read-scoped token's turns carry the request block badged `hidden` (no
+`request` lines, as the run export's jsonl) and its marks
+`content_hidden` instead of their content; capability `timeline` is not
+required — without a SessionEventReader the marks are the
+`not_recorded` hole),
 `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
 public_id}`, the public id `thread.PublicID` stamped on the session's
 turns — MAX(`weft.public_id`) over its top-level turns: one value per

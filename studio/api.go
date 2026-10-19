@@ -1098,8 +1098,10 @@ var turnMarkKinds = []string{obsdb.RecordCompaction, "interrupt"}
 // paged by offset while Total says more — and the sessions it
 // delegated, paged by cursor. pub, a panel token's public id, scopes
 // every read. What it could not read is the returned hole (nil when
-// none): a turn left unmarked is said, never a chip drawn wrong; a read
-// that fails leaves its marks absent and is logged at Debug.
+// none): a turn left unmarked is said, never a chip drawn wrong — past
+// a bound, or when a read fails (its turns' marks absent and counted in
+// the hole, the failure logged at Debug), on its first page or a later
+// one.
 func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) *treeHole {
 	bySession := map[string][]int{}
 	var order []string
@@ -1133,12 +1135,13 @@ func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) *tree
 			for _, i := range bySession[sid] {
 				ids = append(ids, rows[i].ID)
 			}
-			read, total := 0, 0
+			read, total, failed := 0, 0, false
 			for range turnMarksPages {
 				page, err := er.SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: sid, PublicID: pub, RunIDs: ids,
 					Kinds: turnMarkKinds, Offset: read, Limit: obsdb.MaxSessionEventLimit})
 				if err != nil {
 					slog.DebugContext(ctx, "studio: a page's turn marks could not be read", "session", sid, "err", err)
+					failed = true
 					break
 				}
 				total = page.Total
@@ -1152,7 +1155,7 @@ func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) *tree
 					break
 				}
 			}
-			if read < total {
+			if failed || read < total {
 				skipped += len(ids)
 			}
 		}
@@ -1167,6 +1170,7 @@ func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) *tree
 		kids, err := s.db.Sessions(ctx, q)
 		if err != nil {
 			slog.DebugContext(ctx, "studio: a page's delegated sessions could not be read", "err", err)
+			skipped += len(byID) // the delegated counts are floors, or absent
 			break
 		}
 		for _, k := range kids.Sessions {

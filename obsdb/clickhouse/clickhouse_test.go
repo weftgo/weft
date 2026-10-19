@@ -363,13 +363,14 @@ func TestContractKeysMatchMetaOf(t *testing.T) {
 
 // The Runs meta filter compiles to a JSON condition over the metadata
 // column — the SQL shape of a MetaOf subset match — applied to the
-// grouped rows, never to weft_runs' stored ones.
+// grouped rows, never to weft_runs' stored ones; the row-level narrowing
+// beside it (idx_meta's LIKE, 0026) only picks the runs to collapse.
 func TestRunsInnerMetaFilter(t *testing.T) {
-	sql, _ := runsInner(obsdb.RunQuery{Meta: map[string]string{"tenant": "acme"}})
+	sql, _ := runsInner(obsdb.RunQuery{Meta: map[string]string{"tenant": "acme"}}, "")
 	for _, want := range []string{
 		"JSONHas(Meta, ?)",
 		"JSONExtractString(Meta, ?) = ?",
-		"FROM weft_runs WHERE 1=1 GROUP BY RunId) WHERE ParentRunID = '' AND CallerRunID = '' AND JSONHas(Meta, ?)",
+		"FROM weft_runs WHERE RunId IN (SELECT t.RunId FROM weft_runs AS t WHERE t.Meta LIKE ?) GROUP BY RunId) WHERE ParentRunID = '' AND CallerRunID = '' AND JSONHas(Meta, ?)",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("runsInner missing %q:\n%s", want, sql)
@@ -387,7 +388,7 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 	sql, args := runsInner(obsdb.RunQuery{
 		Agent: "a", SessionID: "s", PublicID: "p", ParentRunID: "par",
 		ExperimentID: "e", Playground: &yes,
-	})
+	}, "")
 	inner, outer, ok := strings.Cut(sql, " GROUP BY RunId) WHERE ")
 	if !ok {
 		t.Fatalf("runsInner has no grouped subquery:\n%s", sql)
@@ -994,12 +995,12 @@ func TestRunsInnerParentScoping(t *testing.T) {
 		q    obsdb.RunQuery
 		want string
 	}{{obsdb.RunQuery{}, "ParentRunID = ''"}, {obsdb.RunQuery{ParentRunID: "p"}, "ParentRunID = ?"}} {
-		sql, _ := runsInner(c.q)
+		sql, _ := runsInner(c.q, "")
 		if !strings.Contains(sql, c.want) {
 			t.Errorf("runsInner(%+v) missing %q", c.q, c.want)
 		}
 	}
-	sql, _ := runsInner(obsdb.RunQuery{ParentRunID: "*"})
+	sql, _ := runsInner(obsdb.RunQuery{ParentRunID: "*"}, "")
 	if strings.Contains(sql, "ParentRunID =") {
 		t.Error("'*' must not scope parentage")
 	}

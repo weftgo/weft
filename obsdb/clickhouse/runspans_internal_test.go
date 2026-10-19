@@ -221,7 +221,7 @@ func TestRunTreeAndChildRunsUseTheirIndexes(t *testing.T) {
 	if p := explain(treeSpansByIDRule+" OR RunId IN (?))"+treeSpanOrder, append(treeIDArgs("tr_p"), "x", 10)...); !strings.Contains(p, "idx_weft_run_id") || strings.Contains(p, "idx_trace_id") {
 		t.Errorf("the tree's spans read names no idx_weft_run_id (or reads by trace):\n%s", p)
 	}
-	if p := explain(childRunsSQL(2), "tr_p", "x", "tr_p", "x"); !strings.Contains(p, "idx_parent_run") {
+	if p := explain(childRunsSQL(2, ""), "tr_p", "x", "tr_p", "x"); !strings.Contains(p, "idx_parent_run") {
 		t.Errorf("ChildRuns' plan names no idx_parent_run:\n%s", p)
 	}
 }

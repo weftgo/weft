@@ -158,6 +158,79 @@ func TestDelegatedReadsPerLevel(t *testing.T) {
 	if got := reads.Load(); got > 10 {
 		t.Errorf("GET /api/sessions/s_lead made %d Runs reads; want a few per tree level, not one per delegated session (%d)", got, n+1)
 	}
+	// P9-pre-go-fix2: a level past one batch's budget. 400 sessions × 30
+	// turns, 12,000 runs: 8 batches of 50 × 1,500 runs, 4 pages each
+	// (33 reads with the lead's own walk). 50 × 210, 10,500 runs in one
+	// batch: past the budget at 20 pages, then two halves of 5,250 (11
+	// pages each) — 43 reads.
+	t.Run("a level past one batch", func(t *testing.T) { delegatedWide(t, 400, 30, 40) })
+	t.Run("an overflowing batch halves", func(t *testing.T) { delegatedWide(t, 50, 210, 50) })
+}
+
+// delegatedWide (P9-pre-go-fix2): a level of sessions delegated
+// sessions of turns turns each prices every session known — the level
+// read in batches (sessionCostBatch), each within sessionCostPages × 500
+// runs, a batch past it halved — and the Runs reads stay at most
+// maxReads: a few per batch, never one per session.
+func delegatedWide(t *testing.T, sessions, turns int, maxReads int64) {
+	db, err := sqlite.Open(t.TempDir() + "/wide.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	seedRun(t, db, "s_lead-t1", "", "s_lead", "", nil)
+	now := time.Now().UTC().Add(-time.Hour)
+	var recs []obsdb.Record
+	for i := range sessions {
+		sid := fmt.Sprintf("s_w%03d", i)
+		for k := 1; k <= turns; k++ {
+			id := fmt.Sprintf("%s-t%d", sid, k)
+			at := now.Add(time.Duration(i*turns+k) * time.Millisecond)
+			attrs := func(ev string, pos int64) map[string]any {
+				return map[string]any{"weft.record": "event", "weft.run.id": id, "gen_ai.agent.name": "acme-support",
+					"weft.session.id": sid, "weft.turn": int64(k), "weft.session.parent": "s_lead",
+					"weft.caller.run.id": "s_lead-t1", "weft.event.type": ev, "weft.event.pos": pos}
+			}
+			recs = append(recs,
+				obsdb.Record{Time: at, EventName: "weft.event", Severity: 9, Service: "svc", Attrs: attrs("run_start", 0),
+					Body: `{"type":"run_start","id":"` + id + `","model":{"provider":"wefttest","name":"script"},"agent":"acme-support"}`},
+				obsdb.Record{Time: at, EventName: "weft.event", Severity: 9, Service: "svc", Attrs: attrs("run_finish", 1),
+					Body: `{"type":"run_finish","run_id":"` + id + `","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`})
+		}
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
+		t.Fatal(err)
+	}
+	var reads atomic.Int64
+	srv := New(DB(countRuns{DB: db, n: &reads}))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	var doc struct {
+		Delegated []struct {
+			ID        string `json:"id"`
+			CostKnown bool   `json:"cost_known"`
+		} `json:"delegated"`
+		DelegatedUsage core.Usage `json:"delegated_usage"`
+		CostKnown      bool       `json:"delegated_sessions_cost_known"`
+		CostReason     string     `json:"delegated_sessions_cost_reason"`
+	}
+	reads.Store(0)
+	getUntil(t, ts, "/api/sessions/s_lead", &doc, func() bool { return true })
+	if !doc.CostKnown || doc.DelegatedUsage.InputTokens != int64(sessions*turns) {
+		t.Errorf("delegated figures = usage %+v known %v reason %q; want %d in, known", doc.DelegatedUsage, doc.CostKnown, doc.CostReason, sessions*turns)
+	}
+	if len(doc.Delegated) == 0 {
+		t.Fatal("no delegated rows")
+	}
+	for _, d := range doc.Delegated {
+		if !d.CostKnown {
+			t.Errorf("delegated session %s: cost unknown; want every session of the level priced", d.ID)
+		}
+	}
+	if got := reads.Load(); got > maxReads {
+		t.Errorf("GET /api/sessions/s_lead made %d Runs reads; want a few per batch, not one per session (%d)", got, sessions)
+	}
 }
 
 // TestCallerLinkedScoped (P9-pre-go-fix): under a panel token a run's

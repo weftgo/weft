@@ -40,11 +40,24 @@ Options: `TTL(content, meta)` overrides the retention windows (content
 30 days, spans and runs 90 by default; values ≤ 0 keep a class's
 default), `KeepDeltas()` stores delta rows in `weft_deltas` for
 debugging (counted, never stored by default). A TTL drops an expired
-row only when ClickHouse merges its part, so `Sessions` and `Session`
-cut at `weft_runs`' own window themselves (the table's
+row only when ClickHouse merges its part, so every read that lists or
+opens runs cuts at `weft_runs`' own window itself (the table's
 `TTL LastSeen + toIntervalSecond(n)` clause, read from `system.tables`
-at most once a minute): a session past it is neither counted nor paged
-nor found, merged away or not, and `Total` always matches the rows.
+at most once a minute): `Runs` and `Search` (every filter), `Sessions`
+(rows, `Total`, turn facts, the tag and `Failed` filters, the
+summarizer usage), `Session` and its runs, `Run` and its children,
+`ChildRuns` and `ResolvePublicID`. A run past it is neither counted nor
+paged nor found, merged away or not, `Total` always matches the rows,
+and no read keeps a turn another has cut; a run's own records and
+spans, read by id, stay until the merge drops them.
+
+The tag filters (`SessionQuery.Meta`, `RunQuery.Meta`) narrow their
+row scan on `idx_meta` (migration 0026), an ngram bloom filter over
+`Meta`: each pair whose key and value are printable ASCII without `"`,
+`\` or `/` also asks `Meta LIKE '%"<k>":"<v>"%'` (the pair's JSON
+text — a superset; the exact `JSONExtractString` match decides), so the
+granules holding none of it are skipped; any other pair reads every
+granule's Meta, as before.
 
 Deletion (`DeleteRun`, `DeleteSession`, `Sweep` — Studio's `DELETE`
 verbs and `studio.Retain`) is a lightweight `DELETE FROM … WHERE` on

@@ -8,15 +8,23 @@ import (
 	"time"
 )
 
-// The session reads' retention cut (U31.1). weft_runs' TTL drops a row
+// The run reads' retention cut (U31.1). weft_runs' TTL drops a row
 // past its window only when ClickHouse merges the part that holds it —
 // seconds or hours after it expired, at a moment no reader chooses — so
 // the session list's two queries (the count, then the page) could
 // straddle a merge: Total counted a session the page no longer held
-// ("1 session" over an empty table). The session reads therefore cut
-// at the table's own window themselves: a collapsed run whose LastSeen
-// is past the TTL is neither counted nor paged, merged away or not, so
-// Total and the rows agree. The window is the table's clause as
+// ("1 session" over an empty table), and a session row whose turns were
+// cut still counted the expired turn's failure from an uncut read. Every
+// read that lists or opens runs therefore cuts at the table's own window
+// itself: a collapsed run whose LastSeen is past the TTL is neither
+// counted nor paged nor opened, merged away or not, so every read agrees
+// with every other — Runs and Search (runsInner, every RunQuery filter:
+// the session's, the turn neighbours' TurnBelow / TurnAbove), Sessions,
+// Session, its runs and the turn facts (sessionRuns), Run and its
+// children, ChildRuns (childRunsSQL) and ResolvePublicID. The builders
+// take the cut as a parameter, so a new read cannot leave it out
+// unseen. A run's own records and spans (Events, RunSpans, …) are read
+// by id, not listed: they are not cut. The window is the table's clause as
 // SHOW CREATE TABLE tells it (TTL LastSeen + toIntervalSecond(n)), read
 // from system.tables — never this handle's TTL option, which another
 // Open may have overridden — and re-read at most once a minute. A
@@ -61,10 +69,10 @@ func (d *DB) runsTTLSeconds(ctx context.Context) int64 {
 	return r.secs
 }
 
-// retentionCond is the session reads' cut over a collapsed run row
-// (sessionRuns' cond): " AND LastSeen + toIntervalSecond(n) > now64(9)",
-// the TTL's own expression, or "" with no recognised window.
-func (d *DB) retentionCond(ctx context.Context) string {
+// runsCut is the run reads' cut over a collapsed (GROUP BY RunId) or
+// FINAL run row: " AND LastSeen + toIntervalSecond(n) > now64(9)", the
+// TTL's own expression, or "" with no recognised window.
+func (d *DB) runsCut(ctx context.Context) string {
 	n := d.runsTTLSeconds(ctx)
 	if n <= 0 {
 		return ""

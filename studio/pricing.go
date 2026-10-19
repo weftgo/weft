@@ -1047,31 +1047,56 @@ func (s *Server) sessionCost(ctx context.Context, id, publicID string) (cost, *c
 	return c.setCost(runs, "turn"), c, runs
 }
 
+// sessionCostBatch is how many sessions one batched runs read of
+// sessionCosts starts with.
+const sessionCostBatch = 50
+
 // sessionCosts is sessionCost for several sessions at once: their runs
-// in one paged read (RunQuery.SessionIDs; the same filters, pub's scope
-// when set), each session's set priced by setCost on a coster of its
-// own — what sessionCost answers per session, one read for them all.
-// Every id gets an answer: past sessionCostPages pages, or when a read
-// fails, each one's is unknown with sessionCost's reason.
+// in batched paged reads (RunQuery.SessionIDs; the same filters, pub's
+// scope when set), each session's set priced by setCost on a coster of
+// its own — what sessionCost answers per session, a read per page of a
+// batch rather than per session. A batch holds sessionCostBatch
+// sessions and reads at most sessionCostPages pages; one that holds
+// more is halved and each half read again, down to one session, so
+// every session keeps at least sessionCost's own budget (sessionCostPages
+// pages of 500) and a level of many small sessions prices every one —
+// the reads stay O(batches) per level, never O(sessions). Every id gets
+// an answer: a session alone past the budget, or one whose read fails,
+// is unknown with sessionCost's reason.
 func (s *Server) sessionCosts(ctx context.Context, ids []string, publicID string) map[string]cost {
 	out := make(map[string]cost, len(ids))
+	for len(ids) > 0 {
+		n := min(sessionCostBatch, len(ids))
+		s.priceSessionBatch(ctx, ids[:n], publicID, out)
+		ids = ids[n:]
+	}
+	return out
+}
+
+// priceSessionBatch prices one batch of sessionCosts into out, halving
+// it when its runs pass the page budget.
+func (s *Server) priceSessionBatch(ctx context.Context, ids []string, publicID string, out map[string]cost) {
 	f := false
 	q := obsdb.RunQuery{SessionIDs: ids, PublicID: publicID, ParentRunID: "*", Playground: &f, Limit: 500}
 	bySession := make(map[string][]obsdb.RunRow, len(ids))
-	fail := func(c cost) map[string]cost {
-		for _, id := range ids {
-			out[id] = c
-		}
-		return out
-	}
 	for pages := 0; ; pages++ {
 		if pages == sessionCostPages {
-			return fail(cost{badge: costUnknown, reason: fmt.Sprintf("the delegated sessions hold more than %d runs: too many to price at read time", sessionCostPages*500)})
+			if len(ids) > 1 {
+				half := len(ids) / 2
+				s.priceSessionBatch(ctx, ids[:half], publicID, out)
+				s.priceSessionBatch(ctx, ids[half:], publicID, out)
+				return
+			}
+			out[ids[0]] = cost{badge: costUnknown, reason: fmt.Sprintf("the session holds more than %d runs: too many to price at read time", sessionCostPages*500)}
+			return
 		}
 		page, err := s.db.Runs(ctx, q)
 		if err != nil {
 			slog.DebugContext(ctx, "studio: delegated sessions' runs could not be read to price them", "sessions", len(ids), "err", err)
-			return fail(cost{badge: costUnknown, reason: "the session's runs could not be read"})
+			for _, id := range ids {
+				out[id] = cost{badge: costUnknown, reason: "the session's runs could not be read"}
+			}
+			return
 		}
 		for _, r := range page.Runs {
 			bySession[r.SessionID] = append(bySession[r.SessionID], r)
@@ -1088,7 +1113,6 @@ func (s *Server) sessionCosts(ctx context.Context, ids []string, publicID string
 		}
 		out[id] = s.coster(ctx).setCost(runs, "turn")
 	}
-	return out
 }
 
 // setCost is the bill of a set of runs read whole — a session's, an

@@ -97,8 +97,10 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("RunTree", runTree(open))
 	t.Run("SessionEvents", sessionEvents(open))
 	t.Run("ThreadRecordsAreNotRunFacts", threadRecordsAreNotRunFacts(open))
+	t.Run("SummarizerSpanIsNotRunFact", summarizerSpanIsNotRunFact(open))
 	t.Run("SessionIDsFilter", sessionIDsFilter(open))
 	t.Run("SessionsOldDated", sessionsOldDated(open))
+	t.Run("SessionsPartlyExpired", sessionsPartlyExpired(open))
 	t.Run("HeldMarker", heldMarker(open))
 }
 

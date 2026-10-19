@@ -220,7 +220,10 @@ func sessionTurnFacts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 // in Go (Session's), and SessionQuery's Awaiting and Failed filters
 // keep exactly the sessions whose Go facts say Pending > 0 and
 // FailedTurns > 0, and its Status filter those whose newest outcome is
-// the word.
+// the word. Every read sees one view of the session's turns —
+// the same retention cut (ClickHouse's weft_runs TTL) on each: the
+// list's Turns is the Session's, its len(Runs) and Runs{SessionID}'s
+// Total, so a read that kept a turn another cut is caught.
 func CheckTurnFactFilters(t *testing.T, db obsdb.DB) {
 	t.Helper()
 	all, err := db.Sessions(ctx(), obsdb.SessionQuery{Limit: 500})
@@ -229,10 +232,19 @@ func CheckTurnFactFilters(t *testing.T, db obsdb.DB) {
 	}
 	var awaiting, failed []string
 	byStatus := map[obsdb.Status][]string{}
+	no := false
 	for _, r := range all.Sessions {
 		det, err := db.Session(ctx(), r.ID)
 		if err != nil {
 			t.Fatalf("Session(%s): %v", r.ID, err)
+		}
+		turns, err := db.Runs(ctx(), obsdb.RunQuery{SessionID: r.ID, Playground: &no, Limit: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Turns != det.Turns || det.Turns != len(det.Runs) || turns.Total != len(det.Runs) {
+			t.Errorf("session %s: the list's %d turns, Session's %d over %d runs, Runs{SessionID}'s Total %d: one view of its turns on every read",
+				r.ID, r.Turns, det.Turns, len(det.Runs), turns.Total)
 		}
 		var g obsdb.SessionRow
 		obsdb.SessionTurnFacts(&g, det.Runs)

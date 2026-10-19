@@ -278,7 +278,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    step "📄 ⤢" hands off, U11.2), diff?a=&b= (two runs aligned by step ordinal, each
 //    //    step reduced to system/tool_calls/tool_results/text/usage with changes and unknown per
 //    //    row (a column a side did not record is never compared) and a summary; compaction and
-//    //    subagent are marks, never a change; system hidden to a read token; past the step cap a
+//    //    subagent are marks, never a change; system hidden to a read token — the side's system_hidden: true,
+//    //    a side's hidden hole keeping its count (child runs out of scope); past the step cap a
 //    //    truncated hole, cause response_cap; capability "diff"; drawn through src/lib/stepdiff.ts —
 //    //    unknown reads "not comparable" — by Studio's N-way /compare?a=&b=[…] page (N−1 diffs against
 //    //    a; from the run header, the replay drawer, the playground) and the panel's 2-way result
@@ -318,9 +319,13 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    ?view=approvals every decision (call, tool, outcome, who / via / key, grant, parked → resumed turn, refused signatures) and grant
 //    //    (rule, scope, uses n of max with their calls, revoked / expired); the forks read in one obsdb.SessionQuery.IDs query, both backends) and sessions/{id}/entries?offset=&limit=
 //    //    (the same marks paged, ≤ 1,000, next_offset; sessions/{id}'s scope, 501 without the capability),
-//    //    sessions/{id}/export?format=jsonl (UX-B-29: the conversation as JSON lines — a session line, every turn's
-//    //    run jsonl export in turn order (≤ 200), the state log's session_mark lines (≤ 2,000), session_hole lines;
-//    //    sessions/{id}'s scope; the session page's export / copy public id / open in app / delete verbs),
+//    //    sessions/{id}/export?format=jsonl (UX-B-29: the conversation as JSON lines, streamed — a session line
+//    //    {format, session_id, public_id, agent, turns, marks}, every turn's run jsonl export in turn order (≤ 200),
+//    //    the state log's session_mark lines (≤ 2,000), session_hole lines (truncated cause response_cap past a cap —
+//    //    64 MiB of turn and mark lines, sessionExportByteCap — or a plain truncated when a read fails mid-stream;
+//    //    the timeline's holes), a session_end line {turns_exported, marks_exported, bytes} last; the turns'
+//    //    children in one ChildRuns read; sessions/{id}'s scope, a read token's requests hidden and marks
+//    //    content_hidden; the session page's export / copy public id / open in app / delete verbs),
 //    //    sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, DELETE runs/{id} and DELETE
 //    //    sessions/{id} (capability "delete": a run with its subagent children, or a session's runs —

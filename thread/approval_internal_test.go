@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -118,6 +119,42 @@ func TestEffectiveDecisionFold(t *testing.T) {
 		if ok != tc.decided || (ok && (got.Outcome != tc.outcome || got.Reason != tc.reason)) {
 			t.Errorf("%s: got %+v decided=%v; want outcome %q reason %q decided=%v",
 				tc.name, got, ok, tc.outcome, tc.reason, tc.decided)
+		}
+	}
+}
+
+// decisionActors names the approvals that counted toward the quorum
+// (P9-pre-go-fix2): in arrival order up to the n-th distinct approver —
+// a late extra approval recorded once the quorum was met names nobody,
+// should the log hold one (Decide itself refuses a call no longer
+// pending) — sorted and deduped; a key that signed twice is one approver and one
+// name; any other decision its own actor.
+func TestDecisionActorsStopAtTheQuorum(t *testing.T) {
+	approve := func(who, key string) ApprovalDecisionEntry {
+		via := viaUser
+		if key != "" {
+			via = viaSigned
+		}
+		return ApprovalDecisionEntry{CallID: "c", Outcome: OutcomeApprove, Who: who, Via: via, KeyID: key}
+	}
+	for _, tc := range []struct {
+		name   string
+		ds     []ApprovalDecisionEntry
+		quorum int
+		want   []string
+	}{
+		{"one approval", []ApprovalDecisionEntry{approve("op", "")}, 1, []string{"op"}},
+		{"a late second approval past a quorum of one", []ApprovalDecisionEntry{approve("op", ""), approve("alice", "")}, 1, []string{"op"}},
+		{"two keys meet two, a third arrives late", []ApprovalDecisionEntry{approve("", "k-c"), approve("", "k-b"), approve("", "k-a")}, 2, []string{"k-b", "k-c"}},
+		{"a key signing twice is one approver", []ApprovalDecisionEntry{approve("", "k-b"), approve("", "k-b"), approve("", "k-a"), approve("", "k-c")}, 2, []string{"k-a", "k-b"}},
+		{"a deny names its own actor", []ApprovalDecisionEntry{{CallID: "c", Outcome: OutcomeDeny, Who: "bob", Via: viaUser}}, 2, []string{"bob"}},
+	} {
+		d, ok := effectiveDecision(tc.ds, tc.quorum)
+		if !ok {
+			t.Fatalf("%s: undecided", tc.name)
+		}
+		if got := decisionActors(d, tc.ds, tc.quorum); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: actors %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

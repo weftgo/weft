@@ -656,6 +656,18 @@
                   }
                 },
                 {
+                  "key": "weft.tool.approved_by",
+                  "value": {
+                    "stringValue": "grant"
+                  }
+                },
+                {
+                  "key": "weft.grant.id",
+                  "value": {
+                    "stringValue": "e_thread_grants_0002"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -1094,6 +1106,12 @@
                   "key": "weft.tool.approved",
                   "value": {
                     "boolValue": true
+                  }
+                },
+                {
+                  "key": "weft.tool.approved_by",
+                  "value": {
+                    "stringValue": "approver"
                   }
                 },
                 {
@@ -2218,6 +2236,18 @@
                   }
                 },
                 {
+                  "key": "weft.tool.approved_by",
+                  "value": {
+                    "stringValue": "grant"
+                  }
+                },
+                {
+                  "key": "weft.grant.id",
+                  "value": {
+                    "stringValue": "e_thread_grants_0004"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -2644,6 +2674,18 @@
                   "key": "weft.tool.approved",
                   "value": {
                     "boolValue": true
+                  }
+                },
+                {
+                  "key": "weft.tool.approved_by",
+                  "value": {
+                    "stringValue": "grant"
+                  }
+                },
+                {
+                  "key": "weft.grant.id",
+                  "value": {
+                    "stringValue": "e_thread_grants_0004"
                   }
                 },
                 {

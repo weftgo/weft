@@ -1,0 +1,131 @@
+{
+  "case": "thread_summarizer",
+  "description": "a summarizer of its own (thread.SummaryModel reporting provider xai, model summary-mini) compacting before the second turn runs (the pre-run trigger): its chat span (role summarizer, 1200 in, 40 out) waits for that turn's run and opens under its invoke_agent span, in its trace; the run rows keep the session agent's provider and model (wefttest/script) and no summarizer metadata on both backends (0024's guard); the session row's summarizer_usage",
+  "runs": [
+    {
+      "id": "01K00000000000000000000001-t1",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "research",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 1,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:34:00Z",
+      "finished": "2026-10-01T09:34:00.016Z",
+      "last_seen": "2026-10-01T09:34:00.027Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8",
+      "catalog_hash": "950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch_doc",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t2",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "research",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 2,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:34:00Z",
+      "finished": "2026-10-01T09:34:00.026Z",
+      "last_seen": "2026-10-01T09:34:00.026Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8",
+      "catalog_hash": "950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": -1,
+          "model": "summary-mini",
+          "input_tokens": 1200,
+          "output_tokens": 40,
+          "status": "unset",
+          "role": "summarizer"
+        },
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    }
+  ],
+  "sessions": [
+    {
+      "id": "01K00000000000000000000001",
+      "agent": "research",
+      "turns": 2,
+      "first_prompt": "Fetch the raft document.",
+      "summarizer_usage": {
+        "input_tokens": 1200,
+        "output_tokens": 40
+      }
+    }
+  ]
+}

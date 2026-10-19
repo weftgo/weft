@@ -1,6 +1,6 @@
 {
   "case": "thread_busy",
-  "description": "the busy policies: a steer accepted (receipt queued) and drained (delivered, under the run that drained it), a steer dropped by ClearQueue (dropped, under the busy turn), a queued send (accepted, its minted turn), an interrupt (interrupt under the felled run, by_turn the follow-up) and a rollback (interrupt, then rewind reason rollback under the run taken off the path); the steer texts under content",
+  "description": "the busy policies: a steer accepted (receipt queued, minted_run and turn the number it took — t2 and t4, the turn numbers no run carries) and drained (delivered, under the run that drained it), a steer dropped by ClearQueue (dropped, under the busy turn), a queued send (accepted, its minted turn), an interrupt (interrupt under the felled run, by_turn the follow-up) and a rollback (interrupt, then rewind reason rollback under the run taken off the path; the turn after it carries weft.turn.parent and weft.session.branch); the steer texts under content",
   "runs": [
     {
       "id": "01K00000000000000000000001-t1",
@@ -335,6 +335,10 @@
       "turn": 9,
       "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
       "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.session.branch": "e_thread_busy_0037",
+        "weft.turn.parent": "7"
+      },
       "started": "2026-10-01T09:32:00.038Z",
       "finished": "2026-10-01T09:32:00.081Z",
       "last_seen": "2026-10-01T09:32:00.081Z",
@@ -378,9 +382,9 @@
     }
   ],
   "thread_records": [
-    "01K00000000000000000000001-t1 receipt full {\"content\":{\"text\":\"Focus only on the EU region.\"},\"entry\":\"e_thread_busy_0004\",\"input\":\"steer\",\"receipt_id\":\"e_thread_busy_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"queued\"}",
+    "01K00000000000000000000001-t1 receipt full {\"content\":{\"text\":\"Focus only on the EU region.\"},\"entry\":\"e_thread_busy_0004\",\"input\":\"steer\",\"minted_run\":\"01K00000000000000000000001-t2\",\"receipt_id\":\"e_thread_busy_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"queued\",\"turn\":2}",
     "01K00000000000000000000001-t1 receipt none {\"entry\":\"e_thread_busy_0009\",\"input\":\"steer\",\"receipt_id\":\"e_thread_busy_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"delivered\"}",
-    "01K00000000000000000000001-t3 receipt full {\"content\":{\"text\":\"this steer will be dropped\"},\"entry\":\"e_thread_busy_0012\",\"input\":\"steer\",\"receipt_id\":\"e_thread_busy_0012\",\"session\":\"01K00000000000000000000001\",\"state\":\"queued\"}",
+    "01K00000000000000000000001-t3 receipt full {\"content\":{\"text\":\"this steer will be dropped\"},\"entry\":\"e_thread_busy_0012\",\"input\":\"steer\",\"minted_run\":\"01K00000000000000000000001-t4\",\"receipt_id\":\"e_thread_busy_0012\",\"session\":\"01K00000000000000000000001\",\"state\":\"queued\",\"turn\":4}",
     "01K00000000000000000000001-t3 receipt none {\"entry\":\"e_thread_busy_0013\",\"input\":\"steer\",\"receipt_id\":\"e_thread_busy_0012\",\"session\":\"01K00000000000000000000001\",\"state\":\"dropped\"}",
     "01K00000000000000000000001-t3 receipt full {\"content\":{\"text\":\"After that, summarise in one line.\"},\"entry\":\"e_thread_busy_0015\",\"input\":\"send\",\"minted_run\":\"01K00000000000000000000001-t5\",\"receipt_id\":\"e_thread_busy_0015\",\"session\":\"01K00000000000000000000001\",\"state\":\"accepted\",\"turn\":5}",
     "01K00000000000000000000001-t6 receipt full {\"content\":{\"text\":\"Stop — just tell me the p99.\"},\"entry\":\"e_thread_busy_0024\",\"input\":\"send\",\"minted_run\":\"01K00000000000000000000001-t7\",\"receipt_id\":\"e_thread_busy_0024\",\"session\":\"01K00000000000000000000001\",\"state\":\"accepted\",\"turn\":7}",

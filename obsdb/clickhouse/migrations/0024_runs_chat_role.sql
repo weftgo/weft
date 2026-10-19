@@ -1,14 +1,21 @@
--- 0024 · weft.chat.role out of the run row's meta (U12.1, audit O15;
--- docs/record-contract.md §3). weft/thread's summarizer calls — a
--- compaction's or a branch summary's model call — are chat spans filed
--- under the turn they concern, marked weft.chat.role = summarizer: a span
--- attribute a reader keys the summarizer's usage on, never caller
--- metadata, so the traces view is restated with the whole tuple (0023's
--- plus the one key), 0023's select otherwise verbatim, pinned by
--- TestMigrationContractTuple. The logs view keeps 0023's: no record
--- carries the key. obsdb.MetaOf drops it on every row read; SQLite needs
--- nothing (it applies MetaOf at ingest). MODIFY QUERY swaps the select in
--- place (0003's reasoning). No backfill: no stored span carries it.
+-- 0024 · weft.chat.role and an approval's provenance out of the run row's
+-- meta (U12.1, audit O15, UX-B-14; docs/record-contract.md §3).
+-- weft/thread's summarizer calls — a compaction's or a branch summary's
+-- model call — are chat spans filed under the turn they concern, marked
+-- weft.chat.role = summarizer; an approved call's execute_tool span names
+-- who approved it (weft.tool.approved_by) and the grant that did
+-- (weft.grant.id). Span attributes, never caller metadata, so the traces
+-- view is restated with the whole tuple (0023's plus the three keys),
+-- 0023's select otherwise verbatim but for one guard, pinned by
+-- TestMigrationContractTuple: a summarizer span gives the run row no
+-- Provider, Model, TraceID or Meta — the summarizing model is not the
+-- run's (SQLite takes provider and model from the run's records and the
+-- trace from its invoke_agent span alone, and skips a summarizer span's
+-- meta: the same row on both). The logs view keeps 0023's: no record
+-- carries the keys. obsdb.MetaOf drops them on every row read; SQLite
+-- needs nothing more (it applies MetaOf at ingest). MODIFY QUERY swaps
+-- the select in place (0003's reasoning). No backfill: no stored span
+-- carries them.
 
 ALTER TABLE weft_runs_traces_mv MODIFY QUERY
 WITH if(mapContains(SpanAttributes, 'gen_ai.operation.name'),
@@ -16,6 +23,7 @@ WITH if(mapContains(SpanAttributes, 'gen_ai.operation.name'),
        startsWith(SpanName, 'invoke_agent')) AS isInvoke,
      StatusCode IN ('Error', 'STATUS_CODE_ERROR') AS isError,
      SpanAttributes['gen_ai.operation.name'] AS op,
+     SpanAttributes['weft.chat.role'] != '' AS isSummarizer,
      mapFilter((k, v) -> NOT has([
         'weft.run.id', 'weft.parent.run.id', 'weft.parent.call.id',
         'weft.session.id', 'weft.public_id', 'weft.turn', 'gen_ai.agent.name',
@@ -57,15 +65,15 @@ WITH if(mapContains(SpanAttributes, 'gen_ai.operation.name'),
         'weft.attempt.wait_ms', 'http.response.status_code', 'weft.tool.pending.source',
         'weft.tool.timeout_ms', 'weft.tool.queue_ms', 'weft.subagent.pending', 'weft.output.submitted',
         'weft.caller.run.id', 'weft.caller.call.id',
-        'weft.chat.role'], k), SpanAttributes) AS metaMap
+        'weft.chat.role', 'weft.tool.approved_by', 'weft.grant.id'], k), SpanAttributes) AS metaMap
 SELECT
     SpanAttributes['weft.run.id'] AS RunId,
     SpanAttributes['weft.parent.run.id'] AS ParentRunID,
     SpanAttributes['weft.parent.call.id'] AS ParentCallID,
-    TraceId AS TraceID,
+    if(isSummarizer, '', TraceId) AS TraceID,
     SpanAttributes['gen_ai.agent.name'] AS Agent,
-    SpanAttributes['gen_ai.provider.name'] AS Provider,
-    SpanAttributes['gen_ai.request.model'] AS Model,
+    if(isSummarizer, '', SpanAttributes['gen_ai.provider.name']) AS Provider,
+    if(isSummarizer, '', SpanAttributes['gen_ai.request.model']) AS Model,
     SpanAttributes['weft.manifest.hash'] AS ManifestHash,
     if(isInvoke, if(SpanAttributes['weft.version'] != '', SpanAttributes['weft.version'], ResourceAttributes['weft.version']), '') AS WeftVersion,
     ServiceName AS Service,
@@ -75,7 +83,7 @@ SELECT
     toUInt8(SpanAttributes['weft.playground'] = 'true') AS Playground,
     SpanAttributes['weft.experiment.id'] AS ExperimentID,
     SpanAttributes['weft.forked_from'] AS ForkedFrom,
-    if(length(metaMap) = 0, '', toJSONString(metaMap)) AS Meta,
+    if(isSummarizer OR length(metaMap) = 0, '', toJSONString(metaMap)) AS Meta,
     Timestamp AS Started,
     if(isInvoke, Timestamp + toIntervalNanosecond(toInt64(Duration)), NULL) AS Finished,
     Timestamp + toIntervalNanosecond(toInt64(Duration)) AS LastSeen,

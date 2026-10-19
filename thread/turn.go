@@ -1347,7 +1347,14 @@ func joinErrs(err, perr error) error {
 // PublicID read as the enclosing session's, and Studio scoped it there).
 // The caller's other pairs still ride in.
 func (s *Session) runMetadata(t *Turn) map[string]string {
-	md := s.identityMetadata(t.turn)
+	var md map[string]string
+	s.locked(func() {
+		md = s.identityMetadataLocked(t.turn)
+		if parent, branch := s.branchMetadataLocked(); branch != "" || parent != "" {
+			md[turnParentKey] = parent
+			md[sessionBranchKey] = branch
+		}
+	})
 	for _, k := range sessionOwnedKeys {
 		if _, ok := md[k]; !ok {
 			md[k] = "" // none: removes the enclosing run's pair
@@ -1361,6 +1368,69 @@ func (s *Session) runMetadata(t *Turn) map[string]string {
 // weft.session.id and weft.turn are always set.
 var sessionOwnedKeys = []string{
 	publicIDKey, sessionTitleKey, "weft.session.forked_from", "weft.session.parent", "weft.session.parent_call",
+	turnParentKey, sessionBranchKey,
+}
+
+// The branch a turn runs on (UX-E-20; record contract §2): metadata, so
+// they survive content-off. weft.turn.parent is the turn whose line this
+// turn continues when that is not the session's newest turn — the first
+// turn after a navigation (Branch, Uncompact, a rollback, an overflow's
+// branch-back) took the leaf off the newest line; "0" when the line it
+// continues holds no turn of this session; absent for a linear turn.
+// weft.session.branch names the navigation the turn's line descends from
+// — the label on the entry it went to (Label), else the leaf entry's id
+// — on every turn of that line; absent on a line no navigation made.
+const (
+	turnParentKey    = "weft.turn.parent"
+	sessionBranchKey = "weft.session.branch"
+)
+
+// branchMetadataLocked is a turn's weft.turn.parent and
+// weft.session.branch, read from the tree as the turn starts (its
+// prompt on the path). Callers hold s.mu.
+func (s *Session) branchMetadataLocked() (parent, branch string) {
+	path, err := s.pathLocked(s.leaf)
+	if err != nil {
+		return "", ""
+	}
+	onPath := s.lastRunOnPathLocked(path)
+	newest := ""
+	for i := len(s.order) - 1; i >= 0; i-- {
+		if te, ok := s.order[i].(TurnEntry); ok && te.RunID != "" {
+			if _, ours := runSeq(s.header.ID, te.RunID); ours {
+				newest = te.RunID
+			}
+			break
+		}
+	}
+	if newest != "" && onPath != newest {
+		n := 0
+		if onPath != "" {
+			n, _ = runSeq(s.header.ID, onPath)
+		}
+		parent = strconv.Itoa(n)
+	}
+	inPath := make(map[string]bool, len(path))
+	for _, e := range path {
+		inPath[idOf(e)] = true
+	}
+	for i := len(s.order) - 1; i >= 0; i-- {
+		le, ok := s.order[i].(LeafEntry)
+		if !ok || !inPath[le.Entry] {
+			continue
+		}
+		branch = le.ID
+		for j := len(s.order) - 1; j >= 0; j-- {
+			if l, ok := s.order[j].(LabelEntry); ok && l.Entry == le.Entry {
+				if l.Name != "" { // an empty name clears the label
+					branch = l.Name
+				}
+				break
+			}
+		}
+		break
+	}
+	return parent, branch
 }
 
 // sessionTitleKey is the run metadata carrying the session's current
@@ -1369,16 +1439,6 @@ var sessionOwnedKeys = []string{
 // title set after the first turn reaches every later turn and a reader
 // takes the newest turn's.
 const sessionTitleKey = "weft.session.title"
-
-// identityMetadata is runMetadata for the run minted as turn n (the
-// turnSeq its id carries): the session's identity pairs, without the
-// caller's. The compaction marker's fallback when it has no sight of
-// the run it is filed under (compactmarker.go).
-func (s *Session) identityMetadata(n int) map[string]string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.identityMetadataLocked(n)
-}
 
 // unseenRunMetadata is unseenRunMetadataLocked taking s.mu.
 func (s *Session) unseenRunMetadata(n int) map[string]string {

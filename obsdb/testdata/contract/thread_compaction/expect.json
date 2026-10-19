@@ -99,14 +99,16 @@
           "model": "script",
           "input_tokens": 1800,
           "output_tokens": 60,
-          "status": "unset"
+          "status": "unset",
+          "role": "summarizer"
         },
         {
           "step": -1,
           "model": "script",
           "input_tokens": 900,
           "output_tokens": 30,
-          "status": "unset"
+          "status": "unset",
+          "role": "summarizer"
         },
         {
           "step": 0,
@@ -144,7 +146,11 @@
       "id": "01K00000000000000000000001",
       "agent": "research",
       "turns": 2,
-      "first_prompt": "Fetch the raft document."
+      "first_prompt": "Fetch the raft document.",
+      "summarizer_usage": {
+        "input_tokens": 2700,
+        "output_tokens": 90
+      }
     }
   ],
   "thread_records": [

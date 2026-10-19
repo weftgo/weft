@@ -1686,7 +1686,10 @@ func (s *Session) danglingDecisionsLocked(denyUndecided bool) []core.RunOption {
 		}
 		switch d.Outcome {
 		case OutcomeApprove:
-			opts = append(opts, core.Approve(c.ID))
+			// The resumed call's execute_tool span names who or what
+			// approved it (UX-B-14): reporting only, the resume is Approve's.
+			by, grant := s.approvalSourceLocked(d)
+			opts = append(opts, core.ApproveBy(c.ID, by, grant))
 		case OutcomeDeny:
 			opts = append(opts, core.Deny(c.ID, d.Reason))
 		case OutcomeResolve:
@@ -1696,4 +1699,38 @@ func (s *Session) danglingDecisionsLocked(denyUndecided bool) []core.RunOption {
 		}
 	}
 	return opts
+}
+
+// The classes core.ApproveBy names on an approved call's execute_tool
+// span (weft.tool.approved_by; record contract §3).
+const (
+	approvedByUser     = "user"     // Decide, DecideSigned: a person, one approval
+	approvedByGrant    = "grant"    // a standing grant matched (weft.grant.id names it)
+	approvedByApprover = "approver" // the WithApprover policy step
+	approvedByQuorum   = "quorum"   // a Quorum(n > 1) of approvals
+	approvedByPolicy   = "policy"   // any other session path (a pool parent's or child's record)
+)
+
+// approvalSourceLocked is an effective approval's provenance: the class
+// that approved it and, for a grant, the grant's id — read from the
+// chain's audit entry written just before the decision. Callers hold
+// s.mu.
+func (s *Session) approvalSourceLocked(d ApprovalDecisionEntry) (by, grant string) {
+	if a, ok := s.precedingLocked(d.ID).(ApprovalAuditEntry); ok && d.ID != "" && a.Step == StepGrant && a.CallID == d.CallID {
+		return approvedByGrant, a.GrantID
+	}
+	switch d.Via {
+	case viaGrant:
+		return approvedByGrant, ""
+	case viaApprover:
+		return approvedByApprover, ""
+	case viaQuorum:
+		return approvedByQuorum, ""
+	case viaUser, viaSigned, "":
+		if s.cfg.quorum > 1 {
+			return approvedByQuorum, ""
+		}
+		return approvedByUser, ""
+	}
+	return approvedByPolicy, ""
 }

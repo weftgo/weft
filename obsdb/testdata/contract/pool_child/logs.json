@@ -2435,15 +2435,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t1"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
                   }
                 },
                 {
@@ -2491,15 +2491,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t1"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
                   }
                 },
                 {

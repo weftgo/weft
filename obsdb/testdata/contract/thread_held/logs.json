@@ -1,0 +1,72 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "contract-app"
+            }
+          },
+          {
+            "key": "weft.version",
+            "value": {
+              "stringValue": "v0.0.0-contract"
+            }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "thread"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "sre"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_held"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"args\":1,\"at\":\"2026-10-01T09:00:00Z\",\"entry\":\"e_thread_held_0002\",\"grant_id\":\"e_thread_held_0002\",\"held\":true,\"kind\":\"grant.mint\",\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"tool\":\"run_command\"}"
+              },
+              "eventName": "weft.thread.grant.mint",
+              "observedTimeUnixNano": "1790847300000000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "timeUnixNano": "1790847300000000000"
+            }
+          ],
+          "scope": {
+            "name": "github.com/weftgo/weft/thread"
+          }
+        }
+      ]
+    }
+  ]
+}

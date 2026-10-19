@@ -565,7 +565,10 @@ func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 	u.applyIdentity(w, obsdb.Record{})
 	u.seeStart(s.Start)
 	u.seeTime(s.End)
-	if s.Attrs != nil {
+	// A summarizer span (weft/thread's compaction or branch-summary call,
+	// weft.chat.role) adds nothing to the run's meta: its metadata is the
+	// session's view of the run, not the run's — ClickHouse's 0024 the same.
+	if s.Attrs != nil && attrString(s.Attrs, "weft.chat.role") == "" {
 		for k, v := range obsdb.MetaOf(s.Attrs) {
 			u.mergeMeta(k, v)
 		}

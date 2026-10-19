@@ -663,6 +663,15 @@ type SessionRow struct {
 	FirstSeen, LastSeen time.Time
 	Status              Status // the newest turn's
 	Usage               core.Usage
+	// SummarizerUsage is what weft/thread's summarizer model calls — a
+	// compaction's summary, a SummarizeLeft branch summary — cost the
+	// session: the summed usage of the chat spans marked weft.chat.role
+	// summarizer under its runs (audit O15, record contract §6). A
+	// separate, labelled figure, never part of Usage (the turns' own)
+	// nor of any run's usage: a reader adds it for the session's whole
+	// cost. Zero when the session summarized nothing (or before weft
+	// recorded the spans).
+	SummarizerUsage core.Usage
 	// Title is the newest turn's (by turn, then start) non-empty
 	// SessionTitleKey — thread's Title as that turn started, a label
 	// that survives content-off — "" when no turn carried one.

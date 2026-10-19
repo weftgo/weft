@@ -205,7 +205,11 @@ func (s *Session) steerSendLocked(ctx context.Context, msg core.Message, opts []
 	if err := s.st.Append(ctx, s.header.ID, e); err != nil {
 		return nil, err
 	}
+	// The queued receipt's record names the turn this steer minted
+	// (threadrec.go): a turn number no run may ever carry.
+	s.steerMint = t
 	s.adoptLocked(e)
+	s.steerMint = nil
 	q := queuedSteer{receipt: t.id, msg: msg, ctx: ctx, opts: opts, turn: t}
 	q.aimOpts, q.aimCtx = s.aimLocked()
 	if err := s.flushLocked(ctx); err != nil {

@@ -1414,7 +1414,65 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 		}
 		out = append(out, row)
 	}
-	return out, rs.Err()
+	if err := rs.Err(); err != nil {
+		return nil, err
+	}
+	_ = rs.Close() // one read handle for :memory:: free it for the next query
+	if err := d.fillSummarizerUsage(ctx, out, pub); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// fillSummarizerUsage sets each session row's SummarizerUsage: the
+// summed usage of the summarizer chat spans (weft.chat.role summarizer)
+// under the session's runs — the runs' own index (runs_session), then
+// each run's spans (spans_run) — scoped to pub's runs when set, the
+// rows' own scope. One read for the page.
+func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, pub string) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(rows)+1)
+	for _, r := range rows {
+		args = append(args, r.ID)
+	}
+	scope := ""
+	if pub != "" {
+		scope = ` AND r.public_id = ? AND r.public_id <> ''`
+		args = append(args, pub)
+	}
+	tok := func(k string) string {
+		return `COALESCE(SUM(CAST(json_extract(s.attrs, '$."` + k + `"') AS INTEGER)), 0)`
+	}
+	rs, err := d.reads.QueryContext(ctx, `SELECT r.session_id, `+
+		tok("gen_ai.usage.input_tokens")+`, `+tok("gen_ai.usage.output_tokens")+`, `+
+		tok("gen_ai.usage.cache_read.input_tokens")+`, `+tok("gen_ai.usage.cache_creation.input_tokens")+`, `+
+		tok("gen_ai.usage.reasoning.output_tokens")+`
+		FROM runs r JOIN spans s ON s.run_id = r.run_id
+		WHERE r.session_id IN (?`+strings.Repeat(",?", len(rows)-1)+`) AND r.session_id <> '' AND s.run_id <> ''`+scope+`
+			AND json_extract(s.attrs, '$."`+obsdb.AttrChatRole+`"') = '`+obsdb.ChatRoleSummarizer+`'
+		GROUP BY r.session_id`, args...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rs.Close() }()
+	by := map[string]core.Usage{}
+	for rs.Next() {
+		var id string
+		var u core.Usage
+		if err := rs.Scan(&id, &u.InputTokens, &u.OutputTokens, &u.CachedInputTokens, &u.CacheWriteTokens, &u.ReasoningTokens); err != nil {
+			return err
+		}
+		by[id] = u
+	}
+	if err := rs.Err(); err != nil {
+		return err
+	}
+	for i := range rows {
+		rows[i].SummarizerUsage = by[rows[i].ID]
+	}
+	return nil
 }
 
 // sessionRowsSQL is sessionRows' statement with its arguments in text

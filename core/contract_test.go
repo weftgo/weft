@@ -6002,3 +6002,31 @@ func TestAgentReportsItsProviders(t *testing.T) {
 		t.Fatalf("ContentCapture() under Content(true) = (%v, %v), want (true, true)", c, set)
 	}
 }
+
+// TestApproveByIsReportingOnly: ApproveBy resumes a parked call exactly
+// as Approve does — the same transcript and result — its provenance
+// reaching only the call's execute_tool span (TestSpansApproveByProvenance).
+func TestApproveByIsReportingOnly(t *testing.T) {
+	run := func(approve core.RunOption) *core.RunResult {
+		t.Helper()
+		gated := core.Tool("gated", "Needs a human.", func(context.Context, struct{}) (string, error) {
+			return "ran", nil
+		}, core.RequireApproval())
+		agt := core.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "gated", ID: "g1"}), wefttest.Say("done")), gated)
+		res, err := agt.Generate(context.Background(), core.Prompt("x"))
+		if err != nil || len(res.Pending) != 1 {
+			t.Fatalf("res=%v err=%v, want one pending call", res, err)
+		}
+		out, err := agt.Generate(context.Background(), core.Messages(res.Messages...), approve)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	a, b := run(core.Approve("g1")), run(core.ApproveBy("g1", "approver", ""))
+	ja, _ := json.Marshal(a.Messages)
+	jb, _ := json.Marshal(b.Messages)
+	if string(ja) != string(jb) || a.Text() != b.Text() {
+		t.Errorf("ApproveBy changed the run:\n Approve:   %s\n ApproveBy: %s", ja, jb)
+	}
+}

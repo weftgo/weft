@@ -58,6 +58,12 @@ const (
 	// state log's family, event names weft.thread.<kind>; record
 	// contract §4). Stored as plain records under the run they concern.
 	RecordThread = "thread"
+	// AttrChatRole is the chat span attribute naming a model call that
+	// is not the run's own step (record contract §3); ChatRoleSummarizer
+	// is weft/thread's summarizer call — its usage the session row's
+	// SummarizerUsage, never the run's.
+	AttrChatRole       = "weft.chat.role"
+	ChatRoleSummarizer = "summarizer"
 )
 
 // CompactionOf reads one stored record as a Compaction, so every

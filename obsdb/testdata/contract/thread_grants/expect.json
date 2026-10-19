@@ -1,6 +1,6 @@
 {
   "case": "thread_grants",
-  "description": "the decision chain at the boundary: four grants minted before any run (held, then filed under the first run), a glob grant's use, the approver's decision (via approver, who policy-bot), a deny-grant's refusal, a MaxUses grant's two uses and its lapse (grant.expire max_uses), a past-expiry grant's lapse noticed by the chain (grant.expire expiry), a revocation (grant.revoke with the grant's use count)",
+  "description": "the decision chain at the boundary: four grants minted before any run (held, then filed under the first run), a glob grant's use, the approver's decision (via approver, who policy-bot), a deny-grant's refusal, a MaxUses grant's two uses and its lapse (grant.expire max_uses), a past-expiry grant's lapse noticed by the chain (grant.expire expiry), a revocation (grant.revoke with the grant's use count); every resumed call's execute_tool span names its approval (approved_by grant with its grant_id, or approver)",
   "runs": [
     {
       "id": "01K00000000000000000000001-t1",
@@ -108,7 +108,9 @@
           "step": 0,
           "seq": 1,
           "status": "ok",
-          "approved": true
+          "approved": true,
+          "approved_by": "grant",
+          "grant_id": "e_thread_grants_0002"
         },
         {
           "name": "run_command",
@@ -175,7 +177,8 @@
           "step": 0,
           "seq": 1,
           "status": "ok",
-          "approved": true
+          "approved": true,
+          "approved_by": "approver"
         },
         {
           "name": "run_command",
@@ -353,7 +356,9 @@
           "step": 0,
           "seq": 1,
           "status": "ok",
-          "approved": true
+          "approved": true,
+          "approved_by": "grant",
+          "grant_id": "e_thread_grants_0004"
         },
         {
           "name": "run_command",
@@ -415,7 +420,9 @@
           "step": 0,
           "seq": 1,
           "status": "ok",
-          "approved": true
+          "approved": true,
+          "approved_by": "grant",
+          "grant_id": "e_thread_grants_0004"
         }
       ],
       "holes": []

@@ -105,6 +105,15 @@ type contractSession struct {
 	ParentSession string `json:"parent_session,omitempty"`
 	ParentCall    string `json:"parent_call,omitempty"`
 	ParentRun     string `json:"parent_run,omitempty"`
+	// SummarizerUsage is the session's summarizer spans' usage (§6, O15):
+	// omitted when it summarized nothing.
+	SummarizerUsage *contractUsage `json:"summarizer_usage,omitempty"`
+}
+
+// contractUsage is a usage figure as the contract states it.
+type contractUsage struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
 }
 
 // contractRun is one run row as the contract states it: the run row's
@@ -212,6 +221,9 @@ type contractLLM struct {
 	InputTokens   int64  `json:"input_tokens"`
 	OutputTokens  int64  `json:"output_tokens"`
 	Status        string `json:"status"`
+	// Role is weft.chat.role: summarizer for weft/thread's summarizer
+	// calls (§3, O15); omitted for the run's own steps.
+	Role string `json:"role,omitempty"`
 }
 
 // contractRPC is one execute_tool span: one tool call.
@@ -234,6 +246,9 @@ type contractRPC struct {
 	Approved   bool   `json:"approved,omitempty"`
 	Denied     bool   `json:"denied,omitempty"`
 	DeniedKind string `json:"denied_kind,omitempty"`
+	// An approved call's provenance (§3, UX-B-14; core.ApproveBy).
+	ApprovedBy string `json:"approved_by,omitempty"`
+	GrantID    string `json:"grant_id,omitempty"`
 	// The card facts (§3, U25): why a call parked, the deadline it ran
 	// under, a parked Subagent child's calls.
 	PendingSource   string `json:"pending_source,omitempty"`
@@ -296,11 +311,9 @@ func runContract(t *testing.T, backend string, open func(*testing.T) obsdb.DB) {
 				w, _ := json.MarshalIndent(want.Sessions, "", "  ")
 				t.Errorf("%s: session rows differ from %s/expect.json\n got: %s\nwant: %s", backend, dir, g, w)
 			}
-			if tr := threadRecordsOf(t, dir); !slices.Equal(tr, want.ThreadRecords) {
-				g, _ := json.MarshalIndent(tr, "", "  ")
-				w, _ := json.MarshalIndent(want.ThreadRecords, "", "  ")
-				t.Errorf("%s: thread records differ from %s/expect.json\n got: %s\nwant: %s", backend, dir, g, w)
-			}
+			// The thread records as the backend stored them, read back per
+			// session through obsdb.SessionEventReader (U12.2's index, the
+			// authority for them; U12.1-fix: never the fixture's input).
 			checkSessionEvents(t, backend, dir, db, want.ThreadRecords)
 		})
 	}
@@ -503,9 +516,20 @@ func observeSessions(t *testing.T, db obsdb.DB) []contractSession {
 	}
 	var out []contractSession
 	for _, s := range page.Sessions {
-		out = append(out, contractSession{ID: s.ID, PublicID: s.PublicID, Agent: s.Agent, Turns: s.Turns,
+		cs := contractSession{ID: s.ID, PublicID: s.PublicID, Agent: s.Agent, Turns: s.Turns,
 			Title: s.Title, FirstPrompt: s.FirstPrompt, ContentOff: s.ContentOff,
-			ParentSession: s.ParentSession, ParentCall: s.ParentCall, ParentRun: s.ParentRun})
+			ParentSession: s.ParentSession, ParentCall: s.ParentCall, ParentRun: s.ParentRun}
+		if u := s.SummarizerUsage; u != (core.Usage{}) {
+			cs.SummarizerUsage = &contractUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
+		}
+		// The one session's read says the same (Session is the detail
+		// route's; both backends fill it alike).
+		if d, err := db.Session(context.Background(), s.ID); err != nil {
+			t.Fatalf("Session(%s): %v", s.ID, err)
+		} else if d.SummarizerUsage != s.SummarizerUsage {
+			t.Errorf("Session(%s).SummarizerUsage = %+v, the list's %+v", s.ID, d.SummarizerUsage, s.SummarizerUsage)
+		}
+		out = append(out, cs)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -527,6 +551,7 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 				InputTokens:   intAttr(s.Attrs, "gen_ai.usage.input_tokens", 0),
 				OutputTokens:  intAttr(s.Attrs, "gen_ai.usage.output_tokens", 0),
 				Status:        statusWord(s.StatusCode),
+				Role:          strAttr(s.Attrs, "weft.chat.role"),
 			}
 			if rs, ok := s.Attrs["gen_ai.response.finish_reasons"].([]any); ok && len(rs) > 0 {
 				l.FinishReason, _ = rs[0].(string)
@@ -549,6 +574,8 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 				Approved:       boolAttr(s.Attrs, "weft.tool.approved"),
 				Denied:         boolAttr(s.Attrs, "weft.tool.denied"),
 				DeniedKind:     strAttr(s.Attrs, "weft.tool.denied_kind"),
+				ApprovedBy:     strAttr(s.Attrs, "weft.tool.approved_by"),
+				GrantID:        strAttr(s.Attrs, "weft.grant.id"),
 
 				PendingSource:   strAttr(s.Attrs, "weft.tool.pending.source"),
 				TimeoutMS:       intAttr(s.Attrs, "weft.tool.timeout_ms", 0),

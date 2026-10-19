@@ -166,6 +166,8 @@ res2, err := agt.Generate(ctx, weft.Messages(res.Messages...), weft.Prompt("And 
 //     handler never runs; Resolve on a non-pending id is a loud run error.
 //     weft.ResumeOf(res.ID) links the resume to the parked run (weft.resumed_from; Studio's
 //     parked row reads resumed_by) — the core cannot infer it; thread and runtime pass it.
+//     weft.ApproveBy(id, by, grantID) is Approve naming its provenance (reporting only): the call's
+//     execute_tool span carries weft.tool.approved_by (thread: user|grant|approver|quorum|policy) + weft.grant.id.
 //     weft.Metadata(map[string]string{"weft.approval.actor": who}) names the decider. A denied call's
 //     execute_tool span is zero-length, weft.tool.denied (+ denied_kind denied|no_decision).
 //     Middleware parks any call by returning an error wrapping ErrApprovalRequired.
@@ -505,7 +507,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    Turns: turn, _ := s.Send(ctx, weft.User("…")[, thread.As(p), thread.RunOptions(…)]) — prompt durable
 //    before the run; turn.Wait() | WaitContext(ctx) | Done() | Events() | Outcome() | Next(); s.WaitIdle(ctx).
 //    Runs carry weft.session.id, weft.turn and, with thread.PublicID(id) (Create only), weft.public_id;
-//    once SetInfo named a title, weft.session.title (metadata: survives content-off; Studio titles the session with it).
+//    once SetInfo named a title, weft.session.title (metadata: survives content-off; Studio titles the session with it);
+//    after a navigation, weft.turn.parent (the turn whose line it continues, first turn only) and weft.session.branch
+//    (the label on the entry branched to, else the leaf entry's id).
 //    thread.WithRunMetadata(kv) (Create/Fork: into Header.RunMeta; Open: held over it; s.RunMeta()) stamps every
 //    turn's run — identity keys win, a Send's own RunOptions(weft.Metadata) wins per key.
 //    Busy (ADR 0019): thread.BusyPolicy(Queue | Reject → ErrBusy | Steer | Interrupt | Rollback), or
@@ -520,12 +524,14 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    ApplyCompaction, under the last run of this session that produced the context (held for the next run
 //    when none did); obsdb.DB.Compactions and the run page read it back. Its body names summarizer_model /
 //    summarizer_usage, and every summarizer model call (compaction, SummarizeLeft) is a chat span with
-//    weft.chat.role summarizer + its usage, under the turn in flight or the last run (never in the run's own usage).
+//    weft.chat.role summarizer + its usage, under the turn in flight or the last run (never in the run's own usage, nor its
+//    provider/model/meta; obsdb.SessionRow.SummarizerUsage sums it per session, apart from Usage).
 //    The state log as records (U12.1, record contract §4 kind thread, event weft.thread.<kind>): approval.request /
 //    decision (via, key_id, grant_id) / refused, grant.mint / use / revoke / expire, receipt (queued / accepted /
 //    delivered / deferred / dropped), interrupt, rewind, branch, uncompact, label, pin, fork, pool.delegate /
 //    retire — filed under the run the fact concerns (the entry's, else the turn in flight, else the last run;
-//    held for the next run), ids/enums/counts always, who/reasons/texts under the body's "content" (the agent's
+//    held for that run; still held at Close → emitted held:true, under no run when none), decided under the
+//    session lock and emitted by one goroutine per Session (never under the lock; Close waits), ids/enums/counts always, who/reasons/texts under the body's "content" (the agent's
 //    Content, else the destination's policy; weft/otel strips it, otel.ContentThread for Redact); label names
 //    are metadata. An index, not evidence (ADR 0021 §5); the timeline that reads them is U12.2's.
 //    Approvals (ADR 0021): s.Pending(); s.Decide(ctx, thread.Approve(id) | Deny | Resolve | ResolveError |

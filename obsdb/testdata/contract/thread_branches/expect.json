@@ -1,0 +1,197 @@
+{
+  "case": "thread_branches",
+  "description": "two turns, a Branch back to the first turn's line, a label on the entry branched to, two turns on it: the first of those carries weft.turn.parent 1 (the turn whose line it continues) and both weft.session.branch via-spain (the label) in meta; the turns before the branch carry neither",
+  "runs": [
+    {
+      "id": "01K00000000000000000000001-t1",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "trip",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 1,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:36:00Z",
+      "finished": "2026-10-01T09:36:00.008Z",
+      "last_seen": "2026-10-01T09:36:00.037Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "0fbcc947ac5358567bb2d652a83b6201310e3e64c8c0b0c0b318d84ef0eca99f",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t2",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "trip",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 2,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:36:00.004Z",
+      "finished": "2026-10-01T09:36:00.017Z",
+      "last_seen": "2026-10-01T09:36:00.036Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "0fbcc947ac5358567bb2d652a83b6201310e3e64c8c0b0c0b318d84ef0eca99f",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t3",
+      "trace_id": "7ace0000000000000000000000000003",
+      "service": "contract-app",
+      "agent": "trip",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 3,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.session.branch": "via-spain",
+        "weft.turn.parent": "1"
+      },
+      "started": "2026-10-01T09:36:00.008Z",
+      "finished": "2026-10-01T09:36:00.026Z",
+      "last_seen": "2026-10-01T09:36:00.026Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "0fbcc947ac5358567bb2d652a83b6201310e3e64c8c0b0c0b318d84ef0eca99f",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t4",
+      "trace_id": "7ace0000000000000000000000000004",
+      "service": "contract-app",
+      "agent": "trip",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "turn": 4,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.session.branch": "via-spain"
+      },
+      "started": "2026-10-01T09:36:00.012Z",
+      "finished": "2026-10-01T09:36:00.035Z",
+      "last_seen": "2026-10-01T09:36:00.035Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "0fbcc947ac5358567bb2d652a83b6201310e3e64c8c0b0c0b318d84ef0eca99f",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    }
+  ],
+  "sessions": [
+    {
+      "id": "01K00000000000000000000001",
+      "agent": "trip",
+      "turns": 4,
+      "first_prompt": "Plan Lisbon."
+    }
+  ],
+  "thread_records": [
+    "01K00000000000000000000001-t2 branch none {\"entry\":\"e_thread_branches_0008\",\"from_entry\":\"e_thread_branches_0007\",\"session\":\"01K00000000000000000000001\",\"summarized\":false,\"to_entry\":\"e_thread_branches_0004\"}",
+    "01K00000000000000000000001-t1 label none {\"entry\":\"e_thread_branches_0009\",\"name\":\"via-spain\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_branches_0004\"}"
+  ]
+}

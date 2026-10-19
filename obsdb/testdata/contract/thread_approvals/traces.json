@@ -1498,6 +1498,12 @@
                   }
                 },
                 {
+                  "key": "weft.tool.approved_by",
+                  "value": {
+                    "stringValue": "user"
+                  }
+                },
+                {
                   "key": "arena.batch",
                   "value": {
                     "stringValue": "b_contract"
@@ -2292,6 +2298,12 @@
                   }
                 },
                 {
+                  "key": "weft.tool.approved_by",
+                  "value": {
+                    "stringValue": "user"
+                  }
+                },
+                {
                   "key": "arena.batch",
                   "value": {
                     "stringValue": "b_contract"
@@ -2357,6 +2369,695 @@
                 "code": "STATUS_CODE_OK"
               },
               "traceId": "7ace0000000000000000000000000006"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_approvals"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.run.steps",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.run.events",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.run.messages",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.run.pending",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.run.stop_reason",
+                  "value": {
+                    "stringValue": "tool_calls"
+                  }
+                },
+                {
+                  "key": "weft.run.stopped_by",
+                  "value": {
+                    "stringValue": "parked"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847000041000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "invoke_agent support",
+              "spanId": "5ba0000000000013",
+              "startTimeUnixNano": "1790847000036000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.stream",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_approvals"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.finish_reasons",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "tool_calls"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "weft.model.tool_calls",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847000038000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "chat script",
+              "parentSpanId": "5ba0000000000013",
+              "spanId": "5ba0000000000014",
+              "startTimeUnixNano": "1790847000037000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "track_parcel"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "p1"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_approvals"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.tool.pending",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "weft.tool.pending.source",
+                  "value": {
+                    "stringValue": "approval"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847000040000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool track_parcel",
+              "parentSpanId": "5ba0000000000013",
+              "spanId": "5ba0000000000015",
+              "startTimeUnixNano": "1790847000039000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.resume.calls",
+                  "value": {
+                    "stringValue": "p1=resolved"
+                  }
+                },
+                {
+                  "key": "weft.resumed_from",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.approval.actor",
+                  "value": {
+                    "stringValue": "agent-7"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_approvals"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "8"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.run.steps",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.run.events",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "weft.run.messages",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.run.stop_reason",
+                  "value": {
+                    "stringValue": "stop"
+                  }
+                },
+                {
+                  "key": "weft.run.stopped_by",
+                  "value": {
+                    "stringValue": "final_answer"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847000045000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "invoke_agent support",
+              "spanId": "5ba0000000000016",
+              "startTimeUnixNano": "1790847000042000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000008"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.stream",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.approval.actor",
+                  "value": {
+                    "stringValue": "agent-7"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_approvals"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "8"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.finish_reasons",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "stop"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "weft.model.tool_calls",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.ttft_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847000044000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "chat script",
+              "parentSpanId": "5ba0000000000016",
+              "spanId": "5ba0000000000017",
+              "startTimeUnixNano": "1790847000043000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000008"
             }
           ]
         }

@@ -85,7 +85,10 @@ type runConfig struct {
 
 type decision struct {
 	approved bool
-	reason   string
+	// by and grant are an approval's provenance (ApproveBy): reporting
+	// only, stamped on the approved call's execute_tool span.
+	by, grant string
+	reason    string
 	// A resolved call never runs its handler: content becomes the
 	// ToolResultPart verbatim (isError marks ResolveError). A decision
 	// is exactly one of approve / deny / resolve (ADR 0007's
@@ -102,16 +105,32 @@ func (c *runConfig) decide(id string, d decision) {
 	c.decisions[id] = d
 }
 
-type approveOption string
+type approveOption struct{ id, by, grant string }
 
-func (o approveOption) applyRun(c *runConfig) { c.decide(string(o), decision{approved: true}) }
+func (o approveOption) applyRun(c *runConfig) {
+	c.decide(o.id, decision{approved: true, by: o.by, grant: o.grant})
+}
 
 // Approve resumes a call left on RunResult.Pending by an earlier run:
 // pass the earlier transcript with Messages and the decision, and the
 // loop executes the call — through the ordinary tool chain, with
 // Call.Approved set — before its next model call. Ids that are not
 // pending are ignored.
-func Approve(callID string) RunOption { return approveOption(callID) }
+func Approve(callID string) RunOption { return approveOption{id: callID} }
+
+// ApproveBy is Approve naming who or what approved the call: by is the
+// decider's class — weft/thread's words are user, grant, approver,
+// quorum and policy — and grantID the standing permission that decided,
+// when one did. Reporting only: the call resumes exactly as Approve
+// resumes it, and its execute_tool span carries weft.tool.approved_by
+// (by) and weft.grant.id (grantID), each absent when empty — ids and
+// enums, never a person's name, so put an opaque class in by. The core
+// cannot know them (a transcript names no decider); weft/thread passes
+// them on every resume it runs. The last decision for an id wins, as
+// with Approve.
+func ApproveBy(callID, by, grantID string) RunOption {
+	return approveOption{id: callID, by: by, grant: grantID}
+}
 
 type denyOption struct{ id, reason string }
 

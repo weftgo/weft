@@ -402,16 +402,21 @@ type Session struct {
 	pendingMarkers []*compactionMarker
 	handed         []queuedSteer
 
-	// The thread record family's state (threadrec.go), guarded by mu:
-	// heldRecs are records no run could be named for yet (emitted under
-	// the next run that reports, dropped at Close — heldDropped counts
-	// the ones the bound pushed out), heldSummaries the summarizer
-	// calls waiting the same way, grantsLapsed the grants whose lapse
-	// this Session reported. None is persisted.
+	// The thread record family's state (threadrec.go, threadout.go),
+	// guarded by mu: heldRecs are records waiting for a run — none could
+	// be named yet, or the turn in flight has not reported — emitted
+	// under it when it reports, as held records at Close (heldDropped
+	// counts the ones the bound pushed out); heldSummaries the
+	// summarizer calls waiting the same way; grantsLapsed the grants
+	// whose lapse this Session reported; steerMint the steer whose
+	// queued receipt is being adopted (its minted turn). None is
+	// persisted. out is the emitter's queue, its own lock.
 	heldRecs      []heldRec
 	heldDropped   int
 	heldSummaries []summarizerCall
 	grantsLapsed  map[string]bool
+	steerMint     *Turn
+	out           outbox
 
 	// The compaction trigger's state (ADR 0020 §2): lastInput is the
 	// provider-reported input of the last model step the session ran,
@@ -1735,8 +1740,9 @@ func (s *Session) sealLocked(ctx context.Context) error {
 	closed := fmt.Errorf("%w: session %s", ErrClosed, s.header.ID)
 	unreported := len(s.pendingMarkers)
 	s.pendingMarkers = nil
-	heldRecords := len(s.heldRecs) + s.heldDropped + len(s.heldSummaries)
-	s.heldRecs, s.heldDropped, s.heldSummaries = nil, 0, nil
+	// The thread records still held go out now, as held records, and
+	// Close waits for the emitter below (threadout.go).
+	heldSums, heldSumMD, heldDropped := s.sealHeldLocked()
 	queued := s.queue
 	s.queue = nil
 	w, _ := s.st.(*leased)
@@ -1753,10 +1759,16 @@ func (s *Session) sealLocked(ctx context.Context) error {
 		s.agent.Logger().Debug("thread: compaction markers dropped at close: no run to report them under",
 			"session", s.header.ID, "markers", unreported)
 	}
-	if heldRecords > 0 {
+	if heldDropped > 0 {
 		s.agent.Logger().Debug("thread: session records dropped at close: no run to report them under",
-			"session", s.header.ID, "records", heldRecords)
+			"session", s.header.ID, "records", heldDropped)
 	}
+	if len(heldSums) > 0 {
+		s.emitHeldSummaries(context.Background(), "", nil, heldSums, heldSumMD)
+	}
+	// Every record decided before the seal has reached the provider when
+	// Close returns — unless ctx ends first.
+	s.waitOut(ctx)
 	for _, ps := range queued {
 		ps.turn.finish(nil, closed)
 	}

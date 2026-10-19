@@ -2145,6 +2145,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -2154,6 +2160,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -2261,6 +2273,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -2270,6 +2288,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {

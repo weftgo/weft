@@ -95,6 +95,9 @@ func approvalsCase(name string) func(*testing.T, context.Context, *otel.Pipeline
 		email := core.Tool("send_email", "Email the customer.", func(_ context.Context, in lookupIn) (string, error) {
 			return "emailed about " + in.OrderID, nil
 		}, core.RequireApproval())
+		track := core.Tool("track_parcel", "Ask the carrier where a parcel is.", func(_ context.Context, in lookupIn) (string, error) {
+			return "the carrier did not answer", nil
+		}, core.RequireApproval())
 		agt := pipelineAgent(p, "support", wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "issue_refund", ID: "r1", Args: `{"order_id":"A-1002"}`}),
 			wefttest.Say("I need a photo of the damage first."),
@@ -102,7 +105,9 @@ func approvalsCase(name string) func(*testing.T, context.Context, *otel.Pipeline
 			wefttest.Say("Refund issued."),
 			wefttest.ToolCalls(wefttest.Call{Name: "send_email", ID: "e1", Args: `{"order_id":"A-1002"}`}),
 			wefttest.Say("Email sent."),
-		), core.Instructions("You are a support agent."), refund, email)
+			wefttest.ToolCalls(wefttest.Call{Name: "track_parcel", ID: "p1", Args: `{"order_id":"A-1002"}`}),
+			wefttest.Say("The replacement is in transit."),
+		), core.Instructions("You are a support agent."), refund, email, track)
 		alice := thread.Key{ID: "k_alice", Secret: []byte("alice-secret"), Active: true}
 		ring, err := thread.NewKeyring(alice)
 		if err != nil {
@@ -152,6 +157,10 @@ func approvalsCase(name string) func(*testing.T, context.Context, *otel.Pipeline
 		}
 		waitTurn(t, sendTurn(t, s, "Email me a confirmation."))
 		decide(thread.ApproveAlways("e1"), "agent-7")
+		// The fourth path: the carrier's answer, looked up by a person
+		// and pasted in — the handler never runs.
+		waitTurn(t, sendTurn(t, s, "Where is the replacement?"))
+		decide(thread.Resolve("p1", "in transit, arriving Friday"), "agent-7")
 		if err := s.Label(ctx, s.Leaf(), "case-closed"); err != nil {
 			t.Fatal(err)
 		}
@@ -345,6 +354,105 @@ func runThreadCompaction(t *testing.T, ctx context.Context, p *otel.Pipeline, _ 
 	return sessionRunIDs(s)
 }
 
+// summaryNamed is a summarizer model that reports its own identity —
+// a provider and a model name other than the session agent's (and
+// sorting after them, so a max() fold over the run's spans would pick
+// them: the leak 0024's guard closes).
+type summaryNamed struct {
+	core.Model
+	info core.ModelInfo
+}
+
+func (m summaryNamed) Info() core.ModelInfo { return m.info }
+
+func runThreadSummarizer(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+	fetch := core.Tool("fetch_doc", "Fetch a document.", func(_ context.Context, in struct {
+		Topic string `json:"topic" jsonschema:"the topic"`
+	}) (string, error) {
+		return strings.Repeat(in.Topic+" notes. ", 400), nil
+	})
+	agt := pipelineAgent(p, "research", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "fetch_doc", Args: `{"topic":"raft"}`}),
+		wefttest.Say("Read raft."),
+		wefttest.Say("Paxos next, then."),
+	), core.Instructions("You are a research assistant."), fetch)
+	summarizer := summaryNamed{
+		Model: wefttest.Script(wefttest.Say("SUMMARY: raft read; elections 150–300 ms.").WithUsage(core.Usage{InputTokens: 1200, OutputTokens: 40})),
+		info:  core.ModelInfo{Provider: "xai", Name: "summary-mini"},
+	}
+	// The pre-run trigger fires once, on the second turn's prompt (the
+	// estimated delta since the last measured step): the compaction runs
+	// before that turn's run reports, so its summarizer span waits for
+	// the run and opens under its invoke_agent span.
+	var fired atomic.Bool
+	opts := append(fixtureSession("thread_summarizer"), thread.ContextWindow(64_000), thread.KeepRecent(10),
+		thread.SummaryModel(summarizer),
+		thread.TriggerFunc(func(in thread.TriggerInput) bool { return in.Estimated > 0 && fired.CompareAndSwap(false, true) }))
+	s, err := thread.Create(ctx, thread.Memory(), agt, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, sendTurn(t, s, "Fetch the raft document."))
+	waitTurn(t, sendTurn(t, s, "What should I read next?"))
+	if !fired.Load() {
+		t.Fatal("the pre-run trigger never fired")
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return sessionRunIDs(s)
+}
+
+// runThreadHeld: a grant minted on a session no run ever reports
+// under, then Close — the held grant.mint goes out filed under no run
+// (weft.run.id absent), marked held, keyed by the session.
+func runThreadHeld(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+	agt := pipelineAgent(p, "sre", wefttest.Script(), core.Instructions("You are an SRE shell."))
+	s, err := thread.Create(ctx, thread.Memory(), agt, append(fixtureSession("thread_held"), thread.PublicID("pub_thread_held"))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Grant(ctx, thread.Grant{Tool: "run_command", Args: []thread.Arg{thread.ArgGlob("/command", "kubectl get *")}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return nil
+}
+
+// runThreadBranches: a SummarizeLeft-free Branch back to the first
+// turn's line, a label on the entry branched to, and a turn on it —
+// weft.turn.parent and weft.session.branch on that turn's run (§2,
+// UX-E-20), the turns before it linear.
+func runThreadBranches(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+	agt := pipelineAgent(p, "trip", wefttest.Script(
+		wefttest.Say("Lisbon: three days."),
+		wefttest.Say("Porto: two days."),
+		wefttest.Say("Seville instead: three days."),
+		wefttest.Say("And a day in Cádiz."),
+	), core.Instructions("You plan trips."))
+	s, err := thread.Create(ctx, thread.Memory(), agt, fixtureSession("thread_branches")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, sendTurn(t, s, "Plan Lisbon."))
+	afterLisbon := s.Leaf()
+	waitTurn(t, sendTurn(t, s, "Add Porto."))
+	if err := s.Branch(ctx, afterLisbon); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Label(ctx, afterLisbon, "via-spain"); err != nil {
+		t.Fatal(err)
+	}
+	waitTurn(t, sendTurn(t, s, "Go to Seville instead."))
+	waitTurn(t, sendTurn(t, s, "Add Cádiz."))
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return sessionRunIDs(s)
+}
+
 func runThreadPool(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 	child := pipelineAgent(p, "researcher", wefttest.Script(wefttest.Say("The answer is 42.")),
 		core.Instructions("You research."))
@@ -378,19 +486,19 @@ func threadGenCases() []genCase {
 	return []genCase{
 		{
 			name: "thread_approvals",
-			desc: "a thread session (thread.WithRunMetadata arena.batch, a public id) through every decision path, content on: a deny with a reason, a signature under a key the ring does not hold (approval.refused, reason bad_signature), alice's signed approval (via signed, key_id), an approve-always minting a grant (grant.mint via always under the parking run), a label; each approval.request and approval.decision filed under the run that parked its call, who and the reason under content; the session's run metadata in every run row's meta",
+			desc: "a thread session (thread.WithRunMetadata arena.batch, a public id) through all four decision outcomes, content on: a deny with a reason, a signature under a key the ring does not hold (approval.refused, reason bad_signature), alice's signed approval (via signed, key_id; its resumed call's execute_tool span approved_by user), an approve-always minting a grant (grant.mint via always under the parking run), a resolve (outcome resolve, its content under content), a label; each approval.request and approval.decision filed under the run that parked its call, who and the reason under content; the session's run metadata in every run row's meta",
 			dest: content,
 			run:  approvalsCase("thread_approvals"),
 		},
 		{
 			name: "thread_grants",
-			desc: "the decision chain at the boundary: four grants minted before any run (held, then filed under the first run), a glob grant's use, the approver's decision (via approver, who policy-bot), a deny-grant's refusal, a MaxUses grant's two uses and its lapse (grant.expire max_uses), a past-expiry grant's lapse noticed by the chain (grant.expire expiry), a revocation (grant.revoke with the grant's use count)",
+			desc: "the decision chain at the boundary: four grants minted before any run (held, then filed under the first run), a glob grant's use, the approver's decision (via approver, who policy-bot), a deny-grant's refusal, a MaxUses grant's two uses and its lapse (grant.expire max_uses), a past-expiry grant's lapse noticed by the chain (grant.expire expiry), a revocation (grant.revoke with the grant's use count); every resumed call's execute_tool span names its approval (approved_by grant with its grant_id, or approver)",
 			dest: content,
 			run:  runThreadGrants,
 		},
 		{
 			name: "thread_busy",
-			desc: "the busy policies: a steer accepted (receipt queued) and drained (delivered, under the run that drained it), a steer dropped by ClearQueue (dropped, under the busy turn), a queued send (accepted, its minted turn), an interrupt (interrupt under the felled run, by_turn the follow-up) and a rollback (interrupt, then rewind reason rollback under the run taken off the path); the steer texts under content",
+			desc: "the busy policies: a steer accepted (receipt queued, minted_run and turn the number it took — t2 and t4, the turn numbers no run carries) and drained (delivered, under the run that drained it), a steer dropped by ClearQueue (dropped, under the busy turn), a queued send (accepted, its minted turn), an interrupt (interrupt under the felled run, by_turn the follow-up) and a rollback (interrupt, then rewind reason rollback under the run taken off the path; the turn after it carries weft.turn.parent and weft.session.branch); the steer texts under content",
 			dest: content,
 			run:  runThreadBusy,
 		},
@@ -401,6 +509,24 @@ func threadGenCases() []genCase {
 			run:  runThreadCompaction,
 		},
 		{
+			name: "thread_summarizer",
+			desc: "a summarizer of its own (thread.SummaryModel reporting provider xai, model summary-mini) compacting before the second turn runs (the pre-run trigger): its chat span (role summarizer, 1200 in, 40 out) waits for that turn's run and opens under its invoke_agent span, in its trace; the run rows keep the session agent's provider and model (wefttest/script) and no summarizer metadata on both backends (0024's guard); the session row's summarizer_usage",
+			dest: content,
+			run:  runThreadSummarizer,
+		},
+		{
+			name: "thread_held",
+			desc: "a grant minted on a session no run reports under, then Close: the held grant.mint is emitted filed under no run (weft.run.id absent), held true, keyed by weft.session.id and the public id; indexed by its session alone (session_events; SQLite stores it nowhere else, ClickHouse in otel_logs), read back through SessionEvents; no run row",
+			dest: content,
+			run:  runThreadHeld,
+		},
+		{
+			name: "thread_branches",
+			desc: "two turns, a Branch back to the first turn's line, a label on the entry branched to, two turns on it: the first of those carries weft.turn.parent 1 (the turn whose line it continues) and both weft.session.branch via-spain (the label) in meta; the turns before the branch carry neither",
+			dest: content,
+			run:  runThreadBranches,
+		},
+		{
 			name: "thread_pool",
 			desc: "a sync thread/pool delegation from a session's turn: pool.delegate (child session, under the delegating turn's run) and pool.retire (state done, the child's usage); the child session's own run",
 			dest: content,
@@ -408,11 +534,49 @@ func threadGenCases() []genCase {
 		},
 		{
 			name: "thread_content_off",
-			desc: "the thread_approvals session through a content-off destination: every thread record's content object stripped (weft.content stripped where it carried one, none where it had none) — who, reasons, the grant's reason — while the ids, enums, the label's name (an app-chosen name is metadata) and the session title (weft.session.title on the label record and the later turns) stay",
+			desc: "the thread_approvals session through a content-off destination: no thread record carries a content object (weft.content none: no destination asked for content, so thread captured none) — no who, reason or resolved content — while the ids, enums, the label's name (an app-chosen name is metadata) and the session title (weft.session.title on the label record and the later turns) stay",
 			dest: nil,
 			run:  approvalsCase("thread_content_off"),
 		},
 	}
+}
+
+// threadLine is one thread record as a case's thread_records state it:
+// "<run id> <kind> <weft.content> <body without at and kind>", the run
+// id empty (the line starts with a space) for a record filed under none.
+type threadLine struct {
+	time uint64
+	s    string
+}
+
+// newThreadLine builds a threadLine from a stored or exported record.
+func newThreadLine(t *testing.T, where string, ns uint64, runID, content, body string) (threadLine, string) {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		t.Fatalf("%s: a thread record's body is not JSON: %v", where, err)
+	}
+	delete(m, "at")
+	kind := fmt.Sprint(m["kind"])
+	delete(m, "kind")
+	bb, _ := json.Marshal(m)
+	return threadLine{ns, fmt.Sprintf("%s %v %s %s", runID, kind, content, bb)}, kind
+}
+
+// sortThreadLines orders a case's thread records by time, a tie by the
+// line itself: the same order from logs.json and from either backend.
+func sortThreadLines(lines []threadLine) []string {
+	sort.SliceStable(lines, func(i, j int) bool {
+		if lines[i].time != lines[j].time {
+			return lines[i].time < lines[j].time
+		}
+		return lines[i].s < lines[j].s
+	})
+	var out []string
+	for _, l := range lines {
+		out = append(out, l.s)
+	}
+	return out
 }
 
 // threadRecordsOf reads a case's thread records from its logs.json:
@@ -430,39 +594,23 @@ func threadRecordsOf(t *testing.T, dir string) []string {
 	if err := protojson.Unmarshal(b, &req); err != nil {
 		t.Fatalf("%s/logs.json: %v", dir, err)
 	}
-	var out []string
-	type line struct {
-		time uint64
-		s    string
-	}
-	var lines []line
+	var lines []threadLine
 	for _, rl := range req.GetResourceLogs() {
 		for _, sl := range rl.GetScopeLogs() {
 			for _, r := range sl.GetLogRecords() {
 				if kvString(r.Attributes, "weft.record") != "thread" {
 					continue
 				}
-				var body map[string]any
-				if err := json.Unmarshal([]byte(r.GetBody().GetStringValue()), &body); err != nil {
-					t.Fatalf("%s: a thread record's body is not JSON: %v", dir, err)
+				l, kind := newThreadLine(t, dir, r.GetTimeUnixNano(), kvString(r.Attributes, "weft.run.id"),
+					kvString(r.Attributes, "weft.content"), r.GetBody().GetStringValue())
+				if want := "weft.thread." + kind; r.GetEventName() != want {
+					t.Errorf("%s: a thread record of kind %v has event name %q", dir, kind, r.GetEventName())
 				}
-				if want := "weft.thread." + fmt.Sprint(body["kind"]); r.GetEventName() != want {
-					t.Errorf("%s: a thread record of kind %v has event name %q", dir, body["kind"], r.GetEventName())
-				}
-				delete(body, "at")
-				kind := body["kind"]
-				delete(body, "kind")
-				bb, _ := json.Marshal(body)
-				lines = append(lines, line{r.GetTimeUnixNano(), fmt.Sprintf("%s %v %s %s",
-					kvString(r.Attributes, "weft.run.id"), kind, kvString(r.Attributes, "weft.content"), bb)})
+				lines = append(lines, l)
 			}
 		}
 	}
-	sort.SliceStable(lines, func(i, j int) bool { return lines[i].time < lines[j].time })
-	for _, l := range lines {
-		out = append(out, l.s)
-	}
-	return out
+	return sortThreadLines(lines)
 }
 
 // TestThreadRecordKindsHaveFixtures: every kind of the family appears in
@@ -486,7 +634,7 @@ func TestThreadRecordKindsHaveFixtures(t *testing.T) {
 			continue
 		}
 		for _, l := range threadRecordsOf(t, filepath.Join(contractDir, d.Name())) {
-			f := strings.Fields(l)
+			f := strings.SplitN(l, " ", 3) // run id ("" for a record filed under none), kind, …
 			seen[f[1]] = true
 		}
 	}

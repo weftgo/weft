@@ -86,8 +86,8 @@ const maxSights = 4
 // every observed batch; cheap when nothing waits.
 func (s *Session) seeRun(rctx context.Context, runID string) {
 	var pending []*compactionMarker
-	var held []heldRec
-	var summaries []summarizerCall
+	var sums, staleSums []summarizerCall
+	var staleMD []map[string]string
 	s.locked(func() {
 		if n := len(s.sights); n == 0 || s.sights[n-1].id != runID {
 			s.sights = slices.DeleteFunc(s.sights, func(r runSight) bool { return r.id == runID })
@@ -97,14 +97,26 @@ func (s *Session) seeRun(rctx context.Context, runID string) {
 			s.sights = append(s.sights, runSight{id: runID, sc: trace.SpanContextFromContext(rctx), md: core.MetadataFromContext(rctx)})
 		}
 		pending, s.pendingMarkers = s.pendingMarkers, nil
-		held = s.takeHeldLocked()
-		summaries, s.heldSummaries = s.heldSummaries, nil
+		if len(s.heldRecs) > 0 {
+			// The thread records held for a run go to the emitter in the
+			// order they were decided (threadout.go).
+			mine, stale := s.takeHeldLocked(runID)
+			s.flushHeldLocked(rctx, runID, core.MetadataFromContext(rctx), mine, stale)
+		}
+		if len(s.heldSummaries) > 0 {
+			sums, staleSums = s.takeHeldSummariesLocked(runID)
+			for _, c := range staleSums {
+				n, _ := runSeq(s.header.ID, c.run)
+				staleMD = append(staleMD, s.unseenRunMetadataLocked(n))
+			}
+		}
 	})
 	for _, m := range pending {
 		s.emitMarker(rctx, runID, nil, m)
 	}
-	s.emitHeldSummaries(rctx, runID, summaries)
-	s.emitHeld(rctx, runID, held)
+	if len(sums)+len(staleSums) > 0 {
+		s.emitHeldSummaries(rctx, runID, sums, staleSums, staleMD)
+	}
 }
 
 // sightLocked is what the Session saw of run id, if it still

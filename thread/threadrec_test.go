@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -157,7 +158,8 @@ func (rp *recPipe) agent(name string, m core.Model, opts ...core.Option) *core.A
 }
 
 // shutdown flushes everything and returns the thread records the Local
-// sink stored, by kind (read straight from its records table: the
+// sink stored, by kind (read straight from its session_events index,
+// where every thread record lands — a runless one only there; the
 // reader is U12.2's).
 func (rp *recPipe) shutdown(t *testing.T) map[string]int {
 	t.Helper()
@@ -169,7 +171,7 @@ func (rp *recPipe) shutdown(t *testing.T) map[string]int {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	rows, err := db.Query(`SELECT json_extract(body, '$.kind'), COUNT(*) FROM records WHERE kind = 'thread' GROUP BY 1`)
+	rows, err := db.Query(`SELECT json_extract(body, '$.kind'), COUNT(*) FROM session_events WHERE kind = 'thread' GROUP BY 1`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,6 +606,20 @@ func TestThreadRecordsWarroomBusy(t *testing.T) {
 				t.Errorf("queued steer filed under %q", r.run)
 			}
 		}
+	}
+	// A steer takes a turn number as it is accepted: its queued receipt
+	// names it, so the run ids' gaps (t2, t4) are explained by a record.
+	var steerTurns []int
+	for _, r := range ofKind(on, "receipt") {
+		if r.str("state") == "queued" {
+			if r.str("minted_run") != fmt.Sprintf("%s-t%d", s.ID(), r.num("turn")) {
+				t.Errorf("queued steer receipt %v names no minted turn", r.body)
+			}
+			steerTurns = append(steerTurns, r.num("turn"))
+		}
+	}
+	if !slices.Equal(steerTurns, []int{2, 4}) {
+		t.Errorf("the steers' turns = %v, want [2 4] (t1 and t3 were running)", steerTurns)
 	}
 	dropped := false
 	for _, r := range ofKind(on, "receipt") {

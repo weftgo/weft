@@ -118,10 +118,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300000000000",
+              "observedTimeUnixNano": "1790847480000000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847300000000000",
+              "timeUnixNano": "1790847480000000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -210,10 +210,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300001000000",
+              "observedTimeUnixNano": "1790847480001000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847300001000000",
+              "timeUnixNano": "1790847480001000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -257,7 +257,7 @@
                 {
                   "key": "weft.catalog.hash",
                   "value": {
-                    "stringValue": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f"
+                    "stringValue": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277"
                   }
                 },
                 {
@@ -310,14 +310,14 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":1},\"tools\":{\"catalog_hash\":\"3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f\",\"names\":[\"issue_refund\",\"send_email\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":1},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300002000000",
+              "observedTimeUnixNano": "1790847480002000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000002",
-              "timeUnixNano": "1790847300002000000",
+              "timeUnixNano": "1790847480002000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -418,10 +418,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300003000000",
+              "observedTimeUnixNano": "1790847480003000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847300003000000",
+              "timeUnixNano": "1790847480003000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -522,10 +522,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300004000000",
+              "observedTimeUnixNano": "1790847480004000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847300004000000",
+              "timeUnixNano": "1790847480004000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -608,10 +608,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300005000000",
+              "observedTimeUnixNano": "1790847480005000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847300005000000",
+              "timeUnixNano": "1790847480005000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -730,10 +730,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300006000000",
+              "observedTimeUnixNano": "1790847480006000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790847300006000000",
+              "timeUnixNano": "1790847480006000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -828,10 +828,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300007000000",
+              "observedTimeUnixNano": "1790847480007000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790847300007000000",
+              "timeUnixNano": "1790847480007000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -875,7 +875,7 @@
                 {
                   "key": "weft.catalog.hash",
                   "value": {
-                    "stringValue": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f"
+                    "stringValue": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277"
                   }
                 },
                 {
@@ -934,14 +934,14 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":3},\"tools\":{\"catalog_hash\":\"3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f\",\"names\":[\"issue_refund\",\"send_email\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":3},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300008000000",
+              "observedTimeUnixNano": "1790847480008000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000005",
-              "timeUnixNano": "1790847300008000000",
+              "timeUnixNano": "1790847480008000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -1030,10 +1030,10 @@
               },
               "eventName": "weft.delta",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300009000000",
+              "observedTimeUnixNano": "1790847480009000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790847300009000000",
+              "timeUnixNano": "1790847480009000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -1146,10 +1146,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300010000000",
+              "observedTimeUnixNano": "1790847480010000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790847300010000000",
+              "timeUnixNano": "1790847480010000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -1238,10 +1238,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300011000000",
+              "observedTimeUnixNano": "1790847480011000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790847300011000000",
+              "timeUnixNano": "1790847480011000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -1342,10 +1342,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300012000000",
+              "observedTimeUnixNano": "1790847480012000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000007",
-              "timeUnixNano": "1790847300012000000",
+              "timeUnixNano": "1790847480012000000",
               "traceId": "7ace0000000000000000000000000003"
             },
             {
@@ -1434,10 +1434,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300013000000",
+              "observedTimeUnixNano": "1790847480013000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000007",
-              "timeUnixNano": "1790847300013000000",
+              "timeUnixNano": "1790847480013000000",
               "traceId": "7ace0000000000000000000000000003"
             },
             {
@@ -1481,7 +1481,7 @@
                 {
                   "key": "weft.catalog.hash",
                   "value": {
-                    "stringValue": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f"
+                    "stringValue": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277"
                   }
                 },
                 {
@@ -1534,14 +1534,14 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":5},\"tools\":{\"catalog_hash\":\"3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f\",\"names\":[\"issue_refund\",\"send_email\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":5},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300014000000",
+              "observedTimeUnixNano": "1790847480014000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000008",
-              "timeUnixNano": "1790847300014000000",
+              "timeUnixNano": "1790847480014000000",
               "traceId": "7ace0000000000000000000000000003"
             },
             {
@@ -1642,10 +1642,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300015000000",
+              "observedTimeUnixNano": "1790847480015000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000007",
-              "timeUnixNano": "1790847300015000000",
+              "timeUnixNano": "1790847480015000000",
               "traceId": "7ace0000000000000000000000000003"
             },
             {
@@ -1746,10 +1746,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300016000000",
+              "observedTimeUnixNano": "1790847480016000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000007",
-              "timeUnixNano": "1790847300016000000",
+              "timeUnixNano": "1790847480016000000",
               "traceId": "7ace0000000000000000000000000003"
             },
             {
@@ -1832,10 +1832,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300017000000",
+              "observedTimeUnixNano": "1790847480017000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000007",
-              "timeUnixNano": "1790847300017000000",
+              "timeUnixNano": "1790847480017000000",
               "traceId": "7ace0000000000000000000000000003"
             },
             {
@@ -1954,10 +1954,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300018000000",
+              "observedTimeUnixNano": "1790847480018000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000a",
-              "timeUnixNano": "1790847300018000000",
+              "timeUnixNano": "1790847480018000000",
               "traceId": "7ace0000000000000000000000000004"
             },
             {
@@ -2064,10 +2064,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300019000000",
+              "observedTimeUnixNano": "1790847480019000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000a",
-              "timeUnixNano": "1790847300019000000",
+              "timeUnixNano": "1790847480019000000",
               "traceId": "7ace0000000000000000000000000004"
             },
             {
@@ -2174,10 +2174,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300020000000",
+              "observedTimeUnixNano": "1790847480020000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000a",
-              "timeUnixNano": "1790847300020000000",
+              "timeUnixNano": "1790847480020000000",
               "traceId": "7ace0000000000000000000000000004"
             },
             {
@@ -2272,10 +2272,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300021000000",
+              "observedTimeUnixNano": "1790847480021000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000a",
-              "timeUnixNano": "1790847300021000000",
+              "timeUnixNano": "1790847480021000000",
               "traceId": "7ace0000000000000000000000000004"
             },
             {
@@ -2319,7 +2319,7 @@
                 {
                   "key": "weft.catalog.hash",
                   "value": {
-                    "stringValue": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f"
+                    "stringValue": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277"
                   }
                 },
                 {
@@ -2378,14 +2378,14 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":7},\"tools\":{\"catalog_hash\":\"3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f\",\"names\":[\"issue_refund\",\"send_email\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":7},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300022000000",
+              "observedTimeUnixNano": "1790847480022000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000b",
-              "timeUnixNano": "1790847300022000000",
+              "timeUnixNano": "1790847480022000000",
               "traceId": "7ace0000000000000000000000000004"
             },
             {
@@ -2474,10 +2474,10 @@
               },
               "eventName": "weft.delta",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300023000000",
+              "observedTimeUnixNano": "1790847480023000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000a",
-              "timeUnixNano": "1790847300023000000",
+              "timeUnixNano": "1790847480023000000",
               "traceId": "7ace0000000000000000000000000004"
             },
             {
@@ -2590,10 +2590,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300024000000",
+              "observedTimeUnixNano": "1790847480024000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000a",
-              "timeUnixNano": "1790847300024000000",
+              "timeUnixNano": "1790847480024000000",
               "traceId": "7ace0000000000000000000000000004"
             },
             {
@@ -2682,10 +2682,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300025000000",
+              "observedTimeUnixNano": "1790847480025000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000a",
-              "timeUnixNano": "1790847300025000000",
+              "timeUnixNano": "1790847480025000000",
               "traceId": "7ace0000000000000000000000000004"
             },
             {
@@ -2792,10 +2792,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300026000000",
+              "observedTimeUnixNano": "1790847480026000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000d",
-              "timeUnixNano": "1790847300026000000",
+              "timeUnixNano": "1790847480026000000",
               "traceId": "7ace0000000000000000000000000005"
             },
             {
@@ -2890,10 +2890,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300027000000",
+              "observedTimeUnixNano": "1790847480027000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000d",
-              "timeUnixNano": "1790847300027000000",
+              "timeUnixNano": "1790847480027000000",
               "traceId": "7ace0000000000000000000000000005"
             },
             {
@@ -2937,7 +2937,7 @@
                 {
                   "key": "weft.catalog.hash",
                   "value": {
-                    "stringValue": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f"
+                    "stringValue": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277"
                   }
                 },
                 {
@@ -2996,14 +2996,14 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":9},\"tools\":{\"catalog_hash\":\"3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f\",\"names\":[\"issue_refund\",\"send_email\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":9},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300028000000",
+              "observedTimeUnixNano": "1790847480028000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000e",
-              "timeUnixNano": "1790847300028000000",
+              "timeUnixNano": "1790847480028000000",
               "traceId": "7ace0000000000000000000000000005"
             },
             {
@@ -3110,10 +3110,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300029000000",
+              "observedTimeUnixNano": "1790847480029000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000d",
-              "timeUnixNano": "1790847300029000000",
+              "timeUnixNano": "1790847480029000000",
               "traceId": "7ace0000000000000000000000000005"
             },
             {
@@ -3220,10 +3220,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300030000000",
+              "observedTimeUnixNano": "1790847480030000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000d",
-              "timeUnixNano": "1790847300030000000",
+              "timeUnixNano": "1790847480030000000",
               "traceId": "7ace0000000000000000000000000005"
             },
             {
@@ -3312,10 +3312,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300031000000",
+              "observedTimeUnixNano": "1790847480031000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000d",
-              "timeUnixNano": "1790847300031000000",
+              "timeUnixNano": "1790847480031000000",
               "traceId": "7ace0000000000000000000000000005"
             },
             {
@@ -3440,10 +3440,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300032000000",
+              "observedTimeUnixNano": "1790847480032000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000010",
-              "timeUnixNano": "1790847300032000000",
+              "timeUnixNano": "1790847480032000000",
               "traceId": "7ace0000000000000000000000000006"
             },
             {
@@ -3556,10 +3556,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300033000000",
+              "observedTimeUnixNano": "1790847480033000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000010",
-              "timeUnixNano": "1790847300033000000",
+              "timeUnixNano": "1790847480033000000",
               "traceId": "7ace0000000000000000000000000006"
             },
             {
@@ -3672,10 +3672,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300034000000",
+              "observedTimeUnixNano": "1790847480034000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000010",
-              "timeUnixNano": "1790847300034000000",
+              "timeUnixNano": "1790847480034000000",
               "traceId": "7ace0000000000000000000000000006"
             },
             {
@@ -3776,10 +3776,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300035000000",
+              "observedTimeUnixNano": "1790847480035000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000010",
-              "timeUnixNano": "1790847300035000000",
+              "timeUnixNano": "1790847480035000000",
               "traceId": "7ace0000000000000000000000000006"
             },
             {
@@ -3823,7 +3823,7 @@
                 {
                   "key": "weft.catalog.hash",
                   "value": {
-                    "stringValue": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f"
+                    "stringValue": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277"
                   }
                 },
                 {
@@ -3888,14 +3888,14 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":11},\"tools\":{\"catalog_hash\":\"3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f\",\"names\":[\"issue_refund\",\"send_email\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":11},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300036000000",
+              "observedTimeUnixNano": "1790847480036000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000011",
-              "timeUnixNano": "1790847300036000000",
+              "timeUnixNano": "1790847480036000000",
               "traceId": "7ace0000000000000000000000000006"
             },
             {
@@ -3990,10 +3990,10 @@
               },
               "eventName": "weft.delta",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300037000000",
+              "observedTimeUnixNano": "1790847480037000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000010",
-              "timeUnixNano": "1790847300037000000",
+              "timeUnixNano": "1790847480037000000",
               "traceId": "7ace0000000000000000000000000006"
             },
             {
@@ -4112,10 +4112,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300038000000",
+              "observedTimeUnixNano": "1790847480038000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000010",
-              "timeUnixNano": "1790847300038000000",
+              "timeUnixNano": "1790847480038000000",
               "traceId": "7ace0000000000000000000000000006"
             },
             {
@@ -4210,11 +4210,1307 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300039000000",
+              "observedTimeUnixNano": "1790847480039000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000010",
-              "timeUnixNano": "1790847300039000000",
+              "timeUnixNano": "1790847480039000000",
               "traceId": "7ace0000000000000000000000000006"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_start"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_start\",\"id\":\"01K00000000000000000000001-t7\",\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"agent\":\"support\",\"instructions_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480040000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000013",
+              "timeUnixNano": "1790847480040000000",
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_start"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"01K00000000000000000000001-t7\",\"index\":0}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480041000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000013",
+              "timeUnixNano": "1790847480041000000",
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "weft.request.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":13},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+              },
+              "eventName": "weft.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480042000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000014",
+              "timeUnixNano": "1790847480042000000",
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_start"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "p1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "track_parcel"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"01K00000000000000000000001-t7\",\"seq\":1,\"call_id\":\"p1\",\"name\":\"track_parcel\",\"args\":null}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480043000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000013",
+              "timeUnixNano": "1790847480043000000",
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.latency_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"01K00000000000000000000001-t7\",\"index\":0,\"reason\":\"tool_calls\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480044000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000013",
+              "timeUnixNano": "1790847480044000000",
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_finish"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"01K00000000000000000000001-t7\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1,\"pending\":[{\"type\":\"tool_call\",\"id\":\"p1\",\"name\":\"track_parcel\",\"args\":null}],\"stopped_by\":\"parked\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480045000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000013",
+              "timeUnixNano": "1790847480045000000",
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_start"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.resume.calls",
+                  "value": {
+                    "stringValue": "p1=resolved"
+                  }
+                },
+                {
+                  "key": "weft.resumed_from",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.approval.actor",
+                  "value": {
+                    "stringValue": "agent-7"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "8"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_start\",\"id\":\"01K00000000000000000000001-t8\",\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"agent\":\"support\",\"instructions_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480046000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000016",
+              "timeUnixNano": "1790847480046000000",
+              "traceId": "7ace0000000000000000000000000008"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_start"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.approval.actor",
+                  "value": {
+                    "stringValue": "agent-7"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "8"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"01K00000000000000000000001-t8\",\"index\":0}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480047000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000016",
+              "timeUnixNano": "1790847480047000000",
+              "traceId": "7ace0000000000000000000000000008"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
+                  }
+                },
+                {
+                  "key": "weft.request.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.approval.actor",
+                  "value": {
+                    "stringValue": "agent-7"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "8"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":15},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+              },
+              "eventName": "weft.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480048000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000017",
+              "timeUnixNano": "1790847480048000000",
+              "traceId": "7ace0000000000000000000000000008"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "delta"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "text_delta"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.delta.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.approval.actor",
+                  "value": {
+                    "stringValue": "agent-7"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "8"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"text_delta\",\"run_id\":\"01K00000000000000000000001-t8\",\"text\":\"\"}"
+              },
+              "eventName": "weft.delta",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480049000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000016",
+              "timeUnixNano": "1790847480049000000",
+              "traceId": "7ace0000000000000000000000000008"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.latency_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.ttft_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.approval.actor",
+                  "value": {
+                    "stringValue": "agent-7"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "8"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"01K00000000000000000000001-t8\",\"index\":0,\"reason\":\"stop\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1,\"ttft_ms\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480050000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000016",
+              "timeUnixNano": "1790847480050000000",
+              "traceId": "7ace0000000000000000000000000008"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_finish"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.approval.actor",
+                  "value": {
+                    "stringValue": "agent-7"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "8"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "stripped"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"01K00000000000000000000001-t8\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1,\"stopped_by\":\"final_answer\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480051000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000016",
+              "timeUnixNano": "1790847480051000000",
+              "traceId": "7ace0000000000000000000000000008"
             }
           ],
           "scope": {
@@ -4233,15 +5529,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t1"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
                   }
                 },
                 {
@@ -4280,10 +5576,10 @@
               },
               "eventName": "weft.thread.approval.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300040000000",
+              "observedTimeUnixNano": "1790847480052000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847300040000000",
+              "timeUnixNano": "1790847480052000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -4295,15 +5591,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t1"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
                   }
                 },
                 {
@@ -4342,10 +5638,10 @@
               },
               "eventName": "weft.thread.approval.decision",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300041000000",
+              "observedTimeUnixNano": "1790847480053000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847300041000000",
+              "timeUnixNano": "1790847480053000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -4357,15 +5653,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t3"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t3"
                   }
                 },
                 {
@@ -4404,10 +5700,10 @@
               },
               "eventName": "weft.thread.approval.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300042000000",
+              "observedTimeUnixNano": "1790847480054000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000007",
-              "timeUnixNano": "1790847300042000000",
+              "timeUnixNano": "1790847480054000000",
               "traceId": "7ace0000000000000000000000000003"
             },
             {
@@ -4419,15 +5715,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t3"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t3"
                   }
                 },
                 {
@@ -4466,10 +5762,10 @@
               },
               "eventName": "weft.thread.approval.refused",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300043000000",
+              "observedTimeUnixNano": "1790847480055000000",
               "severityNumber": "SEVERITY_NUMBER_WARN",
               "spanId": "5ba0000000000007",
-              "timeUnixNano": "1790847300043000000",
+              "timeUnixNano": "1790847480055000000",
               "traceId": "7ace0000000000000000000000000003"
             },
             {
@@ -4481,15 +5777,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t3"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t3"
                   }
                 },
                 {
@@ -4528,10 +5824,10 @@
               },
               "eventName": "weft.thread.approval.decision",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300044000000",
+              "observedTimeUnixNano": "1790847480056000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000007",
-              "timeUnixNano": "1790847300044000000",
+              "timeUnixNano": "1790847480056000000",
               "traceId": "7ace0000000000000000000000000003"
             },
             {
@@ -4543,15 +5839,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t5"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t5"
                   }
                 },
                 {
@@ -4596,10 +5892,10 @@
               },
               "eventName": "weft.thread.approval.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300045000000",
+              "observedTimeUnixNano": "1790847480057000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000d",
-              "timeUnixNano": "1790847300045000000",
+              "timeUnixNano": "1790847480057000000",
               "traceId": "7ace0000000000000000000000000005"
             },
             {
@@ -4611,15 +5907,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t5"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t5"
                   }
                 },
                 {
@@ -4664,10 +5960,10 @@
               },
               "eventName": "weft.thread.approval.decision",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300046000000",
+              "observedTimeUnixNano": "1790847480058000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000d",
-              "timeUnixNano": "1790847300046000000",
+              "timeUnixNano": "1790847480058000000",
               "traceId": "7ace0000000000000000000000000005"
             },
             {
@@ -4679,15 +5975,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t5"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t5"
                   }
                 },
                 {
@@ -4732,10 +6028,10 @@
               },
               "eventName": "weft.thread.grant.mint",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300047000000",
+              "observedTimeUnixNano": "1790847480059000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba000000000000d",
-              "timeUnixNano": "1790847300047000000",
+              "timeUnixNano": "1790847480059000000",
               "traceId": "7ace0000000000000000000000000005"
             },
             {
@@ -4747,15 +6043,151 @@
                   }
                 },
                 {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "01K00000000000000000000001-t6"
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"args_sha256\":\"6dfbe69de7cb7d90cbcaa7c9d3ded05946effca5cb9fd400251ec1c6b7624fd1\",\"at\":\"2026-10-01T09:00:00Z\",\"call_id\":\"p1\",\"entry\":\"e_thread_content_off_0041\",\"kind\":\"approval.request\",\"session\":\"01K00000000000000000000001\",\"tool\":\"track_parcel\"}"
+              },
+              "eventName": "weft.thread.approval.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480060000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000013",
+              "timeUnixNano": "1790847480060000000",
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "thread"
                   }
                 },
                 {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t7"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "arena.batch",
+                  "value": {
+                    "stringValue": "b_contract"
+                  }
+                },
+                {
+                  "key": "weft.public_id",
+                  "value": {
+                    "stringValue": "pub_thread_content_off"
+                  }
+                },
+                {
+                  "key": "weft.session.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.session.title",
+                  "value": {
+                    "stringValue": "Refund desk"
+                  }
+                },
+                {
+                  "key": "weft.turn",
+                  "value": {
+                    "stringValue": "7"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"call_id\":\"p1\",\"entry\":\"e_thread_content_off_0043\",\"kind\":\"approval.decision\",\"outcome\":\"resolve\",\"request_entry\":\"e_thread_content_off_0041\",\"session\":\"01K00000000000000000000001\",\"via\":\"user\"}"
+              },
+              "eventName": "weft.thread.approval.decision",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847480061000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000013",
+              "timeUnixNano": "1790847480061000000",
+              "traceId": "7ace0000000000000000000000000007"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "thread"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
                   }
                 },
                 {
@@ -4797,20 +6229,20 @@
                 {
                   "key": "weft.turn",
                   "value": {
-                    "stringValue": "6"
+                    "stringValue": "8"
                   }
                 }
               ],
               "body": {
-                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"entry\":\"e_thread_content_off_0038\",\"kind\":\"label\",\"name\":\"case-closed\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_content_off_0037\"}"
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"entry\":\"e_thread_content_off_0049\",\"kind\":\"label\",\"name\":\"case-closed\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_content_off_0048\"}"
               },
               "eventName": "weft.thread.label",
               "flags": 1,
-              "observedTimeUnixNano": "1790847300048000000",
+              "observedTimeUnixNano": "1790847480062000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000010",
-              "timeUnixNano": "1790847300048000000",
-              "traceId": "7ace0000000000000000000000000006"
+              "spanId": "5ba0000000000016",
+              "timeUnixNano": "1790847480062000000",
+              "traceId": "7ace0000000000000000000000000008"
             }
           ],
           "scope": {

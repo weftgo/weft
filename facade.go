@@ -1251,6 +1251,18 @@ type RunOption = core.RunOption
 // pending are ignored.
 func Approve(callID string) RunOption { return core.Approve(callID) }
 
+// ApproveBy is Approve naming who or what approved the call: by is the
+// decider's class — weft/thread's words are user, grant, approver,
+// quorum and policy — and grantID the standing permission that decided,
+// when one did. Reporting only: the call resumes exactly as Approve
+// resumes it, and its execute_tool span carries weft.tool.approved_by
+// (by) and weft.grant.id (grantID), each absent when empty — ids and
+// enums, never a person's name, so put an opaque class in by. The core
+// cannot know them (a transcript names no decider); weft/thread passes
+// them on every resume it runs. The last decision for an id wins, as
+// with Approve.
+func ApproveBy(callID, by, grantID string) RunOption { return core.ApproveBy(callID, by, grantID) }
+
 // Deny resolves a pending call without running it: the model sees an
 // error result reading "DENIED: <reason>" and the loop continues.
 // Pending calls given neither Approve nor Deny are denied with the

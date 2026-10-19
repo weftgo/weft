@@ -64,6 +64,10 @@ const (
 	attrModelToolCalls = attribute.Key("weft.model.tool_calls")
 	attrToolSeq        = attribute.Key("weft.tool.seq")
 	attrToolApproved   = attribute.Key("weft.tool.approved")
+	// An approved call's provenance (ApproveBy; UX-B-14): the decider's
+	// class and the grant that decided.
+	attrToolApprovedBy = attribute.Key("weft.tool.approved_by")
+	attrGrantID        = attribute.Key("weft.grant.id")
 	attrToolPending    = attribute.Key("weft.tool.pending")
 	// The execution facts of a call (UX-S2-06, UX-H-18, UX-S3-15): the
 	// deadline it ran under, how long it queued, why it parked, and a
@@ -554,6 +558,9 @@ type toolStartFacts struct {
 	// contentOff is the agent's Content(false): the Debug line names an
 	// error result's size (err_bytes), never its text.
 	contentOff bool
+	// approvedBy and grantID are an approved call's provenance
+	// (ApproveBy), "" when the decision named none.
+	approvedBy, grantID string
 }
 
 func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartFacts) (context.Context, func(res ToolResultPart, park string, err error, cut int, retry retryMark, end time.Time)) {
@@ -571,6 +578,12 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartF
 		}
 		if c.Approved {
 			attrs = append(attrs, attrToolApproved.Bool(true))
+			if facts.approvedBy != "" {
+				attrs = append(attrs, attrToolApprovedBy.String(facts.approvedBy))
+			}
+			if facts.grantID != "" {
+				attrs = append(attrs, attrGrantID.String(facts.grantID))
+			}
 		}
 		if facts.timeout > 0 {
 			attrs = append(attrs, attrToolTimeoutMS.Int64(ceilMS(facts.timeout)))

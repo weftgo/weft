@@ -28,8 +28,12 @@ import (
 // thread, event name weft.thread.<kind>, filed under the run the fact
 // concerns (the compaction marker's rule: the run named by the entry,
 // else the turn in flight, else the last run of this session that
-// produced the leaf's context; with none, held for the next run this
-// Session drives, dropped at Close with a Debug line).
+// produced the leaf's context; with none — or when it is the turn in
+// flight's and that run has not reported yet — held for the run that
+// reports next; what is still held at Close goes out then, marked held,
+// under the run it waited for or, with none, under no run, keyed by the
+// session). The provider is called by the Session's emitter alone
+// (threadout.go), never under s.mu.
 //
 // The body is one JSON object: kind, session, entry, at (the entry's
 // time on the session clock) and the kind's ids, enums and counts —
@@ -116,60 +120,72 @@ type threadRec struct {
 	content map[string]string
 }
 
-// heldRec is a record waiting for a run to be filed under.
-type heldRec struct{ rec threadRec }
-
 // threadLogger is the logger the thread records go through: the
 // agent's LoggerProvider under the thread instrumentation scope (the
 // compaction marker's).
 func (s *Session) threadLogger() log.Logger { return s.markerLogger() }
 
 // reportLocked files one record under runID — or, when runID is "",
-// under the run the session would name now (concernedRunLocked); with
-// none it is held for the next run. Callers hold s.mu. Observation
-// only: a panic is contained into a Debug line.
+// under the run the session would name now (concernedRunLocked). The
+// record is queued for the session's emitter (threadout.go), never
+// emitted here: no provider call runs under s.mu. With no run to file
+// it under — or when it is the turn in flight's and that run has not
+// reported yet, so its span is unknown — it is held for the run that
+// reports next (seeRun); a Close emits what is still held. Callers hold
+// s.mu.
 func (s *Session) reportLocked(runID string, r threadRec) {
-	defer func() {
-		if p := recover(); p != nil {
-			s.agent.Logger().Debug("thread: session record dropped", "session", s.header.ID, "kind", r.kind, "panic", fmt.Sprint(p))
-		}
-	}()
-	l := s.threadLogger()
-	if l == nil || !l.Enabled(context.Background(), log.EnabledParameters{EventName: threadEventName(r.kind)}) {
-		return
-	}
 	if r.at.IsZero() {
 		r.at = s.now()
 	}
 	if runID == "" {
 		runID = s.concernedRunLocked()
 	}
-	if runID == "" {
+	if runID == "" || s.awaitsSightLocked(runID) {
 		if s.closing == stateSealed {
+			// No run reports under a sealed Session: out at once, as a
+			// held record (Close's rule).
+			s.queueRecLocked(s.closeItemLocked(heldRec{rec: r, run: runID}))
 			return
 		}
 		if len(s.heldRecs) >= maxHeldThread {
 			s.heldRecs = slices.Delete(s.heldRecs, 0, 1)
 			s.heldDropped++
 		}
-		s.heldRecs = append(s.heldRecs, heldRec{rec: r})
+		s.heldRecs = append(s.heldRecs, heldRec{rec: r, run: runID})
 		return
 	}
-	ctx := trace.ContextWithSpanContext(context.Background(), trace.SpanContext{})
-	var md map[string]string
+	s.queueRecLocked(s.itemForRunLocked(runID, r))
+}
+
+// itemForRunLocked is one record filed under runID: under the run's
+// invoke_agent span with its merged metadata when the Session saw it,
+// else spanless with the session's metadata for that turn. Callers
+// hold s.mu.
+func (s *Session) itemForRunLocked(runID string, r threadRec) outItem {
 	if sight, ok := s.sightLocked(runID); ok {
-		ctx = trace.ContextWithSpanContext(context.Background(), sight.sc)
-		md = sight.md
-	} else {
-		n, _ := runSeq(s.header.ID, runID)
-		md = s.unseenRunMetadataLocked(n)
+		return outItem{ctx: trace.ContextWithSpanContext(context.Background(), sight.sc), run: runID, md: sight.md, rec: r}
 	}
-	s.emitThread(ctx, l, runID, md, r)
+	n, _ := runSeq(s.header.ID, runID)
+	return outItem{ctx: context.Background(), run: runID, md: s.unseenRunMetadataLocked(n), rec: r}
+}
+
+// awaitsSightLocked reports whether runID is the turn in flight's and
+// has not reported yet: a record or summarizer span filed under it now
+// would have no parent span, so it waits for the run's first report.
+// Callers hold s.mu.
+func (s *Session) awaitsSightLocked(runID string) bool {
+	if s.inFlight == nil || s.inFlight.RunID() != runID {
+		return false
+	}
+	_, seen := s.sightLocked(runID)
+	return !seen
 }
 
 // emitThread writes one record. ctx carries the span the record is
-// filed under (or none); md is the run's metadata.
-func (s *Session) emitThread(ctx context.Context, l log.Logger, runID string, md map[string]string, r threadRec) {
+// filed under (or none); md is the run's metadata; held marks a record
+// Close emitted because no run reported to take it (runID "" when it
+// named none).
+func (s *Session) emitThread(ctx context.Context, l log.Logger, runID string, md map[string]string, r threadRec, held bool) {
 	body := make(map[string]any, len(r.fields)+5)
 	for k, v := range r.fields {
 		switch x := v.(type) {
@@ -185,6 +201,9 @@ func (s *Session) emitThread(ctx context.Context, l log.Logger, runID string, md
 	body["kind"] = r.kind
 	body["session"] = s.header.ID
 	body["at"] = r.at.UTC().Format(time.RFC3339Nano)
+	if held {
+		body["held"] = true
+	}
 	// weft.content says what the body holds: full when it carries a
 	// content object, none when capture is off or the fact had no
 	// content field set.
@@ -207,8 +226,10 @@ func (s *Session) emitThread(ctx context.Context, l log.Logger, runID string, md
 	rec.SetBody(attribute.StringValue(string(b)))
 	attrs := []attribute.KeyValue{
 		attribute.String("weft.record", threadRecordKind),
-		attribute.String("weft.run.id", runID),
 		attribute.String("weft.content", content),
+	}
+	if runID != "" {
+		attrs = append(attrs, attribute.String("weft.run.id", runID))
 	}
 	if name := s.agent.Name(); name != "" {
 		attrs = append(attrs, attribute.String("gen_ai.agent.name", name))
@@ -267,35 +288,27 @@ func (s *Session) concernedRunLocked() string {
 	return s.lastRunIDLocked()
 }
 
-// takeHeldLocked takes the records held for a run; the caller emits
-// them under the run that reported (seeRun). Callers hold s.mu.
-func (s *Session) takeHeldLocked() []heldRec {
-	held := s.heldRecs
-	s.heldRecs = nil
-	return held
-}
-
-// emitHeld writes the held records under the run reporting on rctx.
-func (s *Session) emitHeld(rctx context.Context, runID string, held []heldRec) {
-	if len(held) == 0 {
-		return
-	}
-	defer func() {
-		if p := recover(); p != nil {
-			s.agent.Logger().Debug("thread: held session records dropped", "session", s.header.ID, "run", runID, "panic", fmt.Sprint(p))
+// takeHeldLocked takes the records held for the run reporting as
+// runID — the untargeted ones and its own — and those whose run is no
+// longer the turn in flight (it ended without reporting: they go out
+// spanless). The rest stay held. Callers hold s.mu.
+func (s *Session) takeHeldLocked(runID string) (mine, stale []heldRec) {
+	keep := s.heldRecs[:0]
+	for _, h := range s.heldRecs {
+		switch {
+		case h.run == "" || h.run == runID:
+			mine = append(mine, h)
+		case s.inFlight == nil || s.inFlight.RunID() != h.run:
+			stale = append(stale, h)
+		default:
+			keep = append(keep, h)
 		}
-	}()
-	l := s.threadLogger()
-	if l == nil {
-		return
 	}
-	md := core.MetadataFromContext(rctx)
-	for _, h := range held {
-		if !l.Enabled(rctx, log.EnabledParameters{EventName: threadEventName(h.rec.kind)}) {
-			continue
-		}
-		s.emitThread(rctx, l, runID, md, h.rec)
+	s.heldRecs = slices.Clip(keep)
+	if len(s.heldRecs) == 0 {
+		s.heldRecs = nil
 	}
+	return mine, stale
 }
 
 // reportEntryLocked is the adoption hook (adoptLocked): every entry the
@@ -443,9 +456,19 @@ func (s *Session) reportReceiptLocked(e ReceiptEntry) {
 		}
 	}
 	f := map[string]any{"entry": e.ID, "receipt_id": id, "state": e.Status, "input": kind}
-	if e.Status == ReceiptAccepted {
-		f["minted_run"] = e.RunID
-		if n, ok := runSeq(s.header.ID, e.RunID); ok {
+	minted := ""
+	switch {
+	case e.Status == ReceiptAccepted:
+		minted = e.RunID
+	case e.Status == ReceiptQueued && s.steerMint != nil && s.steerMint.id == e.ID:
+		// A steer takes a turn number as it is accepted (newTurnLocked):
+		// delivered, it runs inside the busy turn and that number never
+		// names a run — the receipt says which number it took.
+		minted = s.steerMint.RunID()
+	}
+	if minted != "" {
+		f["minted_run"] = minted
+		if n, ok := runSeq(s.header.ID, minted); ok {
 			f["turn"] = n
 		}
 	}
@@ -566,26 +589,35 @@ func (s *Session) lastRunOnPathLocked(path []Entry) string {
 // compaction or a branch summary makes is a chat span — the agent's
 // TracerProvider, the thread scope — carrying the call's model and
 // usage and weft.chat.role = summarizer, filed under the run the
-// session names (the turn in flight, else the last run; with none,
-// held and opened, with its recorded times, under the next run that
-// reports). Usage is what the provider reported; it is never folded
-// into a run's own usage — a reader adds it as the summarizer's.
+// session names (the turn in flight, else the last run; with none, or
+// when the turn in flight has not reported yet — the pre-run trigger's
+// compaction — held and opened, with its recorded times, under that run
+// when it reports). Usage is what the provider reported; it is never
+// folded into a run's own usage — a reader adds it as the summarizer's
+// (obsdb's SessionRow.SummarizerUsage).
 
 const (
 	summarizerRole = "summarizer"
 	attrChatRole   = "weft.chat.role"
 )
 
-// summarizerCall is one recorded summarizer model call.
+// summarizerCall is one recorded summarizer model call. run is the
+// run a held call waits for ("" for the next run that reports).
 type summarizerCall struct {
 	start, end time.Time
 	model      core.ModelInfo
 	usage      core.Usage
 	err        error
+	run        string
 }
 
-// recordSummarizer files a summarizer call's span. Callers must not
-// hold s.mu.
+// recordSummarizer files a summarizer call's span: under the run the
+// session names now — a child of its invoke_agent span when the
+// Session saw it. A call with no run to name, or one filed under the
+// turn in flight before that run reported (the pre-run trigger's
+// compaction), is held and opened, with its recorded times, under the
+// run when it reports (seeRun) — never as a trace of its own. Callers
+// must not hold s.mu.
 func (s *Session) recordSummarizer(c summarizerCall) {
 	var (
 		run   string
@@ -596,8 +628,9 @@ func (s *Session) recordSummarizer(c summarizerCall) {
 	)
 	s.locked(func() {
 		run = s.concernedRunLocked()
-		if run == "" {
+		if run == "" || s.awaitsSightLocked(run) {
 			if s.closing != stateSealed {
+				c.run = run
 				s.heldSummaries = append(s.heldSummaries, c)
 				held = true
 			}
@@ -609,10 +642,11 @@ func (s *Session) recordSummarizer(c summarizerCall) {
 			md = s.unseenRunMetadataLocked(n)
 		}
 	})
+	if held {
+		return
+	}
 	if run == "" {
-		if !held {
-			s.agent.Logger().Debug("thread: summarizer span dropped: no run to file it under", "session", s.header.ID)
-		}
+		s.agent.Logger().Debug("thread: summarizer span dropped: no run to file it under", "session", s.header.ID)
 		return
 	}
 	ctx := context.Background()
@@ -621,6 +655,24 @@ func (s *Session) recordSummarizer(c summarizerCall) {
 		md = sight.md
 	}
 	s.emitSummarizer(ctx, run, md, c)
+}
+
+// takeHeldSummariesLocked splits the held summarizer calls as
+// takeHeldLocked splits the records. Callers hold s.mu.
+func (s *Session) takeHeldSummariesLocked(runID string) (mine, stale []summarizerCall) {
+	var keep []summarizerCall
+	for _, c := range s.heldSummaries {
+		switch {
+		case c.run == "" || c.run == runID:
+			mine = append(mine, c)
+		case s.inFlight == nil || s.inFlight.RunID() != c.run:
+			stale = append(stale, c)
+		default:
+			keep = append(keep, c)
+		}
+	}
+	s.heldSummaries = keep
+	return mine, stale
 }
 
 // emitSummarizer opens and ends one summarizer span with its recorded
@@ -684,17 +736,24 @@ func (s *Session) emitSummarizer(ctx context.Context, runID string, md map[strin
 	span.End(trace.WithTimestamp(c.end))
 }
 
-// emitHeldSummaries opens the held summarizer spans under the run that
-// reports on rctx.
-func (s *Session) emitHeldSummaries(rctx context.Context, runID string, held []summarizerCall) {
+// emitHeldSummaries opens held summarizer spans: mine under the run
+// reporting on rctx, stale ones — their run ended without reporting —
+// under their own run, spanless, with stale's metadata (md[i]).
+func (s *Session) emitHeldSummaries(rctx context.Context, runID string, mine, stale []summarizerCall, staleMD []map[string]string) {
+	ctx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(rctx))
 	md := core.MetadataFromContext(rctx)
-	for _, c := range held {
-		s.emitSummarizer(rctx, runID, md, c)
+	for _, c := range mine {
+		s.emitSummarizer(ctx, runID, md, c)
+	}
+	for i, c := range stale {
+		s.emitSummarizer(context.Background(), c.run, staleMD[i], c)
 	}
 }
 
-// identityMetadataLocked is identityMetadata with s.mu held: the
-// session's identity pairs for the run minted as turn n.
+// identityMetadataLocked is the session's identity pairs for the run
+// minted as turn n (the turnSeq its id carries), without the caller's
+// — runMetadata's base and the fallback for a run this Session did not
+// see. Callers hold s.mu.
 func (s *Session) identityMetadataLocked(n int) map[string]string {
 	md := map[string]string{
 		"weft.session.id": s.header.ID,

@@ -1,6 +1,6 @@
 {
   "case": "thread_approvals",
-  "description": "a thread session (thread.WithRunMetadata arena.batch, a public id) through every decision path, content on: a deny with a reason, a signature under a key the ring does not hold (approval.refused, reason bad_signature), alice's signed approval (via signed, key_id), an approve-always minting a grant (grant.mint via always under the parking run), a label; each approval.request and approval.decision filed under the run that parked its call, who and the reason under content; the session's run metadata in every run row's meta",
+  "description": "a thread session (thread.WithRunMetadata arena.batch, a public id) through all four decision outcomes, content on: a deny with a reason, a signature under a key the ring does not hold (approval.refused, reason bad_signature), alice's signed approval (via signed, key_id; its resumed call's execute_tool span approved_by user), an approve-always minting a grant (grant.mint via always under the parking run), a resolve (outcome resolve, its content under content), a label; each approval.request and approval.decision filed under the run that parked its call, who and the reason under content; the session's run metadata in every run row's meta",
   "runs": [
     {
       "id": "01K00000000000000000000001-t1",
@@ -20,7 +20,7 @@
       },
       "started": "2026-10-01T09:30:00Z",
       "finished": "2026-10-01T09:30:00.009Z",
-      "last_seen": "2026-10-01T09:30:00.068Z",
+      "last_seen": "2026-10-01T09:30:00.089Z",
       "status": "succeeded",
       "steps": 1,
       "pending": 1,
@@ -34,7 +34,7 @@
       "message_count": 2,
       "delta_count": 0,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 5,
       "messages_emitted": 2,
@@ -93,7 +93,7 @@
       "message_count": 3,
       "delta_count": 1,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 4,
       "messages_emitted": 3,
@@ -143,7 +143,7 @@
       },
       "started": "2026-10-01T09:30:00.012Z",
       "finished": "2026-10-01T09:30:00.03Z",
-      "last_seen": "2026-10-01T09:30:00.071Z",
+      "last_seen": "2026-10-01T09:30:00.092Z",
       "status": "succeeded",
       "steps": 1,
       "pending": 1,
@@ -157,7 +157,7 @@
       "message_count": 2,
       "delta_count": 0,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 5,
       "messages_emitted": 2,
@@ -216,7 +216,7 @@
       "message_count": 3,
       "delta_count": 1,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 6,
       "messages_emitted": 3,
@@ -238,7 +238,8 @@
           "step": 0,
           "seq": 1,
           "status": "ok",
-          "approved": true
+          "approved": true,
+          "approved_by": "user"
         }
       ],
       "holes": []
@@ -262,7 +263,7 @@
       },
       "started": "2026-10-01T09:30:00.024Z",
       "finished": "2026-10-01T09:30:00.053Z",
-      "last_seen": "2026-10-01T09:30:00.074Z",
+      "last_seen": "2026-10-01T09:30:00.095Z",
       "status": "succeeded",
       "steps": 1,
       "pending": 1,
@@ -276,7 +277,7 @@
       "message_count": 2,
       "delta_count": 0,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 5,
       "messages_emitted": 2,
@@ -323,7 +324,7 @@
       },
       "started": "2026-10-01T09:30:00.03Z",
       "finished": "2026-10-01T09:30:00.066Z",
-      "last_seen": "2026-10-01T09:30:00.075Z",
+      "last_seen": "2026-10-01T09:30:00.066Z",
       "status": "succeeded",
       "steps": 1,
       "stop_reason": "stop",
@@ -336,7 +337,7 @@
       "message_count": 3,
       "delta_count": 1,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 6,
       "messages_emitted": 3,
@@ -358,9 +359,121 @@
           "step": 0,
           "seq": 1,
           "status": "ok",
-          "approved": true
+          "approved": true,
+          "approved_by": "user"
         }
       ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t7",
+      "trace_id": "7ace0000000000000000000000000007",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "public_id": "pub_thread_approvals",
+      "turn": 7,
+      "resumed_by": "01K00000000000000000000001-t8",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "arena.batch": "b_contract",
+        "weft.session.title": "Refund desk"
+      },
+      "started": "2026-10-01T09:30:00.036Z",
+      "finished": "2026-10-01T09:30:00.076Z",
+      "last_seen": "2026-10-01T09:30:00.097Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 5,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
+      "request_count": 1,
+      "events_emitted": 5,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "track_parcel",
+          "call_id": "p1",
+          "step": 0,
+          "seq": 1,
+          "status": "unset",
+          "pending_source": "approval"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "01K00000000000000000000001-t8",
+      "trace_id": "7ace0000000000000000000000000008",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "public_id": "pub_thread_approvals",
+      "turn": 8,
+      "resumed_from": "01K00000000000000000000001-t7",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "arena.batch": "b_contract",
+        "weft.approval.actor": "agent-7",
+        "weft.session.title": "Refund desk"
+      },
+      "started": "2026-10-01T09:30:00.042Z",
+      "finished": "2026-10-01T09:30:00.087Z",
+      "last_seen": "2026-10-01T09:30:00.098Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 3,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 3,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
       "holes": []
     }
   ],
@@ -369,7 +482,7 @@
       "id": "01K00000000000000000000001",
       "public_id": "pub_thread_approvals",
       "agent": "support",
-      "turns": 6,
+      "turns": 8,
       "title": "Refund desk",
       "first_prompt": "Refund A-1002 in full, please."
     }
@@ -383,6 +496,8 @@
     "01K00000000000000000000001-t5 approval.request none {\"args_sha256\":\"6dfbe69de7cb7d90cbcaa7c9d3ded05946effca5cb9fd400251ec1c6b7624fd1\",\"call_id\":\"e1\",\"entry\":\"e_thread_approvals_0029\",\"session\":\"01K00000000000000000000001\",\"tool\":\"send_email\"}",
     "01K00000000000000000000001-t5 approval.decision full {\"always\":true,\"call_id\":\"e1\",\"content\":{\"who\":\"agent-7\"},\"entry\":\"e_thread_approvals_0031\",\"outcome\":\"approve\",\"request_entry\":\"e_thread_approvals_0029\",\"session\":\"01K00000000000000000000001\",\"via\":\"user\"}",
     "01K00000000000000000000001-t5 grant.mint none {\"args\":1,\"call_id\":\"e1\",\"entry\":\"e_thread_approvals_0032\",\"grant_id\":\"e_thread_approvals_0032\",\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"tool\":\"send_email\",\"via\":\"always\"}",
-    "01K00000000000000000000001-t6 label none {\"entry\":\"e_thread_approvals_0038\",\"name\":\"case-closed\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_approvals_0037\"}"
+    "01K00000000000000000000001-t7 approval.request none {\"args_sha256\":\"6dfbe69de7cb7d90cbcaa7c9d3ded05946effca5cb9fd400251ec1c6b7624fd1\",\"call_id\":\"p1\",\"entry\":\"e_thread_approvals_0041\",\"session\":\"01K00000000000000000000001\",\"tool\":\"track_parcel\"}",
+    "01K00000000000000000000001-t7 approval.decision full {\"call_id\":\"p1\",\"content\":{\"content\":\"in transit, arriving Friday\",\"who\":\"agent-7\"},\"entry\":\"e_thread_approvals_0043\",\"outcome\":\"resolve\",\"request_entry\":\"e_thread_approvals_0041\",\"session\":\"01K00000000000000000000001\",\"via\":\"user\"}",
+    "01K00000000000000000000001-t8 label none {\"entry\":\"e_thread_approvals_0049\",\"name\":\"case-closed\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_approvals_0048\"}"
   ]
 }

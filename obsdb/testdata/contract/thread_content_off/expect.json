@@ -1,6 +1,6 @@
 {
   "case": "thread_content_off",
-  "description": "the thread_approvals session through a content-off destination: every thread record's content object stripped (weft.content stripped where it carried one, none where it had none) — who, reasons, the grant's reason — while the ids, enums, the label's name (an app-chosen name is metadata) and the session title (weft.session.title on the label record and the later turns) stay",
+  "description": "the thread_approvals session through a content-off destination: no thread record carries a content object (weft.content none: no destination asked for content, so thread captured none) — no who, reason or resolved content — while the ids, enums, the label's name (an app-chosen name is metadata) and the session title (weft.session.title on the label record and the later turns) stay",
   "runs": [
     {
       "id": "01K00000000000000000000001-t1",
@@ -18,9 +18,9 @@
       "meta": {
         "arena.batch": "b_contract"
       },
-      "started": "2026-10-01T09:35:00Z",
-      "finished": "2026-10-01T09:35:00.005Z",
-      "last_seen": "2026-10-01T09:35:00.041Z",
+      "started": "2026-10-01T09:38:00Z",
+      "finished": "2026-10-01T09:38:00.005Z",
+      "last_seen": "2026-10-01T09:38:00.053Z",
       "status": "succeeded",
       "steps": 1,
       "pending": 1,
@@ -34,7 +34,7 @@
       "message_count": 0,
       "delta_count": 0,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 5,
       "messages_emitted": 0,
@@ -80,9 +80,9 @@
         "arena.batch": "b_contract",
         "weft.approval.actor": "agent-7"
       },
-      "started": "2026-10-01T09:35:00.006Z",
-      "finished": "2026-10-01T09:35:00.011Z",
-      "last_seen": "2026-10-01T09:35:00.011Z",
+      "started": "2026-10-01T09:38:00.006Z",
+      "finished": "2026-10-01T09:38:00.011Z",
+      "last_seen": "2026-10-01T09:38:00.011Z",
       "status": "succeeded",
       "steps": 1,
       "stop_reason": "stop",
@@ -95,7 +95,7 @@
       "message_count": 0,
       "delta_count": 1,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 4,
       "messages_emitted": 0,
@@ -145,9 +145,9 @@
       "meta": {
         "arena.batch": "b_contract"
       },
-      "started": "2026-10-01T09:35:00.012Z",
-      "finished": "2026-10-01T09:35:00.017Z",
-      "last_seen": "2026-10-01T09:35:00.044Z",
+      "started": "2026-10-01T09:38:00.012Z",
+      "finished": "2026-10-01T09:38:00.017Z",
+      "last_seen": "2026-10-01T09:38:00.056Z",
       "status": "succeeded",
       "steps": 1,
       "pending": 1,
@@ -161,7 +161,7 @@
       "message_count": 0,
       "delta_count": 0,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 5,
       "messages_emitted": 0,
@@ -207,9 +207,9 @@
         "arena.batch": "b_contract",
         "weft.approval.actor": "k_alice"
       },
-      "started": "2026-10-01T09:35:00.018Z",
-      "finished": "2026-10-01T09:35:00.025Z",
-      "last_seen": "2026-10-01T09:35:00.025Z",
+      "started": "2026-10-01T09:38:00.018Z",
+      "finished": "2026-10-01T09:38:00.025Z",
+      "last_seen": "2026-10-01T09:38:00.025Z",
       "status": "succeeded",
       "steps": 1,
       "stop_reason": "stop",
@@ -222,7 +222,7 @@
       "message_count": 0,
       "delta_count": 1,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 6,
       "messages_emitted": 0,
@@ -244,7 +244,8 @@
           "step": 0,
           "seq": 1,
           "status": "ok",
-          "approved": true
+          "approved": true,
+          "approved_by": "user"
         }
       ],
       "holes": [
@@ -268,9 +269,9 @@
         "arena.batch": "b_contract",
         "weft.session.title": "Refund desk"
       },
-      "started": "2026-10-01T09:35:00.024Z",
-      "finished": "2026-10-01T09:35:00.031Z",
-      "last_seen": "2026-10-01T09:35:00.047Z",
+      "started": "2026-10-01T09:38:00.024Z",
+      "finished": "2026-10-01T09:38:00.031Z",
+      "last_seen": "2026-10-01T09:38:00.059Z",
       "status": "succeeded",
       "steps": 1,
       "pending": 1,
@@ -284,7 +285,7 @@
       "message_count": 0,
       "delta_count": 0,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 5,
       "messages_emitted": 0,
@@ -331,9 +332,9 @@
         "weft.approval.actor": "agent-7",
         "weft.session.title": "Refund desk"
       },
-      "started": "2026-10-01T09:35:00.03Z",
-      "finished": "2026-10-01T09:35:00.039Z",
-      "last_seen": "2026-10-01T09:35:00.048Z",
+      "started": "2026-10-01T09:38:00.03Z",
+      "finished": "2026-10-01T09:38:00.039Z",
+      "last_seen": "2026-10-01T09:38:00.039Z",
       "status": "succeeded",
       "steps": 1,
       "stop_reason": "stop",
@@ -346,7 +347,7 @@
       "message_count": 0,
       "delta_count": 1,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
-      "catalog_hash": "3255e31b91351cb68ce1ee1287c541ea84b754c13889304d8424b90105cce30f",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
       "request_count": 1,
       "events_emitted": 6,
       "messages_emitted": 0,
@@ -368,9 +369,125 @@
           "step": 0,
           "seq": 1,
           "status": "ok",
-          "approved": true
+          "approved": true,
+          "approved_by": "user"
         }
       ],
+      "holes": [
+        "stripped"
+      ]
+    },
+    {
+      "id": "01K00000000000000000000001-t7",
+      "trace_id": "7ace0000000000000000000000000007",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "public_id": "pub_thread_content_off",
+      "turn": 7,
+      "resumed_by": "01K00000000000000000000001-t8",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "arena.batch": "b_contract",
+        "weft.session.title": "Refund desk"
+      },
+      "started": "2026-10-01T09:38:00.036Z",
+      "finished": "2026-10-01T09:38:00.045Z",
+      "last_seen": "2026-10-01T09:38:00.061Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 5,
+      "message_count": 0,
+      "delta_count": 0,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
+      "request_count": 1,
+      "events_emitted": 5,
+      "messages_emitted": 0,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "track_parcel",
+          "call_id": "p1",
+          "step": 0,
+          "seq": 1,
+          "status": "unset",
+          "pending_source": "approval"
+        }
+      ],
+      "holes": [
+        "stripped"
+      ]
+    },
+    {
+      "id": "01K00000000000000000000001-t8",
+      "trace_id": "7ace0000000000000000000000000008",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "public_id": "pub_thread_content_off",
+      "turn": 8,
+      "resumed_from": "01K00000000000000000000001-t7",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "arena.batch": "b_contract",
+        "weft.approval.actor": "agent-7",
+        "weft.session.title": "Refund desk"
+      },
+      "started": "2026-10-01T09:38:00.042Z",
+      "finished": "2026-10-01T09:38:00.051Z",
+      "last_seen": "2026-10-01T09:38:00.062Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 0,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 0,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
       "holes": [
         "stripped"
       ]
@@ -381,7 +498,7 @@
       "id": "01K00000000000000000000001",
       "public_id": "pub_thread_content_off",
       "agent": "support",
-      "turns": 6,
+      "turns": 8,
       "title": "Refund desk",
       "content_off": true
     }
@@ -395,6 +512,8 @@
     "01K00000000000000000000001-t5 approval.request none {\"args_sha256\":\"6dfbe69de7cb7d90cbcaa7c9d3ded05946effca5cb9fd400251ec1c6b7624fd1\",\"call_id\":\"e1\",\"entry\":\"e_thread_content_off_0029\",\"session\":\"01K00000000000000000000001\",\"tool\":\"send_email\"}",
     "01K00000000000000000000001-t5 approval.decision none {\"always\":true,\"call_id\":\"e1\",\"entry\":\"e_thread_content_off_0031\",\"outcome\":\"approve\",\"request_entry\":\"e_thread_content_off_0029\",\"session\":\"01K00000000000000000000001\",\"via\":\"user\"}",
     "01K00000000000000000000001-t5 grant.mint none {\"args\":1,\"call_id\":\"e1\",\"entry\":\"e_thread_content_off_0032\",\"grant_id\":\"e_thread_content_off_0032\",\"scope\":\"session\",\"session\":\"01K00000000000000000000001\",\"tool\":\"send_email\",\"via\":\"always\"}",
-    "01K00000000000000000000001-t6 label none {\"entry\":\"e_thread_content_off_0038\",\"name\":\"case-closed\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_content_off_0037\"}"
+    "01K00000000000000000000001-t7 approval.request none {\"args_sha256\":\"6dfbe69de7cb7d90cbcaa7c9d3ded05946effca5cb9fd400251ec1c6b7624fd1\",\"call_id\":\"p1\",\"entry\":\"e_thread_content_off_0041\",\"session\":\"01K00000000000000000000001\",\"tool\":\"track_parcel\"}",
+    "01K00000000000000000000001-t7 approval.decision none {\"call_id\":\"p1\",\"entry\":\"e_thread_content_off_0043\",\"outcome\":\"resolve\",\"request_entry\":\"e_thread_content_off_0041\",\"session\":\"01K00000000000000000000001\",\"via\":\"user\"}",
+    "01K00000000000000000000001-t8 label none {\"entry\":\"e_thread_content_off_0049\",\"name\":\"case-closed\",\"session\":\"01K00000000000000000000001\",\"target\":\"e_thread_content_off_0048\"}"
   ]
 }

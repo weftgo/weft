@@ -492,6 +492,34 @@ func ExampleResumeOf() {
 	// Refunded.
 }
 
+// ApproveBy resumes a parked call exactly as Approve does and names the
+// approval's provenance on the call's execute_tool span: here a standing
+// grant (weft.tool.approved_by grant, weft.grant.id g_refunds) — the
+// shape weft/thread passes when its decision chain approved the call.
+func ExampleApproveBy() {
+	refund := core.Tool("refund", "Refund an order.", func(context.Context, struct{}) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "refund"}),
+		wefttest.Say("Refunded."),
+	), refund)
+
+	parked, err := agt.Generate(context.Background(), core.Prompt("refund order 42"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	res, err := agt.Generate(context.Background(),
+		core.Messages(parked.Messages...), core.ApproveBy("c1", "grant", "g_refunds"),
+		core.ResumeOf(parked.ID))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Text())
+	// Output:
+	// Refunded.
+}
+
 // The loop's coded failures are exported contract strings. A denied
 // call renders DENIED whether the approval boundary refused it (here,
 // on resume) or mw.Allow did — one vocabulary for the model; the same

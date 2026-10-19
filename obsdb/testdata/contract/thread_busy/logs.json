@@ -6089,6 +6089,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -6098,6 +6104,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -6175,6 +6187,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -6184,6 +6202,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -6255,6 +6279,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -6264,6 +6294,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -6329,6 +6365,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -6338,6 +6380,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -6403,6 +6451,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -6412,6 +6466,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -6495,6 +6555,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -6504,6 +6570,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -6569,6 +6641,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -6578,6 +6656,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -6649,6 +6733,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -6658,6 +6748,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -6747,6 +6843,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -6756,6 +6858,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -6821,6 +6929,12 @@
                   }
                 },
                 {
+                  "key": "weft.session.branch",
+                  "value": {
+                    "stringValue": "e_thread_busy_0037"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"
@@ -6830,6 +6944,12 @@
                   "key": "weft.turn",
                   "value": {
                     "stringValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.turn.parent",
+                  "value": {
+                    "stringValue": "7"
                   }
                 },
                 {
@@ -6873,15 +6993,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t1"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
                   }
                 },
                 {
@@ -6904,7 +7024,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"content\":{\"text\":\"Focus only on the EU region.\"},\"entry\":\"e_thread_busy_0004\",\"input\":\"steer\",\"kind\":\"receipt\",\"receipt_id\":\"e_thread_busy_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"queued\"}"
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"content\":{\"text\":\"Focus only on the EU region.\"},\"entry\":\"e_thread_busy_0004\",\"input\":\"steer\",\"kind\":\"receipt\",\"minted_run\":\"01K00000000000000000000001-t2\",\"receipt_id\":\"e_thread_busy_0004\",\"session\":\"01K00000000000000000000001\",\"state\":\"queued\",\"turn\":2}"
               },
               "eventName": "weft.thread.receipt",
               "flags": 1,
@@ -6923,15 +7043,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t1"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t1"
                   }
                 },
                 {
@@ -6973,15 +7093,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t3"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t3"
                   }
                 },
                 {
@@ -7004,7 +7124,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"content\":{\"text\":\"this steer will be dropped\"},\"entry\":\"e_thread_busy_0012\",\"input\":\"steer\",\"kind\":\"receipt\",\"receipt_id\":\"e_thread_busy_0012\",\"session\":\"01K00000000000000000000001\",\"state\":\"queued\"}"
+                "stringValue": "{\"at\":\"2026-10-01T09:00:00Z\",\"content\":{\"text\":\"this steer will be dropped\"},\"entry\":\"e_thread_busy_0012\",\"input\":\"steer\",\"kind\":\"receipt\",\"minted_run\":\"01K00000000000000000000001-t4\",\"receipt_id\":\"e_thread_busy_0012\",\"session\":\"01K00000000000000000000001\",\"state\":\"queued\",\"turn\":4}"
               },
               "eventName": "weft.thread.receipt",
               "flags": 1,
@@ -7023,15 +7143,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t3"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t3"
                   }
                 },
                 {
@@ -7073,15 +7193,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t3"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t3"
                   }
                 },
                 {
@@ -7123,15 +7243,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t6"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t6"
                   }
                 },
                 {
@@ -7173,15 +7293,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t6"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t6"
                   }
                 },
                 {
@@ -7223,15 +7343,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t8"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
                   }
                 },
                 {
@@ -7273,15 +7393,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t8"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
                   }
                 },
                 {
@@ -7323,15 +7443,15 @@
                   }
                 },
                 {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "01K00000000000000000000001-t8"
-                  }
-                },
-                {
                   "key": "weft.content",
                   "value": {
                     "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "01K00000000000000000000001-t8"
                   }
                 },
                 {

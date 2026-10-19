@@ -616,6 +616,41 @@ func TestSpansResumedCalls(t *testing.T) {
 	}
 }
 
+// ApproveBy: the approved call's execute_tool span names who or what
+// approved it (weft.tool.approved_by) and the grant that decided
+// (weft.grant.id); a plain Approve carries neither.
+func TestSpansApproveByProvenance(t *testing.T) {
+	tp := newRecProvider()
+	gated := core.Tool("gated", "Needs a human.", func(context.Context, struct{}) (string, error) {
+		return "ran", nil
+	}, core.RequireApproval())
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "gated", ID: "g1"}, wefttest.Call{Name: "gated", ID: "g2"}),
+		wefttest.Say("done")), core.TracerProvider(tp), gated)
+	res, err := agt.Generate(context.Background(), core.Prompt("x"))
+	if err != nil || len(res.Pending) != 2 {
+		t.Fatalf("res=%v err=%v, want two pending calls", res, err)
+	}
+	if _, err := agt.Generate(context.Background(), core.Messages(res.Messages...),
+		core.ApproveBy("g1", "grant", "e_grant_1"), core.Approve("g2")); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]map[string]string{}
+	tp.mu.Lock()
+	for _, s := range tp.spans {
+		if a := s.attrsMap(); s.name == "execute_tool gated" && a["weft.tool.approved"] == "true" {
+			got[a["gen_ai.tool.call.id"]] = a
+		}
+	}
+	tp.mu.Unlock()
+	if a := got["g1"]; a["weft.tool.approved_by"] != "grant" || a["weft.grant.id"] != "e_grant_1" {
+		t.Errorf("g1's span = %v, want approved_by grant and grant id e_grant_1", a)
+	}
+	if a, ok := got["g2"]; !ok || a["weft.tool.approved_by"] != "" || a["weft.grant.id"] != "" {
+		t.Errorf("g2's span = %v (ok=%v), want approved with no provenance", a, ok)
+	}
+}
+
 // S8: the option replaces the global provider for one agent; nothing
 // here — or anywhere in the module's tests — calls
 // otel.SetTracerProvider.

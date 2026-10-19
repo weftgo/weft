@@ -498,6 +498,8 @@ span and every log record of the run (ADR 0024):
 | `weft.public_id` | the session's public id, when created with `thread.PublicID` |
 | `weft.session.forked_from` | `<session>#<entry>`, on a fork |
 | `weft.session.parent`, `weft.session.parent_call` | the parent session and delegating call, on a pool child |
+| `weft.turn.parent` | the turn whose line this turn continues, on the first turn after a navigation (`Branch`, `Uncompact`, a rollback) took the leaf off the newest line; `0` when that line holds no turn |
+| `weft.session.branch` | the branch the turn's line descends from: the label on the entry the navigation went to, else the navigation's entry id |
 
 The session's keys win over a caller's colliding
 `thread.RunOptions(weft.Metadata(...))`; other keys pass through. A
@@ -532,7 +534,10 @@ summary's cost (`summarizer_model`, `summarizer_usage`), and the
 summarizer's model call itself — every compaction's and every
 `SummarizeLeft` branch summary's — is a `chat` span with
 `weft.chat.role = summarizer` and its usage, filed under the turn in
-flight or the last run, never folded into that run's own usage.
+flight or the last run (a compaction the pre-run trigger makes waits for
+that turn's run to start and opens under it), never folded into that
+run's own usage: `obsdb`'s session row counts it apart, as
+`SummarizerUsage`.
 
 The state log, as records. Beside the marker, the session reports every
 state fact it writes as a record of kind `thread` (event name
@@ -541,18 +546,28 @@ decisions (with `via`, the key id, the grant that decided) and refused
 signatures; grants minted, used (with the use count), revoked and lapsed
 (`MaxUses` reached, or an `Expiry` the chain noticed passed); the busy
 policies' receipts (a steer queued, delivered, deferred or dropped; a
-send accepted, with the turn it was minted as); interrupts (the turn
+send accepted, with the turn it was minted as — and a queued steer's
+turn number too, the one no run will carry); interrupts (the turn
 that felled the run) and rewinds (a rollback, an overflow re-run's
 branch-back); branches (with a summary's cost), uncompacts, labels,
 pins, forks; and `thread/pool` delegations and their settlements. Each
 is filed under the run it concerns — the run the entry names, else the
 turn in flight, else the last run on the leaf's line; with none yet
-(grants minted before the first turn) held for the next run, dropped at
-`Close` with a Debug line. Ids, enums and counts always; who decided,
+(grants minted before the first turn), or while the turn in flight has
+not reported, held for that run; what is still held at `Close` goes out
+then, marked `held` — with no run, filed under none and keyed by the
+session id. The session decides each record under its lock and one
+emitter goroutine per Session hands it to the provider, in order, so a
+slow or blocking destination never holds the session (`Pending`,
+`Entries`, `Decide` stay prompt); `Close` waits for the emitter, bounded
+by its context. Ids, enums and counts always; who decided,
 reasons, a steer's text and a summary only where content is on (the
 agent's `weft.Content`, else the destination's policy — a content-off
 destination receives the record without them); a label's name is
-metadata and always rides. The file stays the record: the exported copy
+metadata and always rides. A resumed call's `execute_tool` span names
+who approved it — `weft.tool.approved_by` `user`, `grant` (with
+`weft.grant.id`), `approver`, `quorum` or `policy` (`weft.ApproveBy`).
+The file stays the record: the exported copy
 is an index, not evidence (ADR 0021 §5), and an Observability
 destination that drops one changes nothing the session does.
 

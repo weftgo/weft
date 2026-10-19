@@ -1585,7 +1585,61 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		end := page.Sessions[len(page.Sessions)-1]
 		page.NextBefore, page.NextBeforeID = &end.LastSeen, end.ID
 	}
+	if err := d.fillSummarizerUsage(ctx, page.Sessions, q.PublicID); err != nil {
+		return obsdb.SessionPage{}, err
+	}
 	return page, nil
+}
+
+// fillSummarizerUsage sets each session row's SummarizerUsage: the
+// summed usage of the summarizer chat spans (weft.chat.role summarizer)
+// under the session's runs — RunId narrowed through weft_runs by
+// session (and pub's runs when set, the rows' own scope), the spans
+// read once each (spanDedup's key) — the SQLite backend's rule. One
+// read for the page.
+func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, pub string) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(rows)+1)
+	for _, r := range rows {
+		args = append(args, r.ID)
+	}
+	scope := ""
+	if pub != "" {
+		scope = " AND r.PublicID = ? AND r.PublicID != ''"
+		args = append(args, pub)
+	}
+	tok := func(k string) string { return "sum(toInt64OrZero(SpanAttributes['" + k + "']))" }
+	rs, err := d.conn.Query(ctx, `SELECT SpanAttributes['weft.session.id'] AS sid, `+
+		tok("gen_ai.usage.input_tokens")+`, `+tok("gen_ai.usage.output_tokens")+`, `+
+		tok("gen_ai.usage.cache_read.input_tokens")+`, `+tok("gen_ai.usage.cache_creation.input_tokens")+`, `+
+		tok("gen_ai.usage.reasoning.output_tokens")+`
+		FROM (SELECT TraceId, SpanId, SpanAttributes FROM otel_traces
+			WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID IN (?`+strings.Repeat(",?", len(rows)-1)+`) AND r.SessionID != ''`+scope+`)
+				AND SpanAttributes['`+obsdb.AttrChatRole+`'] = '`+obsdb.ChatRoleSummarizer+`'
+			LIMIT 1 BY TraceId, SpanId)
+		GROUP BY sid`, args...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rs.Close() }()
+	by := map[string]core.Usage{}
+	for rs.Next() {
+		var id string
+		var u core.Usage
+		if err := rs.Scan(&id, &u.InputTokens, &u.OutputTokens, &u.CachedInputTokens, &u.CacheWriteTokens, &u.ReasoningTokens); err != nil {
+			return err
+		}
+		by[id] = u
+	}
+	if err := rs.Err(); err != nil {
+		return err
+	}
+	for i := range rows {
+		rows[i].SummarizerUsage = by[rows[i].ID]
+	}
+	return nil
 }
 
 // sessionAggs is a session row's aggregates over sessionRuns' rows,
@@ -1744,6 +1798,11 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	}
 	now := time.Now()
 	row.Status = obsdb.DeriveStatus(failed, ok, newestSeen, now)
+	one := []obsdb.SessionRow{row}
+	if err := d.fillSummarizerUsage(ctx, one, ""); err != nil {
+		return obsdb.SessionDetail{}, err
+	}
+	row = one[0]
 	// Every turn (the SQLite backend's rule): a cap here kept the oldest
 	// 500 and silently dropped the newest. A caller that wants pages
 	// reads Runs with RunQuery.SessionID.
@@ -1873,6 +1932,9 @@ var contractKeys = []string{
 	// U12.1 (audit O15): weft/thread's summarizer chat spans' role, a span
 	// attribute (migration 0024's restatement of the traces view).
 	"weft.chat.role",
+	// UX-B-14: an approved call's provenance (core.ApproveBy), span
+	// attributes on execute_tool (the same restatement).
+	"weft.tool.approved_by", "weft.grant.id",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

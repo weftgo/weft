@@ -445,8 +445,9 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // with the whole set, the run cards' seven span facts (u25Keys)
 // appended; 0023 (U14) both views with the whole set, the caller link's
 // two keys (u14Keys) appended; 0024 (U12.1) the traces view with the
-// whole set, the summarizer span's weft.chat.role (u12Keys) appended — a
-// span attribute, so the logs view keeps 0023's.
+// whole set, the summarizer span's weft.chat.role and an approval's
+// weft.tool.approved_by / weft.grant.id (u12Keys) appended — a
+// span attributes, so the logs view keeps 0023's.
 const (
 	adr0028Keys   = 12 + 4 + 1 + 10
 	rawKeys       = 1
@@ -460,7 +461,7 @@ const (
 	u11Keys       = 1
 	u25Keys       = 7
 	u14Keys       = 2
-	u12Keys       = 1
+	u12Keys       = 3
 )
 
 func TestMigrationContractTuple(t *testing.T) {

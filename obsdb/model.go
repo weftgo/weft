@@ -366,7 +366,11 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.subagent.pending":     {},
 	"weft.output.submitted":     {},
 	// U12.1 (audit O15): weft/thread's summarizer chat spans' role.
-	"weft.chat.role":         {},
+	"weft.chat.role": {},
+	// UX-B-14: an approved call's provenance on its execute_tool span
+	// (core.ApproveBy).
+	"weft.tool.approved_by":  {},
+	"weft.grant.id":          {},
 	"weft.tap.panics":        {}, // U32.1: the run's contained observer panics (Problems)
 	"weft.stop.raw":          {},
 	"weft.model.tool_calls":  {},

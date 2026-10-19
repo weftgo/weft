@@ -682,7 +682,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			}
 		default:
 			var retried []string
-			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false, parallelism, parkSet, &records, state.retries)
+			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, nil, parallelism, parkSet, &records, state.retries)
 			for _, name := range retried {
 				state.retries[name]++
 			}
@@ -1031,8 +1031,10 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // A tool marked Sequential is a barrier: the dispatcher waits for the
 // in-flight calls to finish, runs it alone, and resumes. Calls the chain
 // parks with ErrApprovalRequired are returned as pending rather than as
-// results: they had a ToolStart and get no ToolFinish. approved marks
-// calls resumed under an Approve decision.
+// results: they had a ToolStart and get no ToolFinish. approved is the
+// run's decisions when the calls are resumed under them (nil for a
+// step's own calls): an approved call runs with Call.Approved set, and
+// its provenance (ApproveBy) rides its execute_tool span.
 //
 // Every dispatched call carries a nest: how a Subagent handler reports
 // its child run's events (wrapped in Nested, numbered from this run's
@@ -1042,7 +1044,7 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // rec is the run's recorder, told each call's truncation before its
 // ToolFinish is emitted (the tool_finish record's
 // weft.tool.truncated_bytes); nil records nothing.
-func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool, parallelism int, parkSet *parkRule, rec *recorder, retryBase map[string]int) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
+func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved map[string]decision, parallelism int, parkSet *parkRule, rec *recorder, retryBase map[string]int) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
 	outcomes := make([]ToolResultPart, len(calls))
 	parked := make([]bool, len(calls))
 	sem := make(chan struct{}, parallelism)
@@ -1151,7 +1153,9 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			startSeq = s
 			return ToolStart{RunID: runID, Seq: s, CallID: call.ID, Name: call.Name, Args: cloneRaw(call.Args)}
 		})
-		c := Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name, Approved: approved}
+		prov, ok := approved[call.ID]
+		isApproved := ok && prov.approved
+		c := Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name, Approved: isApproved}
 		wg.Add(1)
 		inflight.Add(1)
 		go func() {
@@ -1165,7 +1169,8 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			// and a child run's invoke_agent hangs under it — ended with
 			// the call's outcome, before ToolFinish is emitted so no span
 			// operation runs under emitMu (ADR 0016).
-			callCtx, endTool := a.obs.tool(callCtx, c, startSeq, toolStartFacts{timeout: a.callTimeout(def), queue: queue, contentOff: a.content != nil && !*a.content})
+			callCtx, endTool := a.obs.tool(callCtx, c, startSeq, toolStartFacts{timeout: a.callTimeout(def), queue: queue, contentOff: a.content != nil && !*a.content,
+				approvedBy: prov.by, grantID: prov.grant})
 			var retry bool
 			var callErr error
 			var cut int
@@ -1269,7 +1274,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			approved = append(approved, c)
 		}
 	}
-	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true, cfg.effectiveParallelism(a.parallelism), parkSet, rec, nil)
+	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, cfg.decisions, cfg.effectiveParallelism(a.parallelism), parkSet, rec, nil)
 	byID := make(map[string]ToolResultPart, len(ran))
 	for _, r := range ran {
 		byID[r.CallID] = r

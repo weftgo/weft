@@ -522,6 +522,126 @@ func TestToolStartsInCallOrder(t *testing.T) {
 	}
 }
 
+// The tool-event order rule (AGENTS rule 3; record contract §3): a
+// step's ToolStarts are in call order; each call's ToolFinish follows
+// its own ToolStart; ToolFinishes are in completion order; Seq is the
+// emission order. That is the whole rule — a batch is not fenced. The
+// dispatcher emits a call's ToolStart when that call starts (once it
+// holds a Parallelism slot, past any Sequential barrier) while earlier
+// calls already run, so a fast call's ToolFinish may precede a later
+// call's ToolStart; readers pair a finish with its start by call id,
+// never by "every start of the batch came first". Each case is forced
+// by the loop itself or by a channel, never by timing.
+func TestToolEventOrderRule(t *testing.T) {
+	type tev struct {
+		kind, id string
+		seq      int64
+	}
+	collect := func(t *testing.T, agt *core.Agent, onFinish func(id string)) ([]tev, *core.RunResult) {
+		t.Helper()
+		run := agt.Stream(context.Background(), core.Prompt("x"))
+		var out []tev
+		for ev, err := range run.Events() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch e := ev.(type) {
+			case core.ToolStart:
+				out = append(out, tev{"start", e.CallID, e.Seq})
+			case core.ToolFinish:
+				out = append(out, tev{"finish", e.CallID, e.Seq})
+				if onFinish != nil {
+					onFinish(e.CallID)
+				}
+			}
+		}
+		res, err := run.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 1; i < len(out); i++ {
+			if out[i].seq <= out[i-1].seq {
+				t.Errorf("Seq is not the emission order: %v", out)
+			}
+		}
+		return out, res
+	}
+	render := func(evs []tev) string {
+		var b []string
+		for _, e := range evs {
+			b = append(b, e.kind+":"+e.id)
+		}
+		return strings.Join(b, " ")
+	}
+	resultOrder := func(res *core.RunResult) string {
+		var ids []string
+		for _, m := range res.Messages {
+			for _, p := range m.Content {
+				if r, ok := p.(core.ToolResultPart); ok {
+					ids = append(ids, r.CallID)
+				}
+			}
+		}
+		return strings.Join(ids, " ")
+	}
+	echo := core.Tool("echo", "Echo.", func(_ context.Context, _ struct{}) (string, error) { return "ok", nil })
+
+	// A slot wait: under Parallelism(1) the second call starts only once
+	// the first released its slot — after the first's ToolFinish.
+	t.Run("slot wait", func(t *testing.T) {
+		agt := core.New(wefttest.Script(wefttest.ToolCalls(
+			wefttest.Call{ID: "a", Name: "echo"}, wefttest.Call{ID: "b", Name: "echo"},
+		), wefttest.Say("ok")), core.Parallelism(1), echo)
+		evs, _ := collect(t, agt, nil)
+		if got, want := render(evs), "start:a finish:a start:b finish:b"; got != want {
+			t.Errorf("events = %q, want %q", got, want)
+		}
+	})
+
+	// A barrier: a Sequential tool starts once everything before it is
+	// done, whatever the Parallelism.
+	t.Run("barrier", func(t *testing.T) {
+		bar := core.Tool("bar", "A barrier.", func(_ context.Context, _ struct{}) (string, error) { return "ok", nil }, core.Sequential())
+		agt := core.New(wefttest.Script(wefttest.ToolCalls(
+			wefttest.Call{ID: "a", Name: "echo"}, wefttest.Call{ID: "b", Name: "bar"},
+		), wefttest.Say("ok")), core.Parallelism(4), echo, bar)
+		evs, _ := collect(t, agt, nil)
+		if got, want := render(evs), "start:a finish:a start:b finish:b"; got != want {
+			t.Errorf("events = %q, want %q", got, want)
+		}
+	})
+
+	// Completion order: the first call is held until the stream has
+	// shown the second's ToolFinish, so the finishes arrive b then a
+	// while the starts stay a then b — and the tool message keeps call
+	// order (rule 5: the transcript does not follow the stream).
+	t.Run("completion order", func(t *testing.T) {
+		release := make(chan struct{})
+		held := core.Tool("held", "Waits for its sibling's finish.", func(ctx context.Context, _ struct{}) (string, error) {
+			select {
+			case <-release:
+				return "held", nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		})
+		agt := core.New(wefttest.Script(wefttest.ToolCalls(
+			wefttest.Call{ID: "a", Name: "held"}, wefttest.Call{ID: "b", Name: "echo"},
+		), wefttest.Say("ok")), core.Parallelism(2), held, echo)
+		evs, res := collect(t, agt, func(id string) {
+			if id == "b" {
+				close(release)
+			}
+		})
+		if got, want := render(evs), "start:a start:b finish:b finish:a"; got != want {
+			t.Errorf("events = %q, want %q", got, want)
+		}
+		if got := resultOrder(res); got != "a b" {
+			t.Errorf("tool results = %q, want call order \"a b\"", got)
+		}
+	})
+}
+
 // A tool that never started because the run was canceled produces an
 // error result and no events — never a ToolFinish without a ToolStart.
 func TestCanceledBeforeStartEmitsNoOrphanEvents(t *testing.T) {

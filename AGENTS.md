@@ -620,7 +620,10 @@ ignore it.
    see `weft.Repair`.
 3. **Tools start in call order; results are in call order; events carry
    `Seq`** so streams replay exactly. `Sequential()` = one at a time.
-   Taps (`weft.Tap`) see the same order as `Events()`.
+   Taps (`weft.Tap`) see the same order as `Events()`. A call's
+   `ToolFinish` follows its own `ToolStart`; finishes are in completion
+   order; a batch is not fenced — a fast call's `ToolFinish` may precede
+   a later call's `ToolStart` (pair them by `CallID`).
 4. **Every run has an id.** `RunStart` is the first event; `RunFinish` the
    last of a successful run.
 5. **Model-visible behaviour is a contract** (tool result text, schema,

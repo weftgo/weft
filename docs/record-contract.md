@@ -435,6 +435,19 @@ of their own, so a dropped delta never opens a gap in the event counter.
 A Subagent child's events are its own records under its own run id; the
 parent's `nested` wrapper is never recorded.
 
+**Tool-event order** (AGENTS rule 3, `TestToolEventOrderRule`).
+`weft.event.pos` is the stream's own order, and `seq` follows it. Within
+a step, `tool_start`s are in call order; each call's `tool_finish` comes
+after its own `tool_start`; `tool_finish`es are in completion order. A
+batch is not fenced: a call's `tool_start` is emitted when the call
+starts — once it holds a `Parallelism` slot, past any `Sequential`
+barrier — while earlier calls already run, so a fast call's
+`tool_finish` may precede a later call's `tool_start` (always so under a
+slot wait or a barrier, sometimes under parallelism). A reader pairs a
+`tool_finish` with its `tool_start` by `call_id`, never by position in
+the batch. The transcript's tool message is in call order whatever the
+interleaving.
+
 A run that ended has a `run_finish` (success, or parked) **or** an
 `invoke_agent` span with status `Error` (failure); a run with neither is
 running or interrupted (§6).

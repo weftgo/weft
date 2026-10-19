@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -44,6 +45,9 @@ func TestParkSourceMergesWithParkOn(t *testing.T) {
 	}
 }
 
+// stepTimings matches StepFinish's wall-clock fields in an event's wire JSON.
+var stepTimings = regexp.MustCompile(`"(latency_ms|ttft_ms)":\d+`)
+
 // A nil answer, an empty one and a panicking source park nothing and
 // leave the run as it is without a source: events, transcript and
 // span attributes byte-equal. The panic is one Debug line.
@@ -77,7 +81,9 @@ func TestParkSourceNothingChangesNothing(t *testing.T) {
 				t.Fatal(err)
 			}
 			b, _ := json.Marshal(ev)
-			evs = append(evs, string(b))
+			// Wall-clock timings are the scheduler's, not the source's:
+			// compared as present, never by value.
+			evs = append(evs, stepTimings.ReplaceAllString(string(b), `"$1":N`))
 		}
 		if ran.Load() != 1 {
 			t.Errorf("%s: refund ran %d times, want 1", id, ran.Load())

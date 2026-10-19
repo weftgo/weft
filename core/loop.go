@@ -1022,6 +1022,14 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // live interleaving. A failing tool never cancels its siblings; only
 // ctx does.
 //
+// The event order rule (TestToolEventOrderRule): ToolStarts in call
+// order, each ToolFinish after its own ToolStart, ToolFinishes in
+// completion order. The batch is not fenced — call i's goroutine may
+// emit its ToolFinish before the dispatcher emits call i+1's ToolStart —
+// and must not be: a start waiting on a slot or a barrier can only
+// follow a finish, and a start emitted before its call holds a slot
+// would claim a call had started that had not.
+//
 // The concurrency slot is acquired here, in call order, before the tool's
 // goroutine is spawned. That is what makes "in call order" true: tools
 // start in the order the model requested them, and under Sequential each

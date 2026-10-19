@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -178,15 +179,27 @@ func TestEventAndDeltaRecords(t *testing.T) {
 
 	// The durable sequence, in emission order with contiguous positions.
 	events_rec := lp.ofKind(t, "event")
-	// The two calls run in parallel: both starts precede either finish
-	// (the ordering rule), the finishes in completion order.
-	wantTypes := []string{"run_start", "step_start", "tool_start", "tool_start",
-		"tool_finish", "tool_finish", "step_finish", "step_start", "step_finish", "run_finish"}
+	// The two calls run in parallel, so records 2–5 are the batch's four
+	// tool events under the ordering rule (TestToolEventOrderRule): the
+	// starts in call order, each finish after its own start, the
+	// finishes in completion order — a fast call's finish may precede
+	// the next call's start, so the batch is not "both starts first".
+	wantTypes := []string{"run_start", "step_start", "tool", "tool",
+		"tool", "tool", "step_finish", "step_start", "step_finish", "run_finish"}
 	if len(events_rec) != len(wantTypes) {
 		t.Fatalf("got %d event records (%v), want %d", len(events_rec), typesOf(events_rec), len(wantTypes))
 	}
+	var batch []string // "start:<call>" / "finish:<call>", in record order
 	for i, want := range wantTypes {
-		if got := events_rec[i].attr("weft.event.type"); got != want {
+		got := events_rec[i].attr("weft.event.type")
+		if want == "tool" {
+			switch got {
+			case "tool_start", "tool_finish":
+				batch = append(batch, strings.TrimPrefix(got, "tool_")+":"+events_rec[i].attr("gen_ai.tool.call.id"))
+				want = got
+			}
+		}
+		if got != want {
 			t.Errorf("event record %d type = %q, want %q", i, got, want)
 		}
 		if pos, ok := events_rec[i].intAttr("weft.event.pos"); !ok || pos != int64(i) {
@@ -202,6 +215,17 @@ func TestEventAndDeltaRecords(t *testing.T) {
 		if events_rec[i].severity != wantSev {
 			t.Errorf("event record %d severity = %v, want %v", i, events_rec[i].severity, wantSev)
 		}
+	}
+	// The batch under the rule: one start and one finish per call, the
+	// starts in call order (c_e, c_b), each finish after its own start.
+	// Either interleaving the rule allows is accepted; nothing rests on
+	// the scheduler.
+	switch got := strings.Join(batch, " "); got {
+	case "start:c_e start:c_b finish:c_e finish:c_b",
+		"start:c_e start:c_b finish:c_b finish:c_e",
+		"start:c_e finish:c_e start:c_b finish:c_b":
+	default:
+		t.Errorf("tool events = %q, want the starts in call order and each finish after its own start", got)
 	}
 
 	// Deltas: one text delta from Say, its own counter, contiguous.

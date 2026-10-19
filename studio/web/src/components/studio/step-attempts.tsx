@@ -74,7 +74,7 @@ export function StepHeadline({
       {line ? (
         <span
           data-attempt-line
-          className="rounded-sm border border-thread/40 px-1.5 py-px font-mono text-[10px] text-thread"
+          className="rounded-sm border border-thread/40 px-1.5 py-px font-mono text-[10px] text-thread-ink"
           title="the attempt that answered, of the attempts the model chain made for this step"
         >
           {line}

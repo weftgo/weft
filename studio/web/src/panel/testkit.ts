@@ -207,10 +207,12 @@ export function fakeStudio(routes: Record<string, Route>, meta: Route = META) {
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       inflight++
+      fetches++
       try {
         return await answer(input, init)
       } finally {
         inflight--
+        fetches++
       }
     }
   )
@@ -340,6 +342,8 @@ export class FakeEventSource {
 
 /** Requests the fake Studio has not answered yet. */
 let inflight = 0
+/** Every request asked or answered: idle()'s progress mark. */
+let fetches = 0
 
 /** pause is a plain sleep: for a test that looks at a moment in the
  * middle of something (a request still in flight). */
@@ -349,6 +353,9 @@ export const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
  * fake Studio in flight and every panel's shadow DOM unchanged over
  * several polls. A fixed sleep is a bet on the machine's load; this
  * is what the tests actually wait for. */
+/** Polls of nothing moving, a request held, that idle() takes as rest. */
+const HELD_STILL = 30
+
 export async function idle(): Promise<void> {
   const snapshot = () =>
     Array.from(document.querySelectorAll("weft-devtools"))
@@ -356,7 +363,14 @@ export async function idle(): Promise<void> {
       .join("\u0000")
   let last = snapshot()
   let still = 0
-  for (let i = 0; i < 300 && still < 4; i++) {
+  // A request a test holds (a never-answering route) keeps inflight
+  // up for good: once nothing else moves — no request asked or
+  // answered, the DOM and the draws still — for HELD_STILL polls, that
+  // is rest too (U34-fix3: the 300-poll cap it otherwise sat out was
+  // 3 s idle and past vitest's 5 s timeout under load).
+  let held = 0
+  let mark = fetches
+  for (let i = 0; i < 300 && still < 4 && held < HELD_STILL; i++) {
     await pause(10)
     const now = snapshot()
     // A draw still scheduled (a live draw waits out LIVE_DRAW_MS) is
@@ -366,7 +380,10 @@ export async function idle(): Promise<void> {
         typeof (n as Partial<WeftDevtools>).quiet === "function" &&
         !(n as WeftDevtools).quiet()
     )
-    still = inflight === 0 && !drawing && now === last ? still + 1 : 0
+    const quietDom = !drawing && now === last
+    still = inflight === 0 && quietDom ? still + 1 : 0
+    held = inflight > 0 && quietDom && fetches === mark ? held + 1 : 0
+    mark = fetches
     last = now
   }
 }

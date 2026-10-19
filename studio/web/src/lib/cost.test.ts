@@ -22,7 +22,10 @@ import {
   atLeastCost,
   costCell,
   costCellWords,
+  costNotRead,
   costView,
+  COST_NOT_READ_HERE,
+  COST_NOT_READ_YET,
   delegatedView,
   formatUSD,
   LOST_CELL_REASON,
@@ -565,5 +568,23 @@ describe("the scripted chip (UX-C-42)", () => {
     expect(isScripted({ model: { provider: "weft/runtime", name: "x" } })).toBe(
       false
     )
+  })
+})
+
+describe("a row not read (U34-fix3)", () => {
+  it("'not read yet' only while a read is in flight, else 'not read on this page'", () => {
+    // sumCost spells COST_NOT_READ_YET's words out (the panel's bundle).
+    expect(sumCost([undefined]).title).toBe(COST_NOT_READ_YET)
+    expect(costNotRead(true)).toMatchObject({
+      known: false,
+      text: "—",
+      title: COST_NOT_READ_YET,
+    })
+    expect(costNotRead(false)).toMatchObject({
+      known: false,
+      text: "—",
+      title: COST_NOT_READ_HERE,
+    })
+    expect(COST_NOT_READ_HERE).not.toContain("yet")
   })
 })

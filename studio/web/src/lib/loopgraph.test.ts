@@ -25,6 +25,7 @@ import { fold } from "./events"
 import type { FoldedRun } from "./events"
 import { ALL_RUNS } from "./run-tree"
 import { waterfallRows } from "./waterfall"
+import { measure, withinBudget } from "@/test/budget"
 import { treeRows } from "./waterfall-tree"
 import {
   build,
@@ -255,7 +256,22 @@ describe("rw.support-desk", () => {
 describe("rw.tool-storm", () => {
   it("the fan-out step lights its six parallel calls; the others are dim", () => {
     const { g } = graphOf(STORM)
-    expect(counts(g)[0]).toEqual(["get_weather", "×6"])
+    // The seed's shape (U34-fix3): eight calls in one step — get_weather
+    // ×6 in two waves of three, the Sequential ledger_append after them,
+    // the capped forecast_report last — one node per tool, in call order.
+    expect(counts(g)).toEqual([
+      ["get_weather", "×6"],
+      ["ledger_append", "×1"],
+      ["forecast_report", "×1"],
+    ])
+    expect(g.tools[0].calls.map((c) => c.key.split(":").at(-1))).toEqual([
+      "call_1",
+      "call_2",
+      "call_3",
+      "call_4",
+      "call_5",
+      "call_6",
+    ])
     const lit = litBy(g, 0)
     expect([...lit].sort()).toEqual([
       "t:forecast_report",
@@ -362,22 +378,23 @@ describe("the budget (§3.5)", () => {
       loopInsights(g)
       return g
     }
-    // The best of 25 samples, warmed: the spec's 50 ms is the model's in
-    // isolation (standalone 9–18 ms); a parallel suite's load spike or a
-    // GC pause lands on some samples, never on all 25 (U34-fix2: the
-    // best of five once read 50.47 ms under a parallel vitest run). The
-    // work measured is the page's.
+    // The spec's 50 ms is the model's in isolation (standalone 9–18
+    // ms). Under a loaded machine (three suites and go test at once)
+    // a wall-clock 50 read 96 ms, so the check is calibrated
+    // (src/test/budget.ts): the model and a fixed baseline workload
+    // timed interleaved, best of 25 each; the model / baseline ratio
+    // under 50 / the baseline's standalone ms — in isolation exactly
+    // "under 50 ms", under load both sides scale — and an absolute
+    // 250 ms ceiling. The work measured is the page's.
     let g = once()
-    let ms = Infinity
-    for (let i = 0; i < 25; i++) {
-      const t0 = performance.now()
-      g = once()
-      ms = Math.min(ms, performance.now() - t0)
-    }
+    const budget = measure(() => (g = once()), 50)
     expect(g.steps).toHaveLength(1000)
     expect(g.tools.map((t) => t.calls.length)).toEqual([250, 250, 250, 250])
-    expect(ms).toBeLessThan(50)
-  })
+    const v = withinBudget(budget)
+    expect(v.ok, v.why).toBe(true)
+    // The test's own timeout is not the budget: 50 samples (work and
+    // baseline) under a loaded machine outlast vitest's 5 s default.
+  }, 60_000)
 })
 
 describe("loopSig (the run page's rebuild key, U9.2-fix W7's rule)", () => {

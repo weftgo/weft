@@ -309,7 +309,10 @@ export function AppShell() {
       >
         {SKIP_TO_CONTENT}
       </a>
-      <Sidebar collapsible="icon">
+      {/* The sidebar is the app's navigation landmark (U34-fix3): its
+          wordmark, links, toggles and version lines sit in one, as the
+          page sits in <main> (axe's region rule). */}
+      <Sidebar collapsible="icon" role="navigation" aria-label="Studio">
         <SidebarHeader>
           <div className="flex h-12 items-center px-2">
             <WeftWordmark />

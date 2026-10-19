@@ -123,6 +123,7 @@ export function LoopGraphView({
   depth,
   openRun,
   offeredHole,
+  offeredError,
   costOf,
 }: {
   graph: LoopGraph
@@ -145,6 +146,10 @@ export function LoopGraphView({
   /** offered null: why the tools offered and never called are unknown
    * (a not_recorded badge); absent while the catalog is being read. */
   offeredHole?: HoleMark
+  /** The requests read failed: its words, drawn as the attempts pane
+   * draws a failed read (no badge: the A3 table's causes are a
+   * record's, not a read's). */
+  offeredError?: string
   /** A run's own cost (capability "pricing"; absent without it). */
   costOf?: (run: string) => CostView | undefined
 }) {
@@ -724,6 +729,14 @@ export function LoopGraphView({
           <span className="text-muted-foreground">{NEVER_CALLED}:</span>
           <HoleBadge {...offeredHole} />
         </div>
+      ) : graph.offered === null && offeredError ? (
+        <p
+          className="font-mono text-[11px] text-status-bad"
+          data-loop-offered-hole
+          data-read-failed
+        >
+          {offeredError}
+        </p>
       ) : null}
       {graph.steps.length ? (
         <div

@@ -56,7 +56,7 @@
   /* brand tokens (plan §5.2) */
   --thread: #ff5c2b; /* the one accent; never a fill for large areas */
   --thread-ink: #d13c10; /* accent text at small sizes */
-  --faint: #a39c8f; /* eyebrow labels, seq gutter */
+  --faint: #716a5c; /* eyebrow labels, seq gutter: text, so ≥ 4.5:1 on paper and the quiet panels (U34-fix3; palette.test.ts) */
   --code-bg: #161310; /* code windows are dark in both themes, like the site */
   --code-ink: #ece6d6;
   --code-mut: #8d887b;
@@ -115,7 +115,7 @@
 
   --thread: #ff5c2b;
   --thread-ink: #ff7d52;
-  --faint: #6e6759;
+  --faint: #948f82; /* ≥ 4.5:1 on background and card (palette.test.ts) */
   --code-bg: #1b1815;
   --code-ink: #ece6d6;
   --code-mut: #8d887b;

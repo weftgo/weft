@@ -228,6 +228,20 @@ export function costSortNote(
   return `${plural(n, "run")} with no known cost: listed last, newest first — not sorted by cost${more ? " · the loaded rows" : ""}`
 }
 
+/** A run's row is being read (a document in flight): its cost comes. */
+export const COST_NOT_READ_YET = "a run's cost is not read yet"
+/** A run's row this page never reads (U34-fix3): a panel token's hidden
+ * child, a grandchild at the agents level under no expanded child —
+ * "yet" would promise a read that never comes. */
+export const COST_NOT_READ_HERE =
+  "a run's cost is not read on this page — open the run for its own"
+
+/** costNotRead is the "—" a missing row draws: COST_NOT_READ_YET while
+ * a read that would carry it is in flight, else COST_NOT_READ_HERE. */
+export function costNotRead(inFlight: boolean): CostView {
+  return view(null, false, inFlight ? COST_NOT_READ_YET : COST_NOT_READ_HERE)
+}
+
 /** sumCost totals runs' whole bills (a playground variant's runs):
  * unknown — with the first reason — when any run is missing or
  * unknown; an empty list is unknown too (nothing to total). */
@@ -239,6 +253,8 @@ export function sumCost(
   // Every run a scripted model's $0: the total is "$0 · scripted" too.
   let scripted = true
   for (const r of rows) {
+    // COST_NOT_READ_YET's words, spelt out: a shared const would be
+    // hoisted into the panel's bundle (cost.test.ts holds them equal).
     if (!r) return view(null, false, "a run's cost is not read yet")
     if ("text" in r) {
       // An already drawn figure (lostCellCost): known adds, unknown is the total's reason.

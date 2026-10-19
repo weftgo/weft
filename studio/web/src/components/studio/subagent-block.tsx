@@ -178,10 +178,7 @@ export function SubagentBlock({
             data-slot="icon"
             className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
           />
-          <span
-            className="font-mono text-[11px] tracking-[0.08em] text-muted-foreground uppercase"
-            title={CHILD_TITLES[kind]}
-          >
+          <span className="eyebrow" title={CHILD_TITLES[kind]}>
             {eyebrow}
           </span>{" "}
           <span
@@ -264,9 +261,7 @@ export function SubagentBlock({
                 data-child-step={step.index}
               >
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-[11px] tracking-[0.08em] text-muted-foreground uppercase">
-                    step {step.index}
-                  </span>
+                  <span className="eyebrow">step {step.index}</span>
                   {step.finish ? (
                     <span className="font-mono text-[11px] text-muted-foreground">
                       {step.finish.reason}

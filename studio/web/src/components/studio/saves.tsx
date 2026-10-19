@@ -153,10 +153,12 @@ export function KeepAsPrompt({
   const { caps } = useCapabilities()
   const qc = useQueryClient()
   const propose = !!agent && mayProposeWith(caps, studioToken())
+  // Ink with the thread as its underline (U34-fix3): the thread reads
+  // 2.95:1 on paper and thread-ink 4.45:1 on a subagent block's tint.
   return (
     <button
       type="button"
-      className="font-mono text-[11px] text-thread hover:underline"
+      className="font-mono text-[11px] text-foreground underline decoration-thread-ink underline-offset-2 hover:decoration-2"
       data-keep-prompt
       title={
         !agent

@@ -32,6 +32,7 @@ import { FakeEventSource } from "@/test/fake-event-source"
 import { withLiveGrant } from "@/test/fake-live-grant"
 import { FakeStudio, golden, pagedEvents } from "@/test/fake-studio"
 import { scrollTo, stubScroll } from "@/test/scroll"
+import { loadFactor } from "@/test/budget"
 
 configure({ asyncUtilTimeout: 30_000 })
 vi.setConfig({ testTimeout: 120_000 })
@@ -438,7 +439,10 @@ describe("the fold's live tail is a bounded ring (plan H2)", () => {
     const t0 = performance.now()
     for (; pos <= 5_000; pos++) es.emit("record", frame(pos), String(pos))
     const took = performance.now() - t0
-    expect(took).toBeLessThan(10)
+    // 10 ms on an idle machine, scaled by the load a fixed baseline
+    // reads right after (src/test/budget.ts, U34-fix3): one stateful
+    // frame cannot be re-sampled, so the bound moves with the machine.
+    expect(took).toBeLessThan(10 * loadFactor())
 
     await waitFor(() => expect(result.current.lastPos).toBe(5_000))
     const s = result.current
@@ -588,7 +592,8 @@ describe("the run tree's time scale over a long run (U8.2-fix)", () => {
     const ms = performance.now() - t
     expect(wf.rows).toHaveLength(40_001)
     // Measured ~130 ms (bun); the quadratic build took ~6 s. The bound
-    // is generous: the machine may be shared.
-    expect(ms).toBeLessThan(2_000)
+    // is generous and scaled by the load a fixed baseline reads (the
+    // machine may be shared; src/test/budget.ts, U34-fix3).
+    expect(ms).toBeLessThan(2_000 * loadFactor())
   })
 })

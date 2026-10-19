@@ -653,7 +653,7 @@ function SteerBlock({
       data-steer
     >
       <div className="min-w-0 flex-1">
-        <span className="eyebrow text-thread/80">steered · user</span>
+        <span className="eyebrow text-thread-ink">steered · user</span>
         <Editable
           target={
             user

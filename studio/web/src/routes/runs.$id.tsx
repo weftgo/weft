@@ -112,7 +112,7 @@ import {
   UNTIMED_NOTE,
 } from "@/lib/waterfall"
 import type { Scale, WaterfallRow } from "@/lib/waterfall"
-import { costView, sumCost } from "@/lib/cost"
+import { costNotRead, costView, sumCost } from "@/lib/cost"
 import type { HoleMark } from "@/lib/honesty"
 // The ?tree=1 read: the descendant rules too (lib/waterfall-tree.ts).
 import { treeRows as waterfallRows } from "@/lib/waterfall-tree"
@@ -691,15 +691,37 @@ function RunPage() {
   // is off with a not_recorded badge, and ?level=agents reads the loop.
   const level: GraphLevel =
     search.level === "agents" && haveTime ? "agents" : "loop"
+  // Still waiting for late spans (U34-fix3): inside the 30 s after the
+  // end (endSeen) with no invoke_agent span read yet, the spans read
+  // polls (above) — an empty answer then is not "recorded none". A
+  // timer renders once when the window closes, the poll having stopped.
+  const spansAt = endSeen.current.id === id ? endSeen.current.at : null
+  const [, setSpansWaitOver] = useState(0)
+  const spansAwaited =
+    spansAt !== null &&
+    Date.now() - spansAt <= INVOKE_AGENT_WAIT_MS &&
+    !hasInvokeAgent(spans.data?.spans, id)
+  useEffect(() => {
+    if (!spansAwaited) return
+    const t = setTimeout(
+      () => setSpansWaitOver((n) => n + 1),
+      spansAt + INVOKE_AGENT_WAIT_MS - Date.now() + 1
+    )
+    return () => clearTimeout(t)
+  }, [spansAwaited, spansAt])
   // Why the agents level is off (U34-fix2): "recorded none" only on a
   // read that succeeded — the spans came back empty on a run that is
-  // over, or the run has no trace to read; a failed read says so;
-  // nothing while it is being read (or the run still runs).
-  const levelHole: HoleMark | undefined = haveTime
-    ? undefined
-    : spans.isError
+  // over and no late span is awaited, or the run has no trace to read;
+  // a failed read says so in words (levelError), no badge; nothing
+  // while it is being read, polled for late spans, or the run runs.
+  const levelError: string | undefined =
+    !haveTime && spans.isError
       ? spansUnreadable(spans.error.message)
-      : (spans.isSuccess && runStatus !== "running") ||
+      : undefined
+  const levelHole: HoleMark | undefined =
+    haveTime || spans.isError
+      ? undefined
+      : (spans.isSuccess && runStatus !== "running" && !spansAwaited) ||
           (run.isSuccess && !run.data.trace_id)
         ? NO_SPANS_LEVEL
         : undefined
@@ -1224,35 +1246,58 @@ function RunPage() {
       if (r && !out.has(r.id)) out.set(r.id, r)
     return out
   }, [pricing, run.data, childDocs])
+  // The documents being read (U34-fix3): a missing row is "not read
+  // yet" only while the read that would carry it is in flight — the
+  // root's document, its own expanded document or its parent's; any
+  // other (a panel token's hidden child, an agents-level grandchild
+  // under no expanded child) is "not read on this page".
+  const docsInFlight = useMemo(() => {
+    const out = new Set<string>()
+    if (!run.data) out.add(id)
+    if (onTree)
+      fetchRuns.forEach((r, i) => {
+        if (!childDocs[i]) out.add(r)
+      })
+    return out
+  }, [run.data, id, onTree, fetchRuns, childDocs])
   const costOf = useCallback(
     (r: string) => {
       const row = costRows.get(r)
-      return row ? costView(row) : undefined
+      if (row) return costView(row)
+      const parent = /^(.+)\/\d+\/[^/]+$/.exec(r)?.[1]
+      return costNotRead(
+        docsInFlight.has(r) ||
+          (parent !== undefined && docsInFlight.has(parent))
+      )
     },
-    [costRows]
+    [costRows, docsInFlight]
   )
   const costOfRuns = useCallback(
     (rs: readonly string[]) => {
-      // A row not read yet is sumCost's "—" with its reason (U34-fix2):
+      // A row not read is "—" with its reason (U34-fix2, U34-fix3):
       // drawn, never nothing.
       const vs = rs.map(costOf)
       if (!vs.length) return undefined
-      return vs.length === 1 ? (vs[0] ?? sumCost(vs)) : sumCost(vs)
+      return vs.length === 1 ? vs[0] : sumCost(vs)
     },
     [costOf]
   )
   // The tools offered and never called, unknown: why (the A3 table's
   // not_recorded) — nothing while the requests are being read; a failed
   // read says so, never "no record carried a catalog" (U34-fix2).
+  // A failed read is words, not a badge (U34-fix3: the A3 table's gap
+  // is a dropped record): offeredError, as the attempts pane says one.
+  const offeredError: string | undefined =
+    ownLoop && requestsCapable && requestsQ.isError
+      ? offeredUnreadable(requestsQ.error.message)
+      : undefined
   const offeredHole: HoleMark | undefined = !ownLoop
     ? OFFERED_UNREAD
     : !requestsCapable
       ? { hole: "not_recorded", cause: "not_served" }
-      : requestsQ.isError
-        ? offeredUnreadable(requestsQ.error.message)
-        : requestsQ.isPending
-          ? undefined
-          : OFFERED_NONE
+      : requestsQ.isError || requestsQ.isPending
+        ? undefined
+        : OFFERED_NONE
   // run_finish.pending by its ids: a new array per event batch, the
   // same calls.
   const pendingKey = atPlayhead.pending.map((p) => p.id).join(",")
@@ -1680,6 +1725,14 @@ function RunPage() {
                     <span data-level-hole>
                       <HoleBadge {...levelHole} />
                     </span>
+                  ) : levelError ? (
+                    <span
+                      className="text-status-bad"
+                      data-level-hole
+                      data-read-failed
+                    >
+                      {levelError}
+                    </span>
                   ) : null}
                 </div>
               ) : null}
@@ -1828,6 +1881,7 @@ function RunPage() {
                         selectedNode={nodeOfKey(loop, selKey, selGraphRow)}
                         step={loopStep}
                         offeredHole={offeredHole}
+                        offeredError={offeredError}
                         costOf={pricing ? costOf : undefined}
                         onSelect={select}
                         onClear={() =>

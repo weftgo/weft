@@ -239,19 +239,52 @@ describe("open in Studio under a playground panel token (setup C)", () => {
       expect(escaped).toEqual([])
     })
 
-  it("the slow-answer timer is cleared on disconnect: no stale note on reconnect", async () => {
-    studioWith(() => new Promise(() => {}))
-    const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
+  // The slow-answer timer under fake timers (U34-fix3): a real 1.1 s
+  // sleep plus settle — which waits out the never-answered hand-off's
+  // in-flight request for its whole 3 s — flaked past 5 s under load.
+  // The click arms the timer synchronously, so with setTimeout faked
+  // after mount it is a fake one; the control proves it fires.
+  const clickFake = (el: WeftDevtools) =>
     expand(el).dispatchEvent(
       new MouseEvent("click", { bubbles: true, cancelable: true })
     )
-    el.remove()
-    await new Promise((r) => setTimeout(r, 1100))
-    document.body.appendChild(el)
-    await settle()
-    expect($(el, ".weft-dock")?.textContent ?? "").not.toContain(
-      "open in Studio:"
-    )
+  it("the slow-answer note: past 1 s with no answer, while connected (the control)", async () => {
+    studioWith(() => new Promise(() => {}))
+    const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      clickFake(el)
+      vi.advanceTimersByTime(900)
+      expect($(el, ".weft-dock")?.textContent ?? "").not.toContain(
+        "open in Studio:"
+      )
+      vi.advanceTimersByTime(200)
+      expect($(el, ".weft-dock")?.textContent ?? "").toContain(
+        "open in Studio:"
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("the slow-answer timer is cleared on disconnect: no stale note on reconnect", async () => {
+    studioWith(() => new Promise(() => {}))
+    const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      clickFake(el)
+      // Removed and back inside the second: a timer left armed would
+      // fire on the reconnected panel (its redraw at connect would hide
+      // one fired while it was out). Past the second, nothing says it.
+      el.remove()
+      document.body.appendChild(el)
+      vi.advanceTimersByTime(1100)
+      expect($(el, ".weft-dock")?.textContent ?? "").not.toContain(
+        "open in Studio:"
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("an answer landing after removal opens no tab and leaves no note", async () => {

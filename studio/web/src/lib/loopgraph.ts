@@ -661,14 +661,11 @@ export const OFFERED_NONE: HoleMark = {
     "no request record of this run carried a tool catalog: the tools it offered and never called are not drawn",
 }
 /** The request record's read failed: the catalog is not known — never
- * "none" (U34-fix2). The A3 table words no read failure (its causes are
- * the record's), so the badge is gap — missing from this page — with the
- * read's own error and the fix: read again. */
-export const offeredUnreadable = (error: string): HoleMark => ({
-  hole: "gap",
-  reason: `the request record could not be read (${error}): the tools offered and never called are not known, not none`,
-  fix: "reload the page to read it again; weft doctor checks the Studio",
-})
+ * "none" (U34-fix2). Said as the attempts pane says a failed read
+ * (U34-fix3): plain words in text-status-bad, no badge — the A3 table's
+ * gap means a dropped record, not a failed HTTP read. */
+export const offeredUnreadable = (error: string): string =>
+  `the request record could not be read: ${error} — the tools offered and never called are not known, not none; reload the page to read it again`
 export const INSIGHTS_LABEL = "insights"
 export const STEPS_LABEL = "steps"
 export const PLAY = "▶ play"
@@ -714,12 +711,10 @@ export const NO_SPANS_LEVEL: HoleMark = {
 
 /** The run's spans could not be read: the agents level is off, and
  * whether the run recorded any is not known (U34-fix2) — said as the
- * read's failure, never NO_SPANS_LEVEL's "recorded none". */
-export const spansUnreadable = (error: string): HoleMark => ({
-  hole: "gap",
-  reason: `the run's spans could not be read (${error}): the agents level is the call graph of the run's spans — not known to be none`,
-  fix: "reload the page to read them again; weft doctor checks the Studio",
-})
+ * read's failure, never NO_SPANS_LEVEL's "recorded none"; plain words,
+ * no badge (U34-fix3, as offeredUnreadable). */
+export const spansUnreadable = (error: string): string =>
+  `the run's spans could not be read: ${error} — the agents level is off, not known to be none; reload the page to read them again`
 
 /** loopSig is what the loop reads off a fold, as a key: its steps'
  * finishes, calls, results and children, its parks and its end — the

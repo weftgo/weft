@@ -28,7 +28,7 @@ import { keyRows, OLD_KEY_NOTE, resolveSel, traceRuns } from "@/lib/trace-sel"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { LoadFailed } from "@/components/studio/empty-state"
-import { JsonTree } from "@/components/studio/json-tree"
+import { CODE_SURFACE, JsonTree } from "@/components/studio/json-tree"
 import { ReplayDrawer } from "@/components/studio/replay-drawer"
 import type { ReplayRequest } from "@/components/studio/replay-drawer"
 import { Waterfall } from "@/components/studio/waterfall"
@@ -484,7 +484,11 @@ function PartView({ part }: { part: ChatPart }) {
             {part.id ? <span className="text-faint"> · {part.id}</span> : null}
           </summary>
           <div className="pt-1">
-            <JsonTree value={part.arguments ?? null} openDepth={2} />
+            <JsonTree
+              value={part.arguments ?? null}
+              openDepth={2}
+              className={CODE_SURFACE}
+            />
           </div>
         </details>
       )
@@ -497,7 +501,11 @@ function PartView({ part }: { part: ChatPart }) {
           {typeof part.response === "string" ? (
             <div className="text-xs whitespace-pre-wrap">{part.response}</div>
           ) : (
-            <JsonTree value={part.response ?? null} openDepth={2} />
+            <JsonTree
+              value={part.response ?? null}
+              openDepth={2}
+              className={CODE_SURFACE}
+            />
           )}
         </div>
       )

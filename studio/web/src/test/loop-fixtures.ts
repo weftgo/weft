@@ -29,6 +29,8 @@ export interface FxCall {
   /** error.type (an error result). */
   error?: string
   content?: string
+  /** The result was capped (weft.tool.truncated_bytes): bytes cut. */
+  truncated?: number
   /** Parked for approval: weft.tool.pending, a tool_start and no
    * tool_finish. */
   pending?: boolean
@@ -167,6 +169,9 @@ export function build(run: FxRun): Built {
               ...(c.error
                 ? { "error.type": c.error }
                 : { "weft.tool.result_bytes": (c.content ?? "ok").length }),
+              ...(c.truncated
+                ? { "weft.tool.truncated_bytes": c.truncated }
+                : {}),
             },
             c.error ? "error" : "ok"
           ),
@@ -370,7 +375,25 @@ export const DESK_RESUME: FxRun = {
   ],
 }
 
-const CITIES = ["Paris", "Tokyo", "Lima", "Cairo", "Oslo", "Sydney"]
+// rw.tool-storm (realworld.go rwToolStorm, agent weather-desk) as the
+// offline seed records it (U34-fix3, read off a fresh seed): one step
+// of eight calls, call_1…call_8 in call order — get_weather ×6 under
+// Parallelism(3) (two waves of three, 150 ms each: call_1–3 at once,
+// call_4–6 as the first wave ends), then ledger_append (Sequential: a
+// barrier, it starts once every get_weather ended and runs alone,
+// 50 ms), then forecast_report (MaxResultBytes(2000): its 28,200-byte
+// report capped, weft.tool.truncated_bytes 26,200) — and a final
+// answer at step 1, final_answer. (stress.event-storm's agent "storm",
+// one tool `bit` ×100, is another scenario.)
+const CITIES: [string, string][] = [
+  ["Paris", "18°C cloudy"],
+  ["Tokyo", "24°C clear"],
+  ["Lima", "16°C mist"],
+  ["Cairo", "33°C sunny"],
+  ["Oslo", "7°C rain"],
+  ["Sydney", "21°C windy"],
+]
+const FORECAST_CAPPED = `${"Oslo day forecast: mild, light wind, 10% rain. ".repeat(42).slice(0, 2000)}\n…[truncated 26200 bytes]`
 export const STORM: FxRun = {
   id: "r_storm",
   agent: "weather-desk",
@@ -378,16 +401,34 @@ export const STORM: FxRun = {
   steps: [
     {
       calls: [
-        ...CITIES.map((city) => ({
+        ...CITIES.map(([city, weather], i) => ({
           name: "get_weather",
           args: { city },
           ms: 150,
+          lag: i < 3 ? 0 : 150.6,
+          content: JSON.stringify({ city, weather }),
         })),
-        { name: "ledger_append", args: { entry: "weather sweep" }, ms: 50 },
-        { name: "forecast_report", args: { city: "Oslo" } },
+        {
+          name: "ledger_append",
+          args: { entry: "weather sweep for 6 cities" },
+          ms: 51,
+          lag: 301.6,
+          content: "ledger entry recorded",
+        },
+        {
+          name: "forecast_report",
+          args: { city: "Oslo" },
+          ms: 0.1,
+          lag: 352.6,
+          content: FORECAST_CAPPED,
+          truncated: 26200,
+        },
       ],
     },
-    { calls: [], text: "Paris 18°C, Tokyo 24°C…" },
+    {
+      calls: [],
+      text: "Paris 18°C, Tokyo 24°C, Lima 16°C, Cairo 33°C, Oslo 7°C, Sydney 21°C.",
+    },
   ],
 }
 

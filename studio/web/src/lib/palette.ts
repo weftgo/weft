@@ -5,8 +5,9 @@
 // the panel's values and names, for each, the Studio variable it
 // equals; palette.test.ts parses styles.css and fails on any drift.
 // A token with no Studio name is the panel's own: faint text that
-// clears 4.5:1 (Studio's --faint is for eyebrow labels and does not),
-// the shortcuts overlay's scrim, the dock's shadow. ROLE (U1) names, for
+// clears 4.5:1 (Studio's --faint clears it too since U34-fix3, a shade
+// apart from the panel's), the shortcuts overlay's scrim, the dock's
+// shadow. ROLE (U1) names, for
 // each status word lib/status.ts draws and the live dot, the one token
 // it is drawn in — and so, through STUDIO_NAMES, Studio's variable: a
 // status reads the same colour on both surfaces, never a literal.

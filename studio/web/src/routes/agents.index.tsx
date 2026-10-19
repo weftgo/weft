@@ -260,7 +260,7 @@ function Proposed({
         <span className="grow" />
         <button
           type="button"
-          className="text-thread hover:underline"
+          className="text-thread-ink hover:underline"
           onClick={() =>
             void copyText(p.instructions).then((ok) =>
               notifySave({ kind: "copy", ok })

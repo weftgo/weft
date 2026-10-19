@@ -50,7 +50,7 @@ export function CompactionMarker({
       data-compaction={session ? "session" : String(c.step ?? "")}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="eyebrow text-thread/80">
+        <span className="eyebrow text-thread-ink">
           {session ? SESSION_LABEL : "compaction"}
         </span>
         <span data-compaction-line className="font-mono">

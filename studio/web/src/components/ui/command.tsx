@@ -44,10 +44,6 @@ function CommandDialog({
 }) {
   return (
     <Dialog {...props}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
       <DialogContent
         className={cn(
           "top-1/3 translate-y-0 overflow-hidden rounded-4xl! p-0",
@@ -55,6 +51,12 @@ function CommandDialog({
         )}
         showCloseButton={showCloseButton}
       >
+        {/* Inside the popup (U34-fix3): outside it the sr-only header
+            rendered on every page, closed, in no landmark (axe region). */}
+        <DialogHeader className="sr-only">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
         {children}
       </DialogContent>
     </Dialog>

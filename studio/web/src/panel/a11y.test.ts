@@ -604,7 +604,10 @@ describe("the axe budget: zero violations", () => {
         // What jsdom cannot judge is said, not passed: both need layout
         // (an exact aria-label = text match is "incomplete" here too).
         for (const id of incomplete) expect(LAYOUT_RULES).toContain(id)
-      })
+        // A whole-panel axe run (the Raw tab's open tree) outlasts
+        // vitest's 5 s default on a loaded machine (U34-fix3): the
+        // budget is the violations, not the clock.
+      }, 30_000)
 })
 
 describe("the audit itself", () => {

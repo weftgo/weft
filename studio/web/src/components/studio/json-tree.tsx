@@ -140,6 +140,11 @@ export function JsonNode({
   )
 }
 
+/** The code window's surface, for a tree drawn outside one (U34-fix3):
+ * the tree's colours are the code window's (--code-*, made for its
+ * dark --code-bg in both themes) and read 1.2:1 on paper. */
+export const CODE_SURFACE = "rounded-md bg-code-bg py-2 pr-3"
+
 export function JsonTree({
   value,
   openDepth = 2,

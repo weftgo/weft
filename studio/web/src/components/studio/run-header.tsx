@@ -257,7 +257,7 @@ function Quote({
         {long ? (
           <button
             type="button"
-            className="ml-2 font-mono text-[11px] text-thread-ink hover:underline"
+            className="ml-2 font-mono text-[11px] text-foreground underline decoration-thread-ink underline-offset-2 hover:decoration-2"
             onClick={() => setOpen((o) => !o)}
           >
             {open ? "less" : `more (${text.length.toLocaleString()} chars)`}

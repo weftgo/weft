@@ -1795,12 +1795,16 @@ node pressed, never two). Selecting the last step's model row (from the
 tree, the drawer or J / K) lights the end node, not the model node: that
 row is the end's — accepted. Unknown offered tools are a `not recorded`
 badge (a child loop's catalog is not read on this page); a failed
-requests read is a `gap` badge with the read's error, never "none". A child loop's scrubber
+requests read is said in words, in the status colour ("… could not be
+read: <error>", as the attempts pane says one; no badge — `gap` is a
+dropped record), never "none". A child loop's scrubber
 selects its own step rows (`s:<run>:<n>`), `?step=` staying the root's.
 A subagent node carries its child run's own cost (lib/cost.ts's words,
 `—` with the reason when unknown; capability `pricing`), on both
-levels; a child row not read yet draws `—` with sumCost's reason ("a
-run's cost is not read yet"), never nothing. `?level=agents` is the call graph (`src/lib/graph.ts`) over
+levels; a child row not read draws `—` with the reason, never nothing:
+"a run's cost is not read yet" while the document that carries it is in
+flight, else "not read on this page" (a panel token's hidden child, an
+agents-level grandchild under no expanded child). `?level=agents` is the call graph (`src/lib/graph.ts`) over
 the same spans: one node per agent (its runs, the slowest, failures,
 tokens when the spans carry them) in call-depth columns, one per MCP
 server (a tool whose request-catalog source starts `mcp`, the run's own
@@ -1808,8 +1812,9 @@ calls; a child run's MCP calls are said not shown, its catalog not read
 here), each edge its call count and slowest call (the slowest, not a
 percentile; an agent node's runs' own cost), a self-call a loop over
 its node; off on a run without spans — a `not recorded` badge only
-when the spans read back empty (or the run has no trace), a `gap` badge
-with the error when the read failed, nothing while it reads; a node
+when the spans read back empty once the 30 s late-spans poll after the
+end is over (or the run has no trace), the read's error in words when
+it failed, nothing while it reads or polls; a node
 selects its first run's row and the selected row lights its node —
 switching scales keeps the selection. Pool children are sessions, not
 runs of the trace: not drawn. The selected row opens the drawer beside

@@ -76,7 +76,7 @@ import {
 import type { StepRequests } from "@/lib/requests"
 import { bytes } from "@/lib/summarize"
 import { HoleBadge } from "@/components/studio/hole-badge"
-import { JsonTree } from "@/components/studio/json-tree"
+import { CODE_SURFACE, JsonTree } from "@/components/studio/json-tree"
 import { WireView } from "@/components/studio/step-wire"
 import { KeepAsPrompt } from "@/components/studio/saves"
 import type { StepPane } from "@/lib/links"
@@ -346,7 +346,7 @@ function PromptView({
         {long ? (
           <button
             type="button"
-            className="font-mono text-[11px] text-thread hover:underline"
+            className="font-mono text-[11px] text-foreground underline decoration-thread-ink underline-offset-2 hover:decoration-2"
             onClick={() => setAll((x) => !x)}
           >
             {all ? "show less" : `show all ${lines.length} lines`}
@@ -454,7 +454,7 @@ function ToolRow({ t }: { t: ToolEntry }) {
         <div className="space-y-1.5 pl-4">
           <p className="text-xs whitespace-pre-wrap">{t.description}</p>
           <ToolChips t={t} />
-          <JsonTree value={t.schema} openDepth={3} />
+          <JsonTree value={t.schema} openDepth={3} className={CODE_SURFACE} />
         </div>
       ) : null}
     </li>
@@ -575,7 +575,7 @@ function MessagesView({
         <div className="space-y-1">
           <button
             type="button"
-            className="flex items-center gap-1 font-mono text-[11px] text-thread-ink hover:underline"
+            className="flex items-center gap-1 font-mono text-[11px] text-foreground underline decoration-thread-ink underline-offset-2 hover:decoration-2"
             aria-expanded={earlier}
             onClick={() => setEarlier((x) => !x)}
           >
@@ -588,7 +588,11 @@ function MessagesView({
           </button>
           {earlier ? (
             <div data-messages-earlier>
-              <JsonTree value={m.before} openDepth={5} />
+              <JsonTree
+                value={m.before}
+                openDepth={5}
+                className={CODE_SURFACE}
+              />
             </div>
           ) : null}
         </div>
@@ -822,7 +826,7 @@ function Mark({
   return (
     <span
       data-mark={mark}
-      className="rounded-sm border border-thread/50 px-1.5 py-px font-mono text-[10px] text-thread"
+      className="rounded-sm border border-thread/50 px-1.5 py-px font-mono text-[10px] text-thread-ink"
       title={title}
     >
       {children}

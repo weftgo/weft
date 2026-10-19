@@ -50,6 +50,8 @@ import { loopGraph } from "@/lib/loopgraph"
 import { ALL_RUNS } from "@/lib/run-tree"
 import { treeRows } from "@/lib/waterfall-tree"
 import * as waterfallTree from "@/lib/waterfall-tree"
+import { BASELINE_MS, measure, withinBudget } from "@/test/budget"
+import { COST_NOT_READ_HERE, COST_NOT_READ_YET } from "@/lib/cost"
 
 // The loop's rows builder, spied (U34-fix2): the page builds its every-
 // child-expanded rows with treeRows({ expanded: ALL_RUNS }); a passthrough.
@@ -91,6 +93,8 @@ function serve(
     spansFail?: boolean
     /** The requests capability, its read answering a 500. */
     requestsFail?: boolean
+    /** Per child run id: its document answers once this settles. */
+    holdDocs?: Record<string, Promise<unknown>>
   } = {}
 ) {
   stubBrowser()
@@ -166,12 +170,15 @@ function serve(
       apiError(500, "internal", "database is locked")
     )
   for (const k of kids)
-    s.on(`GET runs/${k.id}`, {
-      ...row(k, parentOf(k.id)),
-      children: kids
-        .filter((x) => parentOf(x.id) === k.id)
-        .map((x) => row(x, k.id)),
-      holes: [],
+    s.on(`GET runs/${k.id}`, async () => {
+      await opts.holdDocs?.[k.id]
+      return {
+        ...row(k, parentOf(k.id)),
+        children: kids
+          .filter((x) => parentOf(x.id) === k.id)
+          .map((x) => row(x, k.id)),
+        holes: [],
+      }
     })
       .on(`GET runs/${k.id}/events`, paged([]))
       .on(`GET runs/${k.id}/spans`, () => ({
@@ -639,8 +646,11 @@ describe("U34-fix", () => {
   })
 
   it("subagent nodes carry the child run's own cost: known, or — with the reason; the agents level too", async () => {
+    let release = () => {}
+    const held = new Promise<void>((r) => (release = r))
     serve(DIRECTOR, {
       caps: ["pricing"],
+      holdDocs: { [ops]: held },
       rows: {
         [ops]: { cost_usd: 0.0125, cost_known: true, cache: "exact" },
         [`${ops}/0/call_1`]: {
@@ -668,7 +678,17 @@ describe("U34-fix", () => {
     fireEvent.click(
       document.querySelector(`[data-loop-expand="${CSS.escape(ops)}"]`)!
     )
-    // "—" not read yet, until ops-manager's document names its row.
+    // "—" not read yet while ops-manager's document is in flight (the
+    // read that carries its children's rows, U34-fix3)…
+    await waitFor(() =>
+      expect(
+        document.querySelector(
+          "[data-loop-node='t:inventory_specialist'] [data-loop-cost] title"
+        )?.textContent
+      ).toBe(COST_NOT_READ_YET)
+    )
+    // …until it answers and names its row.
+    release()
     await waitFor(() =>
       expect(
         document.querySelector(
@@ -697,15 +717,14 @@ describe("U34-fix", () => {
       document.querySelector("[data-node='a:ops-manager'] [data-graph-cost]")!
         .textContent
     ).toContain("$0.0125")
-    // The grandchild's row is not read with nothing selected under it:
-    // "—" with sumCost's reason (U34-fix2), never nothing, never a guess.
+    // The grandchild's row is not read with nothing selected under it,
+    // and no read in flight would carry it: "—" not read on this page
+    // (U34-fix3), never "yet", never nothing, never a guess.
     const unread = document.querySelector(
       "[data-node='a:inventory-specialist'] [data-graph-cost]"
     )!
     expect(unread.textContent).toContain("—")
-    expect(unread.querySelector("title")!.textContent).toBe(
-      "a run's cost is not read yet"
-    )
+    expect(unread.querySelector("title")!.textContent).toBe(COST_NOT_READ_HERE)
   })
 
   it("the draw's budget: a 1,000-step run's model and render, with CI margin", () => {
@@ -720,15 +739,12 @@ describe("U34-fix", () => {
     }
     const make = () =>
       loopGraph(treeRows(input, "time").rows, r.id, { stoppedBy: "max_steps" })
-    // The model (lib/loopgraph.test.ts's budget): warmed, the best of 25
-    // samples — a parallel run's spike lands on some, never on all.
+    // The model (lib/loopgraph.test.ts's budget): calibrated against a
+    // fixed baseline timed beside it (src/test/budget.ts) — the ratio
+    // the spec's 50 ms implies, plus a 250 ms ceiling — so a loaded
+    // machine slows both sides, never the verdict.
     let g = make()
-    let model = Infinity
-    for (let i = 0; i < 25; i++) {
-      const t0 = performance.now()
-      g = make()
-      model = Math.min(model, performance.now() - t0)
-    }
+    const budget = measure(() => (g = make()), 50)
     const t1 = performance.now()
     render(
       <LoopGraphView
@@ -745,10 +761,13 @@ describe("U34-fix", () => {
     )
     const draw = performance.now() - t1
     expect(document.querySelectorAll("[data-loop-step]")).toHaveLength(1000)
-    expect(model).toBeLessThan(50)
-    // jsdom draws far slower than a browser: a generous bound.
-    expect(draw).toBeLessThan(1500)
-  })
+    const v = withinBudget(budget)
+    expect(v.ok, v.why).toBe(true)
+    // jsdom draws far slower than a browser: a generous bound, scaled
+    // by the load the baseline measured (never below 1,500 ms).
+    expect(draw).toBeLessThan(1500 * Math.max(1, budget.base / BASELINE_MS))
+    // The test's own timeout is not the budget (as loopgraph.test.ts).
+  }, 60_000)
 })
 
 describe("U34-fix2", () => {
@@ -826,16 +845,18 @@ describe("U34-fix2", () => {
     serve(FLAKY, { requestsFail: true })
     renderApp(`/runs/${FLAKY.id}?scale=graph`)
     await waitFor(() => expect(nodes()).toHaveLength(4))
-    const hole = await waitFor(() => {
-      const h = document.querySelector("[data-loop-offered-hole] [data-hole]")
+    // Words in text-status-bad, as the attempts pane says a failed read
+    // — no badge: the A3 table's gap is a dropped record (U34-fix3).
+    const said = await waitFor(() => {
+      const h = document.querySelector("[data-loop-offered-hole]")
       expect(h).not.toBeNull()
       return h!
     })
-    expect(hole.getAttribute("data-hole")).toBe("gap")
-    const words = document.querySelector(
-      "[data-loop-offered-hole]"
-    )!.textContent
-    expect(words).toContain("the request record could not be read")
+    expect(said.hasAttribute("data-read-failed")).toBe(true)
+    expect(said.className).toContain("text-status-bad")
+    expect(said.querySelector("[data-hole]")).toBeNull()
+    const words = said.textContent
+    expect(words).toContain("the request record could not be read: ")
     expect(words).toContain("database is locked")
     expect(words).not.toContain("no request record of this run carried")
   })
@@ -843,14 +864,16 @@ describe("U34-fix2", () => {
   it("the agents level: a failed spans read is a read failure, never 'this run recorded none'", async () => {
     serve(DIRECTOR, { spansFail: true })
     renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
-    const hole = await waitFor(() => {
-      const h = document.querySelector("[data-level-hole] [data-hole]")
+    const said = await waitFor(() => {
+      const h = document.querySelector("[data-level-hole]")
       expect(h).not.toBeNull()
       return h!
     })
-    expect(hole.getAttribute("data-hole")).toBe("gap")
-    const words = document.querySelector("[data-level-hole]")!.textContent
-    expect(words).toContain("the run's spans could not be read")
+    expect(said.hasAttribute("data-read-failed")).toBe(true)
+    expect(said.className).toContain("text-status-bad")
+    expect(said.querySelector("[data-hole]")).toBeNull()
+    const words = said.textContent
+    expect(words).toContain("the run's spans could not be read: ")
     expect(words).toContain("database is locked")
     expect(words).not.toContain("recorded none")
     expect(document.querySelector("[data-call-graph]")).toBeNull()
@@ -865,6 +888,39 @@ describe("U34-fix2", () => {
         document.querySelector("[data-level-hole]")?.textContent
       ).toContain("recorded none")
     )
+  })
+
+  it("the agents level: no 'recorded none' while the page still polls for late spans; said once the 30 s pass", async () => {
+    // A cold open of a run that ended a second ago (the runs list →
+    // click flow): its spans may still be batching (OTLP), so the page
+    // polls them for 30 s after the end — an empty answer inside that
+    // window is not "recorded none" (U34-fix3).
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      serve(DIRECTOR, {
+        spans: false,
+        trace: true,
+        rows: {
+          [DIRECTOR.id]: {
+            finished: new Date(Date.now() - 1000).toISOString(),
+          },
+        },
+      })
+      renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
+      await waitFor(() => expect(nodes().length).toBeGreaterThan(0))
+      // Spans read (empty) at least once, still inside the window.
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(document.querySelector("[data-level-hole]")).toBeNull()
+      // The window closes: the poll stops and the badge says it.
+      await vi.advanceTimersByTimeAsync(30_000)
+      await waitFor(() =>
+        expect(
+          document.querySelector("[data-level-hole]")?.textContent
+        ).toContain("recorded none")
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("subagent nodes not read yet draw — with the reason, never nothing", () => {

@@ -660,7 +660,10 @@ describe("review fixes (session 8)", () => {
     const studio = fakeStudio(r, META_PV)
     const el = await mount()
     click($(el, C2))
-    await settle()
+    // Held, the panel is never at rest: settle() would sit out idle()'s
+    // whole cap (3 s, far longer under load — U34-fix3's flake). Wait
+    // for the held read itself instead: asked, unanswered, no editor.
+    await vi.waitFor(() => expect(studio.gets("runtimes").length).toBe(1))
     expect($(el, 'textarea[data-weft-k="ed:tool_result:1:c2:0"]')).toBeNull()
     release()
     await settle()

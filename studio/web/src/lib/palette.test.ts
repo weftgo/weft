@@ -138,3 +138,63 @@ describe("diff roles (UX-F-20)", () => {
       }
     })
 })
+
+// WCAG 2.x contrast (no library), as panel/theme.test.ts measures it.
+function contrast(a: string, b: string): number {
+  const lum = (hex: string) => {
+    const n = parseInt(hex.slice(1), 16)
+    const [r, g, bl] = [n >> 16, (n >> 8) & 255, n & 255].map((v) => {
+      const c = v / 255
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+    })
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl
+  }
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p)
+  return (x + 0.05) / (y + 0.05)
+}
+/** fg drawn at opacity a over bg: what a bg-x/40 tint is. */
+function over(fg: string, bg: string, a: number): string {
+  const ch = (h: string) =>
+    [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
+  const [f, b] = [ch(fg), ch(bg)]
+  return (
+    "#" +
+    f
+      .map((v, i) =>
+        Math.round(v * a + b[i] * (1 - a))
+          .toString(16)
+          .padStart(2, "0")
+      )
+      .join("")
+  )
+}
+
+describe("Studio's text tokens (U34-fix3): --faint is text", () => {
+  // --faint is the .eyebrow utility's colour and 300-odd text-faint
+  // labels (the run header, step labels, the request's field names, the
+  // sidebar's version lines): text, so 4.5:1 on every surface it sits on
+  // — the page, a card, the quiet panels and sidebar, and the output
+  // card / subagent block's bg-secondary/40 tint. (A hovered row's wash,
+  // sidebar-accent, carries foreground: light's is the line colour.)
+  for (const [theme, sel] of [
+    ["light", ":root"],
+    ["dark", ".dark"],
+  ] as const)
+    it(`${theme}: faint and muted-foreground clear 4.5:1 on every surface`, () => {
+      const s = studioTokens(sel)
+      const surfaces: Record<string, string> = {
+        background: s.background,
+        card: s.card,
+        secondary: s.secondary,
+        sidebar: s.sidebar,
+        "secondary/40 on card": over(s.secondary, s.card, 0.4),
+        "secondary/40 on background": over(s.secondary, s.background, 0.4),
+      }
+      for (const t of ["faint", "muted-foreground"])
+        for (const [name, bg] of Object.entries(surfaces))
+          expect(
+            contrast(s[t], bg),
+            `${theme} --${t} on ${name}`
+          ).toBeGreaterThanOrEqual(4.5)
+    })
+})

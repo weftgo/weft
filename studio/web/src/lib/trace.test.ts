@@ -2,7 +2,7 @@
 // inside their call with the parent's positions, open spans honest.
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import type { EventsPage, WireEvent, Span as TimedSpan } from "./api"
 import { fold } from "./events"
@@ -192,11 +192,30 @@ describe("spansFromTimed (the time axis, S4.7)", () => {
   })
 
   it("handles a trace too large to spread into Math.min", () => {
-    const timed = Array.from({ length: 200_000 }, (_, i) =>
-      span(`s${i}`, "", "work", i, i + 1)
-    )
-    expect(timeDomain(timed)).toEqual([0, 200_000])
-    expect(spansFromTimed(timed)).toHaveLength(200_000)
+    // 200,000 spans once proved it by blowing the engine's argument
+    // limit — and took past 5 s under load (U34-fix3). The same claim,
+    // deterministic: Math.min / Math.max refuse more than 64 arguments
+    // (any spread of the spans would pass thousands), over 5,000 spans.
+    const guard =
+      (f: (...xs: number[]) => number) =>
+      (...xs: number[]) => {
+        if (xs.length > 64)
+          throw new RangeError(`spread of ${xs.length} into Math.min/max`)
+        return f(...xs)
+      }
+    const [realMin, realMax] = [Math.min, Math.max]
+    const min = vi.spyOn(Math, "min").mockImplementation(guard(realMin))
+    const max = vi.spyOn(Math, "max").mockImplementation(guard(realMax))
+    try {
+      const timed = Array.from({ length: 5_000 }, (_, i) =>
+        span(`s${i}`, "", "work", i, i + 1)
+      )
+      expect(timeDomain(timed)).toEqual([0, 5_000])
+      expect(spansFromTimed(timed)).toHaveLength(5_000)
+    } finally {
+      min.mockRestore()
+      max.mockRestore()
+    }
   })
 
   it("keeps unparseable times off the axis instead of NaN", () => {

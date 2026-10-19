@@ -661,7 +661,7 @@ describe("the drawer against a fake Studio", () => {
     )
   })
 
-  it("a parked experiment run offers continue / skip / resolve on its own verbs", async () => {
+  it("a parked experiment run offers approve / deny / resolve on its own verbs", async () => {
     const routes: Record<string, unknown> = {
       ...baseRoutes(),
       "POST playground/runs": { command_id: "cmd_p1", state: "queued" },
@@ -738,11 +738,11 @@ describe("the drawer against a fake Studio", () => {
     const res = $(el, ".weft-xres")
     expect(res?.textContent).toContain("awaiting a decision")
     const cont = all(el, ".weft-xres .weft-btn").find(
-      (b) => b.textContent === "continue"
+      (b) => b.textContent === "approve"
     )
     expect(cont).toBeTruthy()
     expect(
-      all(el, ".weft-xres .weft-btn").some((b) => b.textContent === "skip")
+      all(el, ".weft-xres .weft-btn").some((b) => b.textContent === "deny")
     ).toBe(true)
     expect(
       all(el, ".weft-xres .weft-btn").some((b) => b.textContent === "resolve…")

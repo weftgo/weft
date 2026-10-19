@@ -424,6 +424,8 @@ describe("no panel-only badge strings", () => {
       "DRAWER.derivedNoEvents — the run page's drawer; the panel imports only DRAWER_TAB_LABEL (U10.2)",
     "error-kind:no result recorded: the call was interrupted":
       "REPAIRED_RESULT — core's Repair text, matched to badge a synthesised result (UX-S1-08), not the hole",
+    "decisions:derived from 's pre-step results":
+      "decisionsNote — the run page's decisions note (U13.2): calls derived from the transcript, not the hole",
     "experiment-body:max_tokens must be ":
       "labOverrides — both drawers' option lab (plan F3): the server's refusal, naming the param, not the hole",
   }
@@ -454,7 +456,7 @@ describe("no panel-only badge strings", () => {
   // one of these, by what its line says — none of them a hole.
   const NON_HOLE_BADGES = [
     "element.ts|⚠", // a tool's side-effect class (the drawer)
-    "element.ts|decided:", // the decision taken on a parked call
+    "element.ts|DONE[decided", // the decision taken on a parked call (lib/decisions.ts DONE)
     'element.ts|"parked"', // a parked call (approvals, read-only)
     "element.ts|data-weft-attempts", // the attempt line (lib/attempts)
     "element.ts|request could not be read", // a read error, not a hole

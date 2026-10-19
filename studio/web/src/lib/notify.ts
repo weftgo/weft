@@ -20,6 +20,7 @@ import type { CommandStatus } from "./api"
 import { LIVE_RETRIES } from "./live"
 import { experimentLink, runLink } from "./links"
 import { saveWords } from "./saves"
+import { VERB } from "./decisions"
 import type { SaveOutcome } from "./saves"
 
 export type Notice =
@@ -128,7 +129,7 @@ export function noticeText(n: Notice): { title: string; tone: Tone } {
       }
     case "approve-failed":
       return {
-        title: `approve on run ${n.runID} refused: ${n.message}`,
+        title: `${VERB.approve} on run ${n.runID} refused: ${n.message}`,
         tone: "error",
       }
     case "runtime-connected":
@@ -201,7 +202,7 @@ function actionsOf(n: Notice, id: string): ToastAction[] {
       let sent = false
       return [
         {
-          label: "approve",
+          label: VERB.approve,
           onClick: () => {
             if (sent) return
             sent = true

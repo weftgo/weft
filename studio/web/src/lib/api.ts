@@ -227,8 +227,47 @@ export function nextCursor(
 
 /** GET /api/runs/{id} → RunDetail: the row and the subagent children,
  * joined by parent_call_id — each child's events load lazily. */
+/** One parked call's decision as a resume applied it (U13.2,
+ * studio/decisions.go): outcome approved, denied, resolved, expired or
+ * no_decision; via thread's (user, signed, grant, approver, quorum,
+ * expiry, …) or the span's approved_by; who thread's content.who
+ * (who_hidden for a read token); reason a denial's, else reason_badge
+ * (hidden, not_recorded); at the decision's own time when recorded. */
+export interface DecidedCall {
+  call_id: string
+  name?: string
+  outcome: string
+  via?: string
+  key_id?: string
+  grant_id?: string
+  who?: string
+  who_hidden?: boolean
+  reason?: string
+  reason_badge?: string
+  at?: string
+}
+
+/** The decisions one resume applied to one parked run: run the other
+ * side (the resume on decided, the parked run on resumes), at the
+ * resume's start, actor its weft.approval.actor, source resume_calls or
+ * transcript (derived from the pre-step results), more the calls past
+ * the cap, error a failed read. */
+export interface DecisionDoc {
+  run: string
+  at: string
+  actor?: string
+  source: string
+  calls: DecidedCall[]
+  more?: number
+  error?: string
+}
+
 export interface RunDoc extends RunRow {
   children: RunRow[]
+  /** On a parked run a resume names: each call's decision (U13.2). */
+  decided?: DecisionDoc
+  /** On a resume: the decided calls, drawn before step 0 (U13.2). */
+  resumes?: DecisionDoc
   /** The run's own holes (ADR 0028 §11, api.go's runHoles):
    * not_recorded, interrupted, derived, stripped, gap — each with its
    * reason and fix. Absent from a Studio older than A3. */

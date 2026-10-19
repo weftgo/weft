@@ -2,7 +2,7 @@
 // F4.3) — the panel's approvals block on this surface (§2's parity
 // rule; parity.test.ts holds both to the same rows). An experiment's
 // park is decided on the playground page. The app's own turn takes
-// continue / skip / resolve while meta's debug_scope is own+runtime —
+// approve / deny / resolve while meta's debug_scope is own+runtime —
 // the app set runtime.Sessions — through the same route a playground
 // run's take: 202 + a command, polled to its end, its rejection said
 // verbatim. Otherwise the verbs are drawn refused with the server's
@@ -15,6 +15,19 @@
 // running app turn sits beside (AppSteer). Cancel is never offered on
 // an app turn: the runtime refuses it.
 import { BREAKPOINT } from "@/lib/cards"
+import {
+  DECIDE_FIELD,
+  decidedCall,
+  decisionDetail,
+  decisionLine,
+  decisionsNote,
+  outcomeOf,
+  REASON_HOLE,
+  VERB,
+  VERB_TITLE,
+} from "@/lib/decisions"
+import { HoleBadge } from "@/components/studio/hole-badge"
+import { TONE_TEXT } from "@/lib/status-class"
 import { useEffect, useId, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -30,7 +43,13 @@ import {
   sessionQuery,
   studioToken,
 } from "@/lib/api"
-import type { CommandStatus, RunDoc, SessionDoc } from "@/lib/api"
+import type {
+  CommandStatus,
+  DecidedCall,
+  DecisionDoc,
+  RunDoc,
+  SessionDoc,
+} from "@/lib/api"
 import {
   appTurn,
   appVerbWords,
@@ -48,7 +67,7 @@ import type { AppGateFacts } from "@/lib/honesty"
 import { runLink, sessionLink } from "@/lib/links"
 import { heldError } from "@/lib/query"
 import { canReplay, tokenScopeOf } from "@/lib/replay"
-import { AWAITING } from "@/lib/status"
+import { AWAITING, turnTag } from "@/lib/status"
 
 interface Call {
   id: string
@@ -156,6 +175,7 @@ function useAppVerbs() {
         void qc.invalidateQueries({ queryKey: ["runs"] })
         void qc.invalidateQueries({ queryKey: ["sessions"] })
         void qc.invalidateQueries({ queryKey: ["session"] })
+        void qc.invalidateQueries({ queryKey: ["run"] })
       }
       if (
         st.state === "finished" ||
@@ -170,7 +190,8 @@ function useAppVerbs() {
 }
 
 /** The verb's line under its call (lib/honesty.ts's appVerbWords): a
- * decision reads "decided", a steer "steered". */
+ * decision reads its outcome (approved, denied, resolved), a steer
+ * "steered". */
 function VerbLine({
   v,
   runID,
@@ -204,8 +225,8 @@ function VerbLine({
   )
 }
 
-/** The verbs on one parked call: continue, skip (the text its reason),
- * resolve (the text its result). */
+/** The verbs on one parked call (lib/decisions.ts's VERB): approve,
+ * deny (the text its reason), resolve (the text its result). */
 function DecideRow({
   call,
   onDecide,
@@ -219,37 +240,99 @@ function DecideRow({
       <button
         type="button"
         className="text-faint hover:underline"
-        title="Approve: the handler runs for real"
+        title={VERB_TITLE.approve}
         onClick={() => onDecide("approve", "")}
       >
-        continue
+        {VERB.approve}
       </button>
       <button
         type="button"
         className="text-faint hover:underline"
-        title="Deny: the model sees a denied result (the text is the reason)"
+        title={VERB_TITLE.deny}
         onClick={() => onDecide("deny", text)}
       >
-        skip
+        {VERB.deny}
       </button>
       <button
         type="button"
         className="text-faint hover:underline disabled:opacity-50"
-        title="Resolve: the text is the tool's result, pasted from outside the process"
+        title={VERB_TITLE.resolve}
         disabled={!text}
         onClick={() => onDecide("resolve", text)}
       >
-        resolve…
+        {VERB.resolve}
       </button>
       <input
         className="min-w-24 flex-1 rounded border bg-transparent px-2 py-0.5"
         aria-label={`result or reason for ${call.name}`}
-        placeholder="result to resolve with · reason to skip"
+        placeholder={DECIDE_FIELD}
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
     </div>
   )
+}
+
+/** One decided call's outcome (U13.2, lib/decisions.ts): "✋ denied ·
+ * agent-7 · 'need a photo of the damage' → t2" in its outcome's tone,
+ * the turn a link; a hidden or uncaptured reason its badge; via / key /
+ * grant / when on a faint line under it. */
+export function DecisionRow({
+  c,
+  d,
+  to,
+}: {
+  c: DecidedCall
+  d: DecisionDoc
+  /** The run the decision resumed in (the parked card's): its link. */
+  to?: string
+}) {
+  const o = outcomeOf(c.outcome)
+  return (
+    <div className="font-sans" data-decision={c.outcome}>
+      <span className={TONE_TEXT[o.tone]} data-decision-line="">
+        {decisionLine(c, d)}
+      </span>
+      {c.reason_badge ? (
+        <>
+          {" "}
+          <HoleBadge hole={c.reason_badge} {...REASON_HOLE[c.reason_badge]} />
+        </>
+      ) : null}
+      {to ? (
+        <>
+          {" → "}
+          <Link
+            {...runLink(to)}
+            className="text-thread-ink hover:underline"
+            data-resumed={to}
+          >
+            {turnTag(to)}
+          </Link>
+        </>
+      ) : null}
+      <div className="text-faint" data-decision-detail="">
+        {decisionDetail(c, d)}
+      </div>
+    </div>
+  )
+}
+
+/** The decisions block's honesty line (a failed read, the cap, a
+ * derived list), when it has one. */
+export function DecisionsNote({
+  d,
+  resume,
+}: {
+  d: DecisionDoc
+  resume: string
+}) {
+  const note = decisionsNote(d, resume)
+  return note ? (
+    <p className="mt-1 text-status-int" data-decisions-note="">
+      {note}
+    </p>
+  ) : null
 }
 
 /** How often the session read is taken again while the turn is parked
@@ -378,7 +461,12 @@ export function ParkedCalls({
   const unread =
     failed && !read && !refused && (kind === "decide" || kind === "read-only")
   const deciding =
-    kind === "decide" && mayAct && !refused && !checking && !unread
+    kind === "decide" &&
+    mayAct &&
+    !refused &&
+    !checking &&
+    !unread &&
+    !doc.decided
   const why = refusalWords(
     kind,
     doc,
@@ -393,7 +481,15 @@ export function ParkedCalls({
   // verb carries its head as a tooltip and points at that line.
   const head = refusalHead(why)
   const lineID = useId()
-  const shown = checking && !refused ? "checking" : unread ? "unread" : kind
+  // A resume the record links (resumed_by) decided the park for good:
+  // its outcomes are the card, whatever surface may act (U13.2).
+  const shown = doc.decided
+    ? "resumed"
+    : checking && !refused
+      ? "checking"
+      : unread
+        ? "unread"
+        : kind
   return (
     <div
       className="rounded-lg border border-ev-error/30 px-4 py-2 text-xs"
@@ -404,17 +500,28 @@ export function ParkedCalls({
           ? "decided"
           : pending.every((p) => words?.get(p.id)?.word === BREAKPOINT)
             ? BREAKPOINT
-            : "pending approval"}
+            : AWAITING}
       </span>
       <ul className="mt-1 space-y-0.5">
         {pending.map((p) => (
           <li key={p.id} className="font-mono" data-pending-call={p.id}>
-            {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) —{" "}
-            <span title={words?.get(p.id)?.hint}>
-              {shown === "resumed"
-                ? "decided"
-                : (words?.get(p.id)?.word ?? AWAITING)}
-            </span>
+            {p.name}({p.args == null ? "" : JSON.stringify(p.args)})
+            {shown === "resumed" && decidedCall(doc.decided, p.id) ? (
+              <DecisionRow
+                c={decidedCall(doc.decided, p.id)!}
+                d={doc.decided!}
+                to={doc.decided!.run}
+              />
+            ) : (
+              <>
+                {" — "}
+                <span title={words?.get(p.id)?.hint}>
+                  {shown === "resumed"
+                    ? "decided"
+                    : (words?.get(p.id)?.word ?? AWAITING)}
+                </span>
+              </>
+            )}
             {shown === "experiment" ||
             shown === "resumed" ||
             shown === "checking" ||
@@ -439,7 +546,7 @@ export function ParkedCalls({
               />
             ) : (
               <div className="mt-1 flex gap-2 font-sans">
-                {["continue", "skip", "resolve…"].map((v) => (
+                {Object.values(VERB).map((v) => (
                   <button
                     key={v}
                     type="button"
@@ -460,7 +567,9 @@ export function ParkedCalls({
           </li>
         ))}
       </ul>
-      {shown === "resumed" && next ? (
+      {shown === "resumed" && doc.decided ? (
+        <DecisionsNote d={doc.decided} resume={turnTag(doc.decided.run)} />
+      ) : shown === "resumed" && next ? (
         <p className="mt-1 text-faint" data-app-owned="resumed">
           {"decided — "}
           <Link

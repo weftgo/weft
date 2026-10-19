@@ -319,7 +319,7 @@ describe("the playground's notices", () => {
     await toastFor(/^run pg_1 parked at refund$/)
     const card = document.querySelector<HTMLElement>('[data-variant="A"]')!
     fireEvent.click(
-      await within(card).findByRole("button", { name: "continue" })
+      await within(card).findByRole("button", { name: "approve" })
     )
     await toastFor(/^experiment pg_2 finished · succeeded$/)
     await waitFor(() =>

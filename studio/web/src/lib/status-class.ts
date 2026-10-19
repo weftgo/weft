@@ -4,7 +4,7 @@
 // it once per variable — palette.test.ts holds it to every ROLE.
 // Studio only: the panel draws the token itself (panel/styles.ts).
 import { ROLE, STUDIO_NAMES } from "./palette"
-import type { Role } from "./palette"
+import type { Role, TONE } from "./palette"
 
 export const ROLE_CLASS: Record<string, { dot: string; text: string }> = {
   // The running word in its ink (palette.ts's INK): 4.5:1 as text.
@@ -23,3 +23,15 @@ export const ROLE_CLASS: Record<string, { dot: string; text: string }> = {
 export const studioVar = (r: Role) => STUDIO_NAMES.light[ROLE[r]]
 
 export const statusClass = (r: Role) => ROLE_CLASS[studioVar(r)]
+
+/** The text class of each TONE (lib/palette.ts), by its TONE_STUDIO
+ * variable: what a decided call's outcome is drawn in (U13.2). */
+export const TONE_TEXT: Record<keyof typeof TONE, string> = {
+  step: "text-foreground",
+  tool: "text-ev-tool",
+  result: "text-ev-result",
+  error: "text-ev-error",
+  bad: "text-status-bad",
+  running: "text-status-run-ink",
+  never: "text-ev-error",
+}

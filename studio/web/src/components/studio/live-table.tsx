@@ -38,6 +38,7 @@ import { attemptNote } from "@/lib/live-attempts"
 import { runLink, sessionLink } from "@/lib/links"
 import { shortId } from "@/lib/title"
 import { notify } from "@/lib/notify"
+import { PARKED_LIVE } from "@/lib/decisions"
 import { STATUS, statusOf } from "@/lib/status"
 import { statusClass } from "@/lib/status-class"
 import { Cost, useCostCapable } from "@/components/studio/cost"
@@ -93,7 +94,7 @@ function CancelCell({
       <Link
         {...runLink(run.id)}
         className={`font-mono text-[11px] whitespace-nowrap ${statusClass(STATUS.parked.role).text} underline-offset-2 hover:underline`}
-        title="a parked run is over until its pending calls are decided: approve or deny on its page"
+        title={PARKED_LIVE}
       >
         parked — decide instead
       </Link>

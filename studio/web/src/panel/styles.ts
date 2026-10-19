@@ -7,6 +7,7 @@
 import { INK, PALETTE, ROLE, TONE } from "../lib/palette"
 import type { Theme } from "../lib/palette"
 import { STATUS } from "../lib/status"
+import { OUTCOME } from "../lib/decisions"
 
 /** The system mono stack every code-ish surface in the panel uses. */
 export const MONO_STACK =
@@ -38,6 +39,14 @@ const statusRules = () =>
 const toneRules = () =>
   Object.entries(TONE)
     .map(([k, t]) => `.weft-tl[data-tone=${k}] { --c: var(--weft-${t}); }`)
+    .join("\n")
+
+/** decisionRules colours a decided call's line by its outcome's tone
+ * (U13.2, lib/decisions.ts's OUTCOME × lib/palette.ts's TONE): Studio's
+ * colour (lib/status-class.ts TONE_TEXT). */
+const decisionRules = () =>
+  [...new Set(Object.values(OUTCOME).map((o) => o.tone))]
+    .map((k) => `.weft-dec[data-tone=${k}] { color: var(--weft-${TONE[k]}); }`)
     .join("\n")
 
 /** The tokens a host page may override (D2): every colour, radius and
@@ -234,6 +243,7 @@ details[data-depth] { margin-left: -10px; }
 .weft-wf-bar { position: absolute; top: 0; bottom: 0; border-radius: var(--weft-radius-sm); background: var(--weft-info); min-width: 2px; }
 .weft-wf-ms { width: 52px; flex: none; text-align: right; color: var(--weft-faint); }
 ${toneRules()}
+${decisionRules()}
 .weft-tl[role] { cursor: pointer; }
 .weft-tl[data-tone=step] .weft-wf-bar, .weft-tl[data-tone=never] .weft-wf-bar { background: color-mix(in srgb, var(--c) 60%, transparent); }
 .weft-tl.weft-sel { background: var(--weft-bg3); }

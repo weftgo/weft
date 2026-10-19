@@ -156,6 +156,7 @@ import { StepCompare } from "@/components/studio/step-diff"
 import { CostText, useCostCapable } from "@/components/studio/cost"
 import { StatusChip } from "@/components/studio/runs-table"
 import { AWAITING } from "@/lib/status"
+import { DECIDE_FIELD, DONE, VERB, VERB_TITLE } from "@/lib/decisions"
 import { formatUSD, lostCellCost, sumCost } from "@/lib/cost"
 import { OWN_RUNTIME, SCOPE_OWN, SCOPE_RUNTIME_ONLY } from "@/lib/honesty"
 
@@ -1706,9 +1707,10 @@ function stateLabel(e: Pick<Experiment, "state" | "status">): string {
 /** Result cards tailing their run live at once (see `streamed`). */
 const MAX_LIVE_CARDS = 3
 
-/** One parked call's decision verbs (ADR 0007): continue runs the
- * handler for real, skip denies with a reason, resolve pastes a
- * result computed outside the process — which needs the result. */
+/** One parked call's decision verbs (ADR 0007; lib/decisions.ts's
+ * VERB): approve runs the handler for real, deny with a reason,
+ * resolve pastes a result computed outside the process — which needs
+ * the result. */
 function PendingCall({
   call,
   decided,
@@ -1724,33 +1726,35 @@ function PendingCall({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="font-mono">{call.name}</span>
-      {decided && <span className="text-status-ok">decided: {decided}</span>}
+      {decided && (
+        <span className="text-status-ok">{DONE[decided] ?? decided}</span>
+      )}
       <button
         className="text-faint hover:underline"
-        title="Approve: the handler runs for real"
+        title={VERB_TITLE.approve}
         onClick={() => onDecide("approve", "")}
       >
-        continue
+        {VERB.approve}
       </button>
       <button
         className="text-faint hover:underline"
-        title="Deny: the model sees a denied result (the text is the reason)"
+        title={VERB_TITLE.deny}
         onClick={() => onDecide("deny", text)}
       >
-        skip
+        {VERB.deny}
       </button>
       <button
         className="text-faint hover:underline disabled:opacity-50"
-        title="Resolve: the text is the tool's result, pasted from outside the process"
+        title={VERB_TITLE.resolve}
         disabled={!text}
         onClick={() => onDecide("resolve", text)}
       >
-        resolve
+        {VERB.resolve}
       </button>
       <input
         className="min-w-24 flex-1 rounded border bg-transparent px-2 py-0.5"
         aria-label={`result or reason for ${call.name}`}
-        placeholder="result to resolve with · reason to skip"
+        placeholder={DECIDE_FIELD}
         value={text}
         onChange={(e) => setText(e.target.value)}
       />

@@ -152,7 +152,7 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
   it("continue posts the playground's route, polls the command; the resumed turn is the next turn and the parked one reads decided", async () => {
     const { el, fake } = await open()
     expect($(el, "[data-weft-refused]")).toBeNull()
-    click(button(el, "continue"))
+    click(button(el, "approve"))
     await vi.waitFor(
       () => expect(line(el, "resumed")).toBe(`decided — resumed as ${RESUMED}`),
       { timeout: 5_000 }
@@ -164,7 +164,7 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
       fake.calls("GET playground/commands/cmd_app").length
     ).toBeGreaterThanOrEqual(2)
     // No verb is left on a decided turn; the resumed run tops the list.
-    expect(button(el, "continue")).toBeUndefined()
+    expect(button(el, "approve")).toBeUndefined()
     expect(all(el, ".weft-turn")[0]?.getAttribute("data-weft-run")).toBe(
       RESUMED
     )
@@ -185,7 +185,7 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
     const { el, fake } = await open()
     const field = call(el).querySelector<HTMLInputElement>(".weft-resolve")!
     field.value = "not on a Friday"
-    click(button(el, "skip"))
+    click(button(el, "deny"))
     await vi.waitFor(() =>
       expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(1)
     )
@@ -199,7 +199,7 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
 
   it("a rejection on the command is said verbatim next to the call, the verbs kept", async () => {
     const { el } = await open({ outcome: "rejected" })
-    click(button(el, "continue"))
+    click(button(el, "approve"))
     await vi.waitFor(
       () =>
         expect(
@@ -210,13 +210,13 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
     expect(
       call(el).querySelector('[data-weft-app-verb="rejected"]')!.textContent
     ).toBe(`rejected: ${REJECTED}`)
-    expect(button(el, "continue")).toBeTruthy()
+    expect(button(el, "approve")).toBeTruthy()
     await axeClean(el)
   })
 
   it("a 403 turns the block into the read-only line with the server's message and fix", async () => {
     const { el } = await open({ outcome: "refused" })
-    click(button(el, "continue"))
+    click(button(el, "approve"))
     await vi.waitFor(
       () => expect($(el, "[data-weft-app-owned]")).toBeTruthy(),
       { timeout: 5_000 }
@@ -226,8 +226,8 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
       `app-owned turn · read-only: run ${PARKED} is the app's own, and no connected runtime of its service app acts on the app's sessions — fix: set runtime.Sessions(resolver) at runtime.Install in the app (service app): its turns then take approvals and steer`
     )
     expect(refusedVerbs(el).map((b) => b.firstChild?.textContent)).toEqual([
-      "continue",
-      "skip",
+      "approve",
+      "deny",
       "resolve…",
     ])
     for (const b of refusedVerbs(el)) {
@@ -239,7 +239,7 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
   it("a 403 a later runtimes read re-gates to decide gives the verbs back (the runtime reconnected)", async () => {
     const { el, fake } = await open({ outcome: "refused", reconnects: true })
     const reads = fake.calls("GET runtimes").length
-    click(button(el, "continue"))
+    click(button(el, "approve"))
     // The refusal reads the runtimes again; they still say a Sessions
     // runtime of the service is connected: the verbs are live again.
     await vi.waitFor(
@@ -249,7 +249,7 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
     await vi.waitFor(
       () =>
         expect(
-          (button(el, "continue") as HTMLButtonElement | undefined)?.disabled
+          (button(el, "approve") as HTMLButtonElement | undefined)?.disabled
         ).toBe(false),
       { timeout: 5_000 }
     )
@@ -264,7 +264,7 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
     // The read the refusal asks for answers 500: the runtimes the panel
     // holds still say decide, but no read past the refusal applied.
     o.runtimesError = true
-    click(button(el, "continue"))
+    click(button(el, "approve"))
     await vi.waitFor(
       () => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads),
       { timeout: 5_000 }
@@ -312,7 +312,7 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
   it("a turn a later one already resumed (a reload) offers no verb: decided — resumed as the next run", async () => {
     const { el, fake } = await open({ resumed: true })
     expect(line(el, "resumed")).toBe(`decided — resumed as ${RESUMED}`)
-    expect(button(el, "continue")).toBeUndefined()
+    expect(button(el, "approve")).toBeUndefined()
     expect(refusedVerbs(el)).toHaveLength(0)
     expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
   })
@@ -370,7 +370,7 @@ describe("an app turn no Sessions runtime of its service acts on", () => {
       await vi.waitFor(
         () =>
           expect(
-            (button(el, "continue") as HTMLButtonElement | undefined)?.disabled
+            (button(el, "approve") as HTMLButtonElement | undefined)?.disabled
           ).toBe(false),
         { timeout: 5_000 }
       )

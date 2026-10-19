@@ -750,7 +750,7 @@ func (h runHead) line(link string) string {
 		s += "; stop_reason " + h.StopReason
 	}
 	if h.Pending > 0 {
-		s += fmt.Sprintf("; %d calls pending approval", h.Pending)
+		s += fmt.Sprintf("; %d calls awaiting a decision", h.Pending)
 	}
 	return s + " — " + link
 }
@@ -1141,7 +1141,7 @@ func explainLine(ex explanation, sh stepHead) string {
 				names = append(names, c.Name)
 			}
 		}
-		s += fmt.Sprintf("; parked: %d calls awaiting approval (%s)", ex.Pending, strings.Join(names, ", "))
+		s += fmt.Sprintf("; parked: %d calls awaiting a decision (%s)", ex.Pending, strings.Join(names, ", "))
 	}
 	if ex.Step != nil {
 		if d := sh.line(ex.RunID, *ex.Step); strings.Contains(d, "; ") {

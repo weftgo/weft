@@ -1047,6 +1047,35 @@ summarized nothing. Never folded into `usage` or any run's: a reader
 adds it for the session's whole cost, labelled (the
 `thread_summarizer` and `thread_compaction` fixtures).
 
+**Decisions** (U13.2) are derived at read time, never stored, from
+records already named above: Studio's run document serves `decided` on
+a parked run that `resumed_by` names and `resumes` on the run whose
+`resumed_from` names a park — the same block either side: `run` (the
+other run), `at` (the resume's start), `actor` (the resume's
+`weft.approval.actor`, metadata), `source`, `calls` (at most 32, `more`
+the rest) and `error` (a failed read, said, never an empty list). The
+calls are the resume's `weft.resume.calls` in call order (`source`
+`resume_calls`); a resume recorded without it reads them from its
+pre-step results — the step-0 output batches of tool messages before
+the model's first message — `DENIED: no decision` → `no_decision`,
+`DENIED: expired…` → `expired`, any other `DENIED: …` → `denied`, else
+`approved` (`source` `transcript`: a resolve is not told apart). Each
+call: `call_id`, `name` (the transcript's, else the `execute_tool`
+span's), `outcome` (`approved`, `denied`, `resolved`, `expired`,
+`no_decision` — a `denied` thread decided `via` `expiry`, or whose
+result reads `DENIED: expired`, is `expired`), `via` / `key_id` /
+`grant_id` / `at` from thread's `approval.decision` record filed under
+the parked run (§4; its body's `at`), else `weft.tool.approved_by` /
+`weft.grant.id` and a denied call's zero-length span start (§3), `who`
+(the record's `content.who`), and a denial's `reason` (the record's
+`content.reason`, else the result text after `DENIED: `). Who and the
+reason are content: a read-scoped panel token gets `who_hidden` and
+`reason_badge` `hidden`; a denial with no reason recorded (content off)
+`reason_badge` `not_recorded`. A panel token's resume of another public
+id is left out (no block). Studio's `TestRunDecisions` pins it over the
+`thread_approvals`, `thread_content_off`, `thread_grants`, `resumed` and
+`approval_denied` fixtures (`studio/testdata/api/decisions.golden.json`).
+
 **Manifests** (U27) are not derived from the records: a row's
 `manifest_hash` is the root span's `weft.manifest.hash` (§2), and a
 store that implements `obsdb.ManifestStore` (both shipped backends:

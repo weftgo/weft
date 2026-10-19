@@ -440,7 +440,7 @@ func TestMCPStdio(t *testing.T) {
 		t.Errorf("explain_failure r_max = %q\n%+v\ncalls %+v", line, ex, calls)
 	}
 	line, ex = explain("r_park")
-	if ex.Pending != 1 || ex.StepStatus != "parked" || !strings.Contains(line, "; parked: 1 calls awaiting approval (refund)") {
+	if ex.Pending != 1 || ex.StepStatus != "parked" || !strings.Contains(line, "; parked: 1 calls awaiting a decision (refund)") {
 		t.Errorf("explain_failure r_park = %q\n%+v", line, ex)
 	}
 	line, ex = explain(derivedFailID)

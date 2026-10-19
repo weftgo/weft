@@ -894,7 +894,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       { timeout: 10_000 }
     )
     expect(await within(card).findByText("awaiting a decision")).toBeTruthy()
-    fireEvent.click(within(card).getByRole("button", { name: "continue" }))
+    fireEvent.click(within(card).getByRole("button", { name: "approve" }))
     // A refused decision is shown on the card that asked.
     expect(
       await within(card).findByText(/call call_9 is not pending/)
@@ -968,7 +968,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     )
     expect(within(card()).queryByText(/will be denied/)).toBeNull()
     fireEvent.click(
-      within(card()).getAllByRole("button", { name: "continue" })[0]
+      within(card()).getAllByRole("button", { name: "approve" })[0]
     )
     await waitFor(() =>
       expect(
@@ -977,7 +977,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     )
     // Back on the same parked run: call_1 is decided, call_2 still waits.
     await waitFor(
-      () => expect(within(card()).getByText(/decided: approve/)).toBeTruthy(),
+      () => expect(within(card()).getByText(/approved/)).toBeTruthy(),
       { timeout: 10_000 }
     )
     expect(within(card()).getByText(/1 of 2 decided/)).toBeTruthy()

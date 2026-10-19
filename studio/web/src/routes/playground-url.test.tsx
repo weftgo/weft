@@ -598,9 +598,9 @@ describe("the playground's hand-off edits and run controls (final web review)", 
       ).toBeTruthy()
       for (const name of [
         "save as test",
-        "continue",
-        "skip",
-        "resolve",
+        "approve",
+        "deny",
+        "resolve…",
         "steer",
       ])
         expect(within(card).queryByRole("button", { name })).toBeNull()
@@ -617,12 +617,12 @@ describe("the playground's hand-off edits and run controls (final web review)", 
       const card = await runCard()
       for (const name of [
         "save as test",
-        "continue",
-        "skip",
-        "resolve",
+        "approve",
+        "deny",
+        "resolve…",
         "steer",
       ])
-        expect(within(card).getByRole("button", { name })).toBeTruthy()
+        expect(within(card).getAllByRole("button", { name })[0]).toBeTruthy()
       expect(within(card).getByLabelText("steer message")).toBeTruthy()
       expect(card.querySelector("[data-pending-read-only]")).toBeNull()
       // One verb, one download (UX-C-29): the run page's wefttest zip,
@@ -638,9 +638,12 @@ describe("the playground's hand-off edits and run controls (final web review)", 
       expect(fake.calls("POST playground/fixtures")).toHaveLength(0)
       // The parked notice offers the card's own approve.
       await screen.findByText("run pg_1 parked at refund")
-      expect(
-        await screen.findByRole("button", { name: "approve" })
-      ).toBeTruthy()
+      // The card's and the toast's verb are one word (U13.2).
+      await waitFor(() =>
+        expect(
+          screen.getAllByRole("button", { name: "approve" }).length
+        ).toBeGreaterThanOrEqual(2)
+      )
     })
   })
 

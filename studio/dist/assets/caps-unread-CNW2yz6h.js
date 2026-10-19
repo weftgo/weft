@@ -1,0 +1,1 @@
+import{In as e,yi as t}from"./title-C2I76EBu.js";var n=t();function r({error:t}){return(0,n.jsx)(`div`,{className:`mx-auto max-w-lg space-y-2 py-24 text-center`,"data-caps-unread":!0,children:(0,n.jsx)(`p`,{className:`text-sm text-ev-error`,children:`${e}: ${t}`})})}export{r as t};

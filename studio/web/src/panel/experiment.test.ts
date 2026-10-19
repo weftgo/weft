@@ -193,7 +193,7 @@ describe("the result pane follows the command to its run", () => {
       state: "queued",
     }
     routes["playground/commands/cmd_2"] = command("cmd_2", "queued")
-    click(button(el, "skip", ".weft-xres"))
+    click(button(el, "deny", ".weft-xres"))
     await settle()
     expect(studio.posts("runs/")[0].path).toBe("runs/pg_b/approvals")
     expect(studio.posts("runs/")[0].body).toEqual({
@@ -397,7 +397,7 @@ describe("the result pane follows the command to its run", () => {
     await settle()
     expect(reads).toBeGreaterThanOrEqual(3)
     expect(text(el, ".weft-xres")).toContain("awaiting a decision")
-    expect(button(el, "continue", ".weft-xres")).toBeTruthy()
+    expect(button(el, "approve", ".weft-xres")).toBeTruthy()
   })
 
   it("ack before export: the final words and the diff wait for the run's row to settle", async () => {
@@ -588,7 +588,7 @@ describe("the approval controls (P2-16)", () => {
     routes["runs/pg_p1/events?after=0&limit=500"] = page(
       runEvents("pg_p1", { pending: [call("call_9")] })
     )
-    click(button(el, "continue", ".weft-xres"))
+    click(button(el, "approve", ".weft-xres"))
     await settle()
     expect(studio.posts("runs/")).toHaveLength(0)
     expect(text(el, ".weft-xres")).toContain(
@@ -619,12 +619,13 @@ describe("the approval controls (P2-16)", () => {
     expect(text(el, ".weft-xres")).toContain(
       "waiting for 1 more decision — the run resumes once every parked call is decided"
     )
-    expect(all(el, ".weft-xres .weft-call")[0].textContent).toContain(
-      "decided: continue"
-    )
-    expect(all(el, ".weft-xres .weft-call")[1].textContent).not.toContain(
-      "decided"
-    )
+    expect(
+      all(el, ".weft-xres .weft-call")[0].querySelector(".weft-badge")
+        ?.textContent
+    ).toBe("approved")
+    expect(
+      all(el, ".weft-xres .weft-call")[1].querySelector(".weft-badge")
+    ).toBeNull()
     // The last one resumes the run under a fresh id: the pane follows.
     routes["POST runs/pg_p1/approvals"] = {
       command_id: "cmd_3",
@@ -649,12 +650,12 @@ describe("the approval controls (P2-16)", () => {
       "bad_request",
       "call call_1 is not pending on run pg_p1 (pending: call_7)"
     )
-    click(button(el, "continue", ".weft-xres"))
+    click(button(el, "approve", ".weft-xres"))
     await settle()
     expect(text(el, ".weft-xres")).toContain(
       "call call_1 is not pending on run pg_p1 (pending: call_7)"
     )
-    expect(button(el, "continue", ".weft-xres")).toBeTruthy()
+    expect(button(el, "approve", ".weft-xres")).toBeTruthy()
     // …and a decision the runtime rejects (the run was already
     // resumed) comes back the same way: the words, and the pane intact.
     routes["POST runs/pg_p1/approvals"] = {
@@ -667,7 +668,7 @@ describe("the approval controls (P2-16)", () => {
       "",
       "no parked run pg_p1 on this runtime"
     )
-    click(button(el, "continue", ".weft-xres"))
+    click(button(el, "approve", ".weft-xres"))
     await settle(60)
     expect(text(el, ".weft-xres")).toContain(
       "no parked run pg_p1 on this runtime"

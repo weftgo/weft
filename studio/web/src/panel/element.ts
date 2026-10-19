@@ -5,6 +5,8 @@
 // experiment drawer and approval controls render only when
 // meta.capabilities reports the playground (§8.5 item 3).
 import type {
+  DecidedCall,
+  DecisionDoc,
   Manifest,
   RunCompaction,
   RunRow,
@@ -30,7 +32,21 @@ import {
   usageKnown,
 } from "../lib/honesty"
 import type { HoleMark, ParkedKind } from "../lib/honesty"
-import { AWAITING, FILTER_KEYS, statusOf } from "../lib/status"
+import { AWAITING, FILTER_KEYS, statusOf, turnTag } from "../lib/status"
+import {
+  DECIDE_FIELD,
+  decidedCall,
+  decisionDetail,
+  decisionLine,
+  decisionsNote,
+  DONE,
+  outcomeOf,
+  REASON_HOLE,
+  resumedHead,
+  VERB,
+  VERB_TITLE,
+  withoutDecided,
+} from "../lib/decisions"
 import type { Status } from "../lib/status"
 import {
   paramFields,
@@ -5186,11 +5202,6 @@ export class WeftDevtools extends HTMLElement {
         )
       )
     }
-    const verbs: Record<string, string> = {
-      approve: "continue",
-      deny: "skip",
-      resolve: "resolve",
-    }
     for (const call of pending) {
       const line = el("div", "weft-call", undefined, { "data-key": call.id })
       const head = el("div", "weft-call-h", [
@@ -5206,7 +5217,7 @@ export class WeftDevtools extends HTMLElement {
           el(
             "span",
             "weft-badge weft-info",
-            `decided: ${verbs[decided[call.id]] ?? decided[call.id]}`
+            DONE[decided[call.id]] ?? decided[call.id]
           )
         )
       line.appendChild(head)
@@ -5218,9 +5229,7 @@ export class WeftDevtools extends HTMLElement {
         el("input", "weft-input weft-resolve") as HTMLInputElement,
         key
       )
-      paste.placeholder = status
-        ? "result to resolve with · reason to skip"
-        : "the result to resolve with"
+      paste.placeholder = DECIDE_FIELD
       paste.value = this.scratch.get(key) ?? ""
       on(paste, "input", (_, n) =>
         this.scratch.set(key, (n as HTMLInputElement).value)
@@ -5237,25 +5246,19 @@ export class WeftDevtools extends HTMLElement {
       const typed = (b: HTMLElement) =>
         b.parentElement?.querySelector<HTMLInputElement>(".weft-resolve")
       ctl.append(
-        mk("continue", "Approve: the handler runs for real", () =>
-          act(call.id, "approve", "")
-        ),
-        mk("skip", "Deny: the model sees a denied result", (b) =>
+        mk(VERB.approve, VERB_TITLE.approve, () => act(call.id, "approve", "")),
+        mk(VERB.deny, VERB_TITLE.deny, (b) =>
           act(call.id, "deny", typed(b)?.value ?? "")
         ),
         paste,
-        mk(
-          "resolve…",
-          "Resolve: the model sees the result typed here; the handler never runs",
-          (b) => {
-            const field = typed(b)
-            if (!field?.value) {
-              field?.focus()
-              return
-            }
-            act(call.id, "resolve", field.value)
+        mk(VERB.resolve, VERB_TITLE.resolve, (b) => {
+          const field = typed(b)
+          if (!field?.value) {
+            field?.focus()
+            return
           }
-        )
+          act(call.id, "resolve", field.value)
+        })
       )
       line.appendChild(ctl)
       abody.appendChild(line)
@@ -5346,6 +5349,29 @@ export class WeftDevtools extends HTMLElement {
     // A replayed run whose prefix was edited says which pairs (weft.edits).
     const mark = marksBlock(this.rowOf(t.id) ?? t.doc, t.transcript?.batches)
     if (mark) wrap.appendChild(mark)
+    // A resume's decided calls (U13.2): the card before step 0, never
+    // inside it — Studio's ResumedCard.
+    const res = t.doc?.resumes
+    if (res) {
+      const card = el("div", "weft-step", undefined, {
+        "data-weft-resumed-card": res.run,
+      })
+      const go = el("button", "weft-btn", resumedHead(res, turnTag(res.run)))
+      on(go, "click", () => this.go(this.model?.select(res.run, true)))
+      card.appendChild(el("div", "weft-step-h", [go]))
+      const b = el("div", "weft-step-b")
+      for (const c of res.calls)
+        b.appendChild(
+          el("div", "weft-call", [
+            el("span", "weft-name", c.name || c.call_id),
+            this.decision(c, res),
+          ])
+        )
+      const note = decisionsNote(res, turnTag(t.id))
+      if (note) b.appendChild(el("div", "weft-note weft-warn", note))
+      card.appendChild(b)
+      wrap.appendChild(card)
+    }
     // thread's session markers (A9.2) at the top of the turn they are
     // filed under; a run from before A9 names none and draws nothing.
     const comps = compactionsOf(t.doc)
@@ -5359,7 +5385,7 @@ export class WeftDevtools extends HTMLElement {
     const row = this.rowOf(t.id)
     wrap.appendChild(
       renderFolded(
-        t.folded,
+        withoutDecided(t.folded, t.doc),
         row?.status ?? t.doc?.status ?? "running",
         t,
         s.selectedStep,
@@ -5597,7 +5623,10 @@ export class WeftDevtools extends HTMLElement {
       .map((c) => sent(c.id))
       .find((v) => v?.state === "refused" && v.fix)
     const act = this.canAct(s)
-    if (kind === "decide" && act && !refused) {
+    // A resume the record links decided the park for good (U13.2): each
+    // call's outcome, whatever this surface may do.
+    const dec = s.turn?.id === runID ? s.turn.doc?.decided : undefined
+    if (kind === "decide" && act && !refused && !dec) {
       const decided: Record<string, string> = {}
       for (const c of pending)
         if (sent(c.id)?.state === "finished")
@@ -5609,7 +5638,8 @@ export class WeftDevtools extends HTMLElement {
         (id) => this.appSaid(sent(id), runID)
       )
     }
-    const next = kind === "resumed" ? nextTurn(run, s.turns) : undefined
+    const next =
+      dec?.run ?? (kind === "resumed" ? nextTurn(run, s.turns) : undefined)
     const box = el("div", "weft-step")
     box.appendChild(
       el("div", "weft-step-h", [
@@ -5647,10 +5677,16 @@ export class WeftDevtools extends HTMLElement {
             "weft-args",
             call.args === undefined ? "(…)" : fmtJSON(call.args)
           ),
-          el("span", "weft-badge weft-info", next ? "decided" : "parked"),
+          ...(decidedCall(dec, call.id)
+            ? []
+            : [
+                el("span", "weft-badge weft-info", next ? "decided" : "parked"),
+              ]),
         ])
       )
-      if (kind === "experiment")
+      const c = decidedCall(dec, call.id)
+      if (c && dec) row.appendChild(this.decision(c, dec, dec.run))
+      else if (kind === "experiment")
         row.appendChild(
           el(
             "div",
@@ -5663,14 +5699,17 @@ export class WeftDevtools extends HTMLElement {
           el(
             "div",
             "weft-res",
-            ["continue", "skip", "resolve…"].map((v) =>
+            Object.values(VERB).map((v) =>
               refusedVerb(v, "button", line, "app-owned")
             )
           )
         )
       body.appendChild(row)
     }
-    if (next) {
+    if (dec) {
+      const note = decisionsNote(dec, turnTag(dec.run))
+      if (note) body.appendChild(el("div", "weft-note weft-warn", note))
+    } else if (next) {
       const go = el("button", "weft-btn", `resumed as ${next}`, {
         "data-weft-resumed": next,
       })
@@ -5699,6 +5738,28 @@ export class WeftDevtools extends HTMLElement {
         })
       )
     box.appendChild(body)
+    return box
+  }
+
+  /** decision is one decided call's outcome (U13.2, lib/decisions.ts):
+   * "✋ denied · agent-7 · 'need a photo' → t2" in its tone, a hidden or
+   * uncaptured reason its badge, the turn a button that opens it, how
+   * and when under it — Studio's DecisionRow. */
+  private decision(c: DecidedCall, d: DecisionDoc, to?: string): HTMLElement {
+    const box = el("div", "weft-dec", decisionLine(c, d), {
+      "data-tone": outcomeOf(c.outcome).tone,
+      "data-weft-decision": c.outcome,
+    })
+    if (c.reason_badge)
+      box.append(" ", badge(c.reason_badge, REASON_HOLE[c.reason_badge]))
+    if (to) {
+      const go = el("button", "weft-btn", turnTag(to), {
+        "data-weft-resumed": to,
+      })
+      on(go, "click", () => this.go(this.model?.select(to, true)))
+      box.append(" → ", go)
+    }
+    box.appendChild(el("div", "weft-reason", decisionDetail(c, d)))
     return box
   }
 

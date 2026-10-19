@@ -52,6 +52,8 @@ import type {
 } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import { callState, fold, linkView, stepHoles, truncation } from "@/lib/events"
+import { withoutDecided } from "@/lib/decisions"
+import { ResumedCard } from "@/components/studio/resumed-card"
 import type {
   FoldedRun,
   FoldedStep,
@@ -1189,10 +1191,14 @@ export function StepList({
   // The rows its calls started: subagent runs and, since U14, the
   // caller-linked runs (a delegated session's turn) on their call.
   const kids = storyChildren(doc)
-  const view = linkView(
+  const linked = linkView(
     upTo == null ? folded : (atPlayhead ?? fold(events, upTo)),
     kids
   )
+  // A resume's decided calls are the resumed card's (U13.2), drawn
+  // before step 0 — never inside it.
+  const view = withoutDecided(linked, doc)
+  const preStep = linked.steps[0]?.toolCalls.filter((c) => c.resumed)
   // A child row per child id; linkView stamped each call with its
   // child's id (S4.3). The block expands lazily.
   const childLinks = new Map<string, ChildRow>(kids.map((c) => [c.id, c]))
@@ -1376,6 +1382,7 @@ export function StepList({
             </div>
           ) : null}
           <EditsMark row={doc} batches={transcript?.batches} />
+          <ResumedCard doc={doc} calls={preStep} />
           {sessionMarkers.map((c, i) => (
             <CompactionMarker
               key={c.hash || `session-${i}`}

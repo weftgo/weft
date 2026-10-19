@@ -150,13 +150,7 @@ export function statusOf(
           : `${calls} pending · ${r.session_id ? "no resume recorded here" : "a resume, if any, is not linked yet"}`
       return { key: "parked", ...STATUS.parked, detail: d, hint: d }
     }
-    const t = runs?.find((x) => x.id === next)?.turn
-    // shortId's cut inlined: importing lib/title.ts here reorders the
-    // bundle (U1-fix).
-    // A thread turn's run id (<session>-t<n>) not in the loaded runs
-    // still names its turn: t<n>, never a cut that loses it.
-    const tn = t ?? /-t(\d+)$/.exec(next)?.[1]
-    const to = tn ? `t${tn}` : next.length > 16 ? `${next.slice(0, 8)}…` : next
+    const to = turnTag(next, runs)
     // "decided · resumed" only on the stored link (W7-prep): the next
     // turn after a Branch, a Rollback or an undecided Send is no
     // resume (docs/record-contract.md §7) — it decided the calls or
@@ -177,6 +171,16 @@ export function statusOf(
   return Object.prototype.hasOwnProperty.call(STATUS, k)
     ? { key: k, ...STATUS[k] }
     : { key: k, word: r.status, hint: r.status, role: "resumed" }
+}
+
+/** turnTag names a run by its turn: t<n> (its row's turn among runs,
+ * else a thread turn's run id <session>-t<n>), else its id cut to 8. */
+export function turnTag(id: string, runs?: readonly StatusRow[] | null) {
+  // shortId's cut inlined: importing lib/title.ts here reorders the
+  // bundle (U1-fix). A thread turn's run id not in the loaded runs
+  // still names its turn: t<n>, never a cut that loses it.
+  const tn = runs?.find((x) => x.id === id)?.turn ?? /-t(\d+)$/.exec(id)?.[1]
+  return tn ? `t${tn}` : id.length > 16 ? `${id.slice(0, 8)}…` : id
 }
 
 /** The note on a row the server lists as parked (/api/runs?status=

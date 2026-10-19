@@ -1,0 +1,189 @@
+{
+  "approval_denied_decided": {
+    "run": "a1100000000000000000000000000002",
+    "at": "2026-10-01T09:19:00.008Z",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "call_1",
+        "name": "refund_order",
+        "outcome": "denied",
+        "reason": "over the limit",
+        "at": "2026-10-01T09:19:00.011Z"
+      },
+      {
+        "call_id": "call_2",
+        "name": "refund_order",
+        "outcome": "no_decision",
+        "at": "2026-10-01T09:19:00.013Z"
+      }
+    ]
+  },
+  "content_off_t1_decided": {
+    "run": "01K00000000000000000000001-t2",
+    "at": "2026-10-01T09:38:00.006Z",
+    "actor": "agent-7",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "r1",
+        "name": "issue_refund",
+        "outcome": "denied",
+        "via": "user",
+        "reason_badge": "not_recorded",
+        "at": "2026-10-01T09:00:00Z"
+      }
+    ]
+  },
+  "grants_t1_decided": {
+    "run": "01K00000000000000000000001-t2",
+    "at": "2026-10-01T09:31:00.006Z",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "c1",
+        "name": "run_command",
+        "outcome": "approved",
+        "via": "grant",
+        "grant_id": "e_thread_grants_0002",
+        "at": "2026-10-01T09:00:00Z"
+      }
+    ]
+  },
+  "grants_t2_decided": {
+    "run": "01K00000000000000000000001-t3",
+    "at": "2026-10-01T09:31:00.014Z",
+    "actor": "policy-bot",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "c2",
+        "name": "run_command",
+        "outcome": "approved",
+        "via": "approver",
+        "who": "policy-bot",
+        "at": "2026-10-01T09:00:00Z"
+      }
+    ]
+  },
+  "read_token_t1_decided": {
+    "run": "01K00000000000000000000001-t2",
+    "at": "2026-10-01T09:30:00.006Z",
+    "actor": "agent-7",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "r1",
+        "name": "issue_refund",
+        "outcome": "denied",
+        "via": "user",
+        "who_hidden": true,
+        "reason_badge": "hidden",
+        "at": "2026-10-01T09:00:00Z"
+      }
+    ]
+  },
+  "resumed_decided": {
+    "run": "a1100000000000000000000000000002",
+    "at": "2026-10-01T09:21:00.008Z",
+    "actor": "op_42",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "call_1",
+        "name": "submit_output",
+        "outcome": "approved"
+      },
+      {
+        "call_id": "call_2",
+        "name": "add_note",
+        "outcome": "resolved"
+      }
+    ]
+  },
+  "resumed_resumes": {
+    "run": "a1100000000000000000000000000001",
+    "at": "2026-10-01T09:21:00.008Z",
+    "actor": "op_42",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "call_1",
+        "name": "submit_output",
+        "outcome": "approved"
+      },
+      {
+        "call_id": "call_2",
+        "name": "add_note",
+        "outcome": "resolved"
+      }
+    ]
+  },
+  "thread_t1_decided": {
+    "run": "01K00000000000000000000001-t2",
+    "at": "2026-10-01T09:30:00.006Z",
+    "actor": "agent-7",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "r1",
+        "name": "issue_refund",
+        "outcome": "denied",
+        "via": "user",
+        "who": "agent-7",
+        "reason": "need a photo of the damage",
+        "at": "2026-10-01T09:00:00Z"
+      }
+    ]
+  },
+  "thread_t2_resumes": {
+    "run": "01K00000000000000000000001-t1",
+    "at": "2026-10-01T09:30:00.006Z",
+    "actor": "agent-7",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "r1",
+        "name": "issue_refund",
+        "outcome": "denied",
+        "via": "user",
+        "who": "agent-7",
+        "reason": "need a photo of the damage",
+        "at": "2026-10-01T09:00:00Z"
+      }
+    ]
+  },
+  "thread_t3_decided": {
+    "run": "01K00000000000000000000001-t4",
+    "at": "2026-10-01T09:30:00.018Z",
+    "actor": "k_alice",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "r2",
+        "name": "issue_refund",
+        "outcome": "approved",
+        "via": "signed",
+        "key_id": "k_alice",
+        "who": "alice",
+        "at": "2026-10-01T09:00:00Z"
+      }
+    ]
+  },
+  "thread_t7_decided": {
+    "run": "01K00000000000000000000001-t8",
+    "at": "2026-10-01T09:30:00.042Z",
+    "actor": "agent-7",
+    "source": "resume_calls",
+    "calls": [
+      {
+        "call_id": "p1",
+        "name": "track_parcel",
+        "outcome": "resolved",
+        "via": "user",
+        "who": "agent-7",
+        "at": "2026-10-01T09:00:00Z"
+      }
+    ]
+  }
+}

@@ -32,7 +32,8 @@ import {
 } from "@/lib/honesty"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { apiError, FakeStudio } from "@/test/fake-studio"
+import { apiError, FakeStudio, golden } from "@/test/fake-studio"
+import type { DecisionDoc } from "@/lib/api"
 import {
   APP_PUB,
   APP_SESSION,
@@ -41,6 +42,7 @@ import {
   NOPUB,
   PARKED,
   PLAIN,
+  plainRow,
   POOL,
   POOL_SUBMIT,
   REJECTED,
@@ -117,7 +119,7 @@ describe("the run page decides an app turn its service's Sessions runtime acts o
     const fake = await open()
     expect(parked().getAttribute("data-parked")).toBe("decide")
     expect(parked().querySelector("[data-refused]")).toBeNull()
-    fireEvent.click(verb("continue")!)
+    fireEvent.click(verb("approve")!)
     await waitFor(() =>
       expect(line("resumed")).toBe(`decided — resumed as ${RESUMED}`)
     )
@@ -126,7 +128,7 @@ describe("the run page decides an app turn its service's Sessions runtime acts o
     ).toEqual([{ call_id: CALL.id, decision: "approve" }])
     const link = parked().querySelector<HTMLAnchorElement>("[data-resumed]")!
     expect(new URL(link.href).pathname).toContain(`/runs/${RESUMED}`)
-    expect(verb("continue")).toBeUndefined()
+    expect(verb("approve")).toBeUndefined()
   })
 
   it("skip carries the typed reason", async () => {
@@ -134,7 +136,7 @@ describe("the run page decides an app turn its service's Sessions runtime acts o
     fireEvent.change(parked().querySelector("input")!, {
       target: { value: "not on a Friday" },
     })
-    fireEvent.click(verb("skip")!)
+    fireEvent.click(verb("deny")!)
     await waitFor(() =>
       expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(1)
     )
@@ -147,7 +149,7 @@ describe("the run page decides an app turn its service's Sessions runtime acts o
 
   it("a rejection is said verbatim; a 403 becomes the read-only line with the server's fix", async () => {
     await open({ outcome: "rejected" })
-    fireEvent.click(verb("continue")!)
+    fireEvent.click(verb("approve")!)
     await waitFor(() =>
       expect(
         parked().querySelector('[data-app-verb="rejected"]')?.textContent
@@ -157,7 +159,7 @@ describe("the run page decides an app turn its service's Sessions runtime acts o
     cleanup()
 
     await open({ outcome: "refused" })
-    fireEvent.click(verb("continue")!)
+    fireEvent.click(verb("approve")!)
     await waitFor(() =>
       expect(parked().querySelector("[data-app-owned]")).toBeTruthy()
     )
@@ -238,8 +240,40 @@ describe("the run page decides an app turn its service's Sessions runtime acts o
     const fake = await open({ resumed: true })
     expect(parked().getAttribute("data-parked")).toBe("resumed")
     expect(line("resumed")).toBe(`decided — resumed as ${RESUMED}`)
-    expect(verb("continue")).toBeUndefined()
+    expect(verb("approve")).toBeUndefined()
     expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
+  })
+})
+
+describe("a park a recorded resume decided (U13.2)", () => {
+  it("a plain Generate's park reads its outcome — rw.support-desk's approve — and no app line", async () => {
+    const d = golden<Record<string, DecisionDoc>>("decisions").resumed_decided
+    serveAppTurn(new FakeStudio(), { studioMeta: true })
+      .on(`GET runs/${PLAIN}`, {
+        ...plainRow(),
+        resumed_by: "r_resume",
+        children: [],
+        holes: [],
+        decided: {
+          ...d,
+          run: "r_resume",
+          calls: [{ ...d.calls[0], call_id: CALL.id, name: CALL.name }],
+        },
+      })
+      .install()
+    renderApp(`/runs/${PLAIN}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-decision-line]")?.textContent).toBe(
+        "✓ approved · op_42"
+      )
+    )
+    expect(parked().getAttribute("data-parked")).toBe("resumed")
+    expect(parked().querySelector(".eyebrow")?.textContent).toBe("decided")
+    expect(parked().querySelector("[data-app-owned]")).toBeNull()
+    expect(verb("approve")).toBeUndefined()
+    expect(
+      parked().querySelector("[data-decision] [data-resumed]")?.textContent
+    ).toBe("r_resume")
   })
 })
 
@@ -410,7 +444,7 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
     expect(line("no-public-id")).toBe(
       `app-owned turn · read-only: run ${NOPUB} is not a turn of a thread session with a public id — fix: ${APP_RUN_FIX}`
     )
-    expect(verb("continue")?.hasAttribute("disabled")).toBe(true)
+    expect(verb("approve")?.hasAttribute("disabled")).toBe(true)
     expect(fake.calls(`POST runs/${NOPUB}/approvals`)).toHaveLength(0)
   })
 
@@ -496,7 +530,7 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
     const o: AppTurnOptions = {}
     const fake = await open(o, SEND)
     expect(parked().getAttribute("data-parked")).toBe("decide")
-    expect(verb("continue")?.hasAttribute("disabled")).toBe(false)
+    expect(verb("approve")?.hasAttribute("disabled")).toBe(false)
     expect(parked().querySelector("[data-app-owned]")).toBeNull()
     expect(fake.calls(`GET sessions/${SEND_SESSION}`).length).toBeGreaterThan(0)
     expect(fake.calls(`GET sessions/${APP_SESSION}`)).toHaveLength(0)
@@ -505,7 +539,7 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
       () => expect(line("resumed")).toBe(`decided — resumed as ${SEND_NEXT}`),
       { timeout: 15_000 }
     )
-    expect(verb("continue")).toBeUndefined()
+    expect(verb("approve")).toBeUndefined()
     expect(fake.calls(`POST runs/${SEND}/approvals`)).toHaveLength(0)
   })
 
@@ -526,7 +560,7 @@ describe("the run page's gate follows the facts while the turn is parked", () =>
       () => expect(parked().getAttribute("data-parked")).toBe("decide"),
       { timeout: 15_000 }
     )
-    expect(verb("continue")?.hasAttribute("disabled")).toBe(false)
+    expect(verb("approve")?.hasAttribute("disabled")).toBe(false)
   })
 
   it("another surface resumes the turn: the page stops offering the verbs and reads resumed, no reload", async () => {
@@ -538,7 +572,7 @@ describe("the run page's gate follows the facts while the turn is parked", () =>
       () => expect(line("resumed")).toBe(`decided — resumed as ${RESUMED}`),
       { timeout: 15_000 }
     )
-    expect(verb("continue")).toBeUndefined()
+    expect(verb("approve")).toBeUndefined()
     expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
   })
 
@@ -549,7 +583,7 @@ describe("the run page's gate follows the facts while the turn is parked", () =>
     const o: AppTurnOptions = { outcome: "refused", reconnects: true }
     const fake = await open(o)
     const reads = fake.calls("GET runtimes").length
-    fireEvent.click(verb("continue")!)
+    fireEvent.click(verb("approve")!)
     await waitFor(() =>
       expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(1)
     )
@@ -557,7 +591,7 @@ describe("the run page's gate follows the facts while the turn is parked", () =>
       expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads)
     )
     await waitFor(() =>
-      expect(verb("continue")?.hasAttribute("disabled")).toBe(false)
+      expect(verb("approve")?.hasAttribute("disabled")).toBe(false)
     )
     expect(parked().getAttribute("data-parked")).toBe("decide")
     expect(parked().querySelector("[data-app-owned]")).toBeNull()
@@ -574,7 +608,7 @@ describe("the run page's gate follows the facts while the turn is parked", () =>
     // The read the refusal asks for answers 500: the runtimes the page
     // holds still say decide, but no read past the refusal applied.
     o.runtimesError = true
-    fireEvent.click(verb("continue")!)
+    fireEvent.click(verb("approve")!)
     await waitFor(() =>
       expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads)
     )

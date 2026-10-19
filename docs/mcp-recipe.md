@@ -128,7 +128,7 @@ A parked run is not a failure, and says so:
 
 ```text
 > explain_failure {"id":"a1100002000000000000000000000001"}
-run a1100002000000000000000000000001 (support): succeeded, last step 0; stop_reason tool_calls; parked: 1 calls awaiting approval (refund_order); tool calls: refund_order pending — http://127.0.0.1:33933/runs/a1100002000000000000000000000001
+run a1100002000000000000000000000001 (support): succeeded, last step 0; stop_reason tool_calls; parked: 1 calls awaiting a decision (refund_order); tool calls: refund_order pending — http://127.0.0.1:33933/runs/a1100002000000000000000000000001
 ```
 
 A run whose process died mid-tool (no end ever arrived) reads

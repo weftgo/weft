@@ -7,6 +7,7 @@
 // how a surface draws them. Plain TypeScript, no React: the run page
 // (hole-badge.tsx) and the devtools panel both read this one module.
 
+import { DONE } from "./decisions"
 import { plural } from "./format"
 
 export type Hole =
@@ -798,7 +799,8 @@ export const refusalLine = (w: { words: string; fix: string }) =>
 export const refusalHead = (w: { words: string }) => w.words.split(/: | — /)[0]
 
 /** appVerbWords is one app-turn verb's line under its call, the same
- * on both surfaces: in flight ("queued…"), "decided" for a decision or
+ * on both surfaces: in flight ("queued…"), the decision's word
+ * (approved, denied, resolved — lib/decisions.ts's DONE) or
  * "steered" for a steer (with the turn the finished command names, when
  * it is another run), or the runtime's rejection / the route's refusal
  * word for word (bad) — "(no reason given)" when the row carries none.
@@ -817,7 +819,8 @@ export function appVerbWords(
 ): { text: string; bad: boolean; resumed?: string } {
   if (v.state === "finished")
     return {
-      text: verb === "steer" ? "steered" : "decided",
+      text:
+        verb === "steer" ? "steered" : (DONE[v.decision ?? ""] ?? "decided"),
       bad: false,
       ...(v.run && v.run !== runID ? { resumed: v.run } : {}),
     }

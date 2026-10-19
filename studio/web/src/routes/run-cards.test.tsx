@@ -122,7 +122,7 @@ describe("the run cards tell the whole truth (U25)", () => {
     )
     expect(call("d1")!.textContent).not.toContain("never completed")
     expect(document.querySelector("[data-parked] .eyebrow")?.textContent).toBe(
-      "pending approval"
+      AWAITING
     )
   })
 

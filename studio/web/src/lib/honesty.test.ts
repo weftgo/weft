@@ -401,13 +401,13 @@ describe("the app turn's kinds and refusal words", () => {
     })
   })
 
-  it("a finished steer reads steered, a finished decision decided", () => {
+  it("a finished steer reads steered, a finished decision its outcome", () => {
     expect(appVerbWords({ state: "finished" }, "r", "steer").text).toBe(
       "steered"
     )
     expect(
       appVerbWords({ state: "finished", decision: "approve" }, "r").text
-    ).toBe("decided")
+    ).toBe("approved")
     // The panel's steer carries no decision: steered without the argument.
     expect(appVerbWords({ state: "finished" }, "r").text).toBe("steered")
   })

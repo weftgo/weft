@@ -228,7 +228,7 @@ func TestMCPLiveCheck(t *testing.T) {
 		"diff "+failedID+" → "+toolsID+": 1 changed steps, first at step 1", `"summary"`)
 	call(cs, "export", map[string]any{"id": failedID, "format": "jsonl", "max_bytes": 2048},
 		"run "+failedID+" exported as jsonl", "[truncated: showing 2048 of ")
-	ex = explained(call(cs, "explain_failure", map[string]any{"id": parkedID}, "; parked: 1 calls awaiting approval (refund_order)"))
+	ex = explained(call(cs, "explain_failure", map[string]any{"id": parkedID}, "; parked: 1 calls awaiting a decision (refund_order)"))
 	if ex.Pending != 1 {
 		t.Errorf("explain_failure %s: pending %d, want 1", parkedID, ex.Pending)
 	}

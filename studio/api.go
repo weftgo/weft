@@ -398,6 +398,12 @@ type runPage struct {
 	CallerLinkedMore    bool     `json:"caller_linked_more,omitempty"`
 	CallerLinkedHidden  int      `json:"caller_linked_hidden,omitempty"`
 	CallerLinkedUnknown bool     `json:"caller_linked_unknown,omitempty"`
+	// Decided is, on a parked run a resume names (resumed_by), each
+	// parked call's decision as that resume applied it; Resumes, on the
+	// resume (resumed_from), the same calls — the card drawn before its
+	// step 0 (U13.2, decisions.go). Absent when the run is neither.
+	Decided *decisionDoc `json:"decided,omitempty"`
+	Resumes *decisionDoc `json:"resumes,omitempty"`
 }
 
 // callerLinkedCap bounds a run page's caller_linked rows.
@@ -1109,6 +1115,7 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	page := runPage{runDoc: doc, Compactions: runCompactions(comps),
 		ManifestAvailable: s.manifestAvailable(r.Context(), det.ManifestHash)}
 	s.callerLinked(r.Context(), c, id, &page)
+	s.runDecisions(r, det.RunRow, &page)
 	writeJSON(w, r, http.StatusOK, page)
 }
 

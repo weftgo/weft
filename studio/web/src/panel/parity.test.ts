@@ -26,7 +26,7 @@ import { STATUS, statusOf } from "../lib/status"
 import { statusClass } from "../lib/status-class"
 import { PANEL_CSS } from "./styles"
 import { clip, NO_CONTENT } from "../lib/title"
-import type { RunDoc, RunRow } from "../lib/api"
+import type { DecisionDoc, RunDoc, RunRow } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
 import {
   REQUEST_NO_INDEX_REASON,
@@ -129,7 +129,10 @@ import {
   NOPUB as APP_NOPUB,
   PARKED as APP_PARKED,
   PLAIN as APP_PLAIN,
+  RESUMED as APP_RESUMED,
   RUNTIMES_500 as APP_RUNTIMES_500,
+  parkedRow as appParkedRow,
+  resumedRow as appResumedRow,
   runtimeRow as appRuntime,
   serveAppTurn,
 } from "../test/appturn-fixture"
@@ -1827,7 +1830,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     await settle()
     if (c.click && c.regated) {
       const reads = fake.calls("GET runtimes").length
-      click(button(el, "continue"))
+      click(button(el, "approve"))
       await vi.waitFor(
         () =>
           expect(fake.calls(`POST runs/${APP_PARKED}/approvals`)).toHaveLength(
@@ -1842,13 +1845,13 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       await vi.waitFor(
         () =>
           expect(
-            (button(el, "continue") as HTMLButtonElement | undefined)?.disabled
+            (button(el, "approve") as HTMLButtonElement | undefined)?.disabled
           ).toBe(false),
         { timeout: 5_000 }
       )
       await settle()
     } else if (c.click) {
-      click(button(el, "continue"))
+      click(button(el, "approve"))
       const done = () =>
         $(el, `${callSel} [data-weft-app-verb="rejected"]`) ??
         $(el, '[data-weft-app-owned="read-only"]') ??
@@ -1860,7 +1863,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     const seen = {
       kind:
         owned?.getAttribute("data-weft-app-owned") ??
-        (button(el, "continue") ? "decide" : null),
+        (button(el, "approve") ? "decide" : null),
       line: owned?.textContent ?? "",
       refused: all(el, '[data-weft-refused="app-owned"]').length,
       after: $(el, `${callSel} [data-weft-app-verb]`)?.textContent ?? "",
@@ -1888,7 +1891,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     if (c.click && c.regated) {
       const reads = fake.calls("GET runtimes").length
       ;[...box()!.querySelectorAll("button")]
-        .find((n) => n.textContent === "continue")!
+        .find((n) => n.textContent === "approve")!
         .click()
       await waitFor(() =>
         expect(fake.calls(`POST runs/${APP_PARKED}/approvals`)).toHaveLength(1)
@@ -1899,13 +1902,13 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       await waitFor(() =>
         expect(
           [...box()!.querySelectorAll("button")].find(
-            (n) => n.textContent === "continue"
+            (n) => n.textContent === "approve"
           )?.disabled
         ).toBe(false)
       )
     } else if (c.click) {
       ;[...box()!.querySelectorAll("button")]
-        .find((n) => n.textContent === "continue")!
+        .find((n) => n.textContent === "approve")!
         .click()
       await waitFor(() =>
         expect(
@@ -1920,7 +1923,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       kind:
         owned?.getAttribute("data-app-owned") ??
         ([...box()!.querySelectorAll("button")].some(
-          (n) => n.textContent === "continue"
+          (n) => n.textContent === "approve"
         )
           ? "decide"
           : null),
@@ -2068,6 +2071,174 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     cleanup()
     expect(studio).toContain(PLAYGROUND_OFF)
     expect(panel).toBe(studio)
+  })
+})
+
+// Decisions (U13.2): a decided park's outcome and the resume's
+// "resumed from" card, from the run documents' decided / resumes blocks
+// (studio/testdata/api/decisions.golden.json — thread_approvals' t1,
+// agent-7's deny), read the same on both surfaces: lib/decisions.ts's
+// words, the turn tag the link.
+describe("decisions on both surfaces (U13.2)", () => {
+  const DONE_LINE = "✋ denied · agent-7 · 'need a photo of the damage' → t2"
+  // The parked call's row in the panel's approvals block (the resumed
+  // card's rows carry no data-key).
+  const PARKED_DECISION = `.weft-call[data-key="${APP_CALL.id}"] [data-weft-decision]`
+  const blocks = golden<Record<string, DecisionDoc>>("decisions")
+  const serveDecided = (studioMeta: boolean, read?: boolean) => {
+    const fake = serveAppTurn(new FakeStudio(), { resumed: true, studioMeta })
+    // The fixture's parked call (call_deploy_1) stands for r1.
+    const call = (d: DecisionDoc) => ({
+      ...d,
+      calls: d.calls.map((c) => ({ ...c, call_id: APP_CALL.id })),
+    })
+    const t1 = call(
+      blocks[read ? "read_token_t1_decided" : "thread_t1_decided"]
+    )
+    const t2 = call(blocks.thread_t2_resumes)
+    fake
+      .on(`GET runs/${APP_PARKED}`, {
+        ...appParkedRow(),
+        resumed_by: APP_RESUMED,
+        children: [],
+        holes: [],
+        decided: { ...t1, run: APP_RESUMED },
+      })
+      .on(`GET runs/${APP_RESUMED}`, {
+        ...appResumedRow(),
+        resumed_from: APP_PARKED,
+        children: [],
+        holes: [],
+        resumes: { ...t2, run: APP_PARKED },
+      })
+    return fake.install()
+  }
+  async function panelSeen(run: string, sel: string) {
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+      "data-public-id": APP_PUB,
+    })
+    await vi.waitFor(
+      () =>
+        expect(
+          all(el, ".weft-turn").some((b) =>
+            (b.getAttribute("data-weft-run") ?? "").includes(run)
+          )
+        ).toBe(true),
+      { timeout: 5_000 }
+    )
+    click(
+      all(el, ".weft-turn").find((b) =>
+        (b.getAttribute("data-weft-run") ?? "").includes(run)
+      )
+    )
+    await vi.waitFor(() => expect($(el, sel)).toBeTruthy(), { timeout: 5_000 })
+    return el
+  }
+  const reset = async (el?: HTMLElement) => {
+    el?.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+  }
+
+  it("the parked turn reads its outcome: ✋ denied · agent-7 · 'need a photo of the damage' → t2", async () => {
+    serveDecided(false)
+    const el = await panelSeen(APP_PARKED, PARKED_DECISION)
+    const dec = $(el, PARKED_DECISION)!
+    const panel = `${dec.firstChild?.textContent} → ${dec.querySelector("[data-weft-resumed]")?.textContent}`
+    const panelDetail = dec.querySelector(".weft-reason")?.textContent
+    // No verb is left on a decided park.
+    expect(button(el, "approve")).toBeUndefined()
+    await reset(el)
+    serveDecided(true)
+    renderApp(`/runs/${APP_PARKED}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-decision-line]")).toBeTruthy()
+    )
+    const row = document.querySelector("[data-decision]")!
+    const studio = `${row.querySelector("[data-decision-line]")?.textContent} → ${row.querySelector("[data-resumed]")?.textContent}`
+    const studioDetail = row.querySelector(
+      "[data-decision-detail]"
+    )?.textContent
+    expect(
+      [...document.querySelectorAll("[data-parked] button")].map(
+        (b) => b.textContent
+      )
+    ).not.toContain("approve")
+    cleanup()
+    expect([panel, studio]).toEqual([DONE_LINE, DONE_LINE])
+    expect(panelDetail).toBe(studioDetail)
+    expect(studioDetail).toMatch(/^via user · /)
+  })
+
+  it("the resume turn opens with the resumed-from card, before step 0, on both", async () => {
+    serveDecided(false)
+    const el = await panelSeen(APP_RESUMED, "[data-weft-resumed-card]")
+    const card = $(el, "[data-weft-resumed-card]")!
+    const panel = [
+      card.querySelector(".weft-step-h")?.textContent,
+      card.querySelector("[data-weft-decision]")?.firstChild?.textContent,
+    ]
+    // Before step 0: the card precedes the first step in the turn view.
+    const step0 = $(el, '.weft-step[data-key="s0"]')
+    expect(step0).toBeTruthy()
+    expect(
+      card.compareDocumentPosition(step0!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    await reset(el)
+    serveDecided(true)
+    renderApp(`/runs/${APP_RESUMED}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-resumed-card]")).toBeTruthy()
+    )
+    const sc = document.querySelector("[data-resumed-card]")!
+    const studio = [
+      sc.querySelector("[data-resumed-from]")?.textContent,
+      sc.querySelector("[data-decision-line]")?.textContent,
+    ]
+    const first = document.querySelector('[data-step="0"]')
+    expect(first).toBeTruthy()
+    expect(
+      sc.compareDocumentPosition(first!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    cleanup()
+    expect(panel).toEqual([
+      "resumed from t1 · 1 decided call",
+      "✋ denied · agent-7 · 'need a photo of the damage'",
+    ])
+    expect(studio).toEqual(panel)
+  })
+
+  it("a read token: no who, no reason — the hidden badge on both", async () => {
+    serveDecided(false, true)
+    const el = await panelSeen(APP_PARKED, PARKED_DECISION)
+    const panel = [
+      $(el, PARKED_DECISION)!.firstChild?.textContent,
+      $(el, `${PARKED_DECISION} [data-hole]`)?.getAttribute("data-hole"),
+    ]
+    await reset(el)
+    serveDecided(true, true)
+    renderApp(`/runs/${APP_PARKED}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-decision-line]")).toBeTruthy()
+    )
+    const studio = [
+      document.querySelector("[data-decision-line]")?.textContent,
+      document
+        .querySelector("[data-decision] [data-hole]")
+        ?.getAttribute("data-hole"),
+    ]
+    cleanup()
+    // The actor is metadata (weft.approval.actor), never content.
+    expect(panel).toEqual(["✋ denied · agent-7", "hidden"])
+    expect(studio).toEqual(panel)
   })
 })
 

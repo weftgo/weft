@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1180,5 +1181,110 @@ func TestUpgradeTo0020ReadsRunTrees(t *testing.T) {
 	if err != nil || len(tree.Spans) != 2 || tree.Spans[0].RunID != "r_up" || tree.Spans[1].RunID != "r_up/0/c" ||
 		tree.Spans[1].ParentRunID != "r_up" || tree.Truncated || len(tree.Missing) != 0 {
 		t.Errorf("RunTreeSpans after 0020 = %+v, %v; want r_up's span and its child's under it", tree, err)
+	}
+}
+
+// A database at 0022 holding a thread/pool child session's turn —
+// stored before weft_runs.SessionParent existed, its lineage only in
+// Meta — upgrades through 0023 on a live server (U14-fix2): the
+// UPDATE backfills SessionParent (a background mutation under Open;
+// applied here with mutations_sync 2 so the test reads its result) and
+// MATERIALIZE INDEX builds idx_session_parent, so SessionQuery.Parents
+// lists the child session under its parent.
+func TestUpgradeTo0023BackfillsSessionParent(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0023 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	apply := func(ctx context.Context, v int) {
+		t.Helper()
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for v := 1; v <= 22; v++ {
+		apply(ctx, v)
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	turn := func(run, session, spanID string, start time.Time, attrs map[string]any) obsdb.Span {
+		attrs["weft.run.id"] = run
+		attrs["weft.session.id"] = session
+		attrs["weft.turn"] = int64(1)
+		attrs["gen_ai.operation.name"] = "invoke_agent"
+		return obsdb.Span{TraceID: "0102030405060708090a0b0c0d0e0f60", SpanID: spanID, Name: "invoke_agent a", Kind: 1,
+			Start: start, End: start.Add(time.Second), StatusCode: 1, Service: "svc",
+			Attrs: attrs, Resource: map[string]any{"service.name": "svc"}}
+	}
+	if err := (&DB{conn: conn}).Write(ctx, obsdb.Batch{Spans: []obsdb.Span{
+		turn("s_parent-t1", "s_parent", "0a0b0c0d0e0f0a01", at, map[string]any{}),
+		turn("s_child-t1", "s_child", "0a0b0c0d0e0f0a02", at.Add(time.Millisecond), map[string]any{"weft.session.parent": "s_parent"}),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var meta string
+	if err := conn.QueryRow(ctx, `SELECT max(Meta) FROM weft_runs WHERE RunId = 's_child-t1'`).Scan(&meta); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(meta, "weft.session.parent") {
+		t.Fatalf("the 0022 row's Meta = %q, want weft.session.parent in it (the backfill's source)", meta)
+	}
+	apply(ch.Context(ctx, ch.WithSettings(ch.Settings{"mutations_sync": 2})), 23)
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0023 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var idx uint64
+	if err := db.(*DB).conn.QueryRow(ctx, `SELECT count() FROM system.data_skipping_indices
+		WHERE database = currentDatabase() AND table = 'weft_runs' AND name = 'idx_session_parent'`).Scan(&idx); err != nil {
+		t.Fatal(err)
+	}
+	if idx != 1 {
+		t.Errorf("idx_session_parent after 0023: %d, want 1", idx)
+	}
+	page, err := db.Sessions(ctx, obsdb.SessionQuery{Parents: []string{"s_parent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Sessions) != 1 || page.Sessions[0].ID != "s_child" || page.Sessions[0].ParentSession != "s_parent" {
+		t.Errorf("Sessions(Parents: s_parent) after 0023 = %+v, want s_child under s_parent", page.Sessions)
 	}
 }

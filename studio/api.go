@@ -820,9 +820,11 @@ type delegatedSessionsFields struct {
 	CostUSD    *float64 `json:"delegated_sessions_cost_usd"`
 	CostKnown  bool     `json:"delegated_sessions_cost_known"`
 	CostReason string   `json:"delegated_sessions_cost_reason,omitempty"`
-	// Cache is cacheOf over the delegated usage (cost_fields' cache:
-	// exact, or not_reported when no delegated session reported a cache
-	// split); absent when nothing was delegated.
+	// Cache is cost_fields' cache over the delegated sessions, kept
+	// from each visited session's own cost: exact only when every one
+	// is exact, not_reported when any one is not (a sum's split would
+	// read exact over a session that reported none); absent when
+	// nothing was delegated.
 	Cache string `json:"delegated_sessions_cache,omitempty"`
 }
 
@@ -1830,6 +1832,7 @@ func (s *Server) delegatedSessions(ctx context.Context, id, pub string, doc *ses
 	var parts []runCost
 	var why string
 	walked := 0
+	allExact := true // every visited session's own cost reported its cache split exact
 walk:
 	for depth := 0; len(level) > 0; depth++ {
 		var next []string
@@ -1841,7 +1844,7 @@ walk:
 				if depth == 0 {
 					doc.DelegatedUnknown = true
 				}
-				why = fmt.Sprintf("the sessions delegated %d level(s) under this one could not be read", depth+1)
+				why = fmt.Sprintf("the sessions delegated %d level(s) under this one could not be read; delegated_usage stops at the levels read", depth+1)
 				break walk
 			}
 			if depth == 0 {
@@ -1853,12 +1856,13 @@ walk:
 				}
 				seen[sr.ID] = true
 				if walked == delegatedTreeCap {
-					why = fmt.Sprintf("more than %d sessions are delegated under this one: too many to price at read time", delegatedTreeCap)
+					why = fmt.Sprintf("more than %d sessions are delegated under this one: too many to price at read time; delegated_usage counts the first %d sessions", delegatedTreeCap, delegatedTreeCap)
 					break walk
 				}
 				walked++
 				sc, _, _ := s.sessionCost(ctx, sr.ID, pub)
 				doc.DelegatedUsage = doc.DelegatedUsage.Add(sr.Usage)
+				allExact = allExact && sc.cache == cacheExact
 				parts = append(parts, runCost{id: sr.ID, own: sc, delegated: cost{known: true}})
 				if depth == 0 && len(doc.Delegated) < delegatedCap {
 					row := sessRow(sr)
@@ -1887,7 +1891,10 @@ walk:
 		}
 		total.reason = why
 	}
-	out := delegatedSessionsFields{CostKnown: total.known, CostReason: total.reason, Cache: cacheOf(doc.DelegatedUsage)}
+	out := delegatedSessionsFields{CostKnown: total.known, CostReason: total.reason, Cache: cacheNotReported}
+	if allExact {
+		out.Cache = cacheExact
+	}
 	if out.CostKnown && out.Cache == cacheNotReported && out.CostReason == "" {
 		out.CostReason = cacheNote // fields()' rule
 	}

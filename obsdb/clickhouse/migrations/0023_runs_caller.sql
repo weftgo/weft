@@ -21,7 +21,13 @@
 -- views, so a delegated walk narrows by idx_session_parent before the
 -- GROUP BY instead of extracting Meta from every run. The UPDATE fills
 -- it on the rows stored before this migration (thread stamped the key
--- before weft.caller.* existed).
+-- before weft.caller.* existed), and MATERIALIZE INDEX builds
+-- idx_session_parent over the parts written before it (0016's
+-- reasoning). Both are mutations ClickHouse runs in the background
+-- (mutations_sync 0), so Open does not wait for them: until the UPDATE
+-- finishes, a delegated session whose turns were all stored before
+-- this migration is missing from SessionQuery.Parents, and until the
+-- index is built those parts are read in full.
 --
 -- No backfill of weft.caller.*: it is new with this version. A run
 -- recorded before it that a tool call started keeps its ParentRunID;
@@ -36,6 +42,8 @@ ALTER TABLE weft_runs ADD INDEX IF NOT EXISTS idx_session_parent SessionParent T
 
 ALTER TABLE weft_runs UPDATE SessionParent = JSONExtractString(Meta, 'weft.session.parent')
 WHERE SessionParent = '' AND position(Meta, 'weft.session.parent') > 0;
+
+ALTER TABLE weft_runs MATERIALIZE INDEX idx_session_parent;
 
 ALTER TABLE weft_runs_logs_mv MODIFY QUERY
 WITH mapFilter((k, v) -> NOT has([

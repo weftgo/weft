@@ -1,13 +1,17 @@
 package studio
 
 import (
+	"context"
+	"errors"
 	"fmt"
-
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
 )
 
@@ -82,7 +86,103 @@ func TestDelegatedOverflow(t *testing.T) {
 	}
 	var capped sessionDocBody
 	getUntil(t, ts, "/api/sessions/s_lead", &capped, func() bool { return true })
-	if capped.CostKnown || capped.CostUSD != nil || !strings.Contains(capped.CostReason, "too many to price") {
-		t.Errorf("past the tree cap: cost %v known %v reason %q; want unknown, the cap named", capped.CostUSD, capped.CostKnown, capped.CostReason)
+	wantCap := fmt.Sprintf("too many to price at read time; delegated_usage counts the first %d sessions", delegatedTreeCap)
+	if capped.CostKnown || capped.CostUSD != nil || !strings.Contains(capped.CostReason, wantCap) {
+		t.Errorf("past the tree cap: cost %v known %v reason %q; want unknown, the cap named and the usage a floor (%q)", capped.CostUSD, capped.CostKnown, capped.CostReason, wantCap)
+	}
+	if capped.DelegatedUsage.InputTokens != delegatedTreeCap {
+		t.Errorf("past the tree cap: delegated usage %+v, want the first %d sessions' (the floor the reason names)", capped.DelegatedUsage, delegatedTreeCap)
+	}
+
+	// A level that cannot be read: the figures are not known, the
+	// reason names the level and says the usage stops above it.
+	fsrv := New(DB(failDeepSessions{DB: db, root: "s_lead"}))
+	t.Cleanup(func() { _ = fsrv.Close() })
+	fts := httptest.NewServer(fsrv.Handler())
+	t.Cleanup(fts.Close)
+	var failed sessionDocBody
+	getUntil(t, fts, "/api/sessions/s_lead", &failed, func() bool { return true })
+	wantFail := "the sessions delegated 2 level(s) under this one could not be read; delegated_usage stops at the levels read"
+	if failed.CostKnown || failed.CostUSD != nil || !strings.Contains(failed.CostReason, wantFail) {
+		t.Errorf("a failed level: cost %v known %v reason %q; want unknown, %q", failed.CostUSD, failed.CostKnown, failed.CostReason, wantFail)
+	}
+	if failed.DelegatedUsage.InputTokens != n {
+		t.Errorf("a failed level: delegated usage %+v, want the direct level's %d alone", failed.DelegatedUsage, n)
+	}
+}
+
+// failDeepSessions fails every delegated read below root's own level.
+type failDeepSessions struct {
+	obsdb.DB
+	root string
+}
+
+func (f failDeepSessions) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionPage, error) {
+	if len(q.Parents) > 0 && !slices.Equal(q.Parents, []string{f.root}) {
+		return obsdb.SessionPage{}, errors.New("deep level unreadable")
+	}
+	return f.DB.Sessions(ctx, q)
+}
+
+// TestDelegatedCache (U14-fix2): delegated_sessions_cache is kept from
+// each delegated session's own cost, never from the summed usage — one
+// session with a cache split and one without read not_reported, though
+// the sum carries a split; only an all-exact set reads exact.
+func TestDelegatedCache(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/cache.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	// A real model's turns (seedRun's scripted model reads exact $0
+	// whatever its usage): one with a cache split, one without.
+	at := time.Now().UTC()
+	turn := func(session, parent string, cached int) {
+		t.Helper()
+		run := session + "-t1"
+		attrs := func(evType string, pos int64) map[string]any {
+			a := map[string]any{"weft.record": "event", "weft.run.id": run, "gen_ai.agent.name": "acme-support",
+				"weft.session.id": session, "weft.turn": "1", "weft.event.type": evType, "weft.event.pos": pos}
+			if parent != "" {
+				a["weft.session.parent"] = parent
+			}
+			return a
+		}
+		rec := func(evType string, pos int64, body string) obsdb.Record {
+			return obsdb.Record{Time: at.Add(time.Duration(pos) * time.Millisecond), EventName: "weft.event", Severity: 9,
+				Body: body, Service: "svc", Attrs: attrs(evType, pos), Resource: map[string]any{"service.name": "svc"}}
+		}
+		if err := db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{
+			rec("run_start", 0, `{"type":"run_start","id":"`+run+`","model":{"provider":"openai","name":"gpt-5"},"agent":"acme-support"}`),
+			rec("run_finish", 1, fmt.Sprintf(`{"type":"run_finish","run_id":%q,"usage":{"input_tokens":10,"output_tokens":1,"cached_input_tokens":%d},"steps":1}`, run, cached)),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	turn("s_mixed", "", 0)
+	turn("s_exact", "s_mixed", 4)
+	turn("s_plain", "s_mixed", 0)
+	turn("s_clean", "", 0)
+	turn("s_e2", "s_clean", 4)
+	srv := New(DB(db))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	type body struct {
+		Delegated      []struct{ ID, Cache string } `json:"delegated"`
+		DelegatedUsage core.Usage                   `json:"delegated_usage"`
+		Cache          string                       `json:"delegated_sessions_cache"`
+	}
+	var mixed body
+	getUntil(t, ts, "/api/sessions/s_mixed", &mixed, func() bool { return true })
+	if len(mixed.Delegated) != 2 || mixed.DelegatedUsage.CachedInputTokens != 4 || mixed.Cache != cacheNotReported {
+		t.Errorf("one exact, one not_reported: rows %+v, usage %+v, cache %q; want 2 rows, the split summed, %q",
+			mixed.Delegated, mixed.DelegatedUsage, mixed.Cache, cacheNotReported)
+	}
+	var clean body
+	getUntil(t, ts, "/api/sessions/s_clean", &clean, func() bool { return true })
+	if clean.Cache != cacheExact {
+		t.Errorf("every delegated session exact: cache %q, want %q", clean.Cache, cacheExact)
 	}
 }

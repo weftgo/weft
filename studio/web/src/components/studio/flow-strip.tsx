@@ -4,6 +4,8 @@
 import type { FlowPill } from "@/lib/trace"
 import { statusOf } from "@/lib/status"
 import { statusClass } from "@/lib/status-class"
+import { END_WORDS } from "@/lib/timeline"
+import type { TurnEnd } from "@/lib/timeline"
 
 export function FlowStrip({
   pills,
@@ -11,6 +13,7 @@ export function FlowStrip({
   errorType,
   selectedKey,
   onSelect,
+  ended,
 }: {
   pills: FlowPill[]
   runStatus: string
@@ -18,18 +21,21 @@ export function FlowStrip({
   errorType?: string
   selectedKey?: string
   onSelect: (key: string) => void
+  /** A newer message ended the run (UX-B-09): its words, neutral. */
+  ended?: TurnEnd
 }) {
   if (pills.length === 0) return null
   // The end mark in lib/status.ts's word and role (U1-fix): a
   // cancelled run reads cancelled, not failed.
   const st = statusOf({ id: "", status: runStatus, error_type: errorType })
-  const end =
-    st.key === "running"
+  const end = ended
+    ? `${ended.kind === "rolled_back" ? "↶" : "✗"} ${ended.text}`
+    : st.key === "running"
       ? "…"
       : st.key === "succeeded"
         ? "■ done"
         : `✗ ${st.word}`
-  const endTone = statusClass(st.role).text
+  const endTone = ended ? "text-muted-foreground" : statusClass(st.role).text
   return (
     <div
       className="flex items-stretch gap-1 overflow-x-auto pb-1"
@@ -48,7 +54,7 @@ export function FlowStrip({
           <button
             type="button"
             className={`flex max-w-56 shrink-0 flex-col items-start rounded-md border px-2 py-1 text-left hover:border-thread/60 ${
-              p.bad
+              p.bad && !ended
                 ? "border-status-bad/50 bg-status-bad/5"
                 : selectedKey === p.key
                   ? "border-thread bg-background ring-1 ring-thread"
@@ -70,6 +76,13 @@ export function FlowStrip({
                   }`}
                 >
                   {p.finish}
+                </span>
+              ) : p.bad && ended ? (
+                <span
+                  className="ml-1.5 font-normal text-muted-foreground"
+                  title={ended.title}
+                >
+                  {END_WORDS[ended.kind]}
                 </span>
               ) : p.bad ? (
                 <span className="ml-1.5 font-normal text-status-bad">

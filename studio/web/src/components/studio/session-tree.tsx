@@ -9,18 +9,26 @@
 // compactions. Each mark opens its drawer on the timeline.
 import { Link } from "@tanstack/react-router"
 import { useMemo } from "react"
+import type { CSSProperties } from "react"
 
 import type { RunRow, TimelineDoc, TimelineTurn } from "@/lib/api"
 import { summarizerView } from "@/lib/cost"
 import { tokens } from "@/lib/format"
 import { runLink, sessionViewLink } from "@/lib/links"
 import { sessionTree, TREE, treeRows } from "@/lib/session-tree"
+import type { TreeNode } from "@/lib/session-tree"
 import { THREAD_LINK, TONE_TEXT } from "@/lib/status-class"
 import { markLine, turnEnds } from "@/lib/timeline"
+import type { TurnEnd } from "@/lib/timeline"
 import { turnLabel, turnTitle } from "@/lib/title"
 import { CostText, useCostCapable } from "@/components/studio/cost"
 import { StatusChip, TitleText } from "@/components/studio/runs-table"
 import { EndChip, ForkState } from "@/components/studio/session-timeline"
+
+/** The marks a tree node draws: its own, less the interrupt mark its
+ * end chip already says (the chip links it). */
+const marksOf = (n: TreeNode, end: TurnEnd | undefined) =>
+  end?.mark ? n.marks.filter(({ key }) => key !== end.mark) : n.marks
 
 export function SessionTree({
   sessionID,
@@ -81,8 +89,11 @@ export function SessionTree({
           return (
             <li
               key={t.run_id}
-              className={`space-y-1 py-1.5 pr-3 text-xs ${n.onPath ? "" : "bg-secondary/40"}`}
-              style={{ paddingLeft: `${0.75 + depth * 1.25}rem` }}
+              // The indent: 1.25rem a level, capped at two levels below
+              // sm — a phone keeps its width for the words (no
+              // horizontal scroll at 360 px).
+              className={`space-y-1 py-1.5 pr-3 pl-[calc(0.75rem_+_min(var(--depth),_2)_*_1.25rem)] text-xs sm:pl-[calc(0.75rem_+_var(--depth)_*_1.25rem)] ${n.onPath ? "" : "bg-secondary/40"}`}
+              style={{ "--depth": depth } as CSSProperties}
               data-tree-turn={t.turn}
               data-on-path={n.onPath ? "" : undefined}
               data-depth={depth}
@@ -100,7 +111,17 @@ export function SessionTree({
                 >
                   {turnLabel(t)}
                 </Link>
-                {end ? (
+                {end && end.mark ? (
+                  // The end chip opens its interrupt mark on the
+                  // timeline: the tree draws the chip, not the mark too.
+                  <Link
+                    {...sessionViewLink(sessionID, { mark: end.mark })}
+                    className="shrink-0 rounded-sm hover:underline"
+                    title={end.title}
+                  >
+                    <EndChip end={end} />
+                  </Link>
+                ) : end ? (
                   <EndChip end={end} />
                 ) : (
                   <StatusChip
@@ -115,7 +136,7 @@ export function SessionTree({
                   />
                 )}
                 <span
-                  className={`shrink-0 font-mono text-[11px] ${n.onPath ? "text-thread-ink" : "text-muted-foreground"}`}
+                  className={`font-mono text-[11px] ${n.onPath ? "text-thread-ink" : "text-muted-foreground"}`}
                   title={n.onPath ? TREE.currentTitle : TREE.offPathTitle}
                   data-path={n.onPath ? "current" : "off"}
                 >
@@ -127,7 +148,7 @@ export function SessionTree({
                 </span>
                 {n.continues !== undefined ? (
                   <span
-                    className="shrink-0 font-mono text-[11px] text-muted-foreground"
+                    className="min-w-0 font-mono text-[11px] break-words text-muted-foreground"
                     title={TREE.continuesTitle}
                     data-continues={n.continues}
                   >
@@ -151,9 +172,9 @@ export function SessionTree({
                   />
                 ) : null}
               </div>
-              {n.marks.length ? (
-                <ul className="space-y-0.5 pl-4">
-                  {n.marks.map(({ i, key }) => (
+              {marksOf(n, end).length ? (
+                <ul className="space-y-0.5 pl-4 max-sm:pl-1">
+                  {marksOf(n, end).map(({ i, key }) => (
                     <TreeMark
                       key={key}
                       sessionID={sessionID}

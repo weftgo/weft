@@ -64,6 +64,8 @@ import {
   stepAttemptsHole,
 } from "@/components/studio/step-attempts"
 import { RequestSection } from "@/components/studio/step-request"
+import { useBusyEndCtx } from "@/components/studio/busy-end"
+import { endLine } from "@/lib/timeline"
 import type { RunRequests } from "@/components/studio/step-request"
 import {
   StepBody,
@@ -253,7 +255,12 @@ function Answer({
   // While scrubbing the run reads as running: the verdict and the end
   // are the playhead's, not the record's.
   const run = runStatus === doc.status ? doc : { status: runStatus }
-  const verdict = stepVerdict(step, run, ms, !hasNext)
+  // A turn a newer message ended (UX-B-09): the verdict names it,
+  // neutral — red stays for real failures.
+  const endCtx = useBusyEndCtx()
+  const ended = runStatus === doc.status ? endCtx : undefined
+  const raw = stepVerdict(step, run, ms, !hasNext)
+  const verdict = ended && raw.bad ? { text: ended.text, bad: false } : raw
   const mine = requests?.steps.get(step.index)
   const row = mine?.rows.at(-1)
   const prev = requests?.prev.get(step.index)
@@ -334,7 +341,14 @@ function Answer({
         step.toolCalls.length && !derived ? "tools" : undefined,
         step.toolCalls.some((c) => c.result?.isError)
       )}
-      {line("then", thenLine(step, run, hasNext), undefined, verdict.bad)}
+      {line(
+        "then",
+        ended && !hasNext
+          ? endLine(ended, step.index)
+          : thenLine(step, run, hasNext),
+        undefined,
+        verdict.bad
+      )}
     </dl>
   )
 }

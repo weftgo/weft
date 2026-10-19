@@ -8,6 +8,14 @@ import { describe, expect, it } from "vitest"
 import type { SessionMark, TimelineTurn } from "./api"
 import { summarizerView } from "./cost"
 import {
+  busyEndSpans,
+  compactionStarts,
+  contextRows,
+  endedByPolicy,
+  endLine,
+  isoCompare,
+  startedFrom,
+  startedWords,
   exchanges,
   exchangesWords,
   markDetail,
@@ -379,5 +387,158 @@ describe("summarizerView (UX-B-13)", () => {
     expect(est?.text).toBe("+ summarizer ≈$0.0045")
     expect(est?.badge).toBe("estimate")
     expect(est?.title).toContain("an estimate: priced at the turn's model")
+  })
+})
+
+// ── U15.2-fix ───────────────────────────────────────────────────────
+
+const comp = (run: number, at: string, reason: string, hash: string) =>
+  mark(
+    "compaction",
+    run,
+    {
+      scope: "session",
+      hash,
+      reason,
+      replaced: 3,
+      entries: 1,
+      tokens_before: 9000,
+      tokens_after: 4000,
+    },
+    { at, lane: "compaction", event: "weft.compaction" }
+  )
+
+describe("compactionStarts (U15.2-fix: the started-on turn by time)", () => {
+  it("names every compaction since the turn before, the next turn to start after each", () => {
+    // t4 (12:00:04–04.5) leaves a trim and a manual one; t5 starts at
+    // 05 on both — t3's earlier trim is t4's.
+    const ts = [3, 4, 5].map((n) => turn(n))
+    const ms = [
+      comp(3, "2026-10-19T12:00:03.700Z", "trim", "h1"),
+      comp(4, "2026-10-19T12:00:04.600Z", "trim", "h2"),
+      comp(4, "2026-10-19T12:00:04.900Z", "manual", "h3"),
+    ]
+    const starts = compactionStarts(ts, ms)
+    expect(starts.map((s) => [s.mark.hash, s.on, s.held])).toEqual([
+      ["h1", `${S}-t4`, false],
+      ["h2", `${S}-t5`, false],
+      ["h3", `${S}-t5`, false],
+    ])
+    const rows = contextRows(ts, ms)
+    expect(rows[2].started.map((s) => s.mark.hash)).toEqual(["h2", "h3"])
+    expect(startedWords(rows[2].started, (r) => r.slice(-2))).toBe(
+      "started on a compacted context · compacted after t4: ⌗ trim 9.0k → 4.0k · ⌗ manual 9.0k → 4.0k"
+    )
+    // A marker past the newest turn: no turn started on it yet.
+    expect(
+      compactionStarts(ts, [
+        comp(5, "2026-10-19T12:00:05.900Z", "trim", "h4"),
+      ])[0].on
+    ).toBeUndefined()
+  })
+
+  it("after a Branch back, the marker filed under an older turn on the line opens the next turn to start — not the next turn number", () => {
+    // t1, t2; Branch back to t1's answer; a compaction filed under t1
+    // (the last run on the current path) lands after t2 ended; t3 is
+    // the turn that started on it, never t2.
+    const ts = [1, 2, 3].map((n) => turn(n))
+    const s = compactionStarts(ts, [
+      comp(1, "2026-10-19T12:00:02.800Z", "manual", "hb"),
+    ])
+    expect(s[0].on).toBe(`${S}-t3`)
+    expect(s[0].held).toBe(false)
+    expect(
+      contextRows(ts, [
+        comp(1, "2026-10-19T12:00:02.800Z", "manual", "hb"),
+      ]).map((r) => r.started.length)
+    ).toEqual([0, 0, 1])
+  })
+
+  it("a held marker (filed under the run that started on it) opens its own run", () => {
+    // thread held the marker (no run produced the context) and emitted
+    // it as t2 reported: it landed inside t2's span.
+    const ts = [1, 2].map((n) => turn(n))
+    const held = comp(2, "2026-10-19T12:00:02.000300Z", "manual", "hh")
+    const [s] = compactionStarts(ts, [held])
+    expect(s.held).toBe(true)
+    expect(s.on).toBe(`${S}-t2`)
+    expect(startedFrom(s, (r) => r)).toBe("compacted before this turn")
+    // The lane: t2 started on it; it is not one of t2's after-marks.
+    const rows = contextRows(ts, [held])
+    expect(rows[1].started).toHaveLength(1)
+    expect(rows[1].marks).toEqual([])
+    // A marker recorded before its own run started (the run it was
+    // held for started after the compaction): that run started on it.
+    const early = comp(2, "2026-10-19T12:00:01.800Z", "manual", "he")
+    expect(compactionStarts(ts, [early])[0]).toMatchObject({
+      held: true,
+      on: `${S}-t2`,
+    })
+  })
+
+  it("orders times to the nanosecond: a marker 0.4 ms after its run's finish is after it", () => {
+    const t = turn(1, { finished: "2026-10-19T12:00:01.500100Z" })
+    const [s] = compactionStarts(
+      [t, turn(2)],
+      [comp(1, "2026-10-19T12:00:01.500500Z", "trim", "hn")]
+    )
+    expect(s.held).toBe(false)
+    expect(s.on).toBe(`${S}-t2`)
+    expect(
+      isoCompare("2026-10-19T12:00:01.5001Z", "2026-10-19T12:00:01.500100001Z")
+    ).toBeLessThan(0)
+  })
+})
+
+describe("the branch mark's words (U15.2-fix)", () => {
+  it("a Branch to the entry the leaf was on says no line was left", () => {
+    const b = (from: string, to: string, summarized = false) =>
+      markLine(
+        mark(
+          "branch",
+          3,
+          { from_entry: from, to_entry: to, summarized },
+          { lane: "branch_fork" }
+        ),
+        turns
+      ).text
+    expect(b("e7", "e4", true)).toBe(
+      "branched · the leaf moved off this line · the left branch summarized"
+    )
+    expect(b("e14", "e14")).toBe(
+      "branched to the entry the leaf was on · no line was left"
+    )
+  })
+})
+
+describe("busy ends on the run page (U15.2-fix, UX-B-09)", () => {
+  it("knows thread's cause, words the end line and redraws the run's rows neutral", () => {
+    expect(endedByPolicy({ cancel_cause: "thread.interrupted" })).toBe(true)
+    expect(endedByPolicy({ cancel_cause: "app.shutdown" })).toBe(false)
+    const end = {
+      kind: "rolled_back" as const,
+      text: "rolled back by t9 · off path",
+      title: "",
+      mark: "k",
+    }
+    expect(endLine(end, 0)).toBe("■ rolled back by t9 · off path at step 0")
+    const rows = busyEndSpans(
+      [
+        { runId: "r", kind: "run", tone: "bad", badge: "error" },
+        { runId: "r", kind: "step", tone: "bad", badge: "failed" },
+        { runId: "r", kind: "tool", tone: "never", badge: "cancelled" },
+        { runId: "r", kind: "tool", tone: "tool", badge: "ok" },
+        { runId: "other", kind: "run", tone: "bad", badge: "error" },
+      ],
+      "r",
+      end
+    )
+    expect(rows.map((r) => [r.tone, r.badge])).toEqual([
+      ["step", "rolled back"],
+      ["step", "rolled back"],
+      ["step", "cut off"],
+      ["tool", "ok"],
+      ["bad", "error"],
+    ])
   })
 })

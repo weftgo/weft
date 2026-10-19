@@ -647,10 +647,16 @@ const MaxGaps = 1000
 // tag.<k>=<v>: thread.WithRunMetadata's tags, core.Metadata's pairs).
 // It selects sessions, never turns: a listed session's turns, usage,
 // order, Total and cursor are all of its turns', tagged or not.
+//
+// IDs keeps the sessions whose id is one of them, empty any: one read
+// gives a known set of sessions their rows (Studio's timeline reads the
+// sessions a session forked so, U15.2-fix) — every aggregate still over
+// all of each one's turns.
 type SessionQuery struct {
 	Agent, PublicID string
 	Q               string
 	Parents         []string
+	IDs             []string
 	Meta            map[string]string
 	Before          time.Time // cursor on LastSeen; zero = newest
 	BeforeID        string    // with Before: the (LastSeen, ID) pair, as RunQuery.BeforeID

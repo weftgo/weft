@@ -45,7 +45,7 @@ import {
   marksByTurn,
   OFF_PATH,
   SESSION_LEVEL,
-  startedCompacted,
+  startedWords,
   toggleLane,
   toolsByCall,
   TRAIL_NOTE,
@@ -64,6 +64,10 @@ import {
 import { derivedUsageUnknown } from "@/lib/honesty"
 import { CODE_SURFACE, JsonTree } from "@/components/studio/json-tree"
 import { Button } from "@/components/ui/button"
+
+/** A mark outside the lane filter: muted ink and a dashed outline —
+ * still listed and clickable, its contrast kept (never an opacity). */
+const DIMMED = "outline-1 outline-dashed outline-border"
 
 export function SessionTimeline({
   sessionID,
@@ -172,26 +176,30 @@ export function SessionTimeline({
     />
   )
   // A turn that started on a compacted context (UX-B-12): its first
-  // line, linking the compaction filed under the turn before it.
+  // line — every compaction since the turn before (the context lane's
+  // started), linking the newest one's mark.
   const compactedStart = (t: TimelineTurn) => {
-    const c = ctx.get(t.run_id)
-    const before = c?.after ? ctx.get(c.after) : undefined
-    if (!c?.after || !before?.marks.length) return null
-    const last = before.marks.at(-1)!
+    const started = ctx.get(t.run_id)?.started ?? []
+    if (!started.length) return null
+    const last = started.at(-1)!
+    const dim = !!lanes && !lanes.has("compaction")
     return (
       <li>
         <button
           type="button"
-          onClick={() => onSelect(last.key)}
-          className={`flex w-full min-w-0 items-baseline gap-1.5 rounded-sm px-1.5 py-0.5 text-left font-mono text-[11px] hover:ring-1 hover:ring-border ${lanes && !lanes.has("compaction") ? "opacity-40" : ""}`}
+          onClick={() => onSelect(last.mark.key)}
+          className={`flex w-full min-w-0 items-baseline gap-1.5 rounded-sm px-1.5 py-0.5 text-left font-mono text-[11px] hover:ring-1 hover:ring-border ${dim ? DIMMED : ""}`}
           data-started-compacted={t.run_id}
+          data-dimmed={dim ? "" : undefined}
         >
-          <span aria-hidden className={TONE_TEXT.step}>
+          <span
+            aria-hidden
+            className={dim ? "text-muted-foreground" : TONE_TEXT.step}
+          >
             ⌗
           </span>
           <span className="truncate">
-            {startedCompacted(turnTag(c.after, statusRows))} ·{" "}
-            {contextMarkLine(last).slice(2)}
+            {startedWords(started, (r) => turnTag(r, statusRows))}
           </span>
         </button>
       </li>
@@ -430,9 +438,9 @@ function ContextLaneRow({
         </span>
       </div>
       <div className="col-start-2 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono sm:col-start-3">
-        {r.after ? (
+        {r.started.length ? (
           <span className="text-muted-foreground" data-context-after>
-            ({startedCompacted(tag(r.after))})
+            ({startedWords(r.started, tag)})
           </span>
         ) : null}
         {r.marks.map((c) => (
@@ -661,22 +669,26 @@ function MarkButton({
   dim?: boolean
 }) {
   const l = markLine(m, turns, tools)
+  // Dimmed: the muted ink (4.5:1 on the background, both themes) and a
+  // dashed outline — never an opacity, which fails contrast (axe).
+  const muted = !!dim && !selected
+  const ink = muted ? "text-muted-foreground" : TONE_TEXT[l.tone]
   return (
     <li>
       <button
         type="button"
         aria-pressed={selected}
         onClick={() => onSelect(selected ? undefined : k)}
-        className={`flex w-full min-w-0 items-baseline gap-1.5 rounded-sm px-1.5 py-0.5 text-left font-mono text-[11px] hover:ring-1 hover:ring-border ${selected ? "ring-2 ring-thread-ink" : ""} ${dim && !selected ? "opacity-40" : ""}`}
+        className={`flex w-full min-w-0 items-baseline gap-1.5 rounded-sm px-1.5 py-0.5 text-left font-mono text-[11px] hover:ring-1 hover:ring-border ${selected ? "ring-2 ring-thread-ink" : ""} ${muted ? DIMMED : ""}`}
         data-mark={k}
         data-mark-kind={m.kind}
         data-mark-lane={m.lane}
         data-dimmed={dim ? "" : undefined}
       >
-        <span aria-hidden className={TONE_TEXT[l.tone]}>
+        <span aria-hidden className={ink}>
           {l.icon}
         </span>
-        <span className={`truncate ${TONE_TEXT[l.tone]}`}>{l.text}</span>
+        <span className={`truncate ${ink}`}>{l.text}</span>
         {m.content_hidden ? (
           <span className="shrink-0 text-faint">· content hidden</span>
         ) : null}

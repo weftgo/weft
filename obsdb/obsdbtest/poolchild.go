@@ -21,7 +21,8 @@ import (
 // exist, carry their lineage and resolve; SessionQuery.Parents lists
 // them, a whole tree level per read; a session's top-level runs
 // (RunQuery.SessionID) are its own turns; RunQuery.CallerRunID lists the caller-linked runs; the caller
-// keys never land in a row's meta.
+// keys never land in a row's meta; SessionQuery.IDs reads a known set
+// of sessions in one query.
 func poolChild(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -226,6 +227,28 @@ func poolChild(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if scoped, err := db.Sessions(ctx(), obsdb.SessionQuery{Parents: []string{"s_lead"}, PublicID: "pub_lead"}); err != nil || scoped.Total != 1 || scoped.Sessions[0].ID != "s_child" {
 			t.Errorf("sessions delegated by s_lead under pub_lead = %+v (%v), want s_child alone", scoped.Sessions, err)
+		}
+
+		// SessionQuery.IDs (U15.2-fix): a known set of sessions in one
+		// read — an id no turn carries is absent, each row its whole
+		// grouping (s_lead's one turn and its own usage).
+		known, err := db.Sessions(ctx(), obsdb.SessionQuery{IDs: []string{"s_lead", "s_child", "s_never"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var knownIDs []string
+		for _, s := range known.Sessions {
+			knownIDs = append(knownIDs, s.ID)
+			if s.ID == "s_lead" && (s.Turns != 1 || s.Usage.InputTokens != 20) {
+				t.Errorf("Sessions(IDs) s_lead = %d turns, input %d; want 1, 20", s.Turns, s.Usage.InputTokens)
+			}
+		}
+		slices.Sort(knownIDs)
+		if known.Total != 2 || !slices.Equal(knownIDs, []string{"s_child", "s_lead"}) {
+			t.Errorf("sessions [s_lead s_child s_never] = %v (total %d), want [s_child s_lead]", knownIDs, known.Total)
+		}
+		if one, err := db.Sessions(ctx(), obsdb.SessionQuery{IDs: []string{"s_child"}, Parents: []string{"s_lead"}}); err != nil || one.Total != 1 || one.Sessions[0].ID != "s_child" {
+			t.Errorf("sessions [s_child] delegated by s_lead = %+v (%v), want s_child alone", one.Sessions, err)
 		}
 	}
 }

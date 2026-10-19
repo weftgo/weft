@@ -55,6 +55,9 @@ interface TurnSpec {
   err?: string
   cancel?: boolean
   summarizer?: boolean
+  /** Parked calls, and the turn that resumed them. */
+  pending?: number
+  resumedBy?: number
 }
 
 // A session as the seed recorded it: its turns (the timeline's and the
@@ -78,6 +81,11 @@ function sessionOf(
     steps: s.steps ?? 1,
     prompt_preview: s.prompt,
     error_type: s.cancel ? "cancelled" : undefined,
+    pending: s.pending,
+    resumed_by: s.resumedBy ? `${sid}-t${s.resumedBy}` : undefined,
+    resumed_from: specs.find((x) => x.resumedBy === s.n)
+      ? `${sid}-t${specs.find((x) => x.resumedBy === s.n)!.n}`
+      : undefined,
     usage: { input_tokens: s.input ?? 10, output_tokens: s.output ?? 5 },
     marks: marks.filter((m) => m.run_id === `${sid}-t${s.n}`).length,
     summarizer: s.summarizer
@@ -222,7 +230,31 @@ const trip = sessionOf(
       "e8"
     ),
     mark(TRIP, 1, "fork", "branch_fork", { new_session: "s_fork_a" }, "e4"),
+    mark(
+      TRIP,
+      3,
+      "branch",
+      "branch_fork",
+      { from_entry: "e10", summarized: false, to_entry: "e6" },
+      "e12"
+    ),
+    mark(
+      TRIP,
+      2,
+      "branch",
+      "branch_fork",
+      { from_entry: "e6", summarized: false, to_entry: "e10" },
+      "e13"
+    ),
     mark(TRIP, 3, "fork", "branch_fork", { new_session: "s_fork_b" }, "e11"),
+    mark(
+      TRIP,
+      3,
+      "branch",
+      "branch_fork",
+      { from_entry: "e14", summarized: false, to_entry: "e14" },
+      "e15"
+    ),
   ],
   {
     forks: [
@@ -368,8 +400,8 @@ const comp = (
   entries: number,
   entry: string,
   summarizer = false
-) =>
-  mark(
+) => ({
+  ...mark(
     RES,
     turn,
     "compaction",
@@ -390,7 +422,10 @@ const comp = (
         : {}),
     },
     entry
-  )
+  ),
+  // After its run's finish (n + 0.5), before the next turn starts.
+  at: at(turn + (reason === "manual" ? 0.8 : 0.7)),
+})
 const res = sessionOf(
   RES,
   "research-notebook",
@@ -442,6 +477,219 @@ const res = sessionOf(
   }
 )
 
+// oncall-sre and treasury-ops (thread.sre-grants, thread.treasury-
+// quorum), the seed's approvals: grants minted before the first run
+// (an args-glob allow, a deny grant, a max-uses one), the approver
+// bot, a shared store's grant, a user's deny, a lapse by max uses, a
+// revoke; a quorum of two signed decisions with refused signatures;
+// one call still awaiting a decision.
+const SRE = "s_sre"
+const sre = sessionOf(
+  SRE,
+  "oncall-sre",
+  "On-call shell",
+  [
+    { n: 1, prompt: "Checkout is throwing 500s.", pending: 4, resumedBy: 2 },
+    { n: 2, prompt: "Checkout is throwing 500s." },
+    { n: 3, prompt: "Restart checkout three times.", pending: 1, resumedBy: 4 },
+    { n: 4, prompt: "Restart checkout three times." },
+    { n: 5, prompt: "Publish the incident note.", pending: 1 },
+  ],
+  [
+    mark(
+      SRE,
+      1,
+      "grant.mint",
+      "grants",
+      { grant_id: "g_get", tool: "run_command", args: 1, scope: "session" },
+      "g_get",
+      { reason: "read-only cluster queries" }
+    ),
+    mark(
+      SRE,
+      1,
+      "grant.mint",
+      "grants",
+      {
+        grant_id: "g_rm",
+        tool: "run_command",
+        args: 1,
+        deny: true,
+        scope: "session",
+      },
+      "g_rm",
+      { reason: "destructive commands are never run from chat" }
+    ),
+    mark(
+      SRE,
+      1,
+      "grant.mint",
+      "grants",
+      {
+        grant_id: "g_restart",
+        tool: "run_command",
+        args: 1,
+        max_uses: 2,
+        scope: "session",
+      },
+      "g_restart"
+    ),
+    mark(
+      SRE,
+      1,
+      "approval.request",
+      "approvals",
+      { call_id: "c1", tool: "run_command" },
+      "e_r1"
+    ),
+    mark(
+      SRE,
+      1,
+      "grant.use",
+      "grants",
+      {
+        grant_id: "g_get",
+        call_id: "c1",
+        outcome: "approved",
+        uses: 1,
+        scope: "session",
+      },
+      "e_u1"
+    ),
+    mark(
+      SRE,
+      1,
+      "approval.decision",
+      "approvals",
+      { call_id: "c1", outcome: "approve", via: "grant", grant_id: "g_get" },
+      "e_d1"
+    ),
+    mark(
+      SRE,
+      1,
+      "approval.decision",
+      "approvals",
+      { call_id: "c2", outcome: "approve", via: "approver" },
+      "e_d2",
+      { who: "policy-bot", reason: "read-only command" }
+    ),
+    mark(
+      SRE,
+      1,
+      "approval.decision",
+      "approvals",
+      { call_id: "c3", outcome: "deny", via: "grant", grant_id: "g_rm" },
+      "e_d3",
+      { reason: "destructive commands are never run from chat" }
+    ),
+    mark(
+      SRE,
+      1,
+      "grant.use",
+      "grants",
+      {
+        grant_id: "team-df",
+        call_id: "c4",
+        outcome: "approved",
+        scope: "shared",
+      },
+      "e_u4"
+    ),
+    mark(
+      SRE,
+      1,
+      "approval.decision",
+      "approvals",
+      {
+        call_id: "c4",
+        outcome: "approve",
+        via: "grant",
+        grant_id: "team-df",
+        grant_scope: "shared",
+      },
+      "e_d4"
+    ),
+    mark(
+      SRE,
+      3,
+      "grant.use",
+      "grants",
+      {
+        grant_id: "g_restart",
+        call_id: "x1",
+        outcome: "approved",
+        uses: 1,
+        max_uses: 2,
+        scope: "session",
+      },
+      "e_u5"
+    ),
+    mark(
+      SRE,
+      3,
+      "grant.use",
+      "grants",
+      {
+        grant_id: "g_restart",
+        call_id: "x2",
+        outcome: "approved",
+        uses: 2,
+        max_uses: 2,
+        scope: "session",
+      },
+      "e_u6"
+    ),
+    mark(SRE, 3, "grant.expire", "grants", {
+      grant_id: "g_restart",
+      reason: "max_uses",
+      tool: "run_command",
+      uses: 2,
+      max_uses: 2,
+    }),
+    mark(
+      SRE,
+      3,
+      "approval.decision",
+      "approvals",
+      { call_id: "x3", outcome: "deny", via: "user", request_entry: "e_rq" },
+      "e_d5",
+      { reason: "enough restarts", who: "alice" }
+    ),
+    mark(
+      SRE,
+      4,
+      "grant.revoke",
+      "grants",
+      { grant_id: "g_get", tool: "run_command", uses: 1 },
+      "e_rv"
+    ),
+    mark(
+      SRE,
+      5,
+      "approval.request",
+      "approvals",
+      { call_id: "p1", tool: "publish", quorum: 2 },
+      "e_r2"
+    ),
+    mark(
+      SRE,
+      5,
+      "approval.refused",
+      "approvals",
+      { call_id: "p1", key_id: "k_old", reason: "bad_signature" },
+      "e_f1"
+    ),
+    mark(
+      SRE,
+      5,
+      "approval.refused",
+      "approvals",
+      { call_id: "p1", key_id: "k_bob", reason: "replayed" },
+      "e_f2"
+    ),
+  ]
+)
+
 let studio: FakeStudio
 beforeEach(() => {
   stubBrowser()
@@ -451,7 +699,7 @@ beforeEach(() => {
   studio = new FakeStudio()
     .on("GET meta", golden<Record<string, unknown>>("meta"))
     .on("GET runs", { total: 0, runs: [], next_before: null })
-  for (const s of [trip, war, res])
+  for (const s of [trip, war, res, sre])
     studio
       .on(`GET sessions/${s.doc.id}`, s.doc)
       .on(`GET sessions/${s.doc.id}/timeline`, s.tl)
@@ -463,9 +711,12 @@ afterEach(() => {
   setStudioToken("")
 })
 
+// color-contrast on (U15.2-fix): a dimmed mark is muted ink and a
+// dashed outline, never an opacity (jsdom computes no layout, so the
+// Chromium pass in the fix round's proof is the full check).
 const noViolations = async (el: Element | Document) => {
   const r = await axe.run(el, {
-    rules: { "color-contrast": { enabled: false } },
+    rules: { "color-contrast": { enabled: true } },
   })
   expect(r.violations.map((v) => v.id)).toEqual([])
 }
@@ -493,6 +744,19 @@ describe("trip-planner: the abandoned branch and the forks (UX-B-08, UX-B-07)", 
       expect(node(n).getAttribute("data-depth")).toBe("0")
     }
     expect(node(3).textContent).toContain("⑂ continues t1 · branch lisbon-v1")
+    // The seed's four branch marks: three moved the leaf, one went to
+    // the entry the leaf was on — said so, never "moved off this line".
+    expect(
+      [...node(3).querySelectorAll('[data-tree-mark="branch"]')].map(
+        (e) => e.textContent
+      )
+    ).toEqual([
+      "⑂branched · the leaf moved off this line",
+      "⑂branched to the entry the leaf was on · no line was left",
+    ])
+    expect(node(2).querySelectorAll('[data-tree-mark="branch"]')).toHaveLength(
+      2
+    )
     // The order: t1, its branch t2, then the line on (t3).
     expect(
       [...container.querySelectorAll("[data-tree-turn]")].map((e) =>
@@ -558,9 +822,21 @@ describe("trip-planner: the abandoned branch and the forks (UX-B-08, UX-B-07)", 
     await waitFor(() =>
       expect(container.querySelector("[data-fork-of]")).toBeTruthy()
     )
-    expect(container.querySelector("[data-fork-of]")?.textContent).toBe(
-      `⑃ fork of · at entry e11${TRIP}`
+    // "⑃ fork of <origin> at entry e11" + the fork point's prompt: the
+    // origin's fork mark naming s_fork_b is filed under t3.
+    await waitFor(() =>
+      expect(
+        container
+          .querySelector("[data-fork-point]")
+          ?.getAttribute("data-fork-point")
+      ).toBe(`${TRIP}-t3`)
     )
+    expect(container.querySelector("[data-fork-of]")?.textContent).toBe(
+      `⑃ fork of ${TRIP} at entry e11 (“What about Porto instead of Lisbon, same dates?”)`
+    )
+    expect(
+      container.querySelector(`[data-fork-of] a[href*="/sessions/${TRIP}"]`)
+    ).toBeTruthy()
   })
 })
 
@@ -617,6 +893,18 @@ describe("incident-analyst: the interrupt and the rollback as such (UX-B-09, UX-
     expect(node(6).querySelector("[data-turn-end]")?.textContent).toBe(
       "✗ interrupted by t7"
     )
+    // One: the end chip links the interrupt mark — the tree does not
+    // draw the same words again as a mark.
+    expect(
+      node(6).querySelectorAll('[data-tree-mark="interrupt"]')
+    ).toHaveLength(0)
+    expect(
+      node(6)
+        .querySelector("a [data-turn-end]")
+        ?.closest("a")
+        ?.getAttribute("href")
+    ).toContain("mark=")
+    await noViolations(container)
     expect(node(9).textContent).toContain("⑂ continues t7")
   })
 
@@ -637,6 +925,15 @@ describe("incident-analyst: the interrupt and the rollback as such (UX-B-09, UX-
     const marks = container.querySelectorAll("[data-mark]")
     expect(marks.length).toBe(8)
     expect([...marks].every((m) => m.hasAttribute("data-dimmed"))).toBe(true)
+    // Dimmed with the muted ink and a dashed outline — never an
+    // opacity (axe color-contrast).
+    for (const m of marks) {
+      expect(m.className).not.toMatch(/opacity/)
+      expect(m.className).toContain("outline-dashed")
+      for (const sp of m.querySelectorAll("span"))
+        expect(sp.className).not.toMatch(/text-(status-bad|ev-)/)
+    }
+    await noViolations(container)
     fireEvent.click(container.querySelector('[data-lane="steer_queue"]')!)
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({
@@ -672,8 +969,13 @@ describe("research-notebook: context size per turn and the summarizer's cost (UX
         (e) => e.textContent
       )
     ).toEqual(["⌗ trim 9.4k → 6.1k", "⌗ manual 6.1k → 2.7k"])
+    // t5 started on both of t4's compactions (every one since the turn
+    // before it), t4 on t3's trim.
     expect(row(5).querySelector("[data-context-after]")?.textContent).toBe(
-      "(started on a compacted context · compacted after t4)"
+      "(started on a compacted context · compacted after t4: ⌗ trim 9.4k → 6.1k · ⌗ manual 6.1k → 2.7k)"
+    )
+    expect(row(4).querySelector("[data-context-after]")?.textContent).toBe(
+      "(started on a compacted context · compacted after t3: ⌗ trim 11.1k → 6.7k)"
     )
     // The summarizer's cost, apart: on t4's row and the session's.
     expect(row(4).textContent).toContain("summarizer")
@@ -686,7 +988,7 @@ describe("research-notebook: context size per turn and the summarizer's cost (UX
       `[data-started-compacted="${RES}-t5"]`
     ) as HTMLButtonElement
     expect(started.textContent).toContain(
-      "started on a compacted context · compacted after t4 · manual 6.1k → 2.7k"
+      "started on a compacted context · compacted after t4: ⌗ trim 9.4k → 6.1k · ⌗ manual 6.1k → 2.7k"
     )
     fireEvent.click(started)
     const drawer = await screen.findByRole("complementary")
@@ -694,6 +996,81 @@ describe("research-notebook: context size per turn and the summarizer's cost (UX
     expect(
       drawer.querySelector('[data-drawer-row="summarizer"]')?.textContent
     ).toBe("10 in / 5 out")
+    await noViolations(container)
+  })
+})
+
+describe("the approvals view (U15.2-fix; UX-B-14, UX-S3-11)", () => {
+  it("lists every decision with who / via / grant and its turns, refused signatures beside their call, and every grant with its uses and end", async () => {
+    const { container } = renderApp(`/sessions/${SRE}?view=approvals`)
+    await waitFor(() =>
+      expect(container.querySelector("[data-session-approvals]")).toBeTruthy()
+    )
+    const row = (call: string) =>
+      container.querySelector(`[data-decision="${call}"]`) as HTMLElement
+    const cells = (call: string) =>
+      [...row(call).querySelectorAll("td")].map((td) => td.textContent)
+    // call · tool · outcome · who / via · grant · when · parked → resumed
+    expect(cells("c1").filter((_, i) => i !== 5)).toEqual([
+      "c1",
+      "run_command",
+      "✓ approved",
+      "via grant",
+      "g_get",
+      "t1 → t2",
+    ])
+    expect(cells("c2")[3]).toBe("policy-bot · via approver")
+    expect(cells("c3")[2]).toBe(
+      "✋ denied · ‘destructive commands are never run from chat’"
+    )
+    expect(cells("c4")[4]).toBe("team-df · shared")
+    expect(cells("x3")[3]).toBe("alice · via user")
+    expect(cells("x3")[6]).toBe("t3 → t4")
+    // The call still parked: awaiting a decision, its refused
+    // signatures beside it.
+    expect(row("p1").getAttribute("data-outcome")).toBe("pending")
+    expect(cells("p1")[2]).toBe(
+      "⏸ awaiting a decision2 signed decisions refused: bad signature (k_old), replayed (k_bob)"
+    )
+    expect(cells("p1")[3]).toBe("needs 2")
+    // The turn links open the parked and the resumed run on the call.
+    expect(
+      row("c1")
+        .querySelector(`a[href*="/runs/${SRE}-t2"]`)
+        ?.getAttribute("href")
+    ).toContain("sel=c%3Aresume%3Ac1")
+    // The grants: rule, scope, uses n of max with their calls, the end.
+    const grant = (id: string) =>
+      [
+        ...(
+          container.querySelector(`[data-grant="${id}"]`) as HTMLElement
+        ).querySelectorAll("td"),
+      ].map((td) => td.textContent)
+    expect(grant("g_get")).toEqual([
+      "g_get‘read-only cluster queries’",
+      "run_command",
+      "allow · 1 args glob · session",
+      "1 · c1 (t1)",
+      "revoked",
+    ])
+    expect(grant("g_rm")[2]).toBe("deny · 1 args glob · session")
+    expect(grant("g_restart").slice(3)).toEqual([
+      "2 of 2 · x1 (t3), x2 (t3)",
+      "expired · max uses",
+    ])
+    expect(grant("team-df")[2]).toBe("shared · minted outside this session")
+    // Every row opens its mark on the timeline.
+    expect(row("c2").querySelector("a")?.getAttribute("href")).toContain(
+      "mark=e_d2"
+    )
+    await noViolations(container)
+  })
+
+  it("a session with no approval says so", async () => {
+    const { container } = renderApp(`/sessions/${RES}?view=approvals`)
+    await waitFor(() =>
+      expect(container.querySelector("[data-approvals-empty]")).toBeTruthy()
+    )
     await noViolations(container)
   })
 })

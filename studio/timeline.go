@@ -515,13 +515,17 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 
 // lookUpForks fills doc.Forks from the fork marks read: each forked
 // session's stored turns and status (UX-B-07: a fork that ran no turn
-// yet is said so, never a link to a page that cannot open), the first
-// timelineForkCap looked up, the rest Unknown. A panel token gets them
-// hidden — the ids are its session's record, the forked sessions'
-// state is not.
+// yet is said so, never a link to a page that cannot open). The
+// distinct forked sessions — the first timelineForkCap of them, the
+// rest Unknown — are read in one Sessions query (SessionQuery.IDs): a
+// live page refetches the timeline on every run frame, so the lookup
+// is one grouped read, never a session document per fork. A panel
+// token gets them hidden — the ids are its session's record, the
+// forked sessions' state is not.
 func (s *Server) lookUpForks(r *http.Request, doc *timelineDoc) {
 	pub := panelPublicID(r)
-	looked := 0
+	var ids []string
+	seen := map[string]bool{}
 	for _, m := range doc.Marks {
 		if m.Kind != "fork" {
 			continue
@@ -530,24 +534,41 @@ func (s *Server) lookUpForks(r *http.Request, doc *timelineDoc) {
 		if id == "" {
 			continue
 		}
-		f := timelineFork{SessionID: id, Entry: m.Entry, RunID: m.RunID}
+		doc.Forks = append(doc.Forks, timelineFork{SessionID: id, Entry: m.Entry, RunID: m.RunID})
+		if pub == "" && !seen[id] && len(ids) < timelineForkCap {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(doc.Forks) == 0 {
+		return
+	}
+	var rows map[string]obsdb.SessionRow
+	failed := false
+	if len(ids) > 0 {
+		page, err := s.db.Sessions(r.Context(), obsdb.SessionQuery{IDs: ids, Limit: len(ids)})
+		if err != nil {
+			failed = true
+		} else {
+			rows = make(map[string]obsdb.SessionRow, len(page.Sessions))
+			for _, row := range page.Sessions {
+				rows[row.ID] = row
+			}
+		}
+	}
+	for i := range doc.Forks {
+		f := &doc.Forks[i]
 		switch {
 		case pub != "":
 			f.Hidden = true
-		case looked >= timelineForkCap:
+		case !seen[f.SessionID] || failed:
+			// Past the cap, or the read failed: not looked up.
 			f.Unknown = true
 		default:
-			looked++
-			det, err := s.db.Session(r.Context(), id)
-			switch {
-			case errors.Is(err, obsdb.ErrNotFound):
-			case err != nil:
-				f.Unknown = true
-			default:
-				f.Turns, f.Status = det.Turns, string(det.Status)
+			if row, ok := rows[f.SessionID]; ok {
+				f.Turns, f.Status = row.Turns, string(row.Status)
 			}
 		}
-		doc.Forks = append(doc.Forks, f)
 	}
 }
 

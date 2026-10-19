@@ -305,7 +305,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    default view: exchanges on a time axis, a drawer per mark ?mark=, ?view=table|tree; a turn's run page steps { }; U15.2: forks — each
 //    //    fork mark's forked session, its stored turns and status (0 turns: it ran none, no page yet; hidden to a panel token) — the lanes
 //    //    filter ?lanes= (dims, never hides), ?view=tree the lines the turns continue (weft.turn.parent: abandoned turns off the path, forks
-//    //    on the origin), a context lane per turn, interrupt / rollback ends worded as such, the page live on /api/live?session=) and sessions/{id}/entries?offset=&limit=
+//    //    on the origin), a context lane per turn, interrupt / rollback ends worded as such, the page live on /api/live?session=; U15.2-fix:
+//    //    ?view=approvals every decision (call, tool, outcome, who / via / key, grant, parked → resumed turn, refused signatures) and grant
+//    //    (rule, scope, uses n of max with their calls, revoked / expired); the forks read in one obsdb.SessionQuery.IDs query, both backends) and sessions/{id}/entries?offset=&limit=
 //    //    (the same marks paged, ≤ 1,000, next_offset; sessions/{id}'s scope, 501 without the capability),
 //    //    sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, DELETE runs/{id} and DELETE

@@ -38,26 +38,22 @@ import {
   turnsWord,
 } from "@/lib/delegation"
 import type { SessionDoc, SessionRow } from "@/lib/api"
-import {
-  runLink,
-  sessionLink,
-  sessionSearch,
-  sessionViewLink,
-} from "@/lib/links"
-import type { SessionView } from "@/lib/links"
+import { runLink, sessionLink, sessionViewLink } from "@/lib/links"
+import type { SessionPageView } from "@/lib/timeline"
 import { summarizerView } from "@/lib/cost"
 import {
   decisionsWords,
   exchangesWords,
   FORK_NO_PAGE,
   forkOf,
-  forkOfWords,
   forkedIntoWords,
   FORKS_TITLE,
   forksWords,
   grantsWords,
   LIVE_WORDS,
   parseLanes,
+  sessionPageLink,
+  sessionPageSearch,
   TIMELINE_OFF,
   timelineUnread,
   TURN_IDS_TITLE,
@@ -72,13 +68,15 @@ import {
   SessionTimeline,
 } from "@/components/studio/session-timeline"
 import { SessionTree } from "@/components/studio/session-tree"
+import { SessionApprovals } from "@/components/studio/session-approvals"
+import { ForkOfLine } from "@/components/studio/fork-of"
 import { LineageLine } from "@/components/studio/lineage"
 import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { THREAD_LINK } from "@/lib/status-class"
 
 export const Route = createFileRoute("/sessions/$id")({
-  validateSearch: sessionSearch,
+  validateSearch: sessionPageSearch,
   component: SessionPage,
 })
 
@@ -86,7 +84,7 @@ function SessionPage() {
   const { id } = Route.useParams()
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
-  const view: SessionView = search.view ?? "timeline"
+  const view: SessionPageView = search.view ?? "timeline"
   const q = useQuery(sessionQuery(id))
   const meta = useQuery(metaQuery())
   const timelineCapable = !!meta.data?.capabilities.includes("timeline")
@@ -233,17 +231,12 @@ function SessionPage() {
             />
           ) : null}
           {forkedFrom ? (
-            <p
-              className="flex min-w-0 flex-wrap items-center gap-1 font-mono text-xs text-faint"
-              data-fork-of={forkedFrom.session}
-            >
-              <span>{forkOfWords(forkedFrom.entry)}</span>
-              <Link
-                {...sessionLink(forkedFrom.session)}
-                className={THREAD_LINK}
-              >
-                {forkedFrom.session}
-              </Link>
+            <p className="min-w-0 font-mono text-xs break-words text-muted-foreground">
+              <ForkOfLine
+                origin={forkedFrom.session}
+                entry={forkedFrom.entry}
+                self={s.id}
+              />
             </p>
           ) : null}
         </div>
@@ -346,7 +339,7 @@ function SessionPage() {
         {VIEWS.map((v) => (
           <Link
             key={v.view}
-            {...sessionViewLink(id, { view: v.view, lanes: search.lanes })}
+            {...sessionPageLink(id, { view: v.view, lanes: search.lanes })}
             aria-current={view === v.view ? "page" : undefined}
             title={v.title}
             className={`rounded-sm border px-2 py-0.5 font-mono ${view === v.view ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
@@ -407,6 +400,24 @@ function SessionPage() {
         <div className="overflow-x-auto rounded-lg border bg-background">
           <SessionTurns turns={turns} experiments={experiments} />
         </div>
+      ) : view === "approvals" ? (
+        <>
+          {tlNote ? (
+            <p
+              className="font-mono text-[11px] text-muted-foreground"
+              data-timeline-note
+            >
+              {tlNote}
+            </p>
+          ) : null}
+          {timelineCapable && tl.isPending ? (
+            <div className="flex justify-center py-6">
+              <Spinner />
+            </div>
+          ) : (
+            <SessionApprovals sessionID={id} turns={tlTurns} marks={marks} />
+          )}
+        </>
       ) : (
         <>
           {tlNote ? (

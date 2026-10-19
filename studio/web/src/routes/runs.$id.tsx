@@ -53,6 +53,9 @@ import type {
 } from "@/lib/api"
 import { compactionsOf } from "@/lib/compaction"
 import { compactionBadges } from "@/lib/compaction-studio"
+import { approvalFactsOf } from "@/lib/approvals-view"
+import { busyEndSpans } from "@/lib/timeline"
+import { useBusyEnd } from "@/components/studio/busy-end"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import { overrideOf, overrideParallelism } from "@/lib/request-pane"
@@ -608,6 +611,8 @@ function RunPage() {
   const override = useMemo(() => overrideOf(ownSpans, id), [ownSpans, id])
   const toolFacts = useMemo(() => toolFactsOf(ownSpans, id), [ownSpans, id])
   const callFacts = useMemo(() => callFactsOf(ownSpans, id), [ownSpans, id])
+  // Who let each call run (U15.2-fix, UX-B-14): the span's approval.
+  const approvals = useMemo(() => approvalFactsOf(ownSpans, id), [ownSpans, id])
   const requests = useMemo(
     () =>
       requestsCapable
@@ -1030,9 +1035,17 @@ function RunPage() {
   )
   // A step whose request saw a compacted view is marked on its row
   // (U15.2, UX-S5b-05): compaction is not the story's alone.
+  // A turn a newer message ended (UX-B-09): its rows neutral, the
+  // end's word on them — red stays for real failures.
+  const ended = useBusyEnd(run.data)
   const treeRows = useMemo(
-    () => compactionBadges(treeSpans(tree), id, compactionsOf(run.data)),
-    [tree, id, run.data]
+    () =>
+      busyEndSpans(
+        compactionBadges(treeSpans(tree), id, compactionsOf(run.data)),
+        id,
+        ended
+      ),
+    [tree, id, run.data, ended]
   )
   // WARN / ERROR ticks (U11.2): read only when the run document counts
   // such lines (log_warn / log_error), at warn and above.
@@ -1868,6 +1881,7 @@ function RunPage() {
                         errorType={replaying ? undefined : run.data.error_type}
                         selectedKey={selKey}
                         onSelect={select}
+                        ended={replaying ? undefined : ended}
                       />
                     </div>
                     <Button
@@ -2077,6 +2091,7 @@ function RunPage() {
                         pending={foldedNow.pending}
                         callFacts={spans.data ? callFacts : undefined}
                         toolFacts={toolFacts}
+                        approvals={approvals}
                         requests={requests}
                       >
                         <SpanDetail
@@ -2141,6 +2156,7 @@ function RunPage() {
                   stepInputRef={stepInput}
                   toolFacts={toolFacts}
                   callFacts={spans.data ? callFacts : undefined}
+                  approvals={approvals}
                   replayFrom={replayOn ? replayFromHere : undefined}
                 />
               )}

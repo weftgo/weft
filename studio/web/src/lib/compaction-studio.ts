@@ -20,7 +20,14 @@ export const COMPACTION_CHIP_TITLE = {
   view: "PrepareStep rewrote the transcript for this step's request: open the step's compaction card (show original) in the story",
   session:
     "thread compacted the session after this run: the next turn starts from the summary — the marker closes the story",
+  started:
+    "this turn's requests ran on a session context thread compacted before it: the card opens the story",
 }
+
+/** startedChip: the header's chip of a turn that started on a
+ * compacted context (U15.2-fix). */
+export const startedChip = (n: number) =>
+  `⌗ started on a compacted context${n > 1 ? ` (${n} compactions)` : ""}`
 
 /** The session marker at the end of the run it is filed under. */
 export const SESSION_AFTER = "after this run · session compacted"
@@ -32,10 +39,12 @@ export const SESSION_AFTER_NOTE =
 /** The card at the top of the turn after it. */
 export const STARTED_COMPACTED = "started on a compacted context"
 
-/** startedCompactedLine: what the turn before left, "compacted after
- * t4 · 11 messages compacted into 2 · 6.1k → 2.7k tokens · manual". */
-export const startedCompactedLine = (tag: string, c: RunCompaction) =>
-  `compacted after ${tag} · ${compactionLine(c)}${c.reason ? ` · ${c.reason}` : ""}`
+/** startedCompactedLine: one compaction the turn started on, "compacted
+ * after t4 · 11 messages compacted into 2 · 6.1k → 2.7k tokens ·
+ * manual" (from: "compacted after t4", or a held one's "compacted
+ * before this turn" — lib/timeline.ts's startedFrom). */
+export const startedCompactedLine = (from: string, c: RunCompaction) =>
+  `${from} · ${compactionLine(c)}${c.reason ? ` · ${c.reason}` : ""}`
 
 /** The link to the marker on the turn before. */
 export const SEE_MARKER = "open the marker"

@@ -1233,6 +1233,14 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 			sargs = append(sargs, p)
 		}
 	}
+	if len(q.IDs) > 0 {
+		// A known set of sessions (U15.2-fix): the grouping's own key,
+		// read by runs_session.
+		scope += ` AND session_id IN (?` + strings.Repeat(",?", len(q.IDs)-1) + `)`
+		for _, id := range q.IDs {
+			sargs = append(sargs, id)
+		}
+	}
 	if len(q.Meta) > 0 {
 		// The tag filter (U12.2) selects sessions, never turns: a session
 		// one of whose own turns carries every pair (bound parameters, as

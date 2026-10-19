@@ -8,14 +8,16 @@ import { ArrowUpRight, Check, Link2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import {
-  metaQuery,
   sessionQuery,
   storedManifestQuery,
-  timelineQuery,
   turnNeighboursQuery,
 } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
-import { COMPACTION_CHIP_TITLE, compactionChip } from "@/lib/compaction-studio"
+import {
+  COMPACTION_CHIP_TITLE,
+  compactionChip,
+  startedChip,
+} from "@/lib/compaction-studio"
 import { concurrencyWords } from "@/lib/request-pane"
 import {
   attachmentsOf,
@@ -97,15 +99,12 @@ import {
   StartedBy,
 } from "@/components/studio/lineage"
 import { LINEAGE_KEYS, lineageOfRun, linkedHoles } from "@/lib/delegation"
-import {
-  END_TITLES,
-  END_WORDS,
-  forkOf,
-  forkOfWords,
-  TURN_STEPPER,
-  turnEnds,
-} from "@/lib/timeline"
+import { END_WORDS, forkOf, TURN_STEPPER } from "@/lib/timeline"
+import type { TurnEnd } from "@/lib/timeline"
 import { EndChip } from "@/components/studio/session-timeline"
+import { useBusyEnd } from "@/components/studio/busy-end"
+import { useCompactionStarts } from "@/components/studio/compaction-marker"
+import { ForkOfLine } from "@/components/studio/fork-of"
 import { isPlainShortcut } from "@/lib/keys"
 import type { ToolFactsMap } from "@/lib/error-kind"
 
@@ -164,12 +163,31 @@ function TurnStepper({ doc }: { doc: RunDoc }) {
 
 /** CompactionChips puts the run's compactions on its header (U15.2,
  * UX-S5b-05): a view at its step, linking the step's card in the
- * story; a session marker after the run, linking the story's end. */
+ * story; a session marker after the run, linking the story's end; the
+ * session compactions this turn started on (U15.2-fix: a held marker
+ * filed under it included), linking the story's top. */
 function CompactionChips({ doc }: { doc: RunDoc }) {
-  const all = compactionsOf(doc)
-  if (!all.length) return null
+  const starts = useCompactionStarts(doc)
+  const held = new Set(
+    starts?.started.filter((s) => s.held).map((s) => s.mark.hash)
+  )
+  const all = compactionsOf(doc).filter(
+    (c) => !isSessionMarker(c) || !held.has(c.hash)
+  )
+  const started = starts?.started ?? []
+  if (!all.length && !started.length) return null
   return (
     <>
+      {started.length ? (
+        <Link
+          {...runLink(doc.id, { view: "story" })}
+          className="rounded-sm border border-thread/40 px-1.5 py-px font-mono text-[11px] text-thread-ink hover:underline"
+          title={COMPACTION_CHIP_TITLE.started}
+          data-compaction-chip="started"
+        >
+          {startedChip(started.length)}
+        </Link>
+      ) : null}
       {all.map((c, i) => {
         const session = isSessionMarker(c)
         return (
@@ -199,28 +217,8 @@ function CompactionChips({ doc }: { doc: RunDoc }) {
  * "interrupted by t7" / "rolled back by t9 · off path", from thread's
  * interrupt mark on the session's timeline — read only for a run whose
  * cancel cause is thread's interrupt. */
-function InterruptedBy({ doc }: { doc: RunDoc }) {
-  const meta = useQuery(metaQuery())
-  const on =
-    doc.cancel_cause === "thread.interrupted" &&
-    !!doc.session_id &&
-    !!meta.data?.capabilities.includes("timeline")
-  const tl = useQuery({ ...timelineQuery(doc.session_id), enabled: on })
-  if (!on) return null
-  const end = tl.data
-    ? turnEnds(tl.data.marks, tl.data.turns).get(doc.id)
-    : undefined
-  if (!end)
-    return (
-      <span
-        className="rounded-sm border px-1.5 py-px font-mono text-[11px] text-muted-foreground"
-        title={END_TITLES.interrupted}
-        data-turn-end="interrupted"
-      >
-        {END_WORDS.byNewer}
-      </span>
-    )
-  return <EndChip end={end} />
+function InterruptedBy({ end }: { end?: TurnEnd }) {
+  return end ? <EndChip end={end} /> : null
 }
 
 /** StoppedByChip is what ended the run (U3.2), in lib/stopped-by.ts's
@@ -574,6 +572,8 @@ export function RunHeader({
   // A delegated session's turn names its parent session (U14).
   const lineage = lineageOfRun(doc)
   const forked = forkOf(doc.meta)
+  // A turn a newer message ended (UX-B-09): neutral, named.
+  const ended = useBusyEnd(doc)
   // The words this run was asked: the last user message it was fed
   // (in a thread the first one is an earlier turn's).
   const prompt = turnPrompt(transcript?.batches ?? [])
@@ -676,7 +676,7 @@ export function RunHeader({
           </span>
         ) : null}
         <KindChip errorType={doc.error_type} />
-        <InterruptedBy doc={doc} />
+        <InterruptedBy end={ended} />
         <StoppedByChip doc={doc} drawn={folded.steps.map((s) => s.index)} />
         <CompactionChips doc={doc} />
         <Badge variant="outline" className="font-mono text-[11px] font-normal">
@@ -797,7 +797,24 @@ export function RunHeader({
           ))}
         </div>
       ) : null}
-      {doc.err ? (
+      {doc.err && ended ? (
+        // A busy policy's cancel (UX-B-09): the error the cancel left,
+        // neutral — red stays for real failures.
+        <div
+          className="flex gap-3 rounded-md border px-3 py-2"
+          title={ended.title}
+          data-run-ended={ended.kind}
+        >
+          <span className="eyebrow mt-0.5 w-[6ch] shrink-0">
+            {END_WORDS.label}
+          </span>
+          <div className="min-w-0 flex-1 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+            <span className="text-foreground">{ended.text}</span>
+            <span className="text-muted-foreground"> · {doc.err}</span>
+          </div>
+          <CopyButton text={doc.err} label="copy error" />
+        </div>
+      ) : doc.err ? (
         <div className="flex gap-3 rounded-md border border-status-bad/40 bg-status-bad/5 px-3 py-2">
           <span className="eyebrow mt-0.5 w-[6ch] shrink-0 text-status-bad">
             error
@@ -905,15 +922,12 @@ export function RunHeader({
         {/* A fork's turn names its origin (U15.2, UX-B-07): a link,
             never the raw weft.session.forked_from pair. */}
         {forked ? (
-          <span className="flex items-center gap-1 font-mono" data-fork-of>
-            {forkOfWords(forked.entry)}
-            <Link
-              {...sessionLink(forked.session)}
-              className="hover:text-foreground hover:underline"
-            >
-              {forked.session}
-            </Link>
-          </span>
+          <ForkOfLine
+            origin={forked.session}
+            entry={forked.entry}
+            self={doc.session_id || undefined}
+            className="font-mono"
+          />
         ) : null}
         {/* The public id and the metadata pairs filter the runs list
             on click (UX-S4-14): the list's own URL chips. */}

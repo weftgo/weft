@@ -79,7 +79,16 @@ import { CodeWin } from "@/components/studio/codewin"
 import {
   CompactionMarker,
   StartedCompacted,
+  useCompactionStarts,
 } from "@/components/studio/compaction-marker"
+import {
+  BusyEndCtx,
+  useBusyEnd,
+  useBusyEndCtx,
+} from "@/components/studio/busy-end"
+import { END_WORDS, endLine } from "@/lib/timeline"
+import { APPROVED_BY } from "@/lib/approvals-view"
+import type { ApprovalFact } from "@/lib/approvals-view"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import {
   AttemptsSection,
@@ -146,6 +155,14 @@ interface Cards {
   sources?: Map<string, string>
 }
 const CardsCtx = createContext<Cards | undefined>(undefined)
+
+/** The run's approved calls by call id (U15.2-fix, UX-B-14): the
+ * execute_tool span's weft.tool.approved_by / weft.grant.id
+ * (lib/approvals-view.ts's approvalFactsOf) — the chip naming who let
+ * the call run. */
+const ApprovalCtx = createContext<Map<string, ApprovalFact> | undefined>(
+  undefined
+)
 
 /** The parked calls' words by call id under a RunCards (the drawer's
  * answer and call facts read them), else undefined. */
@@ -271,6 +288,8 @@ function CallPill({
   child?: boolean
 }) {
   const cards = useContext(CardsCtx)
+  const ended = useBusyEndCtx()
+  const approval = useContext(ApprovalCtx)?.get(call.callId)
   const cf = cards?.facts?.get(`${step}:${call.callId}`)
   const parked = state === "never" ? cards?.parked.get(call.callId) : undefined
   const src = cards?.sources?.get(call.name)
@@ -297,6 +316,17 @@ function CallPill({
     return (
       <span className="font-mono text-[11px] text-status-run-ink">
         running…
+      </span>
+    )
+  if (state === "never" && ended)
+    // A newer message ended the turn mid-call (UX-B-09): neutral.
+    return (
+      <span
+        className="rounded-sm border px-1.5 py-px font-mono text-[10px] tracking-wide text-muted-foreground uppercase"
+        title={END_WORDS.callTitle}
+        data-call-ended={ended.kind}
+      >
+        {END_WORDS.call}
       </span>
     )
   if (state === "never")
@@ -337,6 +367,15 @@ function CallPill({
       ) : (
         <span className="font-mono text-[11px] text-ev-result">ok</span>
       )}
+      {approval ? (
+        <span
+          className="rounded-sm border px-1.5 py-px font-mono text-[10px] text-muted-foreground"
+          title={APPROVED_BY.title}
+          data-call-approval={approval.by}
+        >
+          {APPROVED_BY.chip(approval)}
+        </span>
+      ) : null}
       <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
         {bytes(new TextEncoder().encode(r.content).length)}
       </span>
@@ -385,6 +424,7 @@ export function ToolCallRow({
   editStep?: number
 }) {
   const state = callState(call, runStatus)
+  const ended = useBusyEndCtx()
   const [open, setOpen] = useRemembered(
     editStep !== undefined ? `call:${call.startPos}` : undefined,
     true
@@ -395,7 +435,7 @@ export function ToolCallRow({
       className={`group/row border-l-2 pl-3 ${
         call.result?.isError
           ? "border-ev-error/60"
-          : state === "never"
+          : state === "never" && !ended
             ? "border-ev-error/40"
             : "border-ev-tool/50"
       }`}
@@ -685,6 +725,29 @@ function SteerBlock({
 
 /** The step's end state as a phrase: honest when it never finished. */
 export function stepOutcome(step: FoldedStep, runStatus: string) {
+  return <StepOutcome step={step} runStatus={runStatus} />
+}
+
+function StepOutcome({
+  step,
+  runStatus,
+}: {
+  step: FoldedStep
+  runStatus: string
+}) {
+  const ended = useBusyEndCtx()
+  if (!step.finish && ended && runStatus === "failed")
+    // A newer message ended the turn during this step (UX-B-09):
+    // neutral, named — red stays for real failures.
+    return (
+      <span
+        className="font-mono text-xs text-muted-foreground"
+        title={ended.title}
+        data-step-ended={ended.kind}
+      >
+        {ended.text} during this step
+      </span>
+    )
   if (step.finish) {
     return (
       <span className="flex items-center gap-2 text-xs">
@@ -801,7 +864,8 @@ function StepCard({
     if (replayFrom && scrollOnHighlight)
       ref.current?.scrollIntoView({ block: "center" })
   }, [replayFrom, scrollOnHighlight])
-  const failedHere = !step.finish && runStatus === "failed"
+  const ended = useBusyEndCtx()
+  const failedHere = !step.finish && runStatus === "failed" && !ended
   // The Request pane open beside the story (plan H3) — where the page
   // is wide enough and a ResizeObserver measures the split.
   const [reqOpen, setReqOpen] = useRemembered(
@@ -1056,6 +1120,7 @@ export function RunCards({
   pending,
   callFacts,
   toolFacts,
+  approvals,
   requests,
   children,
 }: {
@@ -1064,9 +1129,12 @@ export function RunCards({
   pending: readonly { id: string; name: string }[]
   callFacts?: Map<string, CallFacts>
   toolFacts?: ToolFactsMap
+  /** The approved calls by call id (approvalFactsOf). */
+  approvals?: Map<string, ApprovalFact>
   requests?: RunRequests
   children: React.ReactNode
 }) {
+  const ended = useBusyEnd(doc)
   // The parked calls' words (UX-S3-12, UX-H-18): an approval gate or a
   // breakpoint, by the span's park source; the tools' origins by name.
   // A ParkSource park is a breakpoint when the run's service has a
@@ -1099,10 +1167,14 @@ export function RunCards({
   return (
     <CardsCtx.Provider value={cards}>
       <ToolFactsCtx.Provider value={toolFacts}>
-        {probe ? (
-          <OwnBreakpointsProbe service={doc.service} onOwn={setOwn} />
-        ) : null}
-        {children}
+        <ApprovalCtx.Provider value={approvals}>
+          <BusyEndCtx.Provider value={ended}>
+            {probe ? (
+              <OwnBreakpointsProbe service={doc.service} onOwn={setOwn} />
+            ) : null}
+            {children}
+          </BusyEndCtx.Provider>
+        </ApprovalCtx.Provider>
       </ToolFactsCtx.Provider>
     </CardsCtx.Provider>
   )
@@ -1140,6 +1212,7 @@ export function StepList({
   stepInputRef,
   toolFacts,
   callFacts,
+  approvals,
   replayFrom,
 }: {
   events: WireEvent[]
@@ -1183,13 +1256,27 @@ export function StepList({
   /** The run cards' call facts by `<step>:<call id>` (callFactsOf),
    * when its spans are loaded (U25). */
   callFacts?: Map<string, CallFacts>
+  /** The approved calls by call id (approvalFactsOf), when its spans
+   * are loaded. */
+  approvals?: Map<string, ApprovalFact>
 }) {
   // The compactions the run document names (A9.2). A run from before
   // A9 has none in its document and draws no marker: the record is
   // optional, so its absence is not a hole ("not recorded" would be a
   // false claim about a run that may simply never have compacted).
   const compactions = compactionsOf(doc)
-  const sessionMarkers = compactions.filter(isSessionMarker)
+  // A held session marker (filed under the run that started on it,
+  // U15.2-fix) opens the story in StartedCompacted; the others close
+  // the run they are filed under.
+  const starts = useCompactionStarts(doc)
+  const heldHere = new Set(
+    starts?.started.filter((s) => s.held).map((s) => s.mark.hash)
+  )
+  const sessionMarkers = compactions.filter(
+    (c) => isSessionMarker(c) && !heldHere.has(c.hash)
+  )
+  // A turn a newer message ended (UX-B-09): its end line names it.
+  const ended = useBusyEnd(doc)
   const replaying = upTo != null && upTo < events.length
   // The rows its calls started: subagent runs and, since U14, the
   // caller-linked runs (a delegated session's turn) on their call.
@@ -1344,6 +1431,7 @@ export function StepList({
         pending={view.pending}
         callFacts={callFacts}
         toolFacts={toolFacts}
+        approvals={approvals}
         requests={requests}
       >
         <div className="space-y-3">
@@ -1473,7 +1561,22 @@ export function StepList({
           chip, on every status the record names one for; a failed run
           that named none ends on its error (its Error root span is the
           terminal record). */}
-          {!replaying && doc.status !== "running" && endCard(doc) ? (
+          {!replaying && doc.status !== "running" && ended ? (
+            <p
+              className="text-center font-mono text-xs text-muted-foreground"
+              data-story-end
+              data-story-ended={ended.kind}
+              title={ended.title}
+            >
+              {endLine(
+                ended,
+                endStep(
+                  doc,
+                  view.steps.map((s) => s.index)
+                )
+              )}
+            </p>
+          ) : !replaying && doc.status !== "running" && endCard(doc) ? (
             <p
               className="text-center font-mono text-xs text-muted-foreground"
               data-story-end

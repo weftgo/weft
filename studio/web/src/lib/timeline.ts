@@ -19,8 +19,8 @@ import type {
 import { decider, decisionLine, outcomeOf } from "./decisions"
 import { compactionLine } from "./compaction"
 import { absoluteTime, plural, tokens } from "./format"
-import { runLink, sessionLink } from "./links"
-import type { RunLink, SessionLink, SessionView } from "./links"
+import { runLink, sessionLink, sessionSearch, sessionViewLink } from "./links"
+import type { RunLink, SessionLink, SessionSearch, SessionView } from "./links"
 import type { TONE } from "./palette"
 import { turnTag } from "./status"
 
@@ -29,8 +29,44 @@ import { turnTag } from "./status"
 export const TRAIL_NOTE =
   "the trail is an index of the session log, not evidence — ADR 0021"
 
+/** The session page's views: lib/links.ts's and the approvals view
+ * (U15.2-fix) — Studio's alone, so it lives here: links.ts is in the
+ * devtools panel's graph, and a literal there would cost the panel its
+ * mangled names (scripts/panel-mangle.ts). */
+export type SessionPageView = SessionView | "approvals"
+
+/** The session page's search: lib/links.ts's, the approvals view too. */
+export interface SessionPageSearch extends Omit<SessionSearch, "view"> {
+  view?: Exclude<SessionPageView, "timeline">
+}
+
+/** sessionPageSearch is the session page's validateSearch. */
+export function sessionPageSearch(
+  search: Record<string, unknown>
+): SessionPageSearch {
+  const out: SessionPageSearch = sessionSearch(search)
+  if (search.view === "approvals") out.view = "approvals"
+  return out
+}
+
+/** sessionPageLink is the session page in a view (sessionViewLink's,
+ * the approvals view too). */
+export function sessionPageLink(
+  id: string,
+  opts: { view?: SessionPageView; mark?: string; lanes?: string }
+): Omit<SessionLink, "search"> & { search: SessionPageSearch } {
+  const { view, ...rest } = opts
+  const link = sessionViewLink(
+    id,
+    view === "approvals" ? rest : { ...rest, view }
+  )
+  return view === "approvals"
+    ? { ...link, search: { ...link.search, view } }
+    : link
+}
+
 /** The session page's views, in the switcher's order, with titles. */
-export const VIEWS: { view: SessionView; word: string; title: string }[] = [
+export const VIEWS: { view: SessionPageView; word: string; title: string }[] = [
   {
     view: "timeline",
     word: "timeline",
@@ -43,6 +79,12 @@ export const VIEWS: { view: SessionView; word: string; title: string }[] = [
     title: "the session's branches and forks as a tree",
   },
   { view: "table", word: "table", title: "one row per turn" },
+  {
+    view: "approvals",
+    word: "approvals",
+    title:
+      "every decision and grant of the session in one table: who, via, key, grant, when, the turns that parked and resumed each call",
+  },
 ]
 
 /** The timeline's read failed: the turns still draw, from the session. */
@@ -340,12 +382,17 @@ export function markLine(
             : `rewound · ${str(f.reason)}`,
         tone: "step",
       }
-    case "branch":
+    case "branch": {
+      // A Branch to the entry the leaf already was on moves nothing:
+      // no line is left (U15.2-fix).
+      const from = str(f.from_entry)
+      const stayed = !!from && from === str(f.to_entry)
       return {
         icon: "⑂",
-        text: `branched · the leaf moved off this line${f.summarized ? " · the left branch summarized" : ""}`,
+        text: `${stayed ? BRANCH_WORDS.stayed : BRANCH_WORDS.moved}${f.summarized ? " · the left branch summarized" : ""}`,
         tone: "step",
       }
+    }
     case "fork":
       return {
         icon: "⑃",
@@ -816,8 +863,23 @@ export function toggleLane(
 export const END_WORDS = {
   interrupted: "interrupted",
   rolled_back: "rolled back",
-  /** The run page's chip before (or without) the timeline's mark. */
-  byNewer: "✗ interrupted by a newer message",
+  /** The run page's words before (or without) the timeline's mark. */
+  byNewer: "interrupted by a newer message",
+  /** The run header's error block's label on such a run: the error is
+   * the cancel the policy caused, not a failure. */
+  label: "ended",
+  /** A call the cancel cut off (the story's "never completed"). */
+  call: "cut off",
+  callTitle:
+    "tool_start was recorded but no tool_finish: a newer message ended the turn (thread's busy policy) while the call ran",
+}
+
+/** The branch mark's words (UX-B-08): a Branch that moved the leaf,
+ * and one to the entry the leaf already was on (from_entry ==
+ * to_entry: nothing left the line). */
+export const BRANCH_WORDS = {
+  moved: "branched · the leaf moved off this line",
+  stayed: "branched to the entry the leaf was on · no line was left",
 }
 
 /** A turn off the session's current path. */
@@ -833,8 +895,59 @@ export interface TurnEnd {
   by?: string
   text: string
   title: string
-  /** The interrupt mark's key (?mark=). */
+  /** The interrupt mark's key (?mark=); "" when no mark was read. */
   mark: string
+}
+
+/** thread's cancel cause for a turn its Interrupt or Rollback busy
+ * policy ended (weft.cancel.cause, record contract §3). */
+export const BUSY_CAUSE = "thread.interrupted"
+
+/** endedByPolicy says a run was ended by a newer message on purpose:
+ * its context cancelled by thread's busy policy, never a failure. */
+export const endedByPolicy = (r?: { cancel_cause?: string } | null) =>
+  r?.cancel_cause === BUSY_CAUSE
+
+/** The end of a run the timeline's marks were not read for: an
+ * interrupt by an unnamed newer message (a rollback cannot be told
+ * apart without its mark). */
+export const UNNAMED_END: TurnEnd = {
+  kind: "interrupted",
+  text: END_WORDS.byNewer,
+  title:
+    "a newer message (thread's Interrupt or Rollback busy policy) cancelled this turn: its context was cancelled on purpose, not a failure — the session's timeline names which",
+  mark: "",
+}
+
+/** The story's end line for such a run: "■ interrupted by t7 at step
+ * 0" — never "the stream ended without run_finish". */
+export const endLine = (end: TurnEnd, step?: number) =>
+  `■ ${end.text}${step === undefined ? "" : ` at step ${step}`}`
+
+/** busyEndSpans redraws a busy-ended run's own rows (the waterfall's
+ * run, step and call rows of runId): a failure's or a never-finished
+ * tone becomes the neutral step tone and a failed badge the end's word
+ * — red stays for real failures (UX-B-09). */
+export function busyEndSpans<
+  T extends { runId: string; tone: string; badge?: string; kind: string },
+>(rows: T[], runId: string, end: TurnEnd | undefined): T[] {
+  if (!end) return rows
+  const word = END_WORDS[end.kind]
+  return rows.map((r) =>
+    r.runId === runId &&
+    (r.tone === "bad" || r.tone === "error" || r.tone === "never")
+      ? {
+          ...r,
+          tone: "step",
+          badge:
+            r.kind === "tool"
+              ? END_WORDS.call
+              : r.badge && /^(error|failed|cancelled)\b/.test(r.badge)
+                ? word
+                : r.badge,
+        }
+      : r
+  )
 }
 
 /** The hovers: what an interrupt and a rollback did. */
@@ -930,9 +1043,39 @@ export function forkOf(
     : { session: v, entry: "" }
 }
 
-/** The lineage line of a forked session or turn. */
-export const forkOfWords = (entry: string) =>
-  `⑃ fork of${entry ? ` · at entry ${entry}` : ""}`
+/** The lineage line of a forked session or turn (UX-B-07): "⑃ fork of
+ * <origin> at entry e9 ("Plan a 4-day trip…")" — the origin a link
+ * between FORK_OF and forkAt's words. */
+export const FORK_OF = "⑃ fork of"
+export const forkAt = (entry: string, prompt?: string) =>
+  [
+    entry ? `at entry ${entry}` : "",
+    prompt
+      ? `(“${prompt.length > 60 ? `${prompt.slice(0, 59)}…` : prompt}”)`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+
+/** forkPoint is the origin's turn a fork was taken from, as the
+ * origin's timeline names it: the fork mark naming this session (and
+ * the entry, when known) is filed under the run whose line was forked —
+ * its prompt the fork point's words. undefined when no mark says. */
+export function forkPoint(
+  origin: Pick<TimelineDoc, "marks" | "turns"> | undefined,
+  self: string,
+  entry: string
+): TimelineTurn | undefined {
+  const m = origin?.marks.find(
+    (x) =>
+      x.kind === "fork" &&
+      str(x.fields.new_session) === self &&
+      (!entry || !x.entry || x.entry === entry)
+  )
+  return m?.run_id
+    ? origin?.turns.find((t) => t.run_id === m.run_id)
+    : undefined
+}
 
 /** The origin's header line: the sessions it forked. */
 export const forkedIntoWords = (n: number) =>
@@ -965,6 +1108,85 @@ export interface ContextMark {
   after: number
   replaced: number
   entries: number
+  /** The marker's hash (the run document's compaction names it). */
+  hash: string
+}
+
+/** One session compaction at its boundary (UX-B-12): the run it is
+ * filed under and the turn whose requests first ran on it. */
+export interface CompactionStart {
+  mark: ContextMark
+  /** The run the marker is filed under. */
+  from: string
+  /** The turn that started on the compacted context: the first turn to
+   * start at or after the marker (by start time — after a Branch back
+   * the marker is filed under an older turn on the line, never "the
+   * next turn number"); the filed-under run itself for a held marker.
+   * undefined while no turn started on it. */
+  on?: string
+  /** Filed under the run that started on it: thread held it (no run of
+   * the session produced the compacted context) and emitted it as that
+   * run reported — the marker landed inside its own run's span, or
+   * before that run started. */
+  held: boolean
+}
+
+/** isoKey is an RFC 3339 time as [ms since the epoch, ns past the ms]:
+ * Date.parse keeps milliseconds, Go's RFC3339Nano writes nanoseconds —
+ * a marker 0.9 ms after its run's finish must still read after it. */
+function isoKey(iso: string): [number, number] {
+  const m = /^(.*T\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)$/.exec(iso)
+  if (!m) return [Date.parse(iso), 0]
+  const frac = (m.at(2) ?? "").padEnd(9, "0").slice(0, 9)
+  return [
+    Date.parse(`${m[1]}.${frac.slice(0, 3)}${m[3]}`),
+    Number(frac.slice(3)),
+  ]
+}
+
+/** isoCompare orders two RFC 3339 times to the nanosecond. */
+export function isoCompare(a: string, b: string): number {
+  const x = isoKey(a)
+  const y = isoKey(b)
+  return x[0] - y[0] || x[1] - y[1]
+}
+
+const contextMark = (m: SessionMark, key: string): ContextMark => ({
+  key,
+  reason: str(m.fields.reason),
+  before: num(m.fields.tokens_before),
+  after: num(m.fields.tokens_after),
+  replaced: num(m.fields.replaced),
+  entries: num(m.fields.entries),
+  hash: str(m.fields.hash),
+})
+
+/** compactionStarts places every session compaction at its boundary:
+ * filed under the run that produced the context (ADR 0028 §8), first
+ * seen by the turn that started after it — or, held, by the run it is
+ * filed under. */
+export function compactionStarts(
+  turns: readonly TimelineTurn[],
+  marks: readonly SessionMark[]
+): CompactionStart[] {
+  const keys = markKeys(marks)
+  const byStart = [...turns].sort((a, b) => isoCompare(a.started, b.started))
+  const out: CompactionStart[] = []
+  marks.forEach((m, i) => {
+    if (m.kind !== "compaction" || !m.run_id) return
+    const own = turns.find((t) => t.run_id === m.run_id)
+    // Held: the marker is not after the run it is filed under — it
+    // landed inside its span (emitted as the run reported), or before
+    // the run started at all. Either way that run started on it.
+    const held = !!own && (!own.finished || isoCompare(m.at, own.finished) <= 0)
+    const on = held
+      ? own.run_id
+      : byStart.find(
+          (t) => t.run_id !== m.run_id && isoCompare(t.started, m.at) >= 0
+        )?.run_id
+    out.push({ mark: contextMark(m, keys[i]), from: m.run_id, on, held })
+  })
+  return out
 }
 
 /** One turn of the context lane. */
@@ -972,46 +1194,32 @@ export interface ContextRow {
   run_id: string
   turn: number
   input: number
+  /** The compactions filed under it that came after it (a held one is
+   * in started instead: it came before its requests). */
   marks: ContextMark[]
-  /** The turn this one followed, when that one's run left a session
-   * compaction: this turn's context is the compacted one. */
-  after?: string
+  /** The compactions this turn started on: every one since the turn
+   * before it (t5: t4's trim and the manual one). */
+  started: CompactionStart[]
 }
 
 /** contextRows is the context lane (UX-B-42): every turn's input
- * tokens with the session compactions filed under it, and which turn
- * started on a compacted context — the turn after the one the marker
- * is filed under (ADR 0028 §8: the run that produced the context). */
+ * tokens with the session compactions filed under it, and the ones it
+ * started on (compactionStarts). */
 export function contextRows(
   turns: readonly TimelineTurn[],
   marks: readonly SessionMark[]
 ): ContextRow[] {
-  const keys = markKeys(marks)
-  const byRun = new Map<string, ContextMark[]>()
-  marks.forEach((m, i) => {
-    if (m.kind !== "compaction" || !m.run_id) return
-    const l = byRun.get(m.run_id) ?? []
-    l.push({
-      key: keys[i],
-      reason: str(m.fields.reason),
-      before: num(m.fields.tokens_before),
-      after: num(m.fields.tokens_after),
-      replaced: num(m.fields.replaced),
-      entries: num(m.fields.entries),
-    })
-    byRun.set(m.run_id, l)
-  })
+  const starts = compactionStarts(turns, marks)
   const sorted = [...turns].sort((a, b) => a.turn - b.turn)
-  return sorted.map((t, i) => {
-    const prev = sorted[i - 1]
-    return {
-      run_id: t.run_id,
-      turn: t.turn,
-      input: t.usage.input_tokens,
-      marks: byRun.get(t.run_id) ?? [],
-      after: i > 0 && byRun.has(prev.run_id) ? prev.run_id : undefined,
-    }
-  })
+  return sorted.map((t) => ({
+    run_id: t.run_id,
+    turn: t.turn,
+    input: t.usage.input_tokens,
+    marks: starts
+      .filter((s) => s.from === t.run_id && !s.held)
+      .map((s) => s.mark),
+    started: starts.filter((s) => s.on === t.run_id),
+  }))
 }
 
 /** A context mark as one line: "⌗ trim 11.1k → 6.7k". */
@@ -1021,7 +1229,29 @@ export function contextMarkLine(c: ContextMark): string {
   return `⌗ ${c.reason || "compaction"}${toks}`
 }
 
-/** The words of a turn that started on a compacted context, the
- * compaction filed under the turn before it. */
-export const startedCompacted = (tag: string) =>
-  `${CONTEXT_LANE.startedOn} · compacted after ${tag}`
+/** startedFrom is where the compactions a turn started on came from:
+ * "compacted after t4", or — held — "compacted before this turn" (no
+ * run of the session produced the context). */
+export const startedFrom = (
+  s: CompactionStart,
+  tag: (run: string) => string
+) => (s.held ? "compacted before this turn" : `compacted after ${tag(s.from)}`)
+
+/** startedWords: "started on a compacted context · compacted after t4:
+ * ⌗ trim 9.4k → 6.1k · ⌗ manual 6.1k → 2.7k" — every compaction since
+ * the turn before, grouped by the run each is filed under. */
+export function startedWords(
+  starts: readonly CompactionStart[],
+  tag: (run: string) => string
+): string {
+  const groups = new Map<string, CompactionStart[]>()
+  for (const s of starts) {
+    const k = startedFrom(s, tag)
+    groups.set(k, [...(groups.get(k) ?? []), s])
+  }
+  const parts = [...groups].map(
+    ([from, l]) =>
+      `${from}: ${l.map((s) => contextMarkLine(s.mark)).join(" · ")}`
+  )
+  return [CONTEXT_LANE.startedOn, ...parts].join(" · ")
+}

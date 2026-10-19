@@ -1470,6 +1470,17 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 			narrowArgs, condArgs = append(narrowArgs, p), append(condArgs, p)
 		}
 	}
+	if len(q.IDs) > 0 {
+		// A known set of sessions (U15.2-fix): the narrow reads their
+		// runs by idx_weft_session_id before the collapse, the cond
+		// keeps the collapsed turns.
+		in := " IN (" + placeholders(len(q.IDs)) + ")"
+		narrows = append(narrows, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID"+in+")")
+		cond += " AND SessionID" + in
+		for _, id := range q.IDs {
+			narrowArgs, condArgs = append(narrowArgs, id), append(condArgs, id)
+		}
+	}
 	if len(q.Meta) > 0 {
 		// The tag filter (U12.2) selects sessions, never turns: the
 		// sessions one of whose own turns carries every pair (RunQuery.Meta's

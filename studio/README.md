@@ -2668,7 +2668,10 @@ drawer per mark at `?mark=`, the table at `?view=table`; U15.2: `forks`
 — each fork mark's forked session with its stored turns and status, 0
 turns for a fork that ran none — the lane filter `?lanes=` (dims, never
 hides), the tree at `?view=tree`, the context lane, the page live on
-`/api/live?session=`),
+`/api/live?session=`; U15.2-fix: the approvals at `?view=approvals` —
+every decision and grant —, a compaction placed by time at the turn
+that started on it, a busy policy's interrupt / rollback neutral on the
+run page),
 `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
 public_id}`, the public id `thread.PublicID` stamped on the session's
 turns — MAX(`weft.public_id`) over its top-level turns: one value per

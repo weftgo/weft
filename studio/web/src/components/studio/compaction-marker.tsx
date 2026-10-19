@@ -14,7 +14,13 @@ import { Link } from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
 import { useState } from "react"
 
-import { runQuery, stepQuery, turnNeighboursQuery } from "@/lib/api"
+import {
+  metaQuery,
+  runQuery,
+  stepQuery,
+  timelineQuery,
+  turnNeighboursQuery,
+} from "@/lib/api"
 import type { RunCompaction, RunDoc, Transcript } from "@/lib/api"
 import {
   compactionLine,
@@ -33,6 +39,9 @@ import {
   startedCompactedLine,
 } from "@/lib/compaction-studio"
 import { ownTurn, poolParent } from "@/lib/honesty"
+import { turnTag } from "@/lib/status"
+import { compactionStarts, startedFrom } from "@/lib/timeline"
+import type { CompactionStart, ContextMark } from "@/lib/timeline"
 import { runLink } from "@/lib/links"
 import { THREAD_LINK } from "@/lib/status-class"
 import { HoleBadge } from "@/components/studio/hole-badge"
@@ -114,44 +123,138 @@ export function CompactionMarker({
   )
 }
 
-/** StartedCompacted is the card at the top of a session turn whose
- * previous turn left a session compaction (U15.2, UX-B-12): this
- * turn's requests ran on the compacted context — the `compacted`
- * badge belongs here — with a link to the marker it came from. It
- * reads the turn stepper's neighbour query (one row) and the previous
- * turn's document, nothing else. */
+/** useCompactionStarts reads which session compactions a turn's run
+ * started on (U15.2-fix, lib/timeline.ts's compactionStarts): from the
+ * session's timeline (one cached query, the session page's) — every
+ * compaction since the turn before, placed by time (after a Branch back
+ * the marker is filed under an older turn on the line), a held marker
+ * filed under this run included. undefined when the timeline is not
+ * read (capability off, not a session turn, still loading): the caller
+ * falls back. */
+export function useCompactionStarts(doc: RunDoc | undefined):
+  | {
+      started: CompactionStart[]
+      tag: (run: string) => string
+    }
+  | undefined {
+  const turn = !!doc && !!doc.session_id && ownTurn(doc) && !poolParent(doc)
+  const meta = useQuery(metaQuery())
+  const on = turn && !!meta.data?.capabilities.includes("timeline")
+  const tl = useQuery({
+    ...timelineQuery(doc?.session_id ?? ""),
+    enabled: on,
+  })
+  if (!on || !tl.data) return undefined
+  const rows = tl.data.turns.map((t) => ({
+    id: t.run_id,
+    status: t.status,
+    turn: t.turn,
+  }))
+  return {
+    started: compactionStarts(tl.data.turns, tl.data.marks).filter(
+      (s) => s.on === doc.id
+    ),
+    tag: (run) => turnTag(run, rows),
+  }
+}
+
+/** A context mark as the run document's compaction shape. */
+const asCompaction = (m: ContextMark): RunCompaction => ({
+  scope: "session",
+  hash: m.hash,
+  replaced: m.replaced,
+  entries: m.entries,
+  tokens_before: m.before || undefined,
+  tokens_after: m.after || undefined,
+  reason: m.reason || undefined,
+})
+
+/** StartedCompacted is the card at the top of a session turn that
+ * started on a compacted context (U15.2, UX-B-12; U15.2-fix): every
+ * session compaction since the turn before — after the turn each is
+ * filed under, or held (filed under this run: no run of the session
+ * produced the context) — this turn's requests ran on it, so the
+ * `compacted` badge belongs here, with a link to each marker's card.
+ * Without the session's timeline it reads the turn stepper's neighbour
+ * (one row) and that turn's document. */
 export function StartedCompacted({ doc }: { doc: RunDoc }) {
+  const starts = useCompactionStarts(doc)
   const turn = ownTurn(doc) && !poolParent(doc)
+  const meta = useQuery(metaQuery())
+  const fallback =
+    turn && !!meta.data && !meta.data.capabilities.includes("timeline")
   const nb = useQuery({
     ...turnNeighboursQuery(doc.session_id, doc.turn),
-    enabled: turn,
+    enabled: fallback,
   })
-  const prev = nb.data?.prev_turn
+  const prev = fallback ? nb.data?.prev_turn : undefined
   const before = useQuery({
     ...runQuery(prev?.id ?? ""),
-    enabled: turn && !!prev,
+    enabled: fallback && !!prev,
   })
-  const markers = compactionsOf(before.data).filter(isSessionMarker)
-  if (!prev || !markers.length) return null
-  const c = markers.at(-1)!
+  const lines: {
+    key: string
+    from: string
+    c: RunCompaction
+    run?: string
+  }[] = starts
+    ? starts.started.map((s) => ({
+        key: s.mark.key,
+        from: startedFrom(s, starts.tag),
+        c: asCompaction(s.mark),
+        run: s.held ? undefined : s.from,
+      }))
+    : prev
+      ? compactionsOf(before.data)
+          .filter(isSessionMarker)
+          .map((c, i) => ({
+            key: c.hash || String(i),
+            from: `compacted after t${prev.turn}`,
+            c,
+            run: prev.id,
+          }))
+      : []
+  if (!lines.length) return null
+  const tag = (run: string) => (starts ? starts.tag(run) : `t${prev?.turn}`)
+  const firstRun = lines.find((l) => l.run)?.run
   return (
     <div
-      className="rounded-md border border-dashed border-thread/40 bg-thread/5 px-3 py-1.5 text-xs"
-      data-started-compacted={prev.id}
+      className="space-y-1 rounded-md border border-dashed border-thread/40 bg-thread/5 px-3 py-1.5 text-xs"
+      data-started-compacted={doc.id}
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow text-thread-ink">{STARTED_COMPACTED}</span>
-        <span className="font-mono">
-          {startedCompactedLine(`t${prev.turn}`, c)}
-        </span>
-        <HoleBadge hole="compacted" />
-        <Link
-          {...runLink(prev.id, { view: "story" })}
-          className={`ml-auto font-mono text-[11px] ${THREAD_LINK}`}
-        >
-          {SEE_MARKER} (t{prev.turn})
-        </Link>
+        {/* The table's fix names the record; on this card the record is
+            the marker each line links (HoleBadge takes a fix text, not
+            a link). */}
+        <HoleBadge
+          hole="compacted"
+          fix={
+            firstRun
+              ? `${SEE_MARKER} (${tag(firstRun)}) on this card`
+              : undefined
+          }
+        />
       </div>
+      <ul className="space-y-0.5">
+        {lines.map((l) => (
+          <li
+            key={l.key}
+            className="flex flex-wrap items-baseline gap-x-2 font-mono"
+            data-started-line={l.run ?? "held"}
+          >
+            <span>{startedCompactedLine(l.from, l.c)}</span>
+            {l.run ? (
+              <Link
+                {...runLink(l.run, { view: "story" })}
+                className={`ml-auto text-[11px] ${THREAD_LINK}`}
+              >
+                {SEE_MARKER} ({tag(l.run)})
+              </Link>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

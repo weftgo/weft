@@ -21,7 +21,9 @@ import (
 // under t4, a steer receipt a content-off destination stripped under t2,
 // a label under t6, one record of another public id filed under no run, and a
 // grant revoke filed under no run (held at Close). s_quiet has a turn
-// and no mark; s_held has marks and no turn.
+// and no mark (a plain send: thread wrote nothing); s_parked a turn that
+// parked a call and no mark (thread's approval.request never arrived);
+// s_held has marks and no turn.
 func timelineDB(t *testing.T) obsdb.DB {
 	t.Helper()
 	db, err := sqlite.Open(":memory:")
@@ -71,6 +73,9 @@ func timelineDB(t *testing.T) obsdb.DB {
 		recs = append(recs, run(sid, pub, turn+1, turn+1 != 6, p)...)
 	}
 	recs = append(recs, run("s_quiet", pub, 1, false, "hello")...)
+	parked := run("s_parked", pub, 1, false, "refund me")
+	parked[2].Body = `{"type":"run_finish","run_id":"s_parked-t1","usage":{},"steps":1,"pending":[{"type":"tool_call","id":"call_1","name":"issue_refund","args":{}}]}`
+	recs = append(recs, parked...)
 	recs = append(recs,
 		thread(sid, pub, sid+"-t1", 11*time.Second, "approval.request", "none", map[string]any{"entry": "e5", "call_id": "r1", "tool": "issue_refund", "args_sha256": "6dfb"}),
 		thread(sid, pub, sid+"-t1", 12*time.Second, "approval.decision", "full", map[string]any{"entry": "e7", "call_id": "r1", "outcome": "deny", "via": "user", "request_entry": "e5",
@@ -226,11 +231,23 @@ func TestSessionTimeline(t *testing.T) {
 		t.Errorf("entries?limit=x: %d, want 400", code)
 	}
 
-	// No mark: not_recorded, its fix naming the LoggerProvider.
+	// No mark and no turn that would have written one (a plain send):
+	// the timeline is its turns, no hole.
 	_, _, body = get(t, h, "/studio/api/sessions/s_quiet/timeline")
 	q := decodeTimeline(t, body)
-	if _, ok := q.hole("not_recorded"); !ok || len(q.Turns) != 1 || len(q.Marks) != 0 || !strings.Contains(body, "LoggerProvider") {
-		t.Errorf("s_quiet's timeline = %s, want its turn, no mark and the not_recorded hole naming the LoggerProvider", body)
+	if len(q.Holes) != 0 || len(q.Turns) != 1 || len(q.Marks) != 0 {
+		t.Errorf("s_quiet's timeline = %s, want its turn, no mark and no hole: a plain send writes no thread record", body)
+	}
+	// No mark although a turn parked a call: not_recorded on that
+	// evidence, its fix naming the LoggerProvider.
+	_, _, body = get(t, h, "/studio/api/sessions/s_parked/timeline")
+	pk := decodeTimeline(t, body)
+	if _, ok := pk.hole("not_recorded"); !ok || len(pk.Turns) != 1 || len(pk.Marks) != 0 ||
+		!strings.Contains(body, "turn 1 parked a call") || !strings.Contains(body, "LoggerProvider") {
+		t.Errorf("s_parked's timeline = %s, want its turn, no mark and the not_recorded hole naming the park and the LoggerProvider", body)
+	}
+	if _, _, eb := get(t, h, "/studio/api/sessions/s_parked/entries"); !strings.Contains(eb, `"hole":"not_recorded"`) {
+		t.Errorf("s_parked's entries = %s, want the not_recorded hole too", eb)
 	}
 	// Marks and no turn (every record held at Close): the session-level marks.
 	code, _, body = get(t, h, "/studio/api/sessions/s_held/timeline")
@@ -249,8 +266,8 @@ func TestSessionTimeline(t *testing.T) {
 	_, _, body = get(t, h, "/studio/api/sessions/s_acme/timeline")
 	if tv := decodeTimeline(t, body); len(tv.Marks) != 3 || tv.MarksTotal != 12 || !strings.Contains(body, "entries?offset=3") {
 		t.Errorf("capped timeline = %s, want 3 marks of 12 and the truncated hole's offset", body)
-	} else if _, ok := tv.hole("truncated"); !ok {
-		t.Errorf("capped timeline holes = %+v, want truncated", tv.Holes)
+	} else if _, ok := tv.hole("truncated"); !ok || !strings.Contains(body, `"hole":"truncated","cause":"response_cap"`) {
+		t.Errorf("capped timeline holes = %s, want truncated, cause response_cap", body)
 	}
 }
 
@@ -303,6 +320,51 @@ func TestSessionTimelineScope(t *testing.T) {
 	_, _, body = getWith(t, h, "/studio/api/sessions/s_acme/entries", tok("pub_acme", scopeRead), "")
 	if strings.Contains(body, "agent-7") || !strings.Contains(body, `"content_hidden":true`) {
 		t.Errorf("read token entries leaked content: %s", body)
+	}
+	// Both routes count the same way for a panel token: its own marks'
+	// total (11 of 12), the foreign one in the hidden hole — /entries'
+	// total and offsets over its marks alone, every page.
+	var e struct {
+		Entries    []json.RawMessage `json:"entries"`
+		Total      int               `json:"total"`
+		NextOffset *int              `json:"next_offset"`
+		Holes      []struct {
+			Hole   string `json:"hole"`
+			Reason string `json:"reason"`
+			Count  int    `json:"count"`
+		} `json:"holes"`
+	}
+	hidden := func() (int, string) {
+		for _, x := range e.Holes {
+			if x.Hole == "hidden" {
+				return x.Count, x.Reason
+			}
+		}
+		return 0, ""
+	}
+	if err := json.Unmarshal([]byte(body), &e); err != nil || len(e.Entries) != 11 || e.Total != 11 || e.NextOffset != nil {
+		t.Errorf("read token entries = %d entries, total %d, next %v (%v); want 11 of 11", len(e.Entries), e.Total, e.NextOffset, err)
+	} else if n, _ := hidden(); n != 1+3 {
+		t.Errorf("read token entries: hidden %d, holes %+v; want 4 like the timeline (one foreign mark, three content objects)", n, e.Holes)
+	}
+	_, _, body = getWith(t, h, "/studio/api/sessions/s_acme/entries?offset=8&limit=4", tok("pub_acme", scopeRead), "")
+	e.NextOffset, e.Holes = nil, nil
+	if err := json.Unmarshal([]byte(body), &e); err != nil || len(e.Entries) != 3 || e.Total != 11 || e.NextOffset != nil {
+		t.Errorf("read token entries?offset=8 = %s, want the last 3 of 11", body)
+	} else if n, why := hidden(); n != 1 || !strings.Contains(why, "1 of this session's marks carry another public id") {
+		t.Errorf("read token entries?offset=8 = %s, want the last 3 of 11, the foreign mark still counted", body)
+	}
+	if strings.Contains(body, `"entry":"e39"`) {
+		t.Errorf("read token entries: the foreign mark leaked: %s", body)
+	}
+	// Past the cap the content count is the marks read: a floor, said so.
+	defer func(n int) { timelineMarkCap = n }(timelineMarkCap)
+	timelineMarkCap = 3
+	_, _, body = getWith(t, h, "/studio/api/sessions/s_acme/timeline", tok("pub_acme", scopeRead), "")
+	if cv := decodeTimeline(t, body); cv.MarksTotal != 11 || len(cv.Marks) != 3 {
+		t.Errorf("capped read-token timeline = %s, want 3 of 11", body)
+	} else if n, _ := cv.hole("hidden"); n != 1+1 || !strings.Contains(body, "a floor: counted over the first 3 marks") {
+		t.Errorf("capped read-token timeline's hidden hole = %d in %s, want 2 (the foreign mark, one content object read) said to be a floor", n, body)
 	}
 }
 

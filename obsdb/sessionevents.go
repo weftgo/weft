@@ -20,24 +20,31 @@ import (
 // The index is fed at ingest from every record of those two kinds that
 // carries a weft.session.id, a record filed under no run included (a
 // thread record held at Close, weft.run.id ""): it is the session's,
-// never a run's. DeleteRun and Sweep remove a run's events with the
-// run; DeleteSession removes every event of the session, the runless
-// ones included.
+// never a run's, and never an app log line (OtherLogs, CountLogs).
+// DeleteRun and Sweep remove a run's events with the run; Sweep also
+// removes, after each pass, the runless events older than its cutoff of
+// a session no run is left of; DeleteSession removes every event of the
+// session, the runless ones included.
 type SessionEventReader interface {
 	// SessionEvents pages a session's events in order (SessionEventQuery):
-	// by record time, then run id, kind and position — the index's
-	// order, stable across reads. Total counts every event of the
-	// session. An unknown session is an empty page, not an error: the
-	// caller decides whether the session exists (DB.Session).
+	// by record time, then run id, kind and body — one total order on
+	// every backend, stable across reads, two records of one time, run
+	// and kind included. Total counts every event the query selects (the
+	// session's, or its public id's under PublicID). An unknown session
+	// is an empty page, not an error: the caller decides whether the
+	// session exists (DB.Session).
 	SessionEvents(ctx context.Context, q SessionEventQuery) (SessionEventPage, error)
 }
 
 // SessionEventQuery selects one session's events for SessionEvents.
-// Offset is the number of events skipped (pass the previous offset plus
-// the page's length to continue); Limit: 0 = 100, max
-// MaxSessionEventLimit.
+// PublicID, when set, keeps only the events carrying that
+// weft.public_id (a panel token's scope): the page, the offsets and
+// Total all count those alone. Offset is the number of events skipped
+// (pass the previous offset plus the page's length to continue); Limit:
+// 0 = 100, max MaxSessionEventLimit.
 type SessionEventQuery struct {
 	SessionID string
+	PublicID  string
 	Offset    int
 	Limit     int
 }

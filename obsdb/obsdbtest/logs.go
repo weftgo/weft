@@ -16,7 +16,11 @@ import (
 // a retried duplicate read once. The run's own spans and the app's
 // span below its tool span count; another run's span below it (a
 // subagent's) does not, nor a line with no span, another trace's, or
-// any weft record.
+// any weft record — a thread record or compaction marker filed under no
+// run (held at Close) included, though it rides the run's trace and
+// span with no weft.run.id: it is the session's (SessionEventReader),
+// never an app line, never counted, and DeleteRun leaves it to its
+// session.
 func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -61,6 +65,15 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 				// A line under a span that was never stored: a gap.
 				appLog("dead00000000beef", 2*time.Second, 9, "orphan line", nil),
 				obsdb.Record{Time: at(2 * time.Second), TraceID: "ff" + trace[2:], SpanID: tool, Severity: 17, Body: "another trace"},
+				// Runless session records under the run's spans: an
+				// approval.refused (WARN) and a compaction marker.
+				obsdb.Record{Time: at(2 * time.Second), TraceID: trace, SpanID: tool, Severity: 13, EventName: "weft.thread.approval.refused",
+					Body: `{"kind":"approval.refused","session":"s_logs","entry":"e2","reason":"bad_signature"}`, Service: "conf-svc",
+					Attrs: map[string]any{"weft.record": obsdb.RecordThread, "weft.run.id": "", "weft.session.id": "s_logs", "weft.content": "none"}},
+				obsdb.Record{Time: at(3 * time.Second), TraceID: trace, SpanID: invoke, Severity: 9, EventName: "weft.compaction",
+					Body: `{"scope":"session","hash":"sha256:logs"}`, Service: "conf-svc",
+					Attrs: map[string]any{"weft.record": obsdb.RecordCompaction, "weft.run.id": "", "weft.session.id": "s_logs",
+						"weft.compaction.hash": "sha256:logs", "weft.compaction.scope": "session", "weft.content": "none"}},
 			),
 		}
 		if err := db.Write(ctx(), batch); err != nil {
@@ -261,6 +274,17 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		fl, err := db.OtherLogs(ctx(), "r_flood", obsdb.LogQuery{})
 		if err != nil || !fl.Truncated || len(fl.Logs) != 0 {
 			t.Errorf("a flooded trace = truncated %v, %d rows, %v; want truncated and none of the parent's", fl.Truncated, len(fl.Logs), err)
+		}
+
+		// DeleteRun takes the run's app lines, never the session's
+		// runless records under its spans.
+		if er, ok := db.(obsdb.SessionEventReader); ok {
+			if err := db.DeleteRun(ctx(), "r_logs"); err != nil {
+				t.Fatal(err)
+			}
+			if p, err := er.SessionEvents(ctx(), obsdb.SessionEventQuery{SessionID: "s_logs"}); err != nil || p.Total != 2 {
+				t.Errorf("s_logs' events after DeleteRun(r_logs) = %d (%v), want its 2 runless records", p.Total, err)
+			}
 		}
 	}
 }

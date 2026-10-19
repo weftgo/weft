@@ -232,7 +232,11 @@ type stepCompaction struct {
 
 // stepHole is one hole of the step: the badge, why, and the fix.
 type stepHole struct {
-	Hole   string `json:"hole"`
+	Hole string `json:"hole"`
+	// Cause names which of a badge's causes this hole is (obsdb.Cause:
+	// response_cap on a truncated hole a response's own cap cut), the
+	// tree holes' field. Absent where the badge has one cause.
+	Cause  string `json:"cause,omitempty"`
 	Reason string `json:"reason"`
 	Fix    string `json:"fix,omitempty"`
 	// Count is the runs a hidden hole stands for (hiddenChildrenHole):

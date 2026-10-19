@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"time"
 
@@ -10,7 +11,9 @@ import (
 
 // SessionEvents pages a session's thread records and compaction markers
 // from the session_events index (obsdb.SessionEventReader; migration
-// 0022): one session in (time, run, kind, pos) order, session_events_time
+// 0022): one session (its public id's under q.PublicID) in (time, run,
+// kind, body) order — the ClickHouse reader's order, body the tie-break
+// two records of one time, run and kind need — session_events_time
 // serving both the count and the page.
 func (d *DB) SessionEvents(ctx context.Context, q obsdb.SessionEventQuery) (_ obsdb.SessionEventPage, err error) {
 	if err := d.checkOpen(); err != nil {
@@ -22,14 +25,16 @@ func (d *DB) SessionEvents(ctx context.Context, q obsdb.SessionEventQuery) (_ ob
 		return page, nil
 	}
 	if err := d.reads.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM session_events WHERE session_id = ?`, q.SessionID).Scan(&page.Total); err != nil {
+		`SELECT COUNT(*) FROM session_events WHERE session_id = ? AND (? = '' OR public_id = ?)`,
+		q.SessionID, q.PublicID, q.PublicID).Scan(&page.Total); err != nil {
 		return obsdb.SessionEventPage{}, err
 	}
 	offset := max(q.Offset, 0)
 	rs, err := d.reads.QueryContext(ctx,
 		`SELECT run_id, kind, event_name, public_id, content, time_ns, body FROM session_events
-		WHERE session_id = ? ORDER BY time_ns, run_id, kind, pos LIMIT ? OFFSET ?`,
-		q.SessionID, q.PageLimit(), offset)
+		WHERE session_id = ? AND (? = '' OR public_id = ?)
+		ORDER BY time_ns, run_id, kind, body LIMIT ? OFFSET ?`,
+		q.SessionID, q.PublicID, q.PublicID, q.PageLimit(), offset)
 	if err != nil {
 		return obsdb.SessionEventPage{}, err
 	}
@@ -46,4 +51,54 @@ func (d *DB) SessionEvents(ctx context.Context, q obsdb.SessionEventQuery) (_ ob
 		page.Events = append(page.Events, e)
 	}
 	return page, rs.Err()
+}
+
+// backfillRunlessSessionEvents is migration 0022's Go step: a thread
+// record or compaction marker an older writer stored with no run id
+// went to other_logs, where it would read as an app log line. Each one
+// carrying a session id moves to session_events — indexed as the
+// writer indexes it now (obsdb.DeriveRecord's position, so a retried
+// batch after the upgrade is a no-op) — and leaves other_logs.
+func backfillRunlessSessionEvents(tx *sql.Tx) error {
+	ctx := context.Background()
+	rows, err := tx.QueryContext(ctx, `SELECT id, time_ns, COALESCE(event_name, ''), COALESCE(body, ''), attrs FROM other_logs
+		WHERE json_valid(attrs)
+		  AND json_extract(attrs, '$."weft.record"') IN ('thread', 'compaction')
+		  AND COALESCE(json_extract(attrs, '$."weft.session.id"'), '') <> ''
+		  AND COALESCE(json_extract(attrs, '$."weft.run.id"'), '') = ''`)
+	if err != nil {
+		return err
+	}
+	type moved struct {
+		id int64
+		r  obsdb.Record
+	}
+	var all []moved
+	for rows.Next() {
+		var m moved
+		var ns int64
+		var attrs string
+		if err := rows.Scan(&m.id, &ns, &m.r.EventName, &m.r.Body, &attrs); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := json.Unmarshal([]byte(attrs), &m.r.Attrs); err != nil {
+			continue // json_valid said it parses; a map it is not
+		}
+		m.r.Time = time.Unix(0, ns).UTC()
+		all = append(all, m)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, m := range all {
+		if err := insertSessionEvent(ctx, tx, m.r, obsdb.DeriveRecord(m.r)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM other_logs WHERE id = ?`, m.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }

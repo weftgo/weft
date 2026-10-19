@@ -47,7 +47,8 @@ var migrations = func() map[int]string {
 // over the runs already stored reads message bodies the way the writer
 // does).
 var postMigrations = map[int]func(*sql.Tx) error{
-	4: backfillSearch,
+	4:  backfillSearch,
+	22: backfillRunlessSessionEvents,
 }
 
 func highestMigration() int {

@@ -95,6 +95,9 @@ func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 			return n, err
 		}
 		n += deleted
+		if err := d.sweepRunlessEvents(ctx, before); err != nil {
+			return n, err
+		}
 		if roots < caps.SweepBatch {
 			return n, nil
 		}
@@ -132,6 +135,19 @@ func (d *DB) sweepPass(ctx context.Context, before time.Time) (roots, deleted in
 		return 0, 0, err
 	}
 	return roots, deleted + extra, nil
+}
+
+// sweepRunlessEvents deletes, after a sweep pass, the session events
+// filed under no run (a thread record held at Close) older than the
+// cutoff whose session has no run left: the pass took the last turn
+// they sat beside, and no run delete names them (their run_id is "").
+// A session that still has a run keeps them, as DeleteSession would
+// take them with it. Its own writer statement, the pass committed.
+func (d *DB) sweepRunlessEvents(ctx context.Context, before time.Time) error {
+	_, err := d.writer.ExecContext(ctx, `DELETE FROM session_events
+		WHERE run_id = '' AND time_ns < ?
+		AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.session_id = session_events.session_id AND runs.session_id <> '')`, unixNS(before))
+	return err
 }
 
 // Vacuum folds the search index's segments and runs VACUUM (obsdb.DB):

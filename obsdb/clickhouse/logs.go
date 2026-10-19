@@ -8,8 +8,10 @@ import (
 )
 
 // OtherLogs reads a run's app log records from otel_logs: Write stores
-// every record there, and an app's own is one with no weft.run.id —
-// the selection SQLite's writer makes into other_logs
+// every record there, and an app's own is one with no weft.run.id that
+// is no session event (a thread record or compaction marker filed
+// under no run is the session's: weft_session_events reads it) — the
+// selection SQLite's writer makes into other_logs
 // (obsdb.ReadOtherLogs: the attribution through the run's spans, the
 // order, the paging). The scan is bounded by the run's time window
 // (otel_logs' order key leads with time) and the run's trace ids
@@ -51,6 +53,7 @@ func (d *DB) logCandidates(ctx context.Context, traceIDs []string, from, to time
 		WHERE Timestamp BETWEEN ? AND ?
 		  AND TraceId IN (?)
 		  AND LogAttributes['weft.run.id'] = ''
+		  AND LogAttributes['weft.record'] NOT IN ('thread', 'compaction')
 		  AND SeverityNumber >= ?
 		ORDER BY Timestamp, SpanId, SeverityNumber, Body, EventName LIMIT ?`, from, to, traceIDs, max(minSeverity, 0), limit)
 	if err != nil {

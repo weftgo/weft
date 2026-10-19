@@ -616,7 +616,10 @@ but the run's own metadata. Each one that carries a `weft.session.id`
 — a `thread` record or a `compaction` marker — is also indexed by its
 session (`session_events`, §6), a record filed under no run (held at
 `Close`, `weft.run.id` `""`) included: it is the session's, never an
-app log line.
+app log line — not on SQLite (it is no `other_logs` row), not on
+ClickHouse (the app-log read and its counters skip a `thread` or
+`compaction` row with no run id), and a run deletion that takes the
+app lines under a run's spans leaves it to its session.
 
 ### `heartbeat`
 
@@ -944,23 +947,31 @@ its turns, tagged or not.
 record and `compaction` marker (§4) carrying a `weft.session.id`,
 written at ingest beside the record — SQLite's `session_events` (0022:
 key `(session_id, run_id, kind, pos)`, `pos` the record's body-derived
-position; `session_events_time` orders a session by `(time_ns, run_id,
-kind, pos)`), ClickHouse's `weft_session_events` (0025: a view over
-`otel_logs`, `ReplacingMergeTree` ordered by `(SessionId, Time, RunId,
-Kind, BodyHash)`, read `FINAL`; the content TTL) — both backfilled from
-what was stored before. `obsdb.SessionEventReader.SessionEvents` pages
-one session in record-time order (ties: run id, kind, then the key's
-last column — the order a reader must not depend on), each event its run
+position; `session_events_time` serves a session's read), ClickHouse's
+`weft_session_events` (0025: a view over `otel_logs`,
+`ReplacingMergeTree` ordered by `(SessionId, Time, RunId, Kind,
+BodyHash)`, read `FINAL`; the content TTL) — both backfilled from what
+was stored before (SQLite from `records`, and from `other_logs` for a
+runless record an older writer put there, moved out of it; ClickHouse
+from `otel_logs`): linear in those tables, so a large database's first
+open at the new schema takes that long. `obsdb.SessionEventReader.SessionEvents`
+pages one session (or, with `PublicID`, its events of that public id
+alone — `Total` and the offsets counting those) in one total order on
+both backends: record time, run id, kind, then the body bytes — two
+records of one time, run and kind read alike everywhere — each event its run
 id (`""` for a session-level record), `weft.record`, event name (the
 record's, else `weft.compaction` / `weft.thread.<body kind>`),
 `weft.public_id`, `weft.content` and body verbatim; a retried batch's
-duplicate reads once. `DeleteRun` and `Sweep` remove a run's events,
-`DeleteSession` every event of the session (the runless ones, and on
-ClickHouse their `otel_logs` rows, included). The conformance fixtures'
+duplicate reads once. `DeleteRun` and `Sweep` remove a run's events;
+after each sweep pass the runless events older than the cutoff of a
+session no run is left of go too (on ClickHouse with their `otel_logs`
+rows); `DeleteSession` removes every event of the session (the runless
+ones, and on ClickHouse their `otel_logs` rows, included); ClickHouse's
+`Vacuum` merges `weft_session_events` with the other tables. The conformance fixtures'
 `thread_records` are read back through it per session on both backends
 (`checkSessionEvents`); obsdbtest's `SessionEvents` case pins the order,
-the runless record, the paging, the dedup, the tag filter and the
-deletions.
+the runless record, the paging, the dedup, the same-time tie order, the
+`PublicID` filter, the tag filter, the deletions and the sweep.
 
 Studio derives two reads from it (U12.2): `GET
 /api/sessions/{id}/timeline` — the session's turns (`DB.Session`'s,
@@ -977,14 +988,22 @@ body's content object)), the six lanes with their counts — `approvals`
 `branch_fork` (`branch`, `fork`, `label`), `pool` (`pool.*`), plus
 `other` for a kind this build does not know — `marks_total` and the
 holes — and `GET /api/sessions/{id}/entries?offset=&limit=` (the same
-marks paged, ≤ 1,000, `next_offset`). Holes: `not_recorded` (turns and
-not one mark: the state log never reached the store — the fix names the
-agent's `LoggerProvider` and `thread.WithRunMetadata`), `stripped`
-(marks a content-off destination stripped, counted), `hidden` (a panel
-token's: marks of another public id left out, and for a read-scoped
-token every content object, `content_hidden: true` on the mark — who
-decided is an actor id, reasons and texts are content), `truncated`
-(cause `response_cap`: past the cap, the fix the `/entries` offset). A
+marks paged, ≤ 1,000, `next_offset`). Holes: `not_recorded` (not one
+mark although a turn shows what thread records — it parked a call
+(`pending`, stopped by `parked`) or is half of an approval link
+(`resumed_from` / `resumed_by`) — so the state log never reached the
+store; the reason names the turn, the fix the agent's `LoggerProvider`
+and `thread.WithRunMetadata`; a session of plain sends writes no record
+and gets no hole), `stripped` (marks a content-off destination stripped,
+counted), `hidden` (a panel token's: marks of another public id left
+out — counted exactly by the store, so `marks_total`, `total` and the
+offsets of both routes are the token's own marks' — and for a
+read-scoped token every content object read, `content_hidden: true` on
+the mark — who decided is an actor id, reasons and texts are content;
+on a capped timeline that count is of the marks read and the reason
+says it is a floor, on `/entries` it is the page's), `truncated` (`cause:
+"response_cap"` on the hole: past the cap, the fix the `/entries`
+offset). A
 panel token reads its public id's session only (`sessions/{id}`'s
 scope); a session of session-level marks alone (no turn stored)
 answers with no turns. The exported state log is an index, not

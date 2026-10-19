@@ -12,12 +12,20 @@
 -- body-derived position, so a retried batch is a no-op), and a thread
 -- record filed under no run (held at Close: weft.run.id "") lands here
 -- alone, run_id ''. session_events_time serves obsdb.SessionEventReader:
--- one session in (time, run, kind, pos) order.
+-- one session in (time, run, kind) order, the body the reader's tie-break.
 --
 -- Backfill: every stored thread and compaction record carrying a session
 -- id, its event name derived as obsdb.SessionEventName derives it (the
--- records table keeps none). DeleteRun / Sweep delete a run's rows by
--- run_id, DeleteSession every row of the session.
+-- records table keeps none); then, in Go (postMigrations[22],
+-- backfillRunlessSessionEvents), every such record an older writer
+-- filed in other_logs because it carried no run id — moved: indexed at
+-- the position obsdb.DeriveRecord gives it, as the writer now does, and
+-- deleted from other_logs, so it never reads as an app log line. Both
+-- passes are linear in the tables they read: a large file's first open
+-- at 0022 takes that long. DeleteRun / Sweep delete a run's rows by
+-- run_id; Sweep then the runless rows of a session no run is left of,
+-- older than its cutoff (session_events_runless); DeleteSession every
+-- row of the session.
 CREATE TABLE IF NOT EXISTS session_events (
   session_id TEXT NOT NULL,
   run_id TEXT NOT NULL DEFAULT '',
@@ -32,6 +40,7 @@ CREATE TABLE IF NOT EXISTS session_events (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS session_events_time ON session_events(session_id, time_ns, run_id, kind, pos);
 CREATE INDEX IF NOT EXISTS session_events_run ON session_events(run_id) WHERE run_id <> '';
+CREATE INDEX IF NOT EXISTS session_events_runless ON session_events(time_ns) WHERE run_id = '';
 INSERT OR IGNORE INTO session_events (session_id, run_id, kind, pos, time_ns, event_name, public_id, content, body)
 SELECT json_extract(attrs, '$."weft.session.id"'), run_id, kind, pos, time_ns,
        CASE WHEN kind = 'compaction' THEN 'weft.compaction'

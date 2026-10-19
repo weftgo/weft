@@ -296,7 +296,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    SQLite 0022 / ClickHouse 0025, every thread record and compaction marker by session, a record filed under no run
 //    //    included: the turns in order, the marks in record-time order — kind, lane approvals|grants|compaction|steer_queue|
 //    //    branch_fork|pool(|other), run_id/turn (null: session-level), entry, fields, content (a read token: content_hidden) —
-//    //    ≤ 2,000, the lanes' counts, holes not_recorded/stripped/hidden/truncated) and sessions/{id}/entries?offset=&limit=
+//    //    ≤ 2,000, the lanes' counts, holes not_recorded (only when a turn parked or resumed: a plain send writes no
+//    //    record)/stripped/hidden (a panel token's counts exact, both routes alike)/truncated cause response_cap) and sessions/{id}/entries?offset=&limit=
 //    //    (the same marks paged, ≤ 1,000, next_offset; sessions/{id}'s scope, 501 without the capability),
 //    //    sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, DELETE runs/{id} and DELETE

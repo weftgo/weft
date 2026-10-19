@@ -147,15 +147,53 @@ func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 			return n, err
 		}
 		n += len(ids) + extra
+		if err := d.sweepRunlessEvents(ctx, before); err != nil {
+			return n, err
+		}
+	}
+	if len(roots) == 0 {
+		if err := d.sweepRunlessEvents(ctx, before); err != nil {
+			return n, err
+		}
 	}
 	return n, nil
+}
+
+// sweepRunlessEvents deletes, after a sweep pass, the session events
+// filed under no run (a thread record held at Close) older than the
+// cutoff whose session has no run left — weft_session_events' rows and
+// their otel_logs records: the pass took the last turn they sat beside,
+// and no run delete names them (their run id is ""). A session that
+// still has a run keeps them, as DeleteSession would take them with
+// it. The sessions are read first, then deleted by id in chunks.
+func (d *DB) sweepRunlessEvents(ctx context.Context, before time.Time) error {
+	ids, err := d.queryIDs(ctx, `SELECT DISTINCT SessionId FROM weft_session_events
+		WHERE RunId = '' AND toUnixTimestamp64Nano(Time) < ?
+		AND SessionId NOT IN (SELECT S FROM (SELECT RunId, max(SessionID) AS S FROM weft_runs GROUP BY RunId) WHERE S != '')`,
+		before.UnixNano())
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	sctx := ch.Context(ctx, ch.WithSettings(ch.Settings{"mutations_sync": 2}))
+	for _, stmt := range []string{
+		`DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] = '' AND LogAttributes['weft.record'] IN ('thread', 'compaction')
+			AND toUnixTimestamp64Nano(Timestamp) < ? AND LogAttributes['weft.session.id'] IN (%s)`,
+		`DELETE FROM weft_session_events WHERE RunId = '' AND toUnixTimestamp64Nano(Time) < ? AND SessionId IN (%s)`,
+	} {
+		if err := inChunks(ids, func(ph string, args []any) error {
+			return d.conn.Exec(sctx, fmt.Sprintf(stmt, ph), append([]any{before.UnixNano()}, args...)...)
+		}); err != nil {
+			return fmt.Errorf("clickhouse: sweep session events: %w", err)
+		}
+	}
+	return nil
 }
 
 func hasKey(m map[string]string, k string) bool { _, ok := m[k]; return ok }
 
 // vacuumTables are the tables deletions mutate, in the order Vacuum
 // merges them.
-var vacuumTables = []string{"weft_runs", "weft_records", "weft_deltas", "otel_logs", "otel_traces"}
+var vacuumTables = []string{"weft_runs", "weft_records", "weft_deltas", "weft_session_events", "otel_logs", "otel_traces"}
 
 // Vacuum runs OPTIMIZE TABLE … FINAL on the tables deletions mutate
 // (obsdb.DB): every part is merged, which is what drops rows a
@@ -276,7 +314,7 @@ func (d *DB) deleteRuns(ctx context.Context, ids []string) (extra int, err error
 	for _, c := range planSpanDeletes(links, keys) {
 		if len(c.logs) > 0 {
 			args, tuples := keyTuples(c.logs)
-			if err := d.conn.Exec(ctx, `DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] = '' AND (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {
+			if err := d.conn.Exec(ctx, `DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] = '' AND LogAttributes['weft.record'] NOT IN ('thread', 'compaction') AND (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {
 				return 0, fmt.Errorf("clickhouse: delete app logs: %w", err)
 			}
 		}

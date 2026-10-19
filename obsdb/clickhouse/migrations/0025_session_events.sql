@@ -17,8 +17,11 @@
 --
 -- Backfill: every stored row of the two kinds carrying a session id; a
 -- row the view copies again while the backfill runs collapses with it.
--- DeleteRun / Sweep delete a run's rows by RunId, DeleteSession every
--- row of the session.
+-- DeleteRun / Sweep delete a run's rows by RunId; Sweep then the runless
+-- rows (and their otel_logs records) of a session no run is left of,
+-- older than its cutoff; DeleteSession every row of the session. The
+-- backfill is linear in otel_logs: a large database's first open at 0025
+-- takes that long.
 CREATE TABLE IF NOT EXISTS weft_session_events (
     SessionId String,
     Time DateTime64(9),

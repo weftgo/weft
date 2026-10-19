@@ -191,5 +191,81 @@ func sessionEvents(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if o, err := er.SessionEvents(ctx(), obsdb.SessionEventQuery{SessionID: "s_other"}); err != nil || o.Total != 1 {
 			t.Errorf("s_other's events after deleting s_acme = %+v, %v; want its one label", o, err)
 		}
+
+		// Ties: records of one time, run and kind read in body order on
+		// every backend, whatever order they were written in; PublicID
+		// keeps one public id's events, Total and offsets counting them
+		// alone.
+		const tie = "s_tie"
+		tied := func(runID, pub, entry string) obsdb.Record {
+			r := thread(runID, 90*time.Second, "label", "none", map[string]any{"entry": entry, "target": "e0", "name": "n"})
+			r.Body = `{"kind":"label","session":"s_tie","at":"` + at(90*time.Second).Format(time.RFC3339Nano) + `","entry":"` + entry + `"}`
+			r.Attrs["weft.session.id"], r.Attrs["weft.public_id"] = tie, pub
+			return r
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			tied("s_tie-t1", "pub_b", "e3"), tied("s_tie-t1", "pub_a", "e1"), tied("", "pub_a", "e9"),
+			tied("s_tie-t1", "pub_a", "e2"), tied("s_tie-t0", "pub_b", "e8"),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		entries := func(q obsdb.SessionEventQuery) ([]string, int) {
+			t.Helper()
+			p, err := er.SessionEvents(ctx(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, e := range p.Events {
+				var b struct {
+					Entry string `json:"entry"`
+				}
+				_ = json.Unmarshal(e.Body, &b)
+				out = append(out, e.RunID+":"+b.Entry)
+			}
+			return out, p.Total
+		}
+		if got, n := entries(obsdb.SessionEventQuery{SessionID: tie}); !slices.Equal(got, []string{":e9", "s_tie-t0:e8", "s_tie-t1:e1", "s_tie-t1:e2", "s_tie-t1:e3"}) || n != 5 {
+			t.Errorf("tied events = %q (total %d), want (time, run, kind, body) order: the runless one, t0, then t1's by body", got, n)
+		}
+		if got, n := entries(obsdb.SessionEventQuery{SessionID: tie, PublicID: "pub_a", Offset: 1}); !slices.Equal(got, []string{"s_tie-t1:e1", "s_tie-t1:e2"}) || n != 3 {
+			t.Errorf("pub_a's tied events from offset 1 = %q (total %d), want e1, e2 of its 3", got, n)
+		}
+
+		// Sweep: a runless event goes once its session has no run left
+		// and it is older than the cutoff; a session with a running turn,
+		// or an event past the cutoff, keeps it.
+		now := time.Now().UTC()
+		sw := func(sid, runID string, tm time.Time, entry string) obsdb.Record {
+			r := thread(runID, 0, "grant.revoke", "none", map[string]any{"entry": entry})
+			r.Time = tm
+			r.Body = `{"kind":"grant.revoke","session":"` + sid + `","entry":"` + entry + `"}`
+			r.Attrs["weft.session.id"] = sid
+			return r
+		}
+		swIdent := func(sid string) map[string]any {
+			return map[string]any{"weft.session.id": sid, "weft.turn": int64(1), "gen_ai.agent.name": "acme-support"}
+		}
+		done := record("s_sw-t1", "event", "run_start", 0, `{"type":"run_start","id":"s_sw-t1"}`, swIdent("s_sw"))
+		fin := record("s_sw-t1", "event", "run_finish", 1, `{"type":"run_finish","run_id":"s_sw-t1","steps":1}`, swIdent("s_sw"))
+		live := record("s_keep-t1", "event", "run_start", 0, `{"type":"run_start","id":"s_keep-t1"}`, swIdent("s_keep"))
+		done.Time, fin.Time, live.Time = now.Add(-time.Minute), now.Add(-time.Minute), now
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			done, fin, live,
+			sw("s_sw", "s_sw-t1", now.Add(-time.Minute), "w1"),
+			sw("s_sw", "", now.Add(-time.Minute), "w2"),
+			sw("s_keep", "", now.Add(-time.Minute), "k1"),
+			sw("s_young", "", now.Add(3*time.Hour), "y1"),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Sweep(ctx(), now.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		for sid, want := range map[string]int{"s_sw": 0, "s_keep": 1, "s_young": 1} {
+			if _, n := entries(obsdb.SessionEventQuery{SessionID: sid}); n != want {
+				t.Errorf("after Sweep: %s has %d events, want %d (s_sw's runless one goes with its last run; a session with a running turn, or an event past the cutoff, keeps it)", sid, n, want)
+			}
+		}
 	}
 }

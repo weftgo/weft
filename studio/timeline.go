@@ -24,7 +24,9 @@ import (
 //
 // Scope: a panel token reads its public id's session only (sessions/{id}'s
 // rule), its turns and the marks that carry its public id; a mark of
-// another public id is left out and counted (a hidden hole). Content: a
+// another public id is left out and counted (a hidden hole) — the
+// backend selects them (SessionEventQuery.PublicID), so both routes'
+// totals, offsets and hidden counts are the same exact numbers. Content: a
 // mark's content object (who decided, a reason, a steer's text, a
 // summary) rides only when the record carried it (content on) and the
 // identity reads content — every identity but a read-scoped panel
@@ -201,13 +203,13 @@ func (s *Server) sessionScopeFor(w http.ResponseWriter, r *http.Request, er obsd
 	det, err := s.db.Session(r.Context(), id)
 	switch {
 	case errors.Is(err, obsdb.ErrNotFound):
-		page, perr := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, Limit: 1})
+		pub := panelPublicID(r)
+		page, perr := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, PublicID: pub, Limit: 1})
 		if perr != nil {
 			dbError(w, r, "session events", id, perr)
 			return obsdb.SessionDetail{}, false
 		}
-		pub := panelPublicID(r)
-		if page.Total == 0 || (pub != "" && (len(page.Events) == 0 || page.Events[0].PublicID != pub)) {
+		if page.Total == 0 {
 			dbError(w, r, "session", id, err)
 			return obsdb.SessionDetail{}, false
 		}
@@ -231,9 +233,30 @@ type markBuilder struct {
 	turns        map[string]int
 	pub          string // a panel token's public id, "" for any other identity
 	readsContent bool
-	hidden       int // marks of another public id, left out
-	contentHid   int // marks whose content the identity may not read
-	stripped     int // marks a content-off destination stripped
+	hidden       int // marks of another public id, left out (counted by the backend)
+	contentHid   int // marks read whose content the identity may not read
+	stripped     int // marks read that a content-off destination stripped
+}
+
+// scope counts the session's marks for the identity: visible, the marks
+// it reads (a panel token's public id's; every one otherwise), all the
+// session's whole count, and mb.hidden the difference — counts from the
+// backend, so a page's paging and both routes' totals agree.
+func (mb *markBuilder) scope(r *http.Request, er obsdb.SessionEventReader) (visible, all int, err error) {
+	page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: mb.sessionID, PublicID: mb.pub, Limit: 1})
+	if err != nil {
+		return 0, 0, err
+	}
+	visible, all = page.Total, page.Total
+	if mb.pub != "" {
+		whole, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: mb.sessionID, Limit: 1})
+		if err != nil {
+			return 0, 0, err
+		}
+		all = max(whole.Total, visible)
+		mb.hidden = all - visible
+	}
+	return visible, all, nil
 }
 
 func (s *Server) newMarkBuilder(r *http.Request, det obsdb.SessionDetail) *markBuilder {
@@ -247,7 +270,8 @@ func (s *Server) newMarkBuilder(r *http.Request, det obsdb.SessionDetail) *markB
 // mark is one event as a mark, ok false when the scope leaves it out.
 func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
 	if mb.pub != "" && e.PublicID != mb.pub {
-		mb.hidden++
+		// A backend that ignored the PublicID filter: still never shown
+		// (scope's count already holds it).
 		return sessionEntry{}, false
 	}
 	kind := obsdb.SessionEventKind(e)
@@ -303,14 +327,52 @@ func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
 	return out, true
 }
 
-// holes is the holes a set of marks carries, in ADR 0028 §11's order.
-func (mb *markBuilder) holes(turns, total int, truncatedAt int) []stepHole {
+// recordEvidence is the first turn whose outcome thread must have
+// recorded — a park (pending calls, stopped by parked: an
+// approval.request) or a resume (resumed_from / resumed_by: an
+// approval.decision) — in the not_recorded reason's words; "" when no
+// turn shows one: a session of plain sends writes no thread record, and
+// its timeline of turns alone is complete.
+func recordEvidence(runs []obsdb.RunRow) string {
+	for _, rr := range runs {
+		switch {
+		case rr.Pending > 0 || rr.StoppedBy == "parked":
+			return fmt.Sprintf("turn %d parked a call, which thread records (approval.request)", rr.Turn)
+		case rr.ResumedFrom != "":
+			return fmt.Sprintf("turn %d resumed a parked turn, which thread records (approval.decision)", rr.Turn)
+		case rr.ResumedBy != "":
+			return fmt.Sprintf("turn %d was resumed, which thread records (approval.decision)", rr.Turn)
+		}
+	}
+	return ""
+}
+
+// holes is the holes a set of marks carries, in ADR 0028 §11's order:
+// all is the session's whole mark count (every public id's),
+// truncatedAt the count the timeline stopped at (0: none), page true
+// for an /entries page (the content counts are the page's).
+func (mb *markBuilder) holes(runs []obsdb.RunRow, all, truncatedAt int, page bool) []stepHole {
 	hs := holeSet{}
-	if total == 0 && turns > 0 {
-		hs[obsdb.HoleNotRecorded] = stepHole{Hole: string(obsdb.HoleNotRecorded), Reason: timelineNotRecordedReason, Fix: timelineNotRecordedFix}
+	if all == 0 {
+		if why := recordEvidence(runs); why != "" {
+			hs[obsdb.HoleNotRecorded] = stepHole{Hole: string(obsdb.HoleNotRecorded),
+				Reason: why + ", but " + timelineNotRecordedReason, Fix: timelineNotRecordedFix}
+		}
+	}
+	// The content counts are of the marks read: a floor when the
+	// timeline stopped at its cap, the page's own on /entries.
+	of := ""
+	switch {
+	case truncatedAt > 0:
+		of = fmt.Sprintf(" — a floor: counted over the first %d marks this response read", truncatedAt)
+	case page:
+		of = " on this page"
 	}
 	if mb.stripped > 0 {
 		reason, fix := obsdb.HoleNote(obsdb.HoleStripped)
+		if truncatedAt > 0 {
+			reason += fmt.Sprintf(" (%d of the marks%s)", mb.stripped, of)
+		}
 		hs[obsdb.HoleStripped] = stepHole{Hole: string(obsdb.HoleStripped), Reason: reason, Fix: fix, Count: mb.stripped}
 	}
 	if n := mb.hidden + mb.contentHid; n > 0 {
@@ -319,13 +381,13 @@ func (mb *markBuilder) holes(turns, total int, truncatedAt int) []stepHole {
 			why = append(why, fmt.Sprintf("%d of this session's marks carry another public id than your token's", mb.hidden))
 		}
 		if mb.contentHid > 0 {
-			why = append(why, fmt.Sprintf("%d marks' content (who decided, reasons, texts) is not read by a read-scoped panel token", mb.contentHid))
+			why = append(why, fmt.Sprintf("%d marks' content (who decided, reasons, texts) is not read by a read-scoped panel token%s", mb.contentHid, of))
 		}
 		hs[obsdb.HoleHidden] = stepHole{Hole: string(obsdb.HoleHidden), Reason: strings.Join(why, "; "), Fix: timelineHiddenFix, Count: n}
 	}
 	if truncatedAt > 0 {
-		hs[obsdb.HoleTruncated] = stepHole{Hole: string(obsdb.HoleTruncated),
-			Reason: fmt.Sprintf("the session has %d marks; this response reads the first %d — nothing was lost", total, truncatedAt),
+		hs[obsdb.HoleTruncated] = stepHole{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
+			Reason: fmt.Sprintf("the session has %d marks; this response reads the first %d — nothing was lost", all-mb.hidden, truncatedAt),
 			Fix:    fmt.Sprintf("page the rest: GET /api/sessions/{id}/entries?offset=%d", truncatedAt)}
 	}
 	return hs.list()
@@ -342,19 +404,23 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 	mb := s.newMarkBuilder(r, det)
+	visible, all, err := mb.scope(r, er)
+	if err != nil {
+		dbError(w, r, "session events", id, err)
+		return
+	}
 	doc := timelineDoc{SessionID: id, PublicID: det.PublicID, Agent: det.Agent, Status: string(det.Status),
-		Turns: make([]timelineTurn, 0, len(det.Runs)), Marks: []sessionEntry{}}
+		Turns: make([]timelineTurn, 0, len(det.Runs)), Marks: []sessionEntry{}, MarksTotal: visible}
 	perTurn := map[string]int{}
 	lanes := map[string]int{}
 	read, truncatedAt := 0, 0
-	for read < timelineMarkCap {
-		page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, Offset: read,
+	for read < timelineMarkCap && read < visible {
+		page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, PublicID: mb.pub, Offset: read,
 			Limit: min(obsdb.MaxSessionEventLimit, timelineMarkCap-read)})
 		if err != nil {
 			dbError(w, r, "session events", id, err)
 			return
 		}
-		doc.MarksTotal = page.Total
 		for _, e := range page.Events {
 			m, ok := mb.mark(e)
 			if !ok {
@@ -367,15 +433,12 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 			}
 		}
 		read += len(page.Events)
-		if len(page.Events) == 0 || read >= page.Total {
+		if len(page.Events) == 0 {
 			break
 		}
 	}
-	if doc.MarksTotal > read {
+	if visible > read {
 		truncatedAt = read
-	}
-	if mb.pub != "" {
-		doc.MarksTotal -= mb.hidden // a panel token's count is its own marks' (the hole counts the rest)
 	}
 	for _, rr := range det.Runs {
 		t := timelineTurn{
@@ -396,7 +459,7 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 	if n := lanes[laneOther]; n > 0 {
 		doc.Lanes = append(doc.Lanes, timelineLane{Lane: laneOther, Marks: n})
 	}
-	doc.Holes = mb.holes(len(det.Runs), doc.MarksTotal+mb.hidden, truncatedAt)
+	doc.Holes = mb.holes(det.Runs, all, truncatedAt, false)
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
@@ -422,12 +485,17 @@ func (s *Server) serveSessionEntries(w http.ResponseWriter, r *http.Request, id 
 	if !ok {
 		return
 	}
-	page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, Offset: offset, Limit: limit})
+	mb := s.newMarkBuilder(r, det)
+	_, all, err := mb.scope(r, er)
 	if err != nil {
 		dbError(w, r, "session events", id, err)
 		return
 	}
-	mb := s.newMarkBuilder(r, det)
+	page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, PublicID: mb.pub, Offset: offset, Limit: limit})
+	if err != nil {
+		dbError(w, r, "session events", id, err)
+		return
+	}
 	doc := entriesDoc{SessionID: id, Entries: []sessionEntry{}, Total: page.Total, Offset: offset}
 	for _, e := range page.Events {
 		if m, ok := mb.mark(e); ok {
@@ -437,6 +505,6 @@ func (s *Server) serveSessionEntries(w http.ResponseWriter, r *http.Request, id 
 	if next := offset + len(page.Events); len(page.Events) > 0 && next < page.Total {
 		doc.NextOffset = &next
 	}
-	doc.Holes = mb.holes(len(det.Runs), page.Total, 0)
+	doc.Holes = mb.holes(det.Runs, all, 0, true)
 	writeJSON(w, r, http.StatusOK, doc)
 }

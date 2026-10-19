@@ -5,9 +5,12 @@
 // run's row, the selection the tree and the detail pane share. A
 // self-call (an agent delegating to itself) is a loop over its node.
 // An agent node carries its runs' own cost (U34-fix, UX-S3-14: the run
-// rows' figures in lib/cost.ts's words, "—" with the reason unknown).
+// rows' figures in lib/cost.ts's words, "—" with the reason unknown),
+// and its status and steps (U34-fix4, UX-S3-14: lib/status's word in
+// its palette role — a failed or parked subagent reads so, its node
+// stroked in the role's mark).
 import type { CostView } from "@/lib/cost"
-import type { CallGraph, GraphNode } from "@/lib/graph"
+import type { CallGraph, GraphNode, GraphRow } from "@/lib/graph"
 import {
   EDGE_HINT,
   GRAPH_ALONE,
@@ -15,10 +18,24 @@ import {
   graphUnsourced,
   loopLabel,
   nodeLine,
+  nodeStatus,
+  nodeStatusLine,
 } from "@/lib/graph"
+import { ROLE_SVG, studioVar } from "@/lib/status-class"
+import type { StatusKey } from "@/lib/status"
+
+/** The statuses a node is coloured by (its stroke and name): the ones
+ * that need a look. A succeeded or running node keeps the quiet frame;
+ * its word still carries its colour. */
+const LOUD: ReadonlySet<StatusKey> = new Set([
+  "failed",
+  "cancelled",
+  "interrupted",
+  "parked",
+])
 
 const W = 230
-const H = 46
+const H = 62
 const GX = 110
 const GY = 22
 const PAD = 12
@@ -30,6 +47,7 @@ export function CallGraphView({
   selected,
   onSelect,
   costOf,
+  rowOf,
 }: {
   graph: CallGraph
   /** The selected node's id. */
@@ -37,6 +55,9 @@ export function CallGraphView({
   onSelect: (n: GraphNode) => void
   /** Runs' own cost, summed (capability "pricing"; absent without it). */
   costOf?: (runs: readonly string[]) => CostView | undefined
+  /** The run rows the page read (status, pending, steps): a node's
+   * status line; a run without one reads its invoke_agent span. */
+  rowOf?: (run: string) => GraphRow | undefined
 }) {
   const cols = new Map<number, GraphNode[]>()
   for (const n of graph.nodes) {
@@ -142,6 +163,11 @@ export function CallGraphView({
           const p = at.get(n.id)!
           const on = n.id === selected
           const cost = n.kind === "agent" ? costOf?.(n.runs) : undefined
+          const st = nodeStatus(n, rowOf)
+          const line = st ? nodeStatusLine(st) : undefined
+          const paint =
+            ROLE_SVG[st ? studioVar(st.status.role) : "muted-foreground"]
+          const loud = st !== undefined && LOUD.has(st.status.key)
           return (
             <g
               key={n.id}
@@ -151,8 +177,9 @@ export function CallGraphView({
               aria-pressed={on}
               // The name starts with the visible words, in their order
               // (axe label-content-name-mismatch): the glyph is aria-hidden.
-              aria-label={`${n.label} ${nodeLine(n)}${cost ? ` ${cost.text}` : ""}`}
+              aria-label={`${n.label} ${nodeLine(n)}${line ? ` ${line.word}${line.rest}` : ""}${cost ? ` ${cost.text}` : ""}`}
               data-node={n.id}
+              data-node-status={st?.status.key}
               className="group cursor-pointer outline-none"
               onClick={() => onSelect(n)}
               onKeyDown={(e) => {
@@ -162,14 +189,24 @@ export function CallGraphView({
                 }
               }}
             >
+              {/* Selected: the thread's 2px frame on the page's fill
+                  (a status word in its ink clears 4.5:1 on paper; the
+                  accent wash took interrupted's mustard to 4.19). */}
               <rect
                 width={W}
                 height={H}
                 rx={6}
-                className={`${on ? "fill-accent stroke-thread" : "fill-background"} ${
-                  n.fails ? "stroke-ev-error" : on ? "" : "stroke-border"
+                className={`fill-background ${
+                  on
+                    ? "stroke-thread"
+                    : loud
+                      ? paint.stroke
+                      : n.fails
+                        ? "stroke-ev-error"
+                        : "stroke-border"
                 }`}
-                strokeWidth={on ? 2 : 1}
+                strokeWidth={on || loud ? 2 : 1}
+                data-node-frame
               />
               {/* The keyboard focus: a ring outside the node (its own
                   stroke says selected or failed). */}
@@ -187,7 +224,13 @@ export function CallGraphView({
               <text
                 x={10}
                 y={18}
-                className={`text-[11px] font-medium ${n.fails ? "fill-ev-error" : "fill-foreground"}`}
+                className={`text-[11px] font-medium ${
+                  loud
+                    ? paint.fill
+                    : n.fails
+                      ? "fill-ev-error"
+                      : "fill-foreground"
+                }`}
               >
                 <tspan aria-hidden>{n.kind === "agent" ? "▣ " : "⧉ "}</tspan>
                 {n.label}{" "}
@@ -195,6 +238,14 @@ export function CallGraphView({
               <text x={10} y={34} className="fill-muted-foreground text-[10px]">
                 {nodeLine(n)}{" "}
               </text>
+              {line ? (
+                <text x={10} y={50} className="text-[10px]" data-node-line>
+                  <tspan className={paint.fill} data-node-word>
+                    {line.word}
+                  </tspan>
+                  <tspan className="fill-muted-foreground">{line.rest} </tspan>
+                </text>
+              ) : null}
               {cost ? (
                 <text
                   x={W - 8}

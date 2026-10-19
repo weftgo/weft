@@ -29,10 +29,12 @@ function Primitive({ value }: { value: unknown }) {
       </span>
     )
   }
+  // The code window's own colours (U34-fix4): a literal is --code-lit,
+  // never the paper's --ev-error (3.9:1 on --code-bg).
   if (typeof value === "number")
-    return <span className="text-ev-tool-code">{String(value)}</span>
+    return <span className="text-code-num">{String(value)}</span>
   if (typeof value === "boolean" || value === null)
-    return <span className="text-ev-error">{String(value)}</span>
+    return <span className="text-code-lit">{String(value)}</span>
   return <span className="text-code-mut">{String(value)}</span>
 }
 

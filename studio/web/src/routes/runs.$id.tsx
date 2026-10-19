@@ -774,6 +774,14 @@ function RunPage() {
     })),
     combine: dataOf,
   })
+  // Which of those reads failed with nothing to show (U34-fix4): the
+  // same queries observed, never fetched again from here — a failed
+  // read is not in flight, so its rows never read "not read yet".
+  const childDocsFailed = useQueries({
+    queries: fetchRuns.map((r) => ({ ...runQuery(r), enabled: false })),
+    combine: (rs) =>
+      fetchRuns.filter((_, i) => rs[i]?.isError && !rs[i]?.data).join("\n"),
+  })
   const childStreams = useQueries({
     queries: fetchRuns.map((r, i) => ({
       ...childStreamQuery(r),
@@ -1234,9 +1242,10 @@ function RunPage() {
   // A run's own cost (plan A5: the API's, read time): the root's row,
   // its children's, the expanded children's documents and theirs.
   const pricing = has("pricing")
-  const costRows = useMemo(() => {
-    const out = new Map<string, CostFields>()
-    if (!pricing) return out
+  // The run rows this page read (the same set): the call graph's
+  // status and steps per agent node (U34-fix4, UX-S3-14).
+  const readRows = useMemo(() => {
+    const out = new Map<string, RunRow>()
     for (const r of [
       run.data,
       ...(run.data?.children ?? []),
@@ -1245,32 +1254,44 @@ function RunPage() {
     ])
       if (r && !out.has(r.id)) out.set(r.id, r)
     return out
-  }, [pricing, run.data, childDocs])
+  }, [run.data, childDocs])
+  const costRows: Map<string, CostFields> = useMemo(
+    () => (pricing ? readRows : new Map()),
+    [pricing, readRows]
+  )
+  const rowOfRun = useCallback((r: string) => readRows.get(r), [readRows])
   // The documents being read (U34-fix3): a missing row is "not read
   // yet" only while the read that would carry it is in flight — the
   // root's document, its own expanded document or its parent's; any
   // other (a panel token's hidden child, an agents-level grandchild
   // under no expanded child) is "not read on this page".
+  // A read that failed (U34-fix4) is not in flight: its rows say the
+  // failure, never "yet" — it would promise a read that is not coming.
+  const docsFailed = useMemo(() => {
+    const out = new Set(childDocsFailed ? childDocsFailed.split("\n") : [])
+    if (!run.data && run.isError) out.add(id)
+    return out
+  }, [childDocsFailed, run.data, run.isError, id])
   const docsInFlight = useMemo(() => {
     const out = new Set<string>()
-    if (!run.data) out.add(id)
+    if (!run.data && !docsFailed.has(id)) out.add(id)
     if (onTree)
       fetchRuns.forEach((r, i) => {
-        if (!childDocs[i]) out.add(r)
+        if (!childDocs[i] && !docsFailed.has(r)) out.add(r)
       })
     return out
-  }, [run.data, id, onTree, fetchRuns, childDocs])
+  }, [run.data, id, onTree, fetchRuns, childDocs, docsFailed])
   const costOf = useCallback(
     (r: string) => {
       const row = costRows.get(r)
       if (row) return costView(row)
       const parent = /^(.+)\/\d+\/[^/]+$/.exec(r)?.[1]
-      return costNotRead(
-        docsInFlight.has(r) ||
-          (parent !== undefined && docsInFlight.has(parent))
-      )
+      const own = docsInFlight.has(r) || docsFailed.has(r)
+      return own || parent === undefined
+        ? costNotRead(docsInFlight.has(r), docsFailed.has(r))
+        : costNotRead(docsInFlight.has(parent), docsFailed.has(parent))
     },
-    [costRows, docsInFlight]
+    [costRows, docsInFlight, docsFailed]
   )
   const costOfRuns = useCallback(
     (rs: readonly string[]) => {
@@ -1902,6 +1923,7 @@ function RunPage() {
                       <CallGraphView
                         graph={graph}
                         costOf={pricing ? costOfRuns : undefined}
+                        rowOf={rowOfRun}
                         selected={nodeOfRun(graph, selectedRow?.runId)?.id}
                         onSelect={(n) => n.runs[0] && select(`r:${n.runs[0]}`)}
                       />

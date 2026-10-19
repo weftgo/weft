@@ -46,7 +46,7 @@ const tokenClass: Record<string, string> = {
   key: "text-code-ink",
   string: "text-code-str",
   number: "text-code-num",
-  literal: "text-ev-error",
+  literal: "text-code-lit",
   punct: "text-code-mut",
   ws: "",
 }
@@ -154,7 +154,7 @@ export function CodeWin({
       <pre
         className={`${folded ? "max-h-[26rem]" : ""} ${
           tone === "error"
-            ? "text-ev-error"
+            ? "text-code-lit"
             : tone === "result" && parsed === null
               ? "text-code-str"
               : ""

@@ -56,12 +56,14 @@
   /* brand tokens (plan §5.2) */
   --thread: #ff5c2b; /* the one accent; never a fill for large areas */
   --thread-ink: #d13c10; /* accent text at small sizes */
-  --faint: #716a5c; /* eyebrow labels, seq gutter: text, so ≥ 4.5:1 on paper and the quiet panels (U34-fix3; palette.test.ts) */
+  --faint: #716a5c; /* eyebrow labels, step labels: text, so ≥ 4.5:1 on paper and the quiet panels (U34-fix3; palette.test.ts) */
+  --faint-deco: #a39c8f; /* decoration only, never text: the delta dots and cells, the seq gutter's quiet marks (U34-fix4) */
   --code-bg: #161310; /* code windows are dark in both themes, like the site */
   --code-ink: #ece6d6;
   --code-mut: #8d887b;
   --code-str: #a8c07a;
   --code-num: #9fb8ff; /* numbers in JSON, on the dark window */
+  --code-lit: #e3b341; /* JSON true / false / null and an error result, on the dark window (U34-fix4) */
   --win-border: #26221b;
   --win-bar: #1d1a15;
   --win-dot: #332e25;
@@ -115,12 +117,14 @@
 
   --thread: #ff5c2b;
   --thread-ink: #ff7d52;
-  --faint: #948f82; /* ≥ 4.5:1 on background and card (palette.test.ts) */
+  --faint: #8d887b; /* ≥ 4.5:1 on background and card, a step under muted-foreground (palette.test.ts) */
+  --faint-deco: #6e6759;
   --code-bg: #1b1815;
   --code-ink: #ece6d6;
   --code-mut: #8d887b;
   --code-str: #a8c07a;
   --code-num: #9fb8ff;
+  --code-lit: #e3b341;
   --win-border: #2f2b25;
   --win-bar: #221f1a;
   --win-dot: #3a352d;
@@ -217,11 +221,13 @@ html[data-density="compact"] {
   --color-thread: var(--thread);
   --color-thread-ink: var(--thread-ink);
   --color-faint: var(--faint);
+  --color-faint-deco: var(--faint-deco);
   --color-code-bg: var(--code-bg);
   --color-code-ink: var(--code-ink);
   --color-code-mut: var(--code-mut);
   --color-code-str: var(--code-str);
   --color-code-num: var(--code-num);
+  --color-code-lit: var(--code-lit);
   --color-win-border: var(--win-border);
   --color-win-bar: var(--win-bar);
   --color-win-dot: var(--win-dot);

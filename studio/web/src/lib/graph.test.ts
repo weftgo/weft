@@ -12,6 +12,8 @@ import {
   loopLabel,
   nodeLine,
   nodeOfRun,
+  nodeStatus,
+  nodeStatusLine,
 } from "./graph"
 
 describe("callGraph", () => {
@@ -57,6 +59,51 @@ describe("callGraph", () => {
     expect(nodeLine(w)).toBe("2 runs · slowest 7.3ms · 1 failed")
     const e = g2.edges.find((x) => x.to === w.id)!
     expect(edgeLabel(e)).toBe("2× · 7.3ms · 1 failed")
+    // Its status line (U34-fix4, UX-S3-14): the worst of its runs —
+    // from the spans with no row, a row's words where the page read one.
+    const st = nodeStatus(w)!
+    expect([st.status.key, st.count, st.runs, st.steps]).toEqual([
+      "failed",
+      1,
+      2,
+      4,
+    ])
+    expect(nodeStatusLine(st)).toEqual({
+      word: "failed 1 of 2",
+      rest: " · 4 steps",
+    })
+    const parkedRow = { id: INV, status: "succeeded", pending: 1, steps: 3 }
+    const viaRows = nodeStatus(w, (r) =>
+      r === INV
+        ? parkedRow
+        : r === second
+          ? { id: r, status: "failed" }
+          : undefined
+    )!
+    // A row with no steps: the span's count stands in.
+    expect([viaRows.status.key, viaRows.steps]).toEqual(["failed", 5])
+    expect(
+      nodeStatus(w, (r) =>
+        r === INV ? parkedRow : { id: r, status: "succeeded" }
+      )!.status.key
+    ).toBe("parked")
+  })
+
+  it("a run parked on weft.run.pending reads parked from its span alone; an MCP node has no status", () => {
+    const parked = callGraph(
+      SPANS.map((s) => {
+        const a = s.attrs
+        return a["weft.run.id"] === INV &&
+          a["gen_ai.operation.name"] === "invoke_agent"
+          ? { ...s, attrs: { ...a, "weft.run.pending": 1 } }
+          : s
+      }),
+      DIR
+    )
+    const n = parked.nodes.find((x) => x.id === "a:inventory-specialist")!
+    expect(nodeStatus(n)?.status.key).toBe("parked")
+    expect(nodeStatusLine(nodeStatus(n)!).word).toBe("parked")
+    expect(nodeStatus({ ...n, kind: "mcp", facts: [] })).toBeUndefined()
   })
 
   it("MCP calls are edges to their server's node, from the tools record's source", () => {

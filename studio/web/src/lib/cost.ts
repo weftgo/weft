@@ -236,10 +236,24 @@ export const COST_NOT_READ_YET = "a run's cost is not read yet"
 export const COST_NOT_READ_HERE =
   "a run's cost is not read on this page — open the run for its own"
 
+/** A run's row whose read failed (U34-fix4): no read is in flight, so
+ * never "yet" — the failure, and where the figure still is. */
+export const COST_READ_FAILED =
+  "a run's cost is not read: its document's read failed — open the run for its own"
+
 /** costNotRead is the "—" a missing row draws: COST_NOT_READ_YET while
- * a read that would carry it is in flight, else COST_NOT_READ_HERE. */
-export function costNotRead(inFlight: boolean): CostView {
-  return view(null, false, inFlight ? COST_NOT_READ_YET : COST_NOT_READ_HERE)
+ * a read that would carry it is in flight, COST_READ_FAILED when that
+ * read failed (not in flight, never "yet"), else COST_NOT_READ_HERE. */
+export function costNotRead(inFlight: boolean, failed = false): CostView {
+  return view(
+    null,
+    false,
+    failed
+      ? COST_READ_FAILED
+      : inFlight
+        ? COST_NOT_READ_YET
+        : COST_NOT_READ_HERE
+  )
 }
 
 /** sumCost totals runs' whole bills (a playground variant's runs):

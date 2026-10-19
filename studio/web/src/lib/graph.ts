@@ -12,6 +12,8 @@
 // Studio only (the panel links here).
 import type { Span } from "./api"
 import { plural } from "./format"
+import { statusOf } from "./status"
+import type { Status, StatusKey, StatusRow } from "./status"
 import { attrsOf, instantMs, int, opOf, str, took } from "./waterfall"
 
 export type NodeKind = "agent" | "mcp"
@@ -32,6 +34,20 @@ export interface GraphNode {
   depth: number
   /** Own tokens summed over its runs, when the spans carry them. */
   tokens?: { input: number; output: number }
+  /** Each run's own facts, as its invoke_agent span says them (an
+   * agent; an MCP node: none) — the status and steps line's fallback
+   * where the page holds no row for the run (UX-S3-14). */
+  facts: RunFact[]
+}
+
+/** A run as its invoke_agent span says it ended. */
+export interface RunFact {
+  run: string
+  failed: boolean
+  /** weft.run.pending: calls parked for approval. */
+  pending: number
+  /** weft.run.steps, when the span carries it. */
+  steps?: number
 }
 
 export interface GraphEdge {
@@ -106,6 +122,7 @@ export function callGraph(
         fails: 0,
         slowest: 0,
         depth: -1,
+        facts: [],
       }
       nodes.set(id, n)
     }
@@ -135,6 +152,13 @@ export function callGraph(
     n.calls++
     n.slowest = Math.max(n.slowest, d)
     if (s.status === "error") n.fails++
+    const steps = int(a["weft.run.steps"])
+    n.facts.push({
+      run,
+      failed: s.status === "error",
+      pending: int(a["weft.run.pending"]) ?? 0,
+      ...(steps !== undefined ? { steps } : {}),
+    })
     const tin = int(a["gen_ai.usage.input_tokens"])
     const tout = int(a["gen_ai.usage.output_tokens"])
     if (tin !== undefined || tout !== undefined) {
@@ -208,6 +232,78 @@ export function nodeLine(n: GraphNode): string {
   if (n.tokens) parts.push(`${n.tokens.input}→${n.tokens.output} tok`)
   if (n.fails) parts.push(`${n.fails} failed`)
   return parts.join(" · ")
+}
+
+/** A run's row where the page read one (the run document, its
+ * children, an expanded child's): its status fields and steps. */
+export type GraphRow = StatusRow & { steps?: number }
+
+/** The worst status first: what an agent node's word says when its
+ * runs ended differently. */
+const WORST: StatusKey[] = [
+  "failed",
+  "cancelled",
+  "interrupted",
+  "parked",
+  "running",
+  "resumed",
+  "succeeded",
+]
+const rank = (k: StatusKey) => {
+  const i = WORST.indexOf(k)
+  return i < 0 ? WORST.length : i
+}
+
+/** An agent node's status and steps (UX-S3-14): each run's status in
+ * lib/status's words — its row's when the page read one, else its
+ * invoke_agent span's (failed, parked on weft.run.pending, else
+ * succeeded) — the worst of them with how many runs share it, and the
+ * steps summed (undefined when a run's count is not known). */
+export interface NodeStatus {
+  status: Status
+  /** Runs at that status, of all the node's runs. */
+  count: number
+  runs: number
+  steps?: number
+}
+
+export function nodeStatus(
+  n: GraphNode,
+  rowOf?: (run: string) => GraphRow | undefined
+): NodeStatus | undefined {
+  if (n.kind !== "agent" || n.facts.length === 0) return undefined
+  let worst: Status | undefined
+  let count = 0
+  let steps: number | undefined = 0
+  for (const f of n.facts) {
+    const row = rowOf?.(f.run)
+    const st = statusOf(
+      row ?? {
+        id: f.run,
+        status: f.failed ? "failed" : "succeeded",
+        pending: f.pending,
+      }
+    )
+    if (worst === undefined || rank(st.key) < rank(worst.key)) {
+      worst = st
+      count = 1
+    } else if (st.key === worst.key) count++
+    const k = row?.steps ?? f.steps
+    steps = steps === undefined || k === undefined ? undefined : steps + k
+  }
+  return { status: worst as Status, count, runs: n.facts.length, steps }
+}
+
+/** A node's status line: "failed · 3 steps", "parked 1 of 2 · 5 steps". */
+export function nodeStatusLine(s: NodeStatus): { word: string; rest: string } {
+  const word =
+    s.runs > 1 && s.count < s.runs
+      ? `${s.status.word} ${s.count} of ${s.runs}`
+      : s.status.word
+  return {
+    word,
+    rest: s.steps !== undefined ? ` · ${plural(s.steps, "step")}` : "",
+  }
 }
 
 /** An edge's label: its call count and the slowest call ("1× · 9.3ms"). */

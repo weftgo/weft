@@ -104,7 +104,8 @@ const kindBg: Record<EventKind, string> = {
   result: "bg-ev-result",
   error: "bg-ev-error",
   reasoning: "bg-ev-reasoning",
-  delta: "bg-faint",
+  // Decoration, not text (U34-fix4): the delta's dot and gutter cell.
+  delta: "bg-faint-deco",
 }
 const kindBorder: Record<EventKind, string> = {
   step: "border-ev-step/40",
@@ -112,7 +113,7 @@ const kindBorder: Record<EventKind, string> = {
   result: "border-ev-result/50",
   error: "border-ev-error/50",
   reasoning: "border-ev-reasoning/40",
-  delta: "border-faint/40",
+  delta: "border-faint-deco/40",
 }
 
 export function kindClass(

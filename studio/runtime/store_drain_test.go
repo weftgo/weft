@@ -116,8 +116,11 @@ func TestStoreBreakerRequeue(t *testing.T) {
 
 // TestStoreCloseDuringThePause is the reviewer's probe: a blip, then
 // Close at once with the default 30 s pause. The store has recovered,
-// so Close's drain applies the held queue at once — Close returns in
-// well under a second — and after a restart every row is right.
+// so Close's drain applies the held queue at once — Close never sits
+// the pause out (bounded against the pause, not a wall clock: under a
+// third of it, so a loaded machine's slow drain is no failure while a
+// drain that waited for the pause is) — and after a restart every row
+// is right.
 func TestStoreCloseDuringThePause(t *testing.T) {
 	db, cs := openStore(t, filepath.Join(t.TempDir(), "w.db"))
 	t.Cleanup(func() { _ = db.Close() })
@@ -130,8 +133,8 @@ func TestStoreCloseDuringThePause(t *testing.T) {
 	defer stop()
 	start := time.Now()
 	rs.Close()
-	if d := time.Since(start); d > time.Second {
-		t.Errorf("Close during the pause took %v over a recovered store, want < 1s", d)
+	if d := time.Since(start); d >= storeBreakerPause/3 {
+		t.Errorf("Close during the pause took %v over a recovered store, want < %v (a third of the %v pause: it must not wait it out)", d, storeBreakerPause/3, storeBreakerPause)
 	}
 
 	rs2 := New(WithStore(cs))

@@ -349,12 +349,21 @@ let fetches = 0
  * middle of something (a request still in flight). */
 export const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Polls of nothing moving, a request held, that idle() takes as rest. */
+const HELD_STILL = 30
+
 /** idle waits until the panel has come to rest: no request of the
  * fake Studio in flight and every panel's shadow DOM unchanged over
  * several polls. A fixed sleep is a bet on the machine's load; this
- * is what the tests actually wait for. */
-/** Polls of nothing moving, a request held, that idle() takes as rest. */
-const HELD_STILL = 30
+ * is what the tests actually wait for.
+ *
+ * Its limits (U34-fix4): with a request held (a route a test never
+ * answers) it returns once nothing has moved for HELD_STILL polls —
+ * about 300 ms — though that request is still in flight: rest, not
+ * an answer. And it watches requests, the DOM and the panels' draws,
+ * never timers: a timer that fires between ~300 ms and the 300-poll
+ * cap (~3 s) after the last movement is not waited for (wait for what
+ * it does instead — vi.waitFor on its effect). */
 
 export async function idle(): Promise<void> {
   const snapshot = () =>

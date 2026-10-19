@@ -42,6 +42,7 @@ import {
   longRun,
   POLLER,
   STORM,
+  TEAM,
   WORKER,
 } from "@/test/loop-fixtures"
 import type { FxRun } from "@/test/loop-fixtures"
@@ -51,7 +52,11 @@ import { ALL_RUNS } from "@/lib/run-tree"
 import { treeRows } from "@/lib/waterfall-tree"
 import * as waterfallTree from "@/lib/waterfall-tree"
 import { BASELINE_MS, measure, withinBudget } from "@/test/budget"
-import { COST_NOT_READ_HERE, COST_NOT_READ_YET } from "@/lib/cost"
+import {
+  COST_NOT_READ_HERE,
+  COST_NOT_READ_YET,
+  COST_READ_FAILED,
+} from "@/lib/cost"
 
 // The loop's rows builder, spied (U34-fix2): the page builds its every-
 // child-expanded rows with treeRows({ expanded: ALL_RUNS }); a passthrough.
@@ -95,6 +100,8 @@ function serve(
     requestsFail?: boolean
     /** Per child run id: its document answers once this settles. */
     holdDocs?: Record<string, Promise<unknown>>
+    /** Child run ids whose document answers a 500. */
+    failDocs?: string[]
   } = {}
 ) {
   stubBrowser()
@@ -104,12 +111,15 @@ function serve(
   const b = build(r)
   const withSpans = opts.spans ?? true
   const kids = childrenOf(r)
+  const parkedOf = (x: FxRun) =>
+    x.steps.flatMap((st) => st.calls).filter((c) => c.pending).length
   const row = (x: FxRun, parent?: string): RunRow => ({
     ...rOK,
     id: x.id,
     agent: x.agent,
     steps: x.steps.length,
     status: x.failed ? "failed" : "succeeded",
+    ...(parkedOf(x) ? { pending: parkedOf(x) } : {}),
     ...(x.stoppedBy ? { stopped_by: x.stoppedBy } : {}),
     ...(parent
       ? { parent_run_id: parent, parent_call_id: x.id.split("/").at(-1) }
@@ -172,6 +182,8 @@ function serve(
   for (const k of kids)
     s.on(`GET runs/${k.id}`, async () => {
       await opts.holdDocs?.[k.id]
+      if (opts.failDocs?.includes(k.id))
+        return apiError(500, "internal", "database is locked")
       return {
         ...row(k, parentOf(k.id)),
         children: kids
@@ -725,6 +737,81 @@ describe("U34-fix", () => {
     )!
     expect(unread.textContent).toContain("—")
     expect(unread.querySelector("title")!.textContent).toBe(COST_NOT_READ_HERE)
+  })
+
+  it("the agents level: each agent's steps and status word in its role — a failed and a parked subagent read so (U34-fix4, UX-S3-14)", async () => {
+    serve(TEAM)
+    renderApp(`/runs/${TEAM.id}?scale=graph&level=agents`)
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll("[data-call-graph] [data-node]").length
+      ).toBe(3)
+    )
+    const at = (id: string) =>
+      document.querySelector<SVGGElement>(`[data-node="${id}"]`)!
+    const word = (id: string) => at(id).querySelector("[data-node-word]")!
+    // The director succeeded: its word in the succeeded role, no status frame.
+    expect(at("a:director").getAttribute("data-node-status")).toBe("succeeded")
+    expect(
+      at("a:director").querySelector("[data-node-line]")!.textContent
+    ).toBe("succeeded · 2 steps ")
+    expect(word("a:director").getAttribute("class")).toBe("fill-status-ok")
+    expect(
+      at("a:director").querySelector("[data-node-frame]")!.getAttribute("class")
+    ).not.toContain("stroke-status")
+    // The researcher failed: the failed word, its name and frame red.
+    expect(at("a:researcher").getAttribute("data-node-status")).toBe("failed")
+    expect(
+      at("a:researcher").querySelector("[data-node-line]")!.textContent
+    ).toBe("failed · 3 steps ")
+    expect(word("a:researcher").getAttribute("class")).toBe("fill-status-bad")
+    expect(
+      at("a:researcher")
+        .querySelector("[data-node-frame]")!
+        .getAttribute("class")
+    ).toContain("stroke-status-bad")
+    // The approver parked a call: the parked word, in the parked role.
+    expect(at("a:approver").getAttribute("data-node-status")).toBe("parked")
+    expect(
+      at("a:approver").querySelector("[data-node-line]")!.textContent
+    ).toBe("parked · 1 step ")
+    expect(word("a:approver").getAttribute("class")).toBe("fill-status-parked")
+    expect(
+      at("a:approver").querySelector("[data-node-frame]")!.getAttribute("class")
+    ).toContain("stroke-status-parked")
+    // The name says it too, in the visible words' order.
+    expect(at("a:researcher").getAttribute("aria-label")).toContain(
+      "failed · 3 steps"
+    )
+  })
+
+  it('a child document whose read fails is not in flight: its rows say the failure, never "not read yet" (U34-fix4)', async () => {
+    serve(DIRECTOR, { caps: ["pricing"], failDocs: [ops] })
+    renderApp(`/runs/${DIRECTOR.id}?scale=graph`)
+    await waitFor(() =>
+      expect(
+        document.querySelector(`[data-loop-expand="${CSS.escape(ops)}"]`)
+      ).not.toBeNull()
+    )
+    fireEvent.click(
+      document.querySelector(`[data-loop-expand="${CSS.escape(ops)}"]`)!
+    )
+    // ops-manager's document answers a 500: the specialist's row it
+    // would carry is the failure's words, and stays so.
+    await waitFor(() =>
+      expect(
+        document.querySelector(
+          "[data-loop-node='t:inventory_specialist'] [data-loop-cost] title"
+        )?.textContent
+      ).toBe(COST_READ_FAILED)
+    )
+    await new Promise((r) => setTimeout(r, 50))
+    expect(
+      document.querySelector(
+        "[data-loop-node='t:inventory_specialist'] [data-loop-cost] title"
+      )?.textContent
+    ).toBe(COST_READ_FAILED)
+    expect(COST_READ_FAILED).not.toContain("yet")
   })
 
   it("the draw's budget: a 1,000-step run's model and render, with CI margin", () => {

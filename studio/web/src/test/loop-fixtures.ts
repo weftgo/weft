@@ -77,6 +77,8 @@ export function build(run: FxRun): Built {
   ): number => {
     const inv = id("inv")
     const own: Span[] = []
+    // Its own parked calls: the invoke_agent span's weft.run.pending.
+    let parked = 0
     let t = t0 + 0.1
     // The run's event counter (tool_start and tool_finish each take
     // one): weft.tool.seq is the tool_start's.
@@ -104,7 +106,14 @@ export function build(run: FxRun): Built {
       const sp = id("t")
       const start = at + (c.lag ?? 0)
       if (c.pending) {
-        pending.push({ type: "tool_call", id: cid, name: c.name, args: c.args })
+        parked++
+        if (root)
+          pending.push({
+            type: "tool_call",
+            id: cid,
+            name: c.name,
+            args: c.args,
+          })
         ev({
           type: "tool_start",
           seq: ++seq,
@@ -243,6 +252,7 @@ export function build(run: FxRun): Built {
             "gen_ai.request.model": "script",
             "weft.run.id": r.id,
             "weft.run.steps": steps,
+            ...(parked ? { "weft.run.pending": parked } : {}),
             "gen_ai.usage.input_tokens": 10 * steps,
             "gen_ai.usage.output_tokens": 5 * steps,
             ...(r.stoppedBy ? { "weft.run.stopped_by": r.stoppedBy } : {}),
@@ -479,6 +489,60 @@ export const DIRECTOR: FxRun = {
       ],
     },
     { calls: [], text: "We have 42 units of A-17 in Lyon." },
+  ],
+}
+
+/** A director whose two subagents did not succeed (U34-fix4, UX-S3-14):
+ * the researcher failed (its run's error, its call's SUBAGENT_FAILED)
+ * and the approver parked a call (weft.run.pending; the parent's
+ * SUBAGENT_PENDING) — the agents level colours each so. */
+export const TEAM: FxRun = {
+  id: "r_team",
+  agent: "director",
+  stoppedBy: "final_answer",
+  steps: [
+    {
+      calls: [
+        {
+          name: "researcher",
+          id: "call_1",
+          error: "SUBAGENT_FAILED",
+          child: {
+            id: "r_team/0/call_1",
+            agent: "researcher",
+            failed: true,
+            steps: [
+              { calls: [{ name: "search_docs", args: { q: "A-17" } }] },
+              { calls: [{ name: "search_docs", error: "timeout" }] },
+              { calls: [] },
+            ],
+          },
+        },
+        {
+          name: "approver",
+          id: "call_2",
+          error: "SUBAGENT_PENDING",
+          child: {
+            id: "r_team/0/call_2",
+            agent: "approver",
+            stoppedBy: "parked",
+            steps: [
+              {
+                calls: [
+                  {
+                    name: "issue_refund",
+                    id: "rf9",
+                    args: { order_id: "1002" },
+                    pending: true,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    { calls: [], text: "The research failed; the refund waits on approval." },
   ],
 }
 

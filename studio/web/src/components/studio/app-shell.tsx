@@ -114,7 +114,10 @@ function Nav() {
         {icon}
         <span className="flex min-w-0 flex-1 items-baseline justify-between gap-2">
           <span>{label}</span>
-          <span className="font-mono text-[10px] text-faint">
+          {/* faint on the sidebar; on the hovered or pressed item's
+              wash (sidebar-accent, 4.18:1 for faint) the item's own ink
+              (U34-fix4, palette.test.ts). */}
+          <span className="font-mono text-[10px] text-faint group-hover/menu-button:text-sidebar-accent-foreground group-active/menu-button:text-sidebar-accent-foreground">
             {NEEDS_TOKEN}
           </span>
         </span>

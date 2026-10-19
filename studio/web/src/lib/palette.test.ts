@@ -2,14 +2,14 @@
 // and one panel token, and they are the same colour in each theme — a
 // status reads alike on both surfaces. panel/theme.test.ts holds the
 // shared tokens to styles.css; this holds the roles to both.
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync, statSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
 import { INK, PALETTE, ROLE, STUDIO_NAMES, TONE, TONE_STUDIO } from "./palette"
 import type { Role } from "./palette"
 import { STATUS } from "./status"
-import { ROLE_CLASS, studioVar } from "./status-class"
+import { ROLE_CLASS, ROLE_SVG, studioVar } from "./status-class"
 
 function studioTokens(selector: string): Record<string, string> {
   const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8")
@@ -58,6 +58,12 @@ describe("status roles (U1)", () => {
         text: `text-${STUDIO_NAMES.light[INK[ROLE[role]] ?? ROLE[role]]}`,
       })
     }
+    // The SVG paints (the call graph's nodes): the same variables.
+    for (const [v, c] of Object.entries(ROLE_CLASS))
+      expect(ROLE_SVG[v], v).toEqual({
+        fill: c.text.replace(/^text-/, "fill-"),
+        stroke: c.dot.replace(/^bg-/, "stroke-"),
+      })
     // The live dot is the succeeded colour (UX-F-07).
     expect(ROLE.live).toEqual(ROLE["succeeded"])
   })
@@ -197,4 +203,132 @@ describe("Studio's text tokens (U34-fix3): --faint is text", () => {
             `${theme} --${t} on ${name}`
           ).toBeGreaterThanOrEqual(4.5)
     })
+})
+
+describe("Studio's tinted surfaces and code window (U34-fix4)", () => {
+  const src = (p: string) => readFileSync(resolve(process.cwd(), p), "utf8")
+  for (const [theme, sel] of [
+    ["light", ":root"],
+    ["dark", ".dark"],
+  ] as const) {
+    it(`${theme}: faint and muted-foreground clear 4.5:1 on the status washes`, () => {
+      const s = studioTokens(sel)
+      // The failure callout and flow strip (bg-status-bad/5) and the
+      // thread's quiet blocks (bg-thread/5) hold faint labels.
+      for (const t of ["faint", "muted-foreground"])
+        for (const base of ["background", "card"])
+          for (const tint of ["status-bad", "thread"])
+            expect(
+              contrast(s[t], over(s[tint], s[base], 0.05)),
+              `${theme} --${t} on ${tint}/5 over ${base}`
+            ).toBeGreaterThanOrEqual(4.5)
+    })
+
+    it(`${theme}: a tinted row's ink clears 4.5:1 on its status tint`, () => {
+      const s = studioTokens(sel)
+      // [ink, tint, alpha], each as its source draws it.
+      const pairs: [string, string, number][] = [
+        // DiffBlock's rows (step-request.tsx): /8 — status-ok reads
+        // 4.47:1 on its /10 in light.
+        ["status-ok", "status-ok", 0.08],
+        ["status-bad", "status-bad", 0.08],
+        // A changed step-diff cell (step-diff.tsx).
+        ["foreground", "ev-error", 0.1],
+        // The destructive badge and button: /10 in light, /20 in dark.
+        ["destructive", "destructive", theme === "light" ? 0.1 : 0.2],
+      ]
+      for (const [ink, tint, a] of pairs)
+        for (const base of ["background", "card"])
+          expect(
+            contrast(s[ink], over(s[tint], s[base], a)),
+            `${theme} --${ink} on ${tint}/${Math.round(a * 100)} over ${base}`
+          ).toBeGreaterThanOrEqual(4.5)
+      const req = src("src/components/studio/step-request.tsx")
+      expect(req).toContain('"bg-status-ok/8 text-status-ok"')
+      expect(req).toContain('"bg-status-bad/8 text-status-bad line-through"')
+    })
+
+    it(`${theme}: on the sidebar's hover wash (sidebar-accent) text is the item's ink`, () => {
+      const s = studioTokens(sel)
+      expect(
+        contrast(s["sidebar-accent-foreground"], s["sidebar-accent"]),
+        `${theme} sidebar-accent-foreground on sidebar-accent`
+      ).toBeGreaterThanOrEqual(4.5)
+      // faint does not clear the wash in light (4.18:1): the locked
+      // item's "needs a token" note takes the item's ink under it.
+      if (contrast(s.faint, s["sidebar-accent"]) < 4.5)
+        expect(src("src/components/studio/app-shell.tsx")).toContain(
+          "text-faint group-hover/menu-button:text-sidebar-accent-foreground group-active/menu-button:text-sidebar-accent-foreground"
+        )
+    })
+
+    it(`${theme}: every code-* token and the literal clear 4.5:1 on --code-bg`, () => {
+      const s = studioTokens(sel)
+      const code = Object.keys(s).filter(
+        (k) => k.startsWith("code-") && k !== "code-bg"
+      )
+      expect(code).toEqual(
+        expect.arrayContaining([
+          "code-ink",
+          "code-mut",
+          "code-str",
+          "code-num",
+          "code-lit",
+        ])
+      )
+      for (const k of code)
+        expect(
+          contrast(s[k], s["code-bg"]),
+          `${theme} --${k} on --code-bg`
+        ).toBeGreaterThanOrEqual(4.5)
+      // The folded window's "show all" foot: code-mut on the bar.
+      expect(
+        contrast(s["code-mut"], s["win-bar"]),
+        `${theme} --code-mut on --win-bar`
+      ).toBeGreaterThanOrEqual(4.5)
+    })
+
+    it(`${theme}: faint is a step under muted-foreground, faint-deco decoration`, () => {
+      const s = studioTokens(sel)
+      // Dark: a visible step (≥ 1.2:1 between the two). Light: 4.5:1 on
+      // the quiet panels leaves faint 4.74 against muted-foreground's
+      // 4.96 there — a shade lighter, never darker, no more is possible
+      // with muted-foreground the panel's dim.
+      const step = contrast(s.faint, s["muted-foreground"])
+      expect(step).toBeGreaterThan(1)
+      if (theme === "dark") expect(step).toBeGreaterThanOrEqual(1.2)
+      expect(contrast(s.faint, s.background)).toBeLessThan(
+        contrast(s["muted-foreground"], s.background)
+      )
+      expect(s["faint-deco"]).toMatch(/^#[0-9a-f]{6}$/)
+    })
+  }
+
+  it("the code surfaces draw --code-lit and --code-num, never an --ev- token", () => {
+    const tree = src("src/components/studio/json-tree.tsx")
+    const win = src("src/components/studio/codewin.tsx")
+    expect(tree).toContain('<span className="text-code-lit">')
+    expect(tree).toContain('<span className="text-code-num">')
+    expect(tree).not.toMatch(/text-ev-/)
+    expect(win).toContain('literal: "text-code-lit",')
+    expect(win).not.toContain("text-ev-error")
+  })
+
+  it("no text is drawn in faint-deco; the delta's marks are", () => {
+    const walk = (d: string): string[] =>
+      readdirSync(d).flatMap((f) => {
+        const p = resolve(d, f)
+        return statSync(p).isDirectory() ? walk(p) : [p]
+      })
+    for (const f of walk(resolve(process.cwd(), "src")).filter(
+      (p) => /\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p)
+    ))
+      expect(readFileSync(f, "utf8"), f).not.toMatch(
+        /(text|fill|stroke)-faint-deco/
+      )
+    const sum = src("src/lib/summarize.ts")
+    expect(sum).toContain('delta: "bg-faint-deco",')
+    expect(sum).toContain('delta: "border-faint-deco/40",')
+    expect(sum).toContain('delta: "text-faint",')
+  })
 })

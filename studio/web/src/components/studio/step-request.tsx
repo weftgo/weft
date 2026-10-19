@@ -245,10 +245,12 @@ export function DiffBlock({ diff }: { diff: BoundedDiff }) {
           key={i}
           data-diff={r.kind}
           className={
+            // An /8 tint: status-ok reads 4.47:1 on its /10 (U34-fix4,
+            // palette.test.ts).
             r.kind === "add"
-              ? "bg-status-ok/10 text-status-ok"
+              ? "bg-status-ok/8 text-status-ok"
               : r.kind === "del"
-                ? "bg-status-bad/10 text-status-bad line-through"
+                ? "bg-status-bad/8 text-status-bad line-through"
                 : "text-muted-foreground"
           }
         >

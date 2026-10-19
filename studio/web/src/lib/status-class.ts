@@ -19,6 +19,24 @@ export const ROLE_CLASS: Record<string, { dot: string; text: string }> = {
   },
 }
 
+/** A role's SVG classes (UX-S3-14: the call graph's agent nodes): the
+ * word's fill in the role's ink, the node's stroke in its mark —
+ * ROLE_CLASS's text and dot, as SVG paints them (palette.test.ts). */
+export const ROLE_SVG: Record<string, { fill: string; stroke: string }> = {
+  "status-run": { fill: "fill-status-run-ink", stroke: "stroke-status-run" },
+  "status-ok": { fill: "fill-status-ok", stroke: "stroke-status-ok" },
+  "status-bad": { fill: "fill-status-bad", stroke: "stroke-status-bad" },
+  "status-int": { fill: "fill-status-int", stroke: "stroke-status-int" },
+  "status-parked": {
+    fill: "fill-status-parked",
+    stroke: "stroke-status-parked",
+  },
+  "muted-foreground": {
+    fill: "fill-muted-foreground",
+    stroke: "stroke-muted-foreground",
+  },
+}
+
 /** studioVar is the styles.css variable a role is drawn in. */
 export const studioVar = (r: Role) => STUDIO_NAMES.light[ROLE[r]]
 

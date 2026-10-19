@@ -26,6 +26,7 @@ import {
   costView,
   COST_NOT_READ_HERE,
   COST_NOT_READ_YET,
+  COST_READ_FAILED,
   delegatedView,
   formatUSD,
   LOST_CELL_REASON,
@@ -586,5 +587,15 @@ describe("a row not read (U34-fix3)", () => {
       title: COST_NOT_READ_HERE,
     })
     expect(COST_NOT_READ_HERE).not.toContain("yet")
+  })
+  it("a failed read is not in flight: its words, never 'yet' (U34-fix4)", () => {
+    for (const inFlight of [true, false])
+      expect(costNotRead(inFlight, true)).toMatchObject({
+        known: false,
+        text: "—",
+        title: COST_READ_FAILED,
+      })
+    expect(COST_READ_FAILED).not.toContain("yet")
+    expect(COST_READ_FAILED).toContain("failed")
   })
 })

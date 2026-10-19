@@ -4,6 +4,9 @@
 // servers, never spans). A node is a button: it selects its first
 // run's row, the selection the tree and the detail pane share. A
 // self-call (an agent delegating to itself) is a loop over its node.
+// An agent node carries its runs' own cost (U34-fix, UX-S3-14: the run
+// rows' figures in lib/cost.ts's words, "—" with the reason unknown).
+import type { CostView } from "@/lib/cost"
 import type { CallGraph, GraphNode } from "@/lib/graph"
 import {
   EDGE_HINT,
@@ -26,11 +29,14 @@ export function CallGraphView({
   graph,
   selected,
   onSelect,
+  costOf,
 }: {
   graph: CallGraph
   /** The selected node's id. */
   selected?: string
   onSelect: (n: GraphNode) => void
+  /** Runs' own cost, summed (capability "pricing"; absent without it). */
+  costOf?: (runs: readonly string[]) => CostView | undefined
 }) {
   const cols = new Map<number, GraphNode[]>()
   for (const n of graph.nodes) {
@@ -135,6 +141,7 @@ export function CallGraphView({
         {graph.nodes.map((n) => {
           const p = at.get(n.id)!
           const on = n.id === selected
+          const cost = n.kind === "agent" ? costOf?.(n.runs) : undefined
           return (
             <g
               key={n.id}
@@ -144,7 +151,7 @@ export function CallGraphView({
               aria-pressed={on}
               // The name starts with the visible words, in their order
               // (axe label-content-name-mismatch): the glyph is aria-hidden.
-              aria-label={`${n.label} ${nodeLine(n)}`}
+              aria-label={`${n.label} ${nodeLine(n)}${cost ? ` ${cost.text}` : ""}`}
               data-node={n.id}
               className="group cursor-pointer outline-none"
               onClick={() => onSelect(n)}
@@ -188,6 +195,19 @@ export function CallGraphView({
               <text x={10} y={34} className="fill-faint text-[10px]">
                 {nodeLine(n)}
               </text>
+              {cost ? (
+                <text
+                  x={W - 8}
+                  y={18}
+                  textAnchor="end"
+                  className="fill-muted-foreground text-[10px]"
+                  data-cost-known={cost.known ? "true" : "false"}
+                  data-graph-cost
+                >
+                  <title>{cost.title}</title>
+                  {cost.text}
+                </text>
+              ) : null}
             </g>
           )
         })}

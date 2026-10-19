@@ -7,8 +7,18 @@
 // fan-out; rw.deep-delegation's subagent expanded in place with its
 // breadcrumb, and level=agents' call graph. A copied URL restores the
 // scale, level, step and selection; the keyboard reaches every node;
-// axe finds nothing.
-import { cleanup, configure, fireEvent, waitFor } from "@testing-library/react"
+// axe finds nothing. U34-fix: the seed's shapes (call ids reused across
+// steps, the resume's output_submitted, RETRY a retry), a child loop's
+// own step rows and catalog hole, the agents level off without spans,
+// the end, edges and never-called insight selectable, subagent costs,
+// and the draw's budget.
+import {
+  cleanup,
+  configure,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react"
 import axe from "axe-core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -28,11 +38,16 @@ import {
   DESK_RESUME,
   DIRECTOR,
   FLAKY,
+  longRun,
   POLLER,
   STORM,
   WORKER,
 } from "@/test/loop-fixtures"
 import type { FxRun } from "@/test/loop-fixtures"
+import { LoopGraphView } from "@/components/studio/loop-graph"
+import { loopGraph } from "@/lib/loopgraph"
+import { ALL_RUNS } from "@/lib/run-tree"
+import { treeRows } from "@/lib/waterfall-tree"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -46,7 +61,15 @@ function childrenOf(r: FxRun): FxRun[] {
   )
 }
 
-function serve(r: FxRun, opts: { spans?: boolean } = {}) {
+function serve(
+  r: FxRun,
+  opts: {
+    spans?: boolean
+    caps?: string[]
+    /** Per run id: fields over its row (a cost block). */
+    rows?: Record<string, Partial<RunRow>>
+  } = {}
+) {
   stubBrowser()
   FakeEventSource.reset()
   vi.stubGlobal("EventSource", FakeEventSource)
@@ -64,6 +87,7 @@ function serve(r: FxRun, opts: { spans?: boolean } = {}) {
     ...(parent
       ? { parent_run_id: parent, parent_call_id: x.id.split("/").at(-1) }
       : {}),
+    ...opts.rows?.[x.id],
   })
   const parentOf = (id: string) => /^(.+)\/\d+\/[^/]+$/.exec(id)?.[1]
   const doc: RunDoc = {
@@ -82,7 +106,7 @@ function serve(r: FxRun, opts: { spans?: boolean } = {}) {
   const s = new FakeStudio()
     .on("GET meta", {
       ...golden<Record<string, unknown>>("meta"),
-      capabilities: ["ingest", "spans_tree"],
+      capabilities: ["ingest", "spans_tree", ...(opts.caps ?? [])],
     })
     .on(`GET runs/${r.id}`, doc)
     .on(`GET runs/${r.id}/events`, paged(b.events))
@@ -130,9 +154,11 @@ describe("rw.flaky-infra on ?scale=graph", () => {
     serve(FLAKY)
     const { router } = renderApp(`/runs/${FLAKY.id}?scale=graph`)
     await waitFor(() => expect(loopOf()).not.toBeNull())
+    // In call order (weft.tool.seq), though tax_service's span starts
+    // first; inventory_api's RETRY is a retry (↻), not a failure.
     await waitFor(() =>
       expect(nodes()).toEqual([
-        ["t:inventory_api", "2", "1"],
+        ["t:inventory_api", "2", "0"],
         ["t:shipping_quote", "1", "1"],
         ["t:legacy_billing", "1", "1"],
         ["t:tax_service", "1", "1"],
@@ -150,6 +176,7 @@ describe("rw.flaky-infra on ?scale=graph", () => {
     expect(document.querySelector("[data-loop-end]")!.textContent).toContain(
       "the model answered"
     )
+    expect(node("t:inventory_api").getAttribute("data-marks")).toBe("×2 ↻")
     // The level switch: loop by default.
     expect(
       document.querySelector("[data-level]")!.getAttribute("data-level")
@@ -197,7 +224,7 @@ describe("rw.budget-guards", () => {
       )
     ).toEqual(["ended by loop detected", "poll_job ×3 same args"])
   })
-  it("the worker ends max_steps", async () => {
+  it("the worker ends max_steps; call_1 twice with {n:1} / {n:2} is no repeat", async () => {
     serve(WORKER)
     renderApp(`/runs/${WORKER.id}?scale=graph`)
     await waitFor(() =>
@@ -208,6 +235,12 @@ describe("rw.budget-guards", () => {
     expect(document.querySelector("[data-loop-end]")!.textContent).toContain(
       "max steps reached"
     )
+    await waitFor(() => expect(nodes()).toEqual([["t:record_step", "2", "0"]]))
+    expect(
+      Array.from(document.querySelectorAll("[data-insight]")).map(
+        (n) => n.textContent
+      )
+    ).toEqual(["ended by max steps reached"])
   })
 })
 
@@ -232,14 +265,17 @@ describe("rw.support-desk", () => {
       document.querySelector("[data-loop-end]")!.getAttribute("data-loop-end")
     ).toBe("parked")
   })
-  it("the resume ends has_tool_call:submit_output", async () => {
+  it("the resume ends output_submitted", async () => {
     serve(DESK_RESUME)
     renderApp(`/runs/${DESK_RESUME.id}?scale=graph`)
     await waitFor(() =>
       expect(
         document.querySelector("[data-loop-end]")?.getAttribute("data-loop-end")
-      ).toBe("has_tool_call:submit_output")
+      ).toBe("output_submitted")
     )
+    expect(
+      document.querySelector("[data-loop-end]")!.getAttribute("data-word")
+    ).toBe("typed output submitted")
     expect(nodes().map((n) => n[0])).toEqual([
       "t:issue_refund",
       "t:submit_output",
@@ -422,5 +458,236 @@ describe("a copied URL, the keyboard, axe", () => {
       ])
     )
     expect(node("t:issue_refund").getAttribute("data-parked")).toBe("1")
+  })
+})
+
+describe("U34-fix", () => {
+  const ops = "r_dir/0/call_1"
+
+  it("a child loop: its scrubber selects its own step rows (?step= stays the root's); its catalog is a not_recorded badge", async () => {
+    serve(DIRECTOR)
+    const { router } = renderApp(
+      `/runs/${DIRECTOR.id}?scale=graph&step=1&sel=${encodeURIComponent(`r:${ops}`)}`
+    )
+    await waitFor(() =>
+      expect(loopOf()?.getAttribute("data-loop-graph")).toBe(ops)
+    )
+    // The root's ?step=1 is not the child's step.
+    expect(
+      document.querySelectorAll("[data-loop-step][aria-pressed='true']")
+    ).toHaveLength(0)
+    fireEvent.click(document.querySelector('[data-loop-step="1"]')!)
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        sel: `s:${ops}:1`,
+        step: 1,
+      })
+    )
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector('[data-loop-step="1"]')!
+          .getAttribute("aria-pressed")
+      ).toBe("true")
+    )
+    expect(loopOf()!.getAttribute("data-loop-graph")).toBe(ops)
+    // K walks the child's steps, through its rows.
+    fireEvent.keyDown(window, { key: "k", bubbles: true })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        sel: `s:${ops}:0`,
+      })
+    )
+    // Clearing the step selects the child's own run row.
+    fireEvent.click(document.querySelector('[data-loop-step="0"]')!)
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ sel: `r:${ops}` })
+    )
+    const hole = document.querySelector(
+      "[data-loop-offered-hole] [data-hole='not_recorded']"
+    )!
+    expect(hole.textContent).toContain("not recorded")
+    expect(hole.textContent).toContain("subagent's request catalog")
+  })
+
+  it("without spans the agents level is off, with a not_recorded badge; ?level=agents reads the loop", async () => {
+    serve(DIRECTOR, { spans: false })
+    renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
+    await waitFor(() => expect(nodes()).toEqual([["t:ops_manager", "1", "0"]]))
+    expect(document.querySelector("[data-call-graph]")).toBeNull()
+    expect(document.body.textContent).not.toContain("one agent, no subagents")
+    const agents = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("[data-level] button")
+    ).find((b) => b.textContent === "agents")!
+    expect(agents.disabled).toBe(true)
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-level-hole] [data-hole='not_recorded']")
+      ).not.toBeNull()
+    )
+  })
+
+  it("the end node, an edge and the never-called insight select", async () => {
+    serve(FLAKY)
+    const { router } = renderApp(`/runs/${FLAKY.id}?scale=graph`)
+    await waitFor(() => expect(nodes()).toHaveLength(4))
+    fireEvent.click(node("end"))
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ sel: "s2:m" })
+    )
+    await waitFor(() =>
+      expect(node("end").getAttribute("aria-pressed")).toBe("true")
+    )
+    expect(node("model").getAttribute("aria-pressed")).toBe("false")
+    // An edge selects the first call along it.
+    fireEvent.click(
+      document.querySelector('[data-loop-edge="model>t:tax_service"]')!
+    )
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ sel: "c:0:call_4" })
+    )
+    await waitFor(() =>
+      expect(node("t:tax_service").getAttribute("aria-pressed")).toBe("true")
+    )
+  })
+
+  it("the never-called insight focuses and marks its node (no row to select)", () => {
+    const b = build(DESK_PARKED)
+    const rows = treeRows(
+      { runId: DESK_PARKED.id, spans: b.spans, fold: b.fold },
+      "time"
+    ).rows
+    const g = loopGraph(rows, DESK_PARKED.id, {
+      stoppedBy: "parked",
+      pending: b.pending,
+      catalog: [
+        { name: "lookup_order" },
+        { name: "issue_refund" },
+        { name: "search_docs" },
+      ],
+    })
+    const onSelect = vi.fn()
+    render(
+      <LoopGraphView
+        graph={g}
+        chain={[]}
+        depth={0}
+        onSelect={onSelect}
+        onClear={() => {}}
+        onStep={() => {}}
+        onFocusRun={() => {}}
+        openRun={(r) => `/runs/${r}`}
+      />
+    )
+    const ins = document.querySelector<HTMLElement>("[data-insight='never']")!
+    expect(ins.textContent).toBe("search_docs never called")
+    fireEvent.click(ins)
+    const o = node("o:search_docs")
+    expect(document.activeElement).toBe(o)
+    expect(o.getAttribute("aria-pressed")).toBe("true")
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("subagent nodes carry the child run's own cost: known, or — with the reason; the agents level too", async () => {
+    serve(DIRECTOR, {
+      caps: ["pricing"],
+      rows: {
+        [ops]: { cost_usd: 0.0125, cost_known: true, cache: "exact" },
+        [`${ops}/0/call_1`]: {
+          cost_usd: null,
+          cost_known: false,
+          cost_badge: "unpriced",
+          cost_reason: "no price for acme/m1",
+        },
+      },
+    })
+    const { router } = renderApp(`/runs/${DIRECTOR.id}?scale=graph`)
+    await waitFor(() =>
+      expect(
+        document.querySelector(
+          "[data-loop-node='t:ops_manager'] [data-loop-cost]"
+        )
+      ).not.toBeNull()
+    )
+    const known = document.querySelector(
+      "[data-loop-node='t:ops_manager'] [data-loop-cost]"
+    )!
+    expect(known.getAttribute("data-cost-known")).toBe("true")
+    expect(known.textContent).toContain("$0.0125")
+    // Into ops-manager's loop: its specialist is unpriced.
+    fireEvent.click(
+      document.querySelector(`[data-loop-expand="${CSS.escape(ops)}"]`)!
+    )
+    await waitFor(() =>
+      expect(
+        document.querySelector(
+          "[data-loop-node='t:inventory_specialist'] [data-loop-cost]"
+        )
+      ).not.toBeNull()
+    )
+    const unknown = document.querySelector(
+      "[data-loop-node='t:inventory_specialist'] [data-loop-cost]"
+    )!
+    expect(unknown.getAttribute("data-cost-known")).toBe("false")
+    expect(unknown.textContent).toContain("—")
+    expect(unknown.querySelector("title")!.textContent).toBe(
+      "no price for acme/m1"
+    )
+    // The agents level: each agent's own.
+    void router.navigate({
+      to: "/runs/$id",
+      params: { id: DIRECTOR.id },
+      search: { scale: "graph", level: "agents" },
+    })
+    await waitFor(() =>
+      // director's and ops-manager's: the grandchild's row is not read
+      // with nothing selected under it — not drawn, never guessed.
+      expect(document.querySelectorAll("[data-graph-cost]").length).toBe(2)
+    )
+    expect(
+      document.querySelector("[data-node='a:ops-manager'] [data-graph-cost]")!
+        .textContent
+    ).toContain("$0.0125")
+  })
+
+  it("the draw's budget: a 1,000-step run's model and render, with CI margin", () => {
+    const r = longRun(1000)
+    const b = build(r)
+    const input = {
+      runId: r.id,
+      status: "failed",
+      spans: b.spans,
+      fold: b.fold,
+      expanded: ALL_RUNS,
+    }
+    const make = () =>
+      loopGraph(treeRows(input, "time").rows, r.id, { stoppedBy: "max_steps" })
+    // The model (lib/loopgraph.test.ts's budget): warmed, the best of three.
+    let g = make()
+    let model = Infinity
+    for (let i = 0; i < 3; i++) {
+      const t0 = performance.now()
+      g = make()
+      model = Math.min(model, performance.now() - t0)
+    }
+    const t1 = performance.now()
+    render(
+      <LoopGraphView
+        graph={g}
+        chain={[]}
+        depth={0}
+        step={500}
+        onSelect={() => {}}
+        onClear={() => {}}
+        onStep={() => {}}
+        onFocusRun={() => {}}
+        openRun={(x) => `/runs/${x}`}
+      />
+    )
+    const draw = performance.now() - t1
+    expect(document.querySelectorAll("[data-loop-step]")).toHaveLength(1000)
+    expect(model).toBeLessThan(50)
+    // jsdom draws far slower than a browser: a generous bound.
+    expect(draw).toBeLessThan(1500)
   })
 })

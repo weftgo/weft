@@ -190,12 +190,17 @@ export function problemBadges(r: ProblemRow, status?: string): ProblemBadge[] {
   return out
 }
 
+/** A ModelRetry result's error.type: the intended repair loop (a
+ * retry, never a failure — the tool_errors counter leaves it out; the
+ * loop graph marks it ↻). */
+export const RETRY_RESULT = "RETRY"
+
 // The error.types the tool_errors counter leaves out (obsdb/problems.go
 // ToolErrors): DENIED is counted as denied, RETRY is the intended
 // repair loop, a context error is the run's cancellation.
 const NOT_TOOL_ERRORS = [
   "DENIED",
-  "RETRY",
+  RETRY_RESULT,
   "context.Canceled",
   "context.DeadlineExceeded",
 ]

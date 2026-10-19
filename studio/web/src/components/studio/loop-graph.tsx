@@ -10,9 +10,12 @@
 // Every node is a button on one roving tab stop (→ follows the calls, ←
 // back to the caller, ↑ ↓ along the tool column, Enter selects, Esc
 // clears); the selection is the run tree's ?sel=, so the same drawer
-// opens and switching scales keeps it. The words are lib/loopgraph.ts's,
-// the colours the palette's roles (lib/palette.ts: error-as-data
-// mustard, a park in the parked colour).
+// opens and switching scales keeps it. An edge selects the first call
+// along it (§3.4). A subagent node carries its child run's own cost
+// (lib/cost.ts's words: "—" with the reason when unknown). The words
+// are lib/loopgraph.ts's, the colours the palette's roles
+// (lib/palette.ts: error-as-data mustard, a park in the parked colour),
+// a hole the A3 table's badge (lib/honesty.ts).
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { KeyboardEvent as ReactKeyboardEvent } from "react"
 
@@ -42,9 +45,13 @@ import {
   toolLine,
   toolMarks,
 } from "@/lib/loopgraph"
-import type { EndTone, LoopGraph, LoopTool } from "@/lib/loopgraph"
+import type { EndTone, LoopCall, LoopGraph, LoopTool } from "@/lib/loopgraph"
+import { sumCost } from "@/lib/cost"
+import type { CostView } from "@/lib/cost"
+import type { HoleMark } from "@/lib/honesty"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { OPEN_RUN } from "@/lib/waterfall"
+import { HoleBadge } from "@/components/studio/hole-badge"
 
 const PAD = 12
 const PW = 110 // the prompt node
@@ -87,6 +94,22 @@ export interface Crumb {
   label: string
 }
 
+/** The row a call selects: its own, or (a parked call no row draws)
+ * its step's. */
+const keyOf = (c: LoopCall | undefined) => c && (c.at ?? c.key)
+
+/** A subagent node's cost: its child runs' own figures, summed. */
+function agentCost(
+  t: LoopTool,
+  costOf: ((run: string) => CostView | undefined) | undefined
+): CostView | undefined {
+  if (!t.agent || !costOf) return undefined
+  const kids = [...new Set(t.calls.flatMap((c) => (c.child ? [c.child] : [])))]
+  if (!kids.length) return undefined
+  const views = kids.map(costOf)
+  return views.length === 1 ? views[0] : sumCost(views)
+}
+
 export function LoopGraphView({
   graph,
   chain,
@@ -98,6 +121,8 @@ export function LoopGraphView({
   onFocusRun,
   depth,
   openRun,
+  offeredHole,
+  costOf,
 }: {
   graph: LoopGraph
   /** The runs from the root down to this one (the breadcrumb). */
@@ -116,6 +141,11 @@ export function LoopGraphView({
   depth: number
   /** A subagent too deep to expand: its run page. */
   openRun: (run: string) => string
+  /** offered null: why the tools offered and never called are unknown
+   * (a not_recorded badge); absent while the catalog is being read. */
+  offeredHole?: HoleMark
+  /** A run's own cost (capability "pricing"; absent without it). */
+  costOf?: (run: string) => CostView | undefined
 }) {
   const reduced = useMediaQuery("(prefers-reduced-motion: reduce)")
   const [more, setMore] = useState(false)
@@ -168,6 +198,9 @@ export function LoopGraphView({
   const [focus, setFocus] = useState<string>(selectedNode ?? PROMPT)
   const stop = order.includes(focus) ? focus : (selectedNode ?? PROMPT)
   const refs = useRef(new Map<string, SVGGElement>())
+  // A never-called tool has no row to select: an insight naming one
+  // focuses and marks its node.
+  const [picked, setPicked] = useState<string>()
   const move = (to: string | undefined) => {
     if (!to) return
     setFocus(to)
@@ -309,13 +342,18 @@ export function LoopGraphView({
               className="rounded-md border px-1.5 py-0.5 text-ev-error hover:bg-secondary"
               data-insight={ins.kind}
               onClick={() => {
+                if (ins.node.startsWith("o:")) {
+                  setPicked(ins.node)
+                  move(ins.node)
+                  return
+                }
                 const t = graph.tools.find((x) => x.id === ins.node)
                 const key =
                   ins.node === END
                     ? lastKey
                     : ins.node === MODEL
                       ? firstStep
-                      : t?.calls[0]?.key
+                      : keyOf(t?.calls[0])
                 if (key) onSelect(key)
               }}
             >
@@ -367,9 +405,10 @@ export function LoopGraphView({
           {/* model → end */}
           <path
             d={`M${colX[1] + MW / 2},${modelY + H} L${colX[1] + MW / 2},${endY - 2}`}
-            className={`fill-none ${STROKE[graph.end.tone === "ok" ? "idle" : graph.end.tone]}`}
+            className={`cursor-pointer fill-none ${STROKE[graph.end.tone === "ok" ? "idle" : graph.end.tone]}`}
             strokeWidth={1.5}
             data-loop-edge="model>end"
+            onClick={() => (lastKey ? onSelect(lastKey) : undefined)}
           />
           {shown.map((t, i) => {
             const y = toolY(i) + H / 2
@@ -379,13 +418,17 @@ export function LoopGraphView({
             const on = t.id === selectedNode || (lit?.has(t.id) ?? false)
             const back =
               t.parked || t.denied ? "parked" : t.fails ? "error" : "idle"
+            const first = keyOf(t.calls[0])
             return (
               <g
                 key={`e${t.id}`}
-                className="group/edge"
+                className="group/edge cursor-pointer"
                 opacity={dimmed(t.id)}
                 data-loop-edge={`model>${t.id}`}
                 data-lit={lit?.has(t.id) ? "" : undefined}
+                // The first call along it (the node's own button is the
+                // keyboard's way to the same selection).
+                onClick={() => (first ? onSelect(first) : undefined)}
               >
                 <title>{`${CALLS_HINT} ×${t.calls.length} · ${RESULTS_HINT}`}</title>
                 <path
@@ -474,15 +517,17 @@ export function LoopGraphView({
           {shown.map((t, i) => {
             const on = t.id === selectedNode
             const tone = toolTone(t)
-            const label = `${t.agent ?? t.name} ${toolMarks(t)} ${toolLine(t)}`
+            const cost = agentCost(t, costOf)
+            const label = `${t.agent ?? t.name} ${toolMarks(t)} ${toolLine(t)}${cost ? ` ${cost.text}` : ""}`
             return (
               <g
                 key={t.id}
                 transform={`translate(${colX[2]},${toolY(i)})`}
                 opacity={dimmed(t.id)}
-                {...nodeProps(t.id, label, () =>
-                  t.calls[0] ? onSelect(t.calls[0].key) : undefined
-                )}
+                {...nodeProps(t.id, label, () => {
+                  const k = keyOf(t.calls[0])
+                  if (k) onSelect(k)
+                })}
                 data-calls={t.calls.length}
                 data-marks={toolMarks(t)}
                 data-fails={t.fails}
@@ -516,6 +561,19 @@ export function LoopGraphView({
                 <text x={10} y={34} className="fill-faint text-[10px]">
                   {toolLine(t)}
                 </text>
+                {cost ? (
+                  <text
+                    x={TW - 8}
+                    y={18}
+                    textAnchor="end"
+                    className="fill-muted-foreground text-[10px]"
+                    data-cost-known={cost.known ? "true" : "false"}
+                    data-loop-cost
+                  >
+                    <title>{cost.title}</title>
+                    {cost.text}
+                  </text>
+                ) : null}
               </g>
             )
           })}
@@ -576,17 +634,24 @@ export function LoopGraphView({
             <g
               key={`o:${n}`}
               transform={`translate(${colX[2]},${toolY(shown.length + (hidden ? 1 : 0) + i)})`}
-              {...nodeProps(`o:${n}`, `${n} ${NEVER_CALLED}`, () => undefined)}
+              {...nodeProps(`o:${n}`, `${n} ${NEVER_CALLED}`, () =>
+                setPicked(`o:${n}`)
+              )}
               aria-disabled
+              aria-pressed={picked === `o:${n}`}
               data-never-called={n}
-              opacity={0.6}
+              opacity={picked === `o:${n}` ? 1 : 0.6}
             >
               <title>{NEVER_HINT}</title>
               <rect
                 width={TW}
                 height={H}
                 rx={6}
-                className="fill-background stroke-border"
+                className={
+                  picked === `o:${n}`
+                    ? "fill-accent stroke-thread"
+                    : "fill-background stroke-border"
+                }
                 strokeDasharray="4 3"
               />
               {ring(TW)}
@@ -630,6 +695,12 @@ export function LoopGraphView({
           </g>
         </svg>
       </div>
+      {graph.offered === null && offeredHole ? (
+        <div className="flex items-center gap-1.5" data-loop-offered-hole>
+          <span className="text-faint">{NEVER_CALLED}:</span>
+          <HoleBadge {...offeredHole} />
+        </div>
+      ) : null}
       {graph.steps.length ? (
         <div
           className="flex flex-wrap items-center gap-1"

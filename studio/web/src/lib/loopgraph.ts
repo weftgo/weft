@@ -16,14 +16,17 @@
 // content-off: no repeat is claimed), the tools offered are the request
 // catalog's (null when it was not read: the renderer says so with a
 // hole badge). Plain TypeScript, no React.
+import { RETRY_RESULT } from "./error-kind"
 import { plural } from "./format"
+import type { FoldedRun } from "./events"
+import type { HoleMark } from "./honesty"
 import { FAILED_WORD, stoppedByWords } from "./stopped-by"
 import { attrsOf, int, str, took } from "./waterfall"
 import type { WaterfallRow } from "./waterfall"
 
 /** What became of one call: its row's status in the loop's words. */
 export type Outcome =
-  "ok" | "error" | "denied" | "parked" | "running" | "never" | "unrun"
+  "ok" | "error" | "retry" | "denied" | "parked" | "running" | "never" | "unrun"
 
 export interface LoopCall {
   /** Its run tree row's key: the selection (?sel=). */
@@ -40,6 +43,11 @@ export interface LoopCall {
   child?: string
   /** Its call id. */
   call?: string
+  /** A parked call no row draws (run_finish.pending alone): the row it
+   * selects instead — its step's. Its own key names no row. */
+  at?: string
+  /** Approved and run before step 0's model call (a resume). */
+  resumed?: boolean
 }
 
 /** A tool node as loopCore counts it (the panel's chip). */
@@ -48,6 +56,8 @@ export interface CoreTool {
   /** In call order. */
   calls: LoopCall[]
   fails: number
+  /** RETRY results (ModelRetry): the repair loop, never a failure. */
+  retries: number
   denied: number
   parked: number
 }
@@ -82,7 +92,8 @@ export interface LoopEnd {
   word: string
   hint: string
   tone: EndTone
-  /** The last step's row (the end node selects it). */
+  /** The last step's model call's row, else its step's (the end node
+   * selects it). */
   key?: string
   tokens?: { input: number; output: number }
 }
@@ -128,14 +139,32 @@ const outcomeOf = (r: WaterfallRow): Outcome =>
       ? "parked"
       : r.error === "DENIED"
         ? "denied"
-        : r.status === "error"
-          ? "error"
-          : r.status === "running" || r.status === "never"
-            ? r.status
-            : "ok"
+        : r.error === RETRY_RESULT
+          ? "retry"
+          : r.status === "error"
+            ? "error"
+            : r.status === "running" || r.status === "never"
+              ? r.status
+              : "ok"
 
+/** What a call's row counts toward (its tool's marks). */
+const countOf = (r: WaterfallRow) =>
+  r.untimed === "unrun"
+    ? ""
+    : r.status === "pending"
+      ? "parked"
+      : r.error === "DENIED"
+        ? "denied"
+        : r.error === RETRY_RESULT
+          ? "retries"
+          : r.status === "error"
+            ? "fails"
+            : ""
+
+// A content-off destination strips tool_start's args to null
+// (core.StripContent): null is unknown, never an argument to match on.
 const json = (v: unknown) => {
-  if (v === undefined) return undefined
+  if (v === undefined || v === null) return undefined
   try {
     return typeof v === "string" ? v : JSON.stringify(v)
   } catch {
@@ -170,7 +199,7 @@ export function loopCore(
   const add = (
     name: string,
     c: LoopCall,
-    k: "fails" | "denied" | "parked" | "" = "parked"
+    k: ReturnType<typeof countOf> = "parked"
   ) => {
     let t = tools.get(name)
     if (!t)
@@ -180,6 +209,7 @@ export function loopCore(
           name,
           calls: [],
           fails: 0,
+          retries: 0,
           denied: 0,
           parked: 0,
         })
@@ -187,31 +217,54 @@ export function loopCore(
     t.calls.push(c)
     if (k) t[k]++
   }
-  for (const r of rows)
-    if (r.runId !== runId) continue
-    else if (r.kind === "step" && r.step! >= (last?.step ?? -1)) last = r
+  // The calls in call order: by step (a resumed call before step 0),
+  // then weft.tool.seq — never by span start, which parallel calls
+  // reach in any order — then the rows' own order (the fold's, its
+  // tool_start order, on a run without spans).
+  const calls: [WaterfallRow, number, number, number][] = []
+  rows.forEach((r, i) => {
+    if (r.runId !== runId) return
+    if (r.kind === "step" && r.step! >= (last?.step ?? -1)) last = r
     else if (r.kind === "tool")
-      add(
-        r.label,
-        // The outcome is loopGraph's (outcomeOf); the core counts.
-        { key: r.key, step: r.step, outcome: "ok" },
-        r.untimed === "unrun"
-          ? ""
-          : r.status === "pending"
-            ? "parked"
-            : r.error === "DENIED"
-              ? "denied"
-              : r.status === "error"
-                ? "fails"
-                : ""
-      )
+      calls.push([
+        r,
+        r.key.includes(":resume:") ? -1 : (r.step ?? Infinity),
+        int(attrsOf(r.span)["weft.tool.seq"]) ?? Infinity,
+        i,
+      ])
+  })
+  calls.sort((a, b) => a[1] - b[1] || a[2] - b[2] || a[3] - b[3])
+  // run_finish.pending names the final step's parked calls, matched on
+  // that step and the call id (an id repeats across steps): a row the
+  // fold drew for one (its tool_start, no finish) is parked; one no
+  // row draws gets a key of its own, selecting its step.
+  const parked = new Set(o.pending?.map((p) => p.id))
+  for (const [r, at] of calls) {
+    // (delete first: a row already pending is that call too)
+    const mine = at >= 0 && r.step === last?.step && parked.delete(r.callId!)
+    const k = countOf(r) || (mine ? "parked" : "")
+    add(
+      r.label,
+      {
+        key: r.key,
+        step: r.step,
+        // The rest of the outcome is loopGraph's (outcomeOf): the panel
+        // reads the counts alone.
+        outcome: k === "parked" ? "parked" : "ok",
+        call: r.callId,
+        resumed: at < 0,
+      },
+      k
+    )
+  }
   for (const p of o.pending ?? [])
-    if (!tools.get(p.name)?.calls.some((c) => c.key.endsWith(`:${p.id}`)))
+    if (parked.has(p.id))
       add(p.name, {
-        key: last?.key || `r:${runId}`,
+        key: `p:${runId}:${p.id}`,
         step: last?.step,
         outcome: "parked",
         call: p.id,
+        at: last?.key || `r:${runId}`,
       })
   const { stoppedBy: by, status } = o
   return {
@@ -280,22 +333,28 @@ export function loopGraph(
     for (const c of t.calls) {
       byKey.set(c.key, c)
       toolOf.set(c.key, t)
-      if (c.call) c.args = json(o.argsOf?.(c.call, c.step))
+      // Arguments by call id AND step: a call id repeats across steps
+      // (each step's calls are numbered afresh); a resumed call's step
+      // is its own, undefined.
+      if (c.call)
+        c.args = json(o.argsOf?.(c.call, c.resumed ? undefined : c.step))
       if (c.step !== undefined) stepOf.get(c.step)?.tools.push(t.id)
     }
   let retries = 0
+  let endKey: string | undefined
+  const lastN = steps.at(-1)?.n
   for (const r of rows) {
     const own = r.runId === runId
-    if (own && r.kind === "model") retries += Math.max(0, (r.attempts ?? 1) - 1)
-    // A call's timing and error, off its row.
+    if (own && r.kind === "model") {
+      retries += Math.max(0, (r.attempts ?? 1) - 1)
+      if (lastN !== undefined && r.step === lastN) endKey ??= r.key
+    }
+    // A call's timing and error, off its row: a duration only off a
+    // span (the order scale's took is stream positions, not ms).
     const at = own && r.kind === "tool" ? byKey.get(r.key) : undefined
     if (at) {
-      at.outcome = outcomeOf(r)
-      at.ms = r.untimed ? null : r.took
-      if (r.callId) {
-        at.call = r.callId
-        at.args = json(o.argsOf?.(r.callId, r.step))
-      }
+      if (at.outcome !== "parked") at.outcome = outcomeOf(r)
+      at.ms = r.untimed || !r.span ? null : r.took
       if (r.error) at.error = r.error
     }
     // A child run's row under one of this run's calls.
@@ -346,7 +405,9 @@ export function loopGraph(
       : null,
     end: {
       ...core.end,
-      ...(steps.at(-1)?.key ? { key: steps.at(-1)!.key } : {}),
+      ...((endKey ?? steps.at(-1)?.key)
+        ? { key: endKey ?? steps.at(-1)!.key }
+        : {}),
       hint:
         stoppedByWords(by)?.hint ??
         (core.end.tone === "bad" ? FAILED_HINT : ENDED_HINT),
@@ -384,6 +445,7 @@ export function nodeOfKey(
   const c = callOf(g, key)
   if (c) return c.tool.id
   if (key === g.runKey) return PROMPT
+  if (key === g.end.key) return END
   if (row && row.runId === g.runId && row.step !== undefined) return MODEL
   return undefined
 }
@@ -488,6 +550,9 @@ export function loopInsights(g: LoopGraph): Insight[] {
 // ── Words (both surfaces) ──────────────────────────────────────────
 
 export const RUNNING_WORD = "running"
+/** A RETRY result's word: the model was asked to fix its call. */
+export const RETRY_WORD = "retried"
+const RETRY_HINT = "RETRY: the tool asked the model to fix its call"
 export const ENDED_WORD = "ended"
 const ENDED_HINT = "the run recorded no stopped_by"
 const FAILED_HINT = "the run failed"
@@ -499,6 +564,7 @@ export const toolMarks = (t: CoreTool) =>
   MARKS.map(([k, m]) => (t[k] ? ` ${m}${t[k] > 1 ? t[k] : ""}` : "")).join("")
 const MARKS = [
   ["fails", "✗"],
+  ["retries", "↻"],
   ["denied", "✋"],
   ["parked", "⏸"],
 ] as const
@@ -507,6 +573,7 @@ const MARKS = [
 export function toolLine(t: LoopTool): string {
   const parts: string[] = []
   if (t.fails) parts.push(`${t.fails} failed`)
+  if (t.retries) parts.push(`${t.retries} ${RETRY_WORD}`)
   if (t.denied) parts.push(`${t.denied} denied`)
   if (t.parked) parts.push(`${t.parked} parked`)
   if (t.running) parts.push(RUNNING_WORD)
@@ -518,6 +585,7 @@ export function toolLine(t: LoopTool): string {
 export const toolHint = (t: LoopTool) =>
   `${t.name}: ${plural(t.calls.length, "call")}` +
   (t.fails ? `, ${t.fails} failed` : "") +
+  (t.retries ? `, ${t.retries} ${RETRY_WORD} (${RETRY_HINT})` : "") +
   (t.denied ? `, ${t.denied} denied` : "") +
   (t.parked ? `, ${t.parked} parked` : "") +
   (t.slowest ? ` · p50 ${took(t.p50)} · slowest ${took(t.slowest)}` : "") +
@@ -577,11 +645,20 @@ export const LOOP_HINT =
 export const NEVER_CALLED = "never called"
 export const NEVER_HINT = "offered in the request catalog, never called"
 export const MORE_TOOLS = (n: number) => `+${n} tools`
-export const OFFERED_UNREAD = {
+/** The tools offered and never called, unknown (offered null): a
+ * not_recorded badge of the A3 table (lib/honesty.ts) in this
+ * instance's words — a subagent's catalog is not read on its parent's
+ * page; a run of its own whose requests carried no catalog. */
+export const OFFERED_UNREAD: HoleMark = {
   hole: "not_recorded",
   reason:
-    "this run's request catalog was not read: the tools it offered and never called are not drawn",
+    "this subagent's request catalog is not read on this page: the tools it offered and never called are not drawn",
   fix: "open the run (open run ↗): its own page reads its catalog",
+}
+export const OFFERED_NONE: HoleMark = {
+  hole: "not_recorded",
+  reason:
+    "no request record of this run carried a tool catalog: the tools it offered and never called are not drawn",
 }
 export const INSIGHTS_LABEL = "insights"
 export const STEPS_LABEL = "steps"
@@ -615,4 +692,29 @@ export function catalogTools(
   return any
     ? [...out].map(([name, source]) => (source ? { name, source } : { name }))
     : null
+}
+
+/** The agents level without spans (the call graph reads them): off,
+ * with the A3 table's not_recorded badge in these words. */
+export const NO_SPANS_LEVEL: HoleMark = {
+  hole: "not_recorded",
+  cause: "no_spans",
+  reason:
+    "the agents level is the call graph of the run's spans: this run recorded none",
+}
+
+/** loopSig is what the loop reads off a fold, as a key: its steps'
+ * finishes, calls, results and children, its parks and its end — the
+ * run page rebuilds the loop's rows when it moves, never per event
+ * batch (a text delta leaves it unchanged). */
+export function loopSig(
+  f: Pick<FoldedRun, "steps" | "pending" | "finished">
+): string {
+  let s = `${+f.finished}|${f.pending.length}`
+  for (const st of f.steps) {
+    s += `;${st.index}${st.finish?.reason ?? ""}`
+    for (const c of st.toolCalls)
+      s += `,${c.callId}${c.result ? (c.result.isError ? "!" : "+") : c.state[0]}${c.childRunId ?? ""}`
+  }
+  return s
 }

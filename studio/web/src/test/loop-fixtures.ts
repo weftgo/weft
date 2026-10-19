@@ -2,12 +2,16 @@
 // rw.flaky-infra, rw.budget-guards (the poller and the worker),
 // rw.support-desk (the parked run and its resume), rw.tool-storm and
 // rw.deep-delegation, mirrored from ../weft-arena/internal/suites/
-// realworld.go in the shapes Studio serves them: the ?tree=1 spans
-// (every span with its weft.run.id and run_id; execute_tool's
-// attributes per docs/record-contract.md §3) and the root's events
-// (tool_start with its arguments — what the fold matches a repeated
-// call on). A synthetic builder, so the 1,000-step perf run is the
-// same shape.
+// realworld.go in the shapes Studio serves them off the offline seed
+// (U34-fix): the ?tree=1 spans, by start (every span with its
+// weft.run.id and run_id; execute_tool's attributes per
+// docs/record-contract.md §3, weft.tool.seq the tool_start's), and the
+// root's events (tool_start with its arguments — what the fold matches
+// a repeated call on). wefttest numbers each step's calls afresh
+// (call_1, call_2, … per step), so a call id repeats across steps; a
+// parked call has its tool_start and no tool_finish; parallel calls
+// start in any order (FxCall.lag). A synthetic builder, so the
+// 1,000-step perf run is the same shape.
 import type { Span, WireEvent } from "@/lib/api"
 import { fold } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
@@ -15,13 +19,18 @@ import { span } from "./director-fixture"
 
 export interface FxCall {
   name: string
+  /** Default: wefttest's, call_<n> numbered within its step. */
   id?: string
   args?: unknown
   ms?: number
+  /** Its span starts this much after its step's calls do (ms): the
+   * seed's parallel calls start out of call order. */
+  lag?: number
   /** error.type (an error result). */
   error?: string
   content?: string
-  /** Parked for approval: weft.tool.pending, no tool_start. */
+  /** Parked for approval: weft.tool.pending, a tool_start and no
+   * tool_finish. */
   pending?: boolean
   /** A call the resume approved (weft.tool.approved, before step 0). */
   approved?: boolean
@@ -67,6 +76,8 @@ export function build(run: FxRun): Built {
     const inv = id("inv")
     const own: Span[] = []
     let t = t0 + 0.1
+    // The run's event counter (tool_start and tool_finish each take
+    // one): weft.tool.seq is the tool_start's.
     let seq = 0
     const ev = (e: Record<string, unknown>) => {
       if (root) events.push({ run_id: r.id, ...e })
@@ -78,31 +89,60 @@ export function build(run: FxRun): Built {
         agent: r.agent,
         model: { provider: "wefttest", name: "script" },
       })
-    const call = (c: FxCall, step: number, start: number, resumed: boolean) => {
-      const cid = c.id ?? id("call_")
+    const call = (
+      c: FxCall,
+      step: number,
+      at: number,
+      resumed: boolean,
+      n: number
+    ) => {
+      const cid = c.id ?? `call_${n + 1}`
       c.id = cid
       const ms = c.ms ?? 1
       const sp = id("t")
+      const start = at + (c.lag ?? 0)
       if (c.pending) {
         pending.push({ type: "tool_call", id: cid, name: c.name, args: c.args })
+        ev({
+          type: "tool_start",
+          seq: ++seq,
+          call_id: cid,
+          name: c.name,
+          args: c.args,
+        })
         own.push(
           withRun(
-            span(sp, inv, `execute_tool ${c.name}`, start, start, {
-              "gen_ai.operation.name": "execute_tool",
-              "gen_ai.tool.name": c.name,
-              "gen_ai.tool.call.id": cid,
-              "weft.run.id": r.id,
-              "weft.step.index": step,
-              "weft.tool.pending": true,
-              "weft.tool.pending.source": "approval",
-            }),
+            span(
+              sp,
+              inv,
+              `execute_tool ${c.name}`,
+              start,
+              start,
+              {
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.name": c.name,
+                "gen_ai.tool.call.id": cid,
+                "weft.run.id": r.id,
+                "weft.step.index": step,
+                "weft.tool.pending": true,
+                "weft.tool.pending.source": "approval",
+                "weft.tool.seq": seq,
+              },
+              "unset"
+            ),
             r.id
           )
         )
         return start
       }
-      seq++
-      ev({ type: "tool_start", seq, call_id: cid, name: c.name, args: c.args })
+      const own0 = ++seq
+      ev({
+        type: "tool_start",
+        seq: own0,
+        call_id: cid,
+        name: c.name,
+        args: c.args,
+      })
       let end = start + ms
       if (c.child) {
         const childEnd = lay(c.child, start + 0.05, sp, r.id, false)
@@ -122,7 +162,7 @@ export function build(run: FxRun): Built {
               "gen_ai.tool.call.id": cid,
               "weft.run.id": r.id,
               "weft.step.index": step,
-              "weft.tool.seq": seq,
+              "weft.tool.seq": own0,
               ...(resumed ? { "weft.tool.approved": true } : {}),
               ...(c.error
                 ? { "error.type": c.error }
@@ -135,7 +175,7 @@ export function build(run: FxRun): Built {
       )
       ev({
         type: "tool_finish",
-        seq,
+        seq: ++seq,
         call_id: cid,
         name: c.name,
         content: c.content ?? (c.error ? `${c.error}: failed` : "ok"),
@@ -143,7 +183,9 @@ export function build(run: FxRun): Built {
       })
       return end
     }
-    for (const c of r.resumed ?? []) t = Math.max(t, call(c, 0, t, true))
+    ;(r.resumed ?? []).forEach(
+      (c, i) => (t = Math.max(t, call(c, 0, t, true, i)))
+    )
     r.steps.forEach((st, n) => {
       ev({ type: "step_start", index: n })
       const finish = st.finish ?? (st.calls.length ? "tool_calls" : "stop")
@@ -163,7 +205,9 @@ export function build(run: FxRun): Built {
       )
       if (st.text) ev({ type: "text_delta", text: st.text })
       let end = t + 0.5
-      for (const c of st.calls) end = Math.max(end, call(c, n, t + 0.6, false))
+      st.calls.forEach(
+        (c, i) => (end = Math.max(end, call(c, n, t + 0.6, false, i)))
+      )
       ev({
         type: "step_finish",
         index: n,
@@ -214,6 +258,11 @@ export function build(run: FxRun): Built {
   }
   lay(run, 0, "")
   if (run.failed) events.pop() // a failed run's stream simply ends
+  // Served by start, as the spans route orders them.
+  // (at()'s fraction is the microseconds after 09:00: Date.parse would
+  // drop the sub-millisecond lags.)
+  const us = (s: Span) => Number(/\.(\d+)Z$/.exec(s.start)?.[1] ?? 0)
+  spans.sort((a, b) => us(a) - us(b))
   const wire = events as unknown as WireEvent[]
   return { spans, events: wire, fold: fold(wire), pending }
 }
@@ -222,6 +271,10 @@ const withRun = (s: Span, run: string): Span => ({ ...s, run_id: run })
 
 // ── The arena's runs ──────────────────────────────────────────────
 
+// The seed's order: tool_start seq is inventory_api, shipping_quote,
+// legacy_billing, tax_service (call_1…call_4); the spans start
+// tax_service first (lag) — first use is the call order, never the
+// span start's.
 export const FLAKY: FxRun = {
   id: "r_flaky",
   agent: "ops-probe",
@@ -229,15 +282,37 @@ export const FLAKY: FxRun = {
   steps: [
     {
       calls: [
-        { name: "inventory_api", args: { sku: "a-17" }, error: "RETRY" },
+        {
+          name: "inventory_api",
+          args: { sku: "a-17" },
+          error: "RETRY",
+          content:
+            "RETRY: SKUs are uppercase, e.g. A-17 — call inventory_api again with the uppercase SKU",
+          lag: 0.03,
+        },
         {
           name: "shipping_quote",
           args: { city: "Lima" },
           ms: 300,
           error: "timeout",
+          content: 'tool "shipping_quote" timed out after 300ms',
+          lag: 0.04,
         },
-        { name: "legacy_billing", args: { account: 9 }, error: "panic" },
-        { name: "tax_service", args: { region: "EU" }, error: "RATE_LIMITED" },
+        {
+          name: "legacy_billing",
+          args: { account: 9 },
+          error: "panic",
+          content:
+            'tool "legacy_billing" panicked: assignment to entry in nil map',
+          lag: 0.05,
+        },
+        {
+          name: "tax_service",
+          args: { region: "EU" },
+          error: "RATE_LIMITED",
+          content:
+            "RATE_LIMITED: tax service quota exceeded for EU, retry after 60s",
+        },
       ],
     },
     { calls: [{ name: "inventory_api", args: { sku: "A-17" } }] },
@@ -263,6 +338,7 @@ export const WORKER: FxRun = {
   steps: [1, 2].map((n) => ({ calls: [{ name: "record_step", args: { n } }] })),
 }
 
+const REFUND = { order_id: "1002", amount: 249.9, reason: "arrived broken" }
 export const DESK_PARKED: FxRun = {
   id: "r_desk1",
   agent: "support-desk",
@@ -270,26 +346,26 @@ export const DESK_PARKED: FxRun = {
   steps: [
     { calls: [{ name: "lookup_order", args: { order_id: "1002" } }] },
     {
-      calls: [
-        {
-          name: "issue_refund",
-          id: "rf1",
-          args: { order_id: "1002", amount: 249.9 },
-          pending: true,
-        },
-      ],
+      calls: [{ name: "issue_refund", id: "rf1", args: REFUND, pending: true }],
     },
   ],
 }
 
+// The resume (weft.Output[T]: the submit_output tool): the approved
+// issue_refund runs before step 0, the run ends output_submitted.
 export const DESK_RESUME: FxRun = {
   id: "r_desk2",
   agent: "support-desk",
-  stoppedBy: "has_tool_call:submit_output",
-  resumed: [{ name: "issue_refund", id: "rf1", args: { order_id: "1002" } }],
+  stoppedBy: "output_submitted",
+  resumed: [{ name: "issue_refund", id: "rf1", args: REFUND }],
   steps: [
     {
-      calls: [{ name: "submit_output", args: { action: "refunded" } }],
+      calls: [
+        {
+          name: "submit_output",
+          args: { action: "refunded", order_id: "1002", refunded: true },
+        },
+      ],
     },
   ],
 }

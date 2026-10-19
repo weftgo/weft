@@ -46,6 +46,7 @@ import {
 } from "@/lib/api"
 import type {
   ChildStream,
+  CostFields,
   RunRow,
   Span as TimedSpan,
   TreeHole,
@@ -104,12 +105,15 @@ import {
   dimRows,
   OPEN_RUN,
   parseDim,
+  rowKeys,
   SCALE_HINT,
   str,
   UNTIMED_HOLE,
   UNTIMED_NOTE,
 } from "@/lib/waterfall"
-import type { Scale } from "@/lib/waterfall"
+import type { Scale, WaterfallRow } from "@/lib/waterfall"
+import { costView, sumCost } from "@/lib/cost"
+import type { HoleMark } from "@/lib/honesty"
 // The ?tree=1 read: the descendant rules too (lib/waterfall-tree.ts).
 import { treeRows as waterfallRows } from "@/lib/waterfall-tree"
 import type { FoldedRun } from "@/lib/events"
@@ -126,7 +130,11 @@ import {
   levelOf,
   LOOP_HINT,
   loopGraph,
+  loopSig,
   nodeOfKey,
+  NO_SPANS_LEVEL,
+  OFFERED_NONE,
+  OFFERED_UNREAD,
   runChain,
 } from "@/lib/loopgraph"
 import type { GraphLevel } from "@/lib/loopgraph"
@@ -677,7 +685,10 @@ function RunPage() {
       : ["order", "graph"]
   // The scale switch (and its t key) is offered when there is a choice.
   const scaled = scales.length > 1
-  const level: GraphLevel = search.level ?? "loop"
+  // The agents level reads the spans (the call graph): without any, it
+  // is off with a not_recorded badge, and ?level=agents reads the loop.
+  const level: GraphLevel =
+    search.level === "agents" && haveTime ? "agents" : "loop"
 
   // The child subtree in place (U9.2, UX-A-01): a child run row stays
   // one row until expanded; its rows (and its children's, lazily — drawn
@@ -1124,13 +1135,49 @@ function RunPage() {
   // The loop graph (U34): every child expanded (a subagent expands in
   // place: its loop is drawn from the same rows), on the tree's scale.
   const loopOn = scale === "graph" && level === "loop"
-  const graphRows = useMemo(
-    () =>
-      loopOn
-        ? waterfallRows({ ...treeInput, expanded: ALL_RUNS }, treeScale).rows
-        : [],
-    [loopOn, treeInput, treeScale]
-  )
+  // A second whole tree (every child expanded) and the folds' arguments,
+  // so built only when what the loop reads moves — the U9.2-fix W7 rule,
+  // as `implied` above: the scale, the status, the spans, each fold's
+  // steps, calls and results — never per event batch of a running run
+  // (a text delta moves no node).
+  const loopKey = loopOn
+    ? [
+        treeScale,
+        viewStatus,
+        treeSpansAll.length,
+        knownRuns.join(","),
+        childAgents.size,
+        loopSig(linkedFold),
+        ...[...childFolds].map(([r, f]) => `${r}=${loopSig(f)}`),
+      ].join("\n")
+    : ""
+  const [loopAt, setLoopAt] = useState<{
+    key: string
+    rows: WaterfallRow[]
+    args: Map<string, unknown>
+  }>({ key: "", rows: [], args: new Map() })
+  let { rows: graphRows, args: argsByRun } = loopAt
+  if (loopAt.key !== loopKey) {
+    graphRows = loopOn
+      ? waterfallRows({ ...treeInput, expanded: ALL_RUNS }, treeScale).rows
+      : []
+    // By run, step and call id: a call id repeats across steps (each
+    // step's calls numbered afresh); a resumed call's step is "resume".
+    argsByRun = new Map()
+    const put = (r: string, f: FoldedRun) => {
+      for (const st of f.steps)
+        for (const c of st.toolCalls)
+          argsByRun.set(
+            `${r}\n${c.resumed ? "resume" : st.index}\n${c.callId}`,
+            c.args
+          )
+    }
+    if (loopOn) {
+      put(id, linkedFold)
+      for (const [r, f] of childFolds) put(r, f)
+    }
+    setLoopAt({ key: loopKey, rows: graphRows, args: argsByRun })
+  }
   // The loop drawn: the selected row's run (a subagent expanded by
   // selecting its run), at most DEEP_HANDOFF_DEPTH levels down.
   const selGraphRow = graphRows.find((r) => r.key === selKey)
@@ -1139,17 +1186,58 @@ function RunPage() {
     return c.slice(0, DEEP_HANDOFF_DEPTH + 1)
   }, [id, selGraphRow?.runId])
   const focus = focusChain.at(-1) ?? id
-  const argsByRun = useMemo(() => {
-    const out = new Map<string, unknown>()
-    const put = (r: string, f: FoldedRun) => {
-      for (const st of f.steps)
-        for (const c of st.toolCalls) out.set(`${r}\n${c.callId}`, c.args)
-    }
-    if (!loopOn) return out
-    put(id, linkedFold)
-    for (const [r, f] of childFolds) put(r, f)
+  const ownLoop = focus === id
+  // The scrubber's step: the root's is ?step=; a child loop's is its
+  // selected step row (s:<child>:<n>) — ?step= is the root's, read so by
+  // the rest of the page.
+  const loopStep = ownLoop
+    ? search.step
+    : selGraphRow?.runId === focus && selGraphRow.kind === "step"
+      ? selGraphRow.step
+      : undefined
+  // A run's own cost (plan A5: the API's, read time): the root's row,
+  // its children's, the expanded children's documents and theirs.
+  const pricing = has("pricing")
+  const costRows = useMemo(() => {
+    const out = new Map<string, CostFields>()
+    if (!pricing) return out
+    for (const r of [
+      run.data,
+      ...(run.data?.children ?? []),
+      ...childDocs,
+      ...childDocs.flatMap((d) => d?.children ?? []),
+    ])
+      if (r && !out.has(r.id)) out.set(r.id, r)
     return out
-  }, [loopOn, id, linkedFold, childFolds])
+  }, [pricing, run.data, childDocs])
+  const costOf = useCallback(
+    (r: string) => {
+      const row = costRows.get(r)
+      return row ? costView(row) : undefined
+    },
+    [costRows]
+  )
+  const costOfRuns = useCallback(
+    (rs: readonly string[]) => {
+      const vs = rs.map(costOf)
+      if (!vs.length || vs.every((v) => !v)) return undefined
+      return vs.length === 1 ? vs[0] : sumCost(vs)
+    },
+    [costOf]
+  )
+  // The tools offered and never called, unknown: why (the A3 table's
+  // not_recorded) — nothing while the requests are being read.
+  const offeredHole: HoleMark | undefined = !ownLoop
+    ? OFFERED_UNREAD
+    : !requestsCapable
+      ? { hole: "not_recorded", cause: "not_served" }
+      : requestsQ.isPending
+        ? undefined
+        : OFFERED_NONE
+  // run_finish.pending by its ids: a new array per event batch, the
+  // same calls.
+  const pendingKey = atPlayhead.pending.map((p) => p.id).join(",")
+  const loopPending = useMemo(() => atPlayhead.pending, [pendingKey])
   const loop = useMemo(() => {
     if (!loopOn) return undefined
     const own = focus === id
@@ -1160,8 +1248,9 @@ function RunPage() {
     return loopGraph(graphRows, focus, {
       stoppedBy: own ? run.data?.stopped_by : kid?.stopped_by,
       status: own ? viewStatus : (kid?.status ?? childStatus.get(focus)),
-      pending: own ? atPlayhead.pending : undefined,
-      argsOf: (call) => argsByRun.get(`${focus}\n${call}`),
+      pending: own ? loopPending : undefined,
+      argsOf: (call, step) =>
+        argsByRun.get(`${focus}\n${step ?? "resume"}\n${call}`),
       // Only this run's catalog is read (U9.2-fix W5's rule): a child's
       // offered tools are a hole, never "none".
       catalog: own ? catalogTools(requests?.steps) : null,
@@ -1176,7 +1265,7 @@ function RunPage() {
     graphRows,
     viewStatus,
     childStatus,
-    atPlayhead.pending,
+    loopPending,
     argsByRun,
     requests?.steps,
   ])
@@ -1206,10 +1295,21 @@ function RunPage() {
   const setLoopStep = useCallback(
     (n: number | undefined) =>
       void navigate({
-        search: (prev) => ({ ...prev, step: n, pane: undefined }),
+        search: (prev) =>
+          focus === id
+            ? { ...prev, step: n, pane: undefined }
+            : // A child loop's step is its own step row, ?step= left the
+              // root's (lib/waterfall.ts's s:<run>:<n>).
+              {
+                ...prev,
+                sel:
+                  n === undefined ? `r:${focus}` : rowKeys(focus, true).step(n),
+                view: undefined,
+                pane: undefined,
+              },
         replace: true,
       }),
-    [navigate]
+    [navigate, focus, id]
   )
   const setScale = useCallback(
     (to: RunScale) =>
@@ -1300,7 +1400,7 @@ function RunPage() {
       ) {
         // The loop's step scrubber: J / K move between its steps.
         const ns = loop.steps.map((st) => st.n)
-        const i = ns.indexOf(search.step ?? -1)
+        const i = ns.indexOf(loopStep ?? -1)
         const next =
           e.key === "j" ? ns[i + 1] : i < 0 ? ns.at(-1) : ns[Math.max(i - 1, 0)]
         if (next !== undefined) setLoopStep(next)
@@ -1327,7 +1427,7 @@ function RunPage() {
     scales,
     setScale,
     loop,
-    search.step,
+    loopStep,
     setLoopStep,
   ])
 
@@ -1545,7 +1645,8 @@ function RunPage() {
                       key={l}
                       type="button"
                       aria-pressed={level === l}
-                      className={`rounded-md border px-2 py-1 ${
+                      disabled={l === "agents" && !haveTime}
+                      className={`rounded-md border px-2 py-1 disabled:opacity-50 ${
                         level === l
                           ? "border-thread/60 bg-secondary"
                           : "text-muted-foreground hover:text-foreground"
@@ -1556,6 +1657,11 @@ function RunPage() {
                       {l}
                     </button>
                   ))}
+                  {!haveTime && spans.fetchStatus === "idle" ? (
+                    <span data-level-hole>
+                      <HoleBadge {...NO_SPANS_LEVEL} />
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
               {view === "waterfall" && scale !== "graph" ? (
@@ -1701,7 +1807,9 @@ function RunPage() {
                         chain={loopCrumbs}
                         depth={focusChain.length - 1}
                         selectedNode={nodeOfKey(loop, selKey, selGraphRow)}
-                        step={search.step}
+                        step={loopStep}
+                        offeredHole={offeredHole}
+                        costOf={pricing ? costOf : undefined}
                         onSelect={select}
                         onClear={() =>
                           void navigate({
@@ -1720,6 +1828,7 @@ function RunPage() {
                     ) : graph ? (
                       <CallGraphView
                         graph={graph}
+                        costOf={pricing ? costOfRuns : undefined}
                         selected={nodeOfRun(graph, selectedRow?.runId)?.id}
                         onSelect={(n) => n.runs[0] && select(`r:${n.runs[0]}`)}
                       />

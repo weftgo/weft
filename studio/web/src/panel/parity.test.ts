@@ -4137,14 +4137,14 @@ describe("the loop line on both surfaces (U34)", () => {
       `→ ${document.querySelector("[data-loop-end]")!.getAttribute("data-word")}`,
     ]
     expect(panel).toEqual([
-      "inventory_api ×2 ✗",
+      "inventory_api ×2 ↻",
       "shipping_quote ×1 ✗",
       "legacy_billing ×1 ✗",
       "tax_service ×1 ✗",
       "→ the model answered",
     ])
     expect(studio).toEqual(panel)
-    expect(tones).toEqual(["error", "error", "error", "error", "ok"])
+    expect(tones).toEqual(["", "error", "error", "error", "ok"])
     // The same selection: step 2 is the scrubber's, its row selected.
     expect(
       document

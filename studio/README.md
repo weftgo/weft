@@ -1061,8 +1061,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 267,092 B raw / 89,609 B gzip
-(87.5 KiB, the bundle of the ledger's row "U34 loop line"; 8,695 B — 8.5 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 267,449 B raw / 89,750 B gzip
+(87.6 KiB, the bundle of the ledger's row "U34-fix"; 8,554 B — 8.4 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1783,13 +1783,26 @@ reduced motion) lights only that step's edges. A node is a button on
 one roving tab stop (→ follows the calls, ← back, ↑ ↓ along the tools,
 Enter selects, Esc clears); it selects in `?sel=` — a tool its first
 call's row, with `‹ call i of n ›` above the drawer walking every call.
-`?level=agents` is the call graph (`src/lib/graph.ts`) over
+A tool's calls are in call order (step, then `weft.tool.seq` — never
+span start, which parallel calls reach in any order); a RETRY result is
+a retry (↻ "retried", lib/error-kind.ts's tool_errors rule), never a
+failure; a repeated call is matched on its arguments by run, step and
+call id (an id repeats across steps), content-off's null arguments
+never matching. The end node selects the last step's model call; an
+edge selects the first call along it; a never-called insight focuses
+its node. Unknown offered tools are a `not recorded` badge (a child
+loop's catalog is not read on this page). A child loop's scrubber
+selects its own step rows (`s:<run>:<n>`), `?step=` staying the root's.
+A subagent node carries its child run's own cost (lib/cost.ts's words,
+`—` with the reason when unknown; capability `pricing`), on both
+levels. `?level=agents` is the call graph (`src/lib/graph.ts`) over
 the same spans: one node per agent (its runs, the slowest, failures,
 tokens when the spans carry them) in call-depth columns, one per MCP
 server (a tool whose request-catalog source starts `mcp`, the run's own
 calls; a child run's MCP calls are said not shown, its catalog not read
 here), each edge its call count and slowest call (the slowest, not a
-percentile; no cost on nodes), a self-call a loop over its node; a node
+percentile; an agent node's runs' own cost), a self-call a loop over
+its node; off (a `not recorded` badge) on a run without spans; a node
 selects its first run's row and the selected row lights its node —
 switching scales keeps the selection. Pool children are sessions, not
 runs of the trace: not drawn. The selected row opens the drawer beside

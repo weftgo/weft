@@ -253,8 +253,10 @@ families, pinned by tests like model-visible bytes:
   `weft.event.pos`; `weft.step.index` on `step_start`, `step_finish`,
   `steered`; `weft.tool.seq`, `gen_ai.tool.call.id`, `gen_ai.tool.name`
   on `tool_start`, `tool_finish`; `weft.parent.run.id`,
-  `weft.parent.call.id`, `weft.manifest.hash`, `weft.version` on
-  `run_start`.
+  `weft.parent.call.id` (a Subagent's child) or `weft.caller.run.id`,
+  `weft.caller.call.id` (any other run started on a tool call's
+  context — a link, not parenthood; O11, record contract §2),
+  `weft.manifest.hash`, `weft.version` on `run_start`.
 - **Delta records:** `weft.event.type` (`text_delta`, `reasoning_delta`,
   `tool_args_delta`) and `weft.delta.pos`. They travel and are never
   stored; the live lane forwards them; `NoDeltas()` drops them before
@@ -275,7 +277,9 @@ families, pinned by tests like model-visible bytes:
 
 Span attribute families are ADR 0016's, unchanged, plus: the linkage
 `weft.parent.run.id` and `weft.parent.call.id` on a subagent's
-`invoke_agent`; `weft.manifest.hash` and `weft.version` on the run span;
+`invoke_agent`, `weft.caller.run.id` and `weft.caller.call.id` on any
+other run started on a tool call's context (a `thread/pool` child turn,
+a `Generate` inside a handler: a link, never parenthood — O11); `weft.manifest.hash` and `weft.version` on the run span;
 every `Metadata` key verbatim, with `gen_ai.conversation.id`,
 `session.id` and `user.id` as mirrors of `weft.session.id` and
 `enduser.id`; `weft.metadata.dropped` when the metadata limits dropped

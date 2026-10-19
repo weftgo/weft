@@ -188,6 +188,13 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		conds = append(conds, "session_id = ? AND session_id <> ''")
 		args = append(args, q.SessionID)
 	}
+	if len(q.SessionIDs) > 0 {
+		// runs_session, as for SessionID: one IN over the set.
+		conds = append(conds, "session_id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(q.SessionIDs)), ",")+") AND session_id <> ''")
+		for _, id := range q.SessionIDs {
+			args = append(args, id)
+		}
+	}
 	if q.ExperimentID != "" {
 		// The literal <> '' is redundant (the value is not empty) but
 		// lets the planner use the partial index runs_experiment

@@ -309,6 +309,11 @@ breaking change with what to write instead.
   `weft.` prefix live in the header only: `SetInfo` rejects them with
   `ErrReservedKey`, so a public id cannot be rotated, and
   `Session.Meta()` never lets an info entry override one.
+  `WithRunMetadata`'s pairs (`run_meta`) are written once too, at
+  `Create` and `Fork` (a fork takes its origin's under its own);
+  `Open` accepts the option but writes nothing — its pairs are held
+  over the stored ones for that Session alone (`Session.RunMeta()`),
+  the header unchanged.
 - **Fork copies the path and nothing that acts for the original.**
   The fork is built as `Open` builds a session and takes its own
   options; nothing is inherited from the origin's options or header,
@@ -550,6 +555,7 @@ older reader can safely ignore is added without a version.
 | `parent` | `{session, entry}` | a fork's origin; optional |
 | `lineage` | `{parent_session, parent_call_id}` | a pool child's parent (format 4); optional |
 | `meta` | object of strings | create-time metadata; optional. Keys under `weft.` are reserved: `weft.public_id`, `weft.require_signed` (`"true"`). A pool child made by a wrap also carries `pool_agent` (the wrap's name, its resume key) |
+| `run_meta` | object of strings | `WithRunMetadata`'s pairs, stamped on every turn's run under the session's identity keys (which win) and a `Send`'s own `RunOptions(core.Metadata(…))` (which wins per key); optional, written at `Create` / `Fork` only (`Open`'s pairs are held over it, never written). Additive: a reader from before it ignores it and stamps none |
 
 **Every entry** carries `type` (the discriminator), `id`, `parent`
 (omitted on a root) and `created`. The kind-specific fields:

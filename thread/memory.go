@@ -51,7 +51,7 @@ type memSession struct {
 func (s memSession) head() (Header, error) {
 	if s.rawHeader == nil {
 		h := s.header
-		h.Meta = rules.CloneMeta(h.Meta)
+		h.Meta, h.RunMeta = rules.CloneMeta(h.Meta), rules.CloneMeta(h.RunMeta)
 		return h, nil
 	}
 	var h Header
@@ -112,7 +112,7 @@ func (m *memStorage) Create(ctx context.Context, h Header) error {
 	if _, ok := m.sessions[h.ID]; ok {
 		return fmt.Errorf("%w: %s", ErrExists, h.ID)
 	}
-	h.Meta = rules.CloneMeta(h.Meta)
+	h.Meta, h.RunMeta = rules.CloneMeta(h.Meta), rules.CloneMeta(h.RunMeta)
 	m.sessions[h.ID] = memSession{header: h}
 	return nil
 }

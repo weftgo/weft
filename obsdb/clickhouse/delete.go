@@ -165,12 +165,23 @@ func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 // their otel_logs records: the pass took the last turn they sat beside,
 // and no run delete names them (their run id is ""). A session that
 // still has a run keeps them, as DeleteSession would take them with
-// it. The sessions are read first, then deleted by id in chunks.
+// it. The sessions are read first, then deleted by id in chunks; a
+// sweep with no runless event older than the cutoff (the common case)
+// stops at one LIMIT 1 read, and the run check reads only the rows of
+// the candidate sessions (any row of a run carrying the session id:
+// a run whose rows were deleted reads none).
 func (d *DB) sweepRunlessEvents(ctx context.Context, before time.Time) error {
+	cut := before.UnixNano()
+	probe, err := d.queryIDs(ctx, `SELECT SessionId FROM weft_session_events
+		WHERE RunId = '' AND toUnixTimestamp64Nano(Time) < ? LIMIT 1`, cut)
+	if err != nil || len(probe) == 0 {
+		return err
+	}
 	ids, err := d.queryIDs(ctx, `SELECT DISTINCT SessionId FROM weft_session_events
 		WHERE RunId = '' AND toUnixTimestamp64Nano(Time) < ?
-		AND SessionId NOT IN (SELECT S FROM (SELECT RunId, max(SessionID) AS S FROM weft_runs GROUP BY RunId) WHERE S != '')`,
-		before.UnixNano())
+		AND SessionId NOT IN (SELECT DISTINCT SessionID FROM weft_runs WHERE SessionID IN (
+			SELECT DISTINCT SessionId FROM weft_session_events WHERE RunId = '' AND toUnixTimestamp64Nano(Time) < ?))`,
+		cut, cut)
 	if err != nil || len(ids) == 0 {
 		return err
 	}
@@ -314,7 +325,7 @@ func (d *DB) deleteRuns(ctx context.Context, ids []string) (extra int, err error
 	for _, c := range planSpanDeletes(links, keys) {
 		if len(c.logs) > 0 {
 			args, tuples := keyTuples(c.logs)
-			if err := d.conn.Exec(ctx, `DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] = '' AND LogAttributes['weft.record'] NOT IN ('thread', 'compaction') AND (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {
+			if err := d.conn.Exec(ctx, `DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] = '' AND NOT (LogAttributes['weft.record'] IN ('thread', 'compaction') AND LogAttributes['weft.session.id'] != '') AND (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {
 				return 0, fmt.Errorf("clickhouse: delete app logs: %w", err)
 			}
 		}

@@ -104,7 +104,15 @@ agent's `Generate` inside a handler, a run nested under a Subagent
 child's own tool call — carries `weft.caller.run.id` /
 `weft.caller.call.id` instead: the run and call it was started from, a
 link a reader may draw as an edge, never a parent (its usage is its own;
-no `/` in its id names it). A `thread/pool` child is a separate session
+no `/` in its id names it). A run started inside a run's own machinery
+— its model chain, `PrepareStep`, taps, `OnRunEnd` (a judge's `Generate`
+on that context) — carries neither: it was started from no call that run
+dispatched, so a judge under a Subagent child is no second child of the
+parent's call and no caller-linked run of it, exactly as a judge under a
+top-level run (the core reads the link once, on the context the run was
+started on, and the call it serves stops counting as a caller inside it;
+`CallFromContext` still answers it there — a child's tap reads its
+parent call). A `thread/pool` child is a separate session
 with its own id (`<child session>-t<n>`): its caller link names the
 delegating turn and call when the delegation ran under one (`pool.Wrap`),
 none when `p.Submit` was called outside a run, and its lineage is the
@@ -286,11 +294,16 @@ metadata, `error.type` `summarizer` and an `Error` status when the call
 failed — an error, a stream that broke the contract, a summary cut at its cap or empty (its tokens were spent either way; a `CheckSummary` rejection of a complete summary is not a failed call). No
 `weft.step.index` (a reader reads -1). Filed under the turn in flight,
 else the last run of the session that produced the leaf's context — a
-child of that run's `invoke_agent` span when the Session saw the run;
-with no run yet, or when the turn in flight has not reported yet (the
+child of that run's `invoke_agent` span; when the Session never saw that
+run report (`Open`, then `Compact` before any turn of its own: the last
+run is a previous writer's), the span is dropped with a Debug line — its
+usage stays on the compaction marker's or the branch record's
+`summarizer_usage`, the session records the timeline prices (§6), and is
+in no span sum; with no run yet, or when the turn in flight has not reported yet (the
 pre-run trigger's compaction, before the turn's run starts), held with
 its recorded times and opened under that run when it reports — in its
-trace, never a trace of its own (the `thread_summarizer` fixture). One
+trace, never a trace of its own (the `thread_summarizer` fixture; at most
+256 wait, the oldest dropped past it with a Debug line). One
 whose run ended without reporting — found stale when a later run
 reports, or still held at `Close` — is dropped with a Debug line, as
 one held for no run is: with no span of its run to open under it would
@@ -830,7 +843,7 @@ backends' own tests' to pin.
 | `manifest_hash`, `weft_version` | `weft.manifest.hash`, `weft.version` — from any record or span of the run that carries them (the `invoke_agent` span does): a run whose records were lost, or never emitted, still names both. `weft_version`'s precedence, one on both backends: the `run_start` record's `weft.version` and the `invoke_agent` span's rank together (one core literal, so equal by construction), the larger string kept should they differ (ClickHouse's `max`, SQLite's merge); the root span's resource `weft.version` (`otel.Install` stamps it there) only when the root carries no attribute; no other span's resource ever (ClickHouse 0012 restates the traces view so, and SQLite's merge reads only the root; a row written before either from a non-root span's resource stays, on both backends — ClickHouse's 0010/0011 view and SQLite's old fill-if-empty both kept one, and neither ClickHouse's `max` nor SQLite's `maxString` can forget it — and differs only where one run's spans carried different resources) |
 | `meta` | every string attribute outside the contract (`obsdb.MetaOf`; `weft.run.stopped_by` and `weft.cancel.cause` are contract — their columns above — and SQLite's 0010 removes them from rows written between U3.1 and U3.2). On ClickHouse the row's `Meta` is `max(String)` over per-row JSON strings, not a merge: a value a reader derives is a column with its own aggregate, never a `meta` key |
 | `started` | the earliest time of anything of the run: span starts, record times |
-| `last_seen` | the latest time of anything of the run, heartbeats included |
+| `last_seen` | the latest time of anything of the run, heartbeats included — but for `thread` records and compaction markers (§4): the session's state log filed under the run, never the run's own facts, they feed no column of its row on either backend (SQLite's writer skips the row for them; ClickHouse 0023's logs view leaves them out), so a late one never moves `last_seen` (an ended run stays as it ended, an interrupted one interrupted, `Retain`'s clock does not restart), lends the row none of its `meta` (ClickHouse's `max` over `Meta` could otherwise pick a record carrying fewer pairs than the turn's), and one landing after `DeleteRun` recreates no row |
 | `finished` | the `invoke_agent` span's end, or `run_finish`'s time — the later; absent while neither arrived |
 | `root_ended` | the `invoke_agent` span is stored (any status) — kept by both backends (`runs.root_ended`, `weft_runs.RootEnded`; `RunRow.RootEnded`), not served by Studio's API. A derived run (§9) is written with it set; the 0009/0010 backfills skipped derived rows and SQLite 0011 / ClickHouse 0012 set it on them, so every derived run reads it (harmless either way: a derived run's status comes from its own fold and every hole rule reads `derived` first) |
 | `finish_recorded`, `settling` | `RunRow.FinishRecorded`: the `run_finish` record is stored (the `finished_ok` column; a derived run's succeeded status). `RunRow.Settling`, derived at read time beside `status` (`obsdb.DeriveSettling`): `root_ended`, not derived, not failed, no `run_finish`, and last-seen at most 30 s old — the window in which a destination that stored the root before the records trailing it (a log exporter's retry or backlog, a user's `Exporters` pair) may still deliver them. A failed root never settles: it is terminal — nothing is coming — so its row reads `settling` false and its event page done at once, one answer from the first read (a failed run whose trailing records were still in flight reads their holes until they land, as any late delivery self-heals). `status` already reads `succeeded`/`failed` from the root; while settling, no reader calls the records lost (`not_recorded`/`no_logger`, `gap`/`events_lost`/`tail_lost`, §7) and the event stream is not done (`EventPage.Done`, Studio's `done`). The window is measured by the run's own timestamps: last-seen is the latest span end or record time stored for it — the clock `DeriveStatus` reads — so a root delivered more than 30 s after the run ended skips the window (its holes are raised at once) and self-heals when the trailing records land. `finish_recorded` is not served; `settling` is, on Studio's run row and run document (`settling: true`, omitted otherwise), and both Studio surfaces follow a settling run as they follow a running one (the web's `isLive`: the run page's polls and event tail, the panel's turn) and draw a `settling` note beside the unchanged status word |
@@ -1075,7 +1088,7 @@ offset). A
 panel token reads its public id's session only (`sessions/{id}`'s
 scope); a session of session-level marks alone (no turn stored)
 answers with no turns. The exported state log is an index, not
-evidence (ADR 0021 §5). The timeline also prices the summarizer at
+evidence (ADR 0021, amendment 2026-10-19). The timeline also prices the summarizer at
 read time (U15.1, UX-B-13; never stored): a turn carries `summarizer`
 (`usage` + the cost block) when marks filed under it — a compaction
 marker, a `SummarizeLeft` branch record — name `summarizer_usage`, each
@@ -1298,8 +1311,12 @@ dropped and the kind stays in the hint. Studio and the devtools panel
 draw these words from one table (`studio/web/src/lib/status.ts`), each
 in one colour role (`lib/palette.ts`'s `ROLE`); the `run` host event
 keeps the plain words (`parked` = succeeded with pending calls). The
-sessions list's status is the newest turn's stored word (no parked /
-cancelled until U16): its row carries only `status`.
+sessions list's status is the newest turn's stored word, and since U16
+the row carries its turn facts beside it (§6): `pending` when the
+newest turn is an open park (the list's "awaiting a decision"),
+`outcomes` with each turn's parked / resumed / cancelled / ended word,
+`failed_turns` apart from `ended_turns` — so a parked or cancelled
+newest turn reads as one.
 
 ## 8. The GenAI semantic conventions
 

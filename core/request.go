@@ -497,14 +497,14 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 	if mctx.Err() != nil {
 		return nil
 	}
-	reqOn := r.elog.Enabled(mctx, log.EnabledParameters{EventName: eventNameRequest})
+	reqOn := r.logEnabled(mctx, log.EnabledParameters{EventName: eventNameRequest})
 	capture := r.captureOn(mctx)
-	promptOn := capture && r.elog.Enabled(mctx, log.EnabledParameters{EventName: eventNamePrompt})
-	toolsOn := capture && r.elog.Enabled(mctx, log.EnabledParameters{EventName: eventNameTools})
+	promptOn := capture && r.logEnabled(mctx, log.EnabledParameters{EventName: eventNamePrompt})
+	toolsOn := capture && r.logEnabled(mctx, log.EnabledParameters{EventName: eventNameTools})
 	// The view record is content (the replacement messages), so it
 	// rides the messages kind's question; only a PrepareStep can make
 	// the request's messages differ from the transcript.
-	viewOn := capture && in.prepared && r.elog.Enabled(mctx, log.EnabledParameters{EventName: eventNameMessages})
+	viewOn := capture && in.prepared && r.logEnabled(mctx, log.EnabledParameters{EventName: eventNameMessages})
 	if !reqOn && !promptOn && !toolsOn && !viewOn {
 		return nil
 	}
@@ -625,7 +625,7 @@ func (rr *requestRecord) attempt(ctx context.Context, index int64, a AttemptInfo
 	if rr == nil || ctx.Err() != nil {
 		return
 	}
-	if !rr.r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventNameRequest}) {
+	if !rr.r.logEnabled(ctx, log.EnabledParameters{EventName: eventNameRequest}) {
 		return
 	}
 	body := rr.body
@@ -731,7 +731,7 @@ func (r *recorder) emitRecord(ctx context.Context, step int, eventName string, b
 	}
 	attrs = append(attrs, metadataAttrs(ctx)...)
 	rec.AddAttributes(attrs...)
-	r.elog.Emit(ctx, rec)
+	r.emitLog(ctx, rec)
 	return true
 }
 
@@ -744,14 +744,51 @@ func (r *recorder) contain(ctx context.Context, step int, what string) {
 	}
 }
 
-// contained counts a recovered panic, names it in the run's one Warn
-// line for the logger provider (providerpanic.go) and leaves its Debug
-// line.
+// contained counts a recovered panic and leaves its Debug line, naming
+// where it came from in the run's one Warn line of its kind: the
+// logger provider's (its Enabled or Emit, which emitLog and logEnabled
+// mark — providerpanic.go), else core's own building of the record
+// (coreRecordsPanicked) — a record-build panic is weft's bug, never
+// blamed on the provider.
 func (r *recorder) contained(ctx context.Context, step int, what string, p any) {
-	r.providerPanicked(ctx, providerLogs, p)
+	if lp, ok := p.(loggerPanic); ok {
+		r.providerPanicked(ctx, providerLogs, lp.p)
+		p = lp.p
+	} else {
+		r.coreRecordsPanicked(ctx, what, p)
+	}
 	// The panic's type only: its value may be built from the very
 	// body the record carried (content).
 	r.debug(ctx, step, what, fmt.Errorf("record panicked (%T)", p))
+}
+
+// loggerPanic marks a panic out of the logger provider's own call, so
+// contained tells it from one out of the record's building.
+type loggerPanic struct{ p any }
+
+// emitLog is r.elog.Emit, a panic out of it marked as the provider's.
+func (r *recorder) emitLog(ctx context.Context, rec log.Record) {
+	defer markLoggerPanic()
+	r.elog.Emit(ctx, rec)
+}
+
+// logEnabled is r.elog.Enabled, a panic out of it marked as the
+// provider's.
+func (r *recorder) logEnabled(ctx context.Context, p log.EnabledParameters) bool {
+	defer markLoggerPanic()
+	return r.elog.Enabled(ctx, p)
+}
+
+// markLoggerPanic re-panics a provider call's panic as a loggerPanic
+// (deferred directly by emitLog and logEnabled; a marked one passes
+// unchanged). Every caller sits under contain or emitRecord's recover.
+func markLoggerPanic() {
+	if p := recover(); p != nil {
+		if _, ok := p.(loggerPanic); ok {
+			panic(p)
+		}
+		panic(loggerPanic{p})
+	}
 }
 
 // debug reports a record that could not be built: one Debug line, never

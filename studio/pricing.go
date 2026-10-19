@@ -1047,6 +1047,50 @@ func (s *Server) sessionCost(ctx context.Context, id, publicID string) (cost, *c
 	return c.setCost(runs, "turn"), c, runs
 }
 
+// sessionCosts is sessionCost for several sessions at once: their runs
+// in one paged read (RunQuery.SessionIDs; the same filters, pub's scope
+// when set), each session's set priced by setCost on a coster of its
+// own — what sessionCost answers per session, one read for them all.
+// Every id gets an answer: past sessionCostPages pages, or when a read
+// fails, each one's is unknown with sessionCost's reason.
+func (s *Server) sessionCosts(ctx context.Context, ids []string, publicID string) map[string]cost {
+	out := make(map[string]cost, len(ids))
+	f := false
+	q := obsdb.RunQuery{SessionIDs: ids, PublicID: publicID, ParentRunID: "*", Playground: &f, Limit: 500}
+	bySession := make(map[string][]obsdb.RunRow, len(ids))
+	fail := func(c cost) map[string]cost {
+		for _, id := range ids {
+			out[id] = c
+		}
+		return out
+	}
+	for pages := 0; ; pages++ {
+		if pages == sessionCostPages {
+			return fail(cost{badge: costUnknown, reason: fmt.Sprintf("the delegated sessions hold more than %d runs: too many to price at read time", sessionCostPages*500)})
+		}
+		page, err := s.db.Runs(ctx, q)
+		if err != nil {
+			slog.DebugContext(ctx, "studio: delegated sessions' runs could not be read to price them", "sessions", len(ids), "err", err)
+			return fail(cost{badge: costUnknown, reason: "the session's runs could not be read"})
+		}
+		for _, r := range page.Runs {
+			bySession[r.SessionID] = append(bySession[r.SessionID], r)
+		}
+		if page.NextBefore == nil || len(page.Runs) == 0 {
+			break
+		}
+		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
+	}
+	for _, id := range ids {
+		runs := bySession[id]
+		if runs == nil {
+			runs = []obsdb.RunRow{}
+		}
+		out[id] = s.coster(ctx).setCost(runs, "turn")
+	}
+	return out
+}
+
 // setCost is the bill of a set of runs read whole — a session's, an
 // experiment's — with their subagent children among them: each root's
 // own + delegated, where a root is every run of the set that is not a

@@ -8,12 +8,16 @@
 -- weft_session_events holds each such record that carries a
 -- weft.session.id once more, ordered by the session first: the view
 -- below copies it at insert, a thread record filed under no run (held at
--- Close: weft.run.id '') included. BodyHash (cityHash64 of the body) is
--- the record's identity in the key — a thread body names its entry,
--- kind and time, a marker its compaction hash — so a retried batch's
--- duplicate collapses (ReplacingMergeTree; obsdb.SessionEventReader
--- reads FINAL). The content TTL (otel_logs', 30 days; clickhouse.TTL
--- rewrites it with the others). No traces or runs view is restated.
+-- Close: weft.run.id '') included. BodyHash is the record's identity in
+-- the key — a thread record's body (cityHash64: it names its entry, kind
+-- and time), a compaction marker's weft.compaction.hash attribute
+-- (cityHash64 of it, SQLite's markerPos rule: one marker per hash per
+-- run, whatever its body says) — so a retried batch's duplicate
+-- collapses (ReplacingMergeTree; obsdb.SessionEventReader reads FINAL,
+-- one row per (run, kind, BodyHash), the SQLite key's identity, so a
+-- marker re-sent at another time reads once there too). The content
+-- TTL (otel_logs', 30 days; clickhouse.TTL rewrites it with the
+-- others). No traces or runs view is restated.
 --
 -- Backfill: every stored row of the two kinds carrying a session id; a
 -- row the view copies again while the backfill runs collapses with it.
@@ -44,7 +48,7 @@ SELECT
     Timestamp AS Time,
     LogAttributes['weft.run.id'] AS RunId,
     LogAttributes['weft.record'] AS Kind,
-    cityHash64(Body) AS BodyHash,
+    if(LogAttributes['weft.record'] = 'compaction', cityHash64(LogAttributes['weft.compaction.hash']), cityHash64(Body)) AS BodyHash,
     EventName AS EventName,
     LogAttributes['weft.public_id'] AS PublicId,
     LogAttributes['weft.content'] AS Content,
@@ -58,7 +62,7 @@ SELECT
     Timestamp,
     LogAttributes['weft.run.id'],
     LogAttributes['weft.record'],
-    cityHash64(Body),
+    if(LogAttributes['weft.record'] = 'compaction', cityHash64(LogAttributes['weft.compaction.hash']), cityHash64(Body)),
     EventName,
     LogAttributes['weft.public_id'],
     LogAttributes['weft.content'],

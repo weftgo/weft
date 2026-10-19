@@ -267,3 +267,38 @@ differs, folded into §1–§5 above. What changed, and why:
   text is unchanged; one reachable case moved — an expired or
   interrupted request that already held an approval is denied with the
   expiry or interrupt reason, not "conflicting decisions".
+
+## Amendment (2026-10-19 — the boundary reported: records and provenance)
+
+The approval subsystem's facts now leave the session as observability
+(U12.1, audit O14; UX-B-14), beside — never instead of — the log this
+ADR made durable. Two things were added; neither changes a decision,
+the wire format above or any model-visible byte.
+
+- **The state log as records.** Every approval fact a Session writes
+  is also one OTel log record of kind `thread` through the agent's
+  `LoggerProvider` (record contract §4): `weft.thread.approval.request`,
+  `approval.decision` (`outcome`, `via` — `user`, `signed`, `grant`,
+  `approver`, `expiry`, `interrupt`, `child`, `parent`, `quorum` —
+  `key_id`, `request_entry`, `always`, the deciding `grant_id`),
+  `approval.refused` (a refused signed decision and why), and the
+  grants' `grant.mint`, `grant.use`, `grant.revoke`, `grant.expire`.
+  Each is filed under the run it concerns (the parking run of a
+  request or decision), ids, enums and counts always, who decided and
+  why only where content is on. **The exported records are an index,
+  not evidence** — this amendment's rule, the same one §5 states for
+  `s.Audit()`: the session file is the record, a reader that needs the
+  trail reads `Audit`, and a destination that drops a record changes
+  nothing the session decides. Observation only: a panicking or
+  refusing logger changes nothing.
+- **An approved call names its provenance.** The core gained
+  `ApproveBy(id, by, grantID)` — `Approve` with reporting attached,
+  never a different decision: the resumed call's `execute_tool` span
+  carries `weft.tool.approved_by` and `weft.grant.id`. `thread` passes
+  `user` (`Decide`, `DecideSigned`), `grant` (a standing grant matched,
+  with its entry id), `approver` (the `WithApprover` step), `quorum`
+  (a `Quorum(n > 1)`) or `policy` (another session path) on every
+  resume it runs, and stamps `weft.approval.actor` (each decision's
+  signing key id, else its `Who`) as metadata on the resume turn. Ids
+  and enums on the span; who by name rides the `thread` record's
+  content alone.

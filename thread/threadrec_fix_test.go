@@ -3,6 +3,7 @@ package thread_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -314,6 +315,72 @@ func TestHeldSummarizerOfAnUnreportedRunIsDropped(t *testing.T) {
 			}
 			rp.shutdown(t)
 		})
+	}
+}
+
+// A session reopened and compacted before any turn of its own files the
+// compaction under the last run — a previous writer's, which this
+// Session never saw report: the summarizer call has no span to open
+// under and is dropped with a Debug line, never opened as a root in a
+// trace of its own (record contract §3). Its usage stays on the
+// compaction marker, the session record the timeline prices.
+func TestReopenedCompactSummarizerIsDropped(t *testing.T) {
+	rp := newRecPipe(t)
+	logs := &lockedBuf{}
+	fetch := core.Tool("fetch_doc", "Fetch a document.", func(_ context.Context, in struct {
+		Topic string `json:"topic"`
+	}) (string, error) {
+		return strings.Repeat(in.Topic+" notes. ", 400), nil
+	})
+	ctx := context.Background()
+	st := thread.Memory()
+	first := rp.agent("research", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "fetch_doc", Args: `{"topic":"raft"}`}),
+		wefttest.Say("Read raft."),
+	), fetch)
+	s, err := thread.Create(ctx, st, first, thread.ContextWindow(64_000), thread.KeepRecent(10), thread.NoAutoCompact())
+	if err != nil {
+		t.Fatal(err)
+	}
+	recSendWait(t, s, "Fetch the raft document.")
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	again := rp.agent("research", wefttest.Script(
+		wefttest.Say("SUMMARY: raft read.").WithUsage(core.Usage{InputTokens: 900, OutputTokens: 30}),
+	), fetch, core.Logger(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))))
+	re, err := thread.Open(ctx, st, s.ID(), again, thread.ContextWindow(64_000), thread.KeepRecent(10), thread.NoAutoCompact())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := re.Compact(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := re.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := rp.p.ForceFlush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, sp := range rp.on.summarizerSpans() {
+		t.Errorf("summarizer span opened: run %s parent %v trace %v", spanAttr(sp, "weft.run.id").AsString(), sp.Parent(), sp.SpanContext().TraceID())
+	}
+	if line := "summarizer span dropped: its run is not one this Session saw report"; !strings.Contains(logs.String(), line) {
+		t.Errorf("no Debug line %q; logs:\n%s", line, logs.String())
+	}
+	rp.shutdown(t)
+	db, err := sql.Open("sqlite", "file:"+rp.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var in int64
+	var run string
+	if err := db.QueryRow(`SELECT run_id, COALESCE(json_extract(body, '$.summarizer_usage.input_tokens'), 0) FROM session_events WHERE kind = 'compaction'`).Scan(&run, &in); err != nil {
+		t.Fatalf("the compaction marker: %v", err)
+	}
+	if in != 900 || run != s.ID()+"-t1" {
+		t.Errorf("the marker = run %q summarizer input %d, want under %s-t1 with 900", run, in, s.ID())
 	}
 }
 

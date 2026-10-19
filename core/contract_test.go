@@ -6103,6 +6103,120 @@ func TestRunLinkSubagentVsCaller(t *testing.T) {
 	}
 }
 
+// judgedModel runs judge on the model call's context before each call.
+type judgedModel struct {
+	next  core.Model
+	judge func(context.Context)
+}
+
+func (m judgedModel) Info() core.ModelInfo { return core.InfoOf(m.next) }
+
+func (m judgedModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	m.judge(ctx)
+	return m.next.Stream(ctx, req)
+}
+
+// TestRunLinkJudgeInsideSubagentChild (O11, record contract §2): a run
+// started inside a Subagent child's own machinery — its model chain, its
+// PrepareStep, its taps, its OnRunEnd (a judge's Generate on that ctx) —
+// is started from no call the child made: it carries neither the
+// child's weft.parent.* (it is no second subagent of the parent's call)
+// nor a weft.caller.* naming that call (the child serves it; the judge
+// was not started from it), exactly as a judge under a top-level run.
+// The child itself keeps its parent link, its tap still reads the
+// parent call through CallFromContext, and a run its own tool starts is
+// still caller-linked to the child.
+func TestRunLinkJudgeInsideSubagentChild(t *testing.T) {
+	tp, lp := newRecProvider(), newRecLogProvider()
+	obs := []core.Option{core.TracerProvider(tp), core.LoggerProvider(lp)}
+	judge := core.New(wefttest.Script(
+		wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"),
+	), append(obs, core.Name("judge"))...)
+	var mu sync.Mutex
+	var judgeErrs []error
+	runJudge := func(ctx context.Context, where string) {
+		_, err := judge.Generate(ctx, core.Prompt(where))
+		mu.Lock()
+		judgeErrs = append(judgeErrs, err)
+		mu.Unlock()
+	}
+	judged := func(where string) core.ModelMiddleware {
+		return func(next core.Model) core.Model {
+			return judgedModel{next: next, judge: func(ctx context.Context) { runJudge(ctx, where) }}
+		}
+	}
+	var tapCall core.Call
+	child := core.New(wefttest.Script(wefttest.Say("child done")), append(obs, core.Name("child"),
+		core.WrapModel(judged("child-model")),
+		core.PrepareStep(func(ctx context.Context, _ int, req core.ModelRequest) (core.ModelRequest, error) {
+			runJudge(ctx, "child-prepare")
+			return req, nil
+		}),
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			if _, ok := ev.(core.RunStart); ok {
+				tapCall, _ = core.CallFromContext(ctx)
+				runJudge(ctx, "child-tap")
+			}
+		}),
+		core.OnRunEnd(func(ctx context.Context, _ *core.RunResult, _ error) { runJudge(ctx, "child-end") }),
+	)...)
+	parent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"x"}`, ID: "c_r"}),
+		wefttest.Say("final"),
+	), append(obs, core.Name("lead"), core.WrapModel(judged("parent-model")), core.Subagent("research", "Research.", child))...)
+	if _, err := parent.Generate(context.Background(), core.RunID("p1"), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	for _, err := range judgeErrs {
+		if err != nil {
+			t.Fatalf("judge run failed: %v", err)
+		}
+	}
+	if tapCall.RunID != "p1" || tapCall.CallID != "c_r" {
+		t.Errorf("child tap's CallFromContext = %+v, want the parent call p1/c_r", tapCall)
+	}
+	keys := []string{"weft.parent.run.id", "weft.parent.call.id", "weft.caller.run.id", "weft.caller.call.id"}
+	tp.mu.Lock()
+	spans := append([]*recSpan(nil), tp.spans...)
+	tp.mu.Unlock()
+	judges := 0
+	for _, s := range spans {
+		a := s.attrsMap()
+		if !strings.HasPrefix(s.name, "invoke_agent ") {
+			continue
+		}
+		switch a["gen_ai.agent.name"] {
+		case "judge":
+			judges++
+			for _, k := range keys {
+				if a[k] != "" {
+					t.Errorf("judge run %s span carries %s = %q, want none", a["weft.run.id"], k, a[k])
+				}
+			}
+		case "child":
+			if a["weft.parent.run.id"] != "p1" || a["weft.parent.call.id"] != "c_r" || a["weft.caller.run.id"] != "" {
+				t.Errorf("child span link = %v, want parent p1/c_r alone", a)
+			}
+		}
+	}
+	// parent-model ×2 (two parent steps), child-model, child-prepare, child-tap, child-end.
+	if judges != 6 {
+		t.Errorf("judge runs = %d, want 6", judges)
+	}
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	for _, r := range lp.records {
+		if r.attr("weft.event.type") != "run_start" || r.attr("gen_ai.agent.name") != "judge" {
+			continue
+		}
+		for _, k := range keys {
+			if v := r.attr(k); v != "" {
+				t.Errorf("judge run_start carries %s = %q, want none", k, v)
+			}
+		}
+	}
+}
+
 // TestAgentReportsItsProviders pins the two accessors a satellite
 // reporting beside the runs reads (weft/thread's session records and
 // summarizer spans): TracerProvider is the option's provider (else the

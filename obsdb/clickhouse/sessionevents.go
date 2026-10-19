@@ -9,8 +9,8 @@ import (
 
 // SessionEvents pages a session's thread records and compaction markers
 // from weft_session_events (obsdb.SessionEventReader; migration 0025):
-// one session (its public id's under q.PublicID), FINAL so a retried
-// batch's duplicate reads once, in (time, run, kind, body) order — the
+// one session (its public id's under q.PublicID), FINAL and one row
+// per (run, kind, BodyHash) so a retried batch's duplicate reads once, in (time, run, kind, body) order — the
 // SQLite reader's order, body the tie-break two records of one time,
 // run and kind need; the table's key (SessionId first) makes the scan a
 // range read of the session's prefix.
@@ -30,15 +30,20 @@ func (d *DB) SessionEvents(ctx context.Context, q obsdb.SessionEventQuery) (_ ob
 		where += ` AND RunId IN (?)`
 		args = append(args, q.RunIDs)
 	}
+	// One row per (run, kind, BodyHash) — SQLite's key, whose position
+	// is the same identity (obsdb.DeriveRecord) — the earliest kept: a
+	// compaction marker re-sent at another time collapses as it does
+	// there (FINAL collapses only an identical key, time included).
+	one := `SELECT RunId, Kind, EventName, PublicId, Content, Time, Body FROM weft_session_events FINAL
+		WHERE ` + where + `
+		ORDER BY Time, Body LIMIT 1 BY RunId, Kind, BodyHash`
 	var total uint64
-	if err := d.conn.QueryRow(ctx,
-		`SELECT count() FROM weft_session_events FINAL WHERE `+where, args...).Scan(&total); err != nil {
+	if err := d.conn.QueryRow(ctx, `SELECT count() FROM (`+one+`)`, args...).Scan(&total); err != nil {
 		return obsdb.SessionEventPage{}, err
 	}
 	page.Total = int(total)
 	rs, err := d.conn.Query(ctx,
-		`SELECT RunId, Kind, EventName, PublicId, Content, Time, Body FROM weft_session_events FINAL
-		WHERE `+where+`
+		`SELECT RunId, Kind, EventName, PublicId, Content, Time, Body FROM (`+one+`)
 		ORDER BY Time, RunId, Kind, Body LIMIT ? OFFSET ?`,
 		append(args, q.PageLimit(), max(q.Offset, 0))...)
 	if err != nil {

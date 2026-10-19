@@ -1,9 +1,12 @@
 package studio
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
@@ -141,5 +144,58 @@ func TestRunDocSummarizer(t *testing.T) {
 	}
 	if f := read("s_acme-t1").Summarizer; f != nil {
 		t.Errorf("t1's summarizer = %+v, want none", f)
+	}
+}
+
+// TestSummarizerPricedAlikeInEveryScope (P9-pre-go-fix): a session one
+// of whose turns another public id shares (a colliding run) is re-read
+// in a panel token's scope — by id (SessionQuery.IDs), never a
+// substring search — with its summarizer usage's per-model split, so a
+// panel token prices the summarizer exactly as the dev token does: at
+// the span's model's rates, not as one unattributed part.
+func TestSummarizerPricedAlikeInEveryScope(t *testing.T) {
+	db := timelineDB(t)
+	at := fixtureT0.Add(45 * time.Second)
+	foreign := obsdb.Record{Time: at, EventName: "weft.event", Severity: 9, Service: "svc", Body: `{"type":"run_start","id":"s_acme-t9"}`,
+		Attrs: map[string]any{"weft.record": "event", "weft.event.type": "run_start", "weft.event.pos": int64(0), "weft.run.id": "s_acme-t9",
+			"weft.session.id": "s_acme", "weft.public_id": "pub_else", "weft.turn": int64(9)}}
+	span := obsdb.Span{TraceID: strings.Repeat("ab", 16), SpanID: strings.Repeat("cd", 8), Name: "chat gpt-4o", Kind: 1,
+		Start: at, End: at.Add(time.Second), Service: "svc",
+		Attrs: map[string]any{"weft.run.id": "s_acme-t4", "weft.session.id": "s_acme", "weft.public_id": "pub_acme",
+			"gen_ai.operation.name": "chat", "weft.chat.role": "summarizer", "gen_ai.provider.name": "openai", "gen_ai.request.model": "gpt-4o",
+			"gen_ai.usage.input_tokens": int64(1_000_000), "gen_ai.usage.output_tokens": int64(0)}}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{foreign}, Spans: []obsdb.Span{span}}); err != nil {
+		t.Fatal(err)
+	}
+	h := Handler(DB(db), Token("srv"))
+	panel, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_acme", Scope: scopePlayground, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	figure := func(bearer string) string {
+		t.Helper()
+		code, _, body := getWith(t, h, "/studio/api/sessions/s_acme/timeline", bearer, "")
+		if code != http.StatusOK {
+			t.Fatalf("timeline: %d %s", code, body)
+		}
+		var v struct {
+			Summarizer json.RawMessage `json:"summarizer"`
+		}
+		if err := json.Unmarshal([]byte(body), &v); err != nil {
+			t.Fatal(err)
+		}
+		return string(v.Summarizer)
+	}
+	dev, pub := figure("srv"), figure(panel)
+	if dev == "" || dev != pub {
+		t.Errorf("summarizer figure: dev token %s, panel token %s; want the same", dev, pub)
+	}
+	var f summarizerCost
+	if err := json.Unmarshal([]byte(pub), &f); err != nil {
+		t.Fatal(err)
+	}
+	// The span's part at gpt-4o's own rates: known, no stand-in estimate.
+	if f.CostUSD == nil || !f.CostKnown || f.CostBadge != "" || f.Usage.InputTokens < 1_000_000 {
+		t.Errorf("panel figure = %s, want the span's 1M priced at gpt-4o, known, no estimate badge", pub)
 	}
 }

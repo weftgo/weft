@@ -90,6 +90,25 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 			}
 			continue
 		}
+		if obsdb.IsSessionEventKind(w.Record) {
+			// thread's state log and its compaction marker (record
+			// contract §4): stored as plain records under the run, counted
+			// under none, and indexed by session (session_events, U12.2).
+			// Never the run's own facts: the run row is not touched — its
+			// last_seen does not move (a finished run stays as it ended,
+			// Retain's clock does not restart), its meta takes none of the
+			// record's pairs, and one landing after DeleteRun recreates no
+			// row (ClickHouse's runs view skips them alike, 0023).
+			if _, err := insertRecord(ctx, tx, r, w); err != nil {
+				return err
+			}
+			if w.SessionID != "" {
+				if err := insertSessionEvent(ctx, tx, r, w); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		u := runIDs.touch(w.RunID)
 		u.applyIdentity(w, r)
 		switch w.Record {
@@ -134,18 +153,6 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 			// none; DB.Requests attaches it to its attempt.
 			if _, err := insertRecord(ctx, tx, r, w); err != nil {
 				return err
-			}
-		case obsdb.RecordThread, obsdb.RecordCompaction:
-			// thread's state log and its compaction marker (record
-			// contract §4): stored as plain records under the run, counted
-			// under none, and indexed by session (session_events, U12.2).
-			if _, err := insertRecord(ctx, tx, r, w); err != nil {
-				return err
-			}
-			if w.SessionID != "" {
-				if err := insertSessionEvent(ctx, tx, r, w); err != nil {
-					return err
-				}
 			}
 		case "heartbeat":
 			// Never a row: no position, so the (run, kind, pos) key

@@ -744,6 +744,30 @@ func TestThreadRecordsResearchCompaction(t *testing.T) {
 	rp.shutdown(t)
 }
 
+// Memory stores a header's RunMeta as its own copy, as it does Meta: a
+// caller changing the map it created with, or the header Load gave it,
+// never changes the stored session.
+func TestMemoryClonesRunMeta(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	kv := map[string]string{"arena.batch": "b1"}
+	if err := st.Create(ctx, thread.Header{ID: "s_clone", RunMeta: kv}); err != nil {
+		t.Fatal(err)
+	}
+	kv["arena.batch"] = "changed"
+	h, _, _, err := st.Load(ctx, "s_clone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.RunMeta["arena.batch"] != "b1" {
+		t.Fatalf("RunMeta after the caller's change = %v, want b1", h.RunMeta)
+	}
+	h.RunMeta["arena.batch"] = "changed again"
+	if h, _, _, _ = st.Load(ctx, "s_clone"); h.RunMeta["arena.batch"] != "b1" {
+		t.Errorf("RunMeta after a Load's map changed = %v, want b1", h.RunMeta)
+	}
+}
+
 // WithRunMetadata: a session's create-time metadata stamps every turn,
 // under the identity keys (which win) and a Send's own pairs (which win
 // per key); an Open's own pairs join the stored ones.

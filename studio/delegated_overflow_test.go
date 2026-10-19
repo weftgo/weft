@@ -2,11 +2,13 @@ package studio
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -108,6 +110,96 @@ func TestDelegatedOverflow(t *testing.T) {
 	}
 	if failed.DelegatedUsage.InputTokens != n {
 		t.Errorf("a failed level: delegated usage %+v, want the direct level's %d alone", failed.DelegatedUsage, n)
+	}
+}
+
+// countRuns counts the Runs reads a page makes.
+type countRuns struct {
+	obsdb.DB
+	n *atomic.Int64
+}
+
+func (c countRuns) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) {
+	c.n.Add(1)
+	return c.DB.Runs(ctx, q)
+}
+
+// TestDelegatedReadsPerLevel (P9-pre-go-fix): a session document prices
+// its delegated tree with one Runs read per level (RunQuery.SessionIDs),
+// never one per delegated session — a hundred and five sessions and a
+// grandchild cost a handful of reads, the figures what they were.
+func TestDelegatedReadsPerLevel(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/levels.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	seedRun(t, db, "s_lead-t1", "", "s_lead", "", nil)
+	const n = delegatedCap + 5
+	for i := range n {
+		id := fmt.Sprintf("s_c%03d", i)
+		seedRun(t, db, id+"-t1", "", id, "", map[string]any{"weft.session.parent": "s_lead", "weft.caller.run.id": "s_lead-t1"})
+	}
+	seedRun(t, db, "s_g-t1", "", "s_g", "", map[string]any{"weft.session.parent": "s_c000", "weft.caller.run.id": "s_c000-t1"})
+	var reads atomic.Int64
+	srv := New(DB(countRuns{DB: db, n: &reads}))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	var doc struct {
+		DelegatedUsage core.Usage `json:"delegated_usage"`
+		CostKnown      bool       `json:"delegated_sessions_cost_known"`
+	}
+	reads.Store(0)
+	getUntil(t, ts, "/api/sessions/s_lead", &doc, func() bool { return true })
+	if doc.DelegatedUsage.InputTokens != n+1 || !doc.CostKnown {
+		t.Errorf("delegated figures = %+v known %v, want %d in, known", doc.DelegatedUsage, doc.CostKnown, n+1)
+	}
+	if got := reads.Load(); got > 10 {
+		t.Errorf("GET /api/sessions/s_lead made %d Runs reads; want a few per tree level, not one per delegated session (%d)", got, n+1)
+	}
+}
+
+// TestCallerLinkedScoped (P9-pre-go-fix): under a panel token a run's
+// caller_linked rows are read in its public id's scope — its own rows
+// listed though another public id's fill the first page, the rest
+// counted hidden, caller_linked_more only when more of its own exist.
+func TestCallerLinkedScoped(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/scoped.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	seedRun(t, db, "lead", "pub_a", "", "", nil)
+	for i := range callerLinkedCap {
+		seedRun(t, db, fmt.Sprintf("b%03d", i), "pub_b", "", "", map[string]any{"weft.caller.run.id": "lead", "weft.caller.call.id": "c"})
+	}
+	for _, id := range []string{"z1", "z2"} {
+		seedRun(t, db, id, "pub_a", "", "", map[string]any{"weft.caller.run.id": "lead", "weft.caller.call.id": "c"})
+	}
+	h := Handler(DB(db), Token("srv"))
+	panel, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, body := getWith(t, h, "/studio/api/runs/lead", panel, "")
+	if code != 200 {
+		t.Fatalf("run page: %d %s", code, body)
+	}
+	var run struct {
+		CallerLinked       []struct{ ID string } `json:"caller_linked"`
+		CallerLinkedMore   bool                  `json:"caller_linked_more"`
+		CallerLinkedHidden int                   `json:"caller_linked_hidden"`
+	}
+	if err := json.Unmarshal([]byte(body), &run); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, r := range run.CallerLinked {
+		ids = append(ids, r.ID)
+	}
+	if !slices.Equal(ids, []string{"z1", "z2"}) || run.CallerLinkedMore || run.CallerLinkedHidden != callerLinkedCap {
+		t.Errorf("panel caller_linked = %v more %v hidden %d; want [z1 z2], no more, %d hidden", ids, run.CallerLinkedMore, run.CallerLinkedHidden, callerLinkedCap)
 	}
 }
 

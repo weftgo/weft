@@ -174,6 +174,34 @@ func withSubagentCall(ctx context.Context, c Call) context.Context {
 	return context.WithValue(ctx, subagentKey{}, c)
 }
 
+// runCallKey holds the call a run was started on (enterRun), as that
+// run's own: runLinkAttrs gives a run started on the same call — from
+// inside the enclosing run's model chain, PrepareStep, taps or
+// OnRunEnd, before any of its steps dispatched a call — no link.
+type runCallKey struct{}
+
+// enterRun marks the call ctx carries (if any) as the one the run
+// starting on ctx serves. CallFromContext still answers it there (a
+// child's tap reads its parent call), but no run started inside the
+// run reads it as its caller.
+func enterRun(ctx context.Context) context.Context {
+	c, ok := CallFromContext(ctx)
+	if !ok {
+		if ctx.Value(runCallKey{}) == nil {
+			return ctx
+		}
+		return context.WithValue(ctx, runCallKey{}, nil)
+	}
+	return context.WithValue(ctx, runCallKey{}, c)
+}
+
+// ownCallOf reports whether c is the call the enclosing run was itself
+// started on (enterRun).
+func ownCallOf(ctx context.Context, c Call) bool {
+	m, ok := ctx.Value(runCallKey{}).(Call)
+	return ok && m == c
+}
+
 // subagentOf reports whether the run started on ctx is a Subagent's
 // child: the call ctx carries is the one Subagent marked.
 func subagentOf(ctx context.Context, c Call) bool {

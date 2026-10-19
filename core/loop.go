@@ -43,6 +43,18 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// child agent) does not report into that chain's step: its handlers
 	// see no reporter, its own model calls install theirs.
 	ctx = maskReport(ctx)
+	// The run's linkage is read once, from the context it was started
+	// on (runLinkAttrs: a Subagent's child names its parent, any other
+	// run on a tool call's context its caller), and the call it was
+	// started on is then marked as this run's own: inside the run — its
+	// model chain, PrepareStep, taps, OnRunEnd — that call is the one
+	// the run serves, not one it dispatched, until a step installs a
+	// call of its own. A run started there (a judge's Generate in a
+	// model middleware) is started from no call this run made: it
+	// carries no link, as under a top-level run, and never claims the
+	// Subagent's parent link (O11, record contract §2).
+	link := runLinkAttrs(ctx)
+	ctx = enterRun(ctx)
 	// The run's metadata is merged and placed before any span starts, so
 	// every span and record of this run carries it and a Subagent's child
 	// run inherits it through the tool call's context (ADR 0024 S1.1).
@@ -111,7 +123,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		runExtra = append(runExtra, attrResumedFrom.String(cfg.resumedFrom))
 	}
 	runExtra = append(runExtra, attrInstructionsHash.String(instructionsHash))
-	runExtra = append(runExtra, runLinkAttrs(ctx)...)
+	runExtra = append(runExtra, link...)
 	if a.manifestHash != "" {
 		runExtra = append(runExtra, attrManifestHash.String(a.manifestHash))
 	}
@@ -134,6 +146,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		manifestHash: a.manifestHash,
 		resumedFrom:  cfg.resumedFrom,
 		resumeCalls:  resumeCalls,
+		link:         link,
 		obs:          &a.obs,
 		panics:       &a.tapPanics,
 	}

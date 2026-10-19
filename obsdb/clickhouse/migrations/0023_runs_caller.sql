@@ -29,6 +29,21 @@
 -- this migration is missing from SessionQuery.Parents, and until the
 -- index is built those parts are read in full.
 --
+-- MATERIALIZE INDEX builds idx_caller_run over the parts written
+-- before it too (a caller-linked lookup otherwise reads those parts in
+-- full until they merge).
+--
+-- The logs view no longer feeds a run row from thread's records (kind
+-- thread) or its compaction markers (kind compaction): they are the
+-- session's state log filed under a run (record contract §4), never the
+-- run's own facts. Their Meta could win max() over the run's own (a
+-- record carrying fewer pairs than the turn's Send-level ones, the tag
+-- filter then missing the run; SQLite merges keys), their time moved a
+-- finished run's LastSeen (an interrupted run reading running for 30 s,
+-- Retain's clock restarting), and one landing after DeleteRun left a
+-- stub row. weft_session_events (0025) and otel_logs keep them; obsdb/
+-- sqlite's writer skips the run row for them alike.
+--
 -- No backfill of weft.caller.*: it is new with this version. A run
 -- recorded before it that a tool call started keeps its ParentRunID;
 -- the own-turn rule reads a pool child's turn of that age by its id.
@@ -44,6 +59,8 @@ ALTER TABLE weft_runs UPDATE SessionParent = JSONExtractString(Meta, 'weft.sessi
 WHERE SessionParent = '' AND position(Meta, 'weft.session.parent') > 0;
 
 ALTER TABLE weft_runs MATERIALIZE INDEX idx_session_parent;
+
+ALTER TABLE weft_runs MATERIALIZE INDEX idx_caller_run;
 
 ALTER TABLE weft_runs_logs_mv MODIFY QUERY
 WITH mapFilter((k, v) -> NOT has([
@@ -129,7 +146,7 @@ SELECT
     LogAttributes['weft.caller.call.id'] AS CallerCallID,
     LogAttributes['weft.session.parent'] AS SessionParent
 FROM otel_logs
-WHERE LogAttributes['weft.run.id'] != '';
+WHERE LogAttributes['weft.run.id'] != '' AND LogAttributes['weft.record'] NOT IN ('thread', 'compaction');
 
 ALTER TABLE weft_runs_traces_mv MODIFY QUERY
 WITH if(mapContains(SpanAttributes, 'gen_ai.operation.name'),

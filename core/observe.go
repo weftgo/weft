@@ -243,10 +243,14 @@ func usageSplits(u Usage) []attribute.KeyValue {
 // session's turn, another agent's Generate inside a handler — names the
 // call it was started from, weft.caller.run.id / weft.caller.call.id: a
 // link, never parenthood (its usage is its own). Nil outside a tool
-// call.
+// call, and nil when the call on ctx is the one the enclosing run was
+// itself started on (ownCallOf): a run started from inside that run's
+// model chain, PrepareStep, taps or OnRunEnd was started from no call
+// that run made — a judge under a Subagent's child carries no link,
+// exactly as one under a top-level run.
 func runLinkAttrs(ctx context.Context) []attribute.KeyValue {
 	c, ok := CallFromContext(ctx)
-	if !ok {
+	if !ok || ownCallOf(ctx, c) {
 		return nil
 	}
 	if subagentOf(ctx, c) {
@@ -938,6 +942,10 @@ type recorder struct {
 	// run that resumes nothing.
 	resumedFrom string
 	resumeCalls string
+	// link is the run's linkage (runLinkAttrs), read by execute from the
+	// context the run was started on before it detached the call:
+	// reported on the run_start record, as on the invoke_agent span.
+	link []attribute.KeyValue
 
 	eventPos    atomic.Int64
 	deltaPos    atomic.Int64
@@ -1019,7 +1027,7 @@ func (r *recorder) captureOn(ctx context.Context) bool {
 	if r.capture != nil {
 		return *r.capture
 	}
-	return r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventNameMessages})
+	return r.logEnabled(ctx, log.EnabledParameters{EventName: eventNameMessages})
 }
 
 // noteTruncated remembers a call's result-cap cut for its tool_finish
@@ -1098,7 +1106,7 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 	if tf, ok := ev.(ToolFinish); ok {
 		cut = r.takeTruncated(tf.CallID)
 	}
-	if !r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventName}) {
+	if !r.logEnabled(ctx, log.EnabledParameters{EventName: eventName}) {
 		return
 	}
 
@@ -1165,8 +1173,9 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 	case RunStart:
 		// The linkage a run started on a tool call reports (runLinkAttrs):
 		// weft.parent.* for a Subagent's child, weft.caller.* for any
-		// other. Absent on a top-level run.
-		attrs = append(attrs, runLinkAttrs(ctx)...)
+		// other. Absent on a top-level run. Read once at execute's start
+		// (the run's own context no longer carries the call).
+		attrs = append(attrs, r.link...)
 		if r.manifestHash != "" {
 			attrs = append(attrs, attrManifestHash.String(r.manifestHash))
 		}
@@ -1183,7 +1192,7 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 	}
 	attrs = append(attrs, metadataAttrs(ctx)...)
 	rec.AddAttributes(attrs...)
-	r.elog.Emit(ctx, rec)
+	r.emitLog(ctx, rec)
 }
 
 // recordMessages reports one batch of messages joining the run's
@@ -1203,7 +1212,7 @@ func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message,
 	if len(msgs) == 0 || ctx.Err() != nil || !r.captureOn(ctx) {
 		return
 	}
-	if !r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventNameMessages}) {
+	if !r.logEnabled(ctx, log.EnabledParameters{EventName: eventNameMessages}) {
 		return
 	}
 	b, err := json.Marshal(msgs)
@@ -1241,7 +1250,7 @@ func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message,
 	}
 	attrs = append(attrs, metadataAttrs(ctx)...)
 	rec.AddAttributes(attrs...)
-	r.elog.Emit(ctx, rec)
+	r.emitLog(ctx, rec)
 }
 
 // quoteInvalidArgs returns a tool call's arguments in a form a record

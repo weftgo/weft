@@ -1274,13 +1274,17 @@ session's turn (`<session>-tN`), reads
 <session>` — and, when it ran under a delegating tool call, `· delegated
 by turn <parent>` — no verb and no fix: its requests are mirrored onto
 the parent session's `Pending()` and decided there (`p.Decide`, ADR 0022
-§7). A child `p.Submit` started from app code outside a run carries no
-parent run id at all (core stamps `weft.parent.run.id` only from a
-running call's context) and reads the same, the session alone. On the
+§7). Since weft 0.18 a pool child's turn carries no parent run id at
+all — the core stamps `weft.parent.*` on a Subagent's child alone — but
+a caller link (`weft.caller.run.id` / `weft.caller.call.id`, the run
+row's `caller_run_id`) naming the delegating turn and call when it ran
+under one (`pool.Wrap`); a child `p.Submit` started from app code
+outside a run carries none and reads the same, the session alone. On the
 run page the session is a link to `/sessions/<session>` and the turn a
 link to its run; the block reads neither the child's session nor the
 runtimes for it. Another agent's `Generate` inside a tool handler (a
-parent run id, an id of its own, whatever session id, public id and
+caller link to the handler's run and call since weft 0.18 — a parent
+run id before it — an id of its own, whatever session id, public id and
 `weft.session.parent` it inherited — core merges a run's context
 metadata into every run started under it, so one nested under a pool
 child's turn carries that key too) never parks onto the parent and
@@ -1686,8 +1690,11 @@ if any, is not linked yet". A decided park's detail says "1 call decided
 · resumed in t2" only on the stored `resumed_by`; a park found by the
 next turn alone says "1 call · next turn t2 (decided or dropped)" — after
 a Branch, a Rollback or an undecided Send that turn is no resume. The
-sessions list's status is the newest turn's stored word (no parked /
-cancelled until U16): its row carries only `status`. The runs list's status filter has `parked`
+sessions list's status is the newest turn's stored word, with its turn
+facts beside it since U16 (record contract §6): `pending` when the
+newest turn is an open park ("⏸ awaiting a decision"), each turn's
+parked / resumed / cancelled / ended word in `outcomes`, `failed_turns`
+apart from `ended_turns`. The runs list's status filter has `parked`
 too — the API's `status=parked` (I3): the open parks by the stored
 link, no run whose `resumed_from` names it. The page's own word reads a
 park decided also when a later turn of its session followed it

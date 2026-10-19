@@ -18,8 +18,12 @@ import (
 // LoggerProvider — an obsdb insert, a Blocking() destination, a slow
 // or panicking exporter — ever runs while s.mu is held, and a reader
 // (Pending, Entries) never waits on one. The queue is FIFO and drained
-// by that one goroutine: records leave in the order the session decided
-// them. Close waits for it (bounded by its context).
+// by that one goroutine: records leave in the order they were queued —
+// the order the session decided them, except a held record (one waiting
+// for its run to report, heldRec), which joins the queue when that run
+// reports or at Close, after records decided later than it; the held
+// ones keep their own decided order among themselves. Close waits for
+// the emitter (bounded by its context).
 
 // heldRec is a record waiting for a run to be filed under: run is the
 // run it waits for ("" for the next run that reports).

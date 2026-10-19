@@ -96,6 +96,8 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("Manifests", manifests(open))
 	t.Run("RunTree", runTree(open))
 	t.Run("SessionEvents", sessionEvents(open))
+	t.Run("ThreadRecordsAreNotRunFacts", threadRecordsAreNotRunFacts(open))
+	t.Run("SessionIDsFilter", sessionIDsFilter(open))
 }
 
 func ctx() context.Context { return context.Background() }

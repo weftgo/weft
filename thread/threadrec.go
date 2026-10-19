@@ -48,10 +48,10 @@ import (
 // for a content-on one. Titles, labels and other app-chosen names are
 // metadata (ADR 0024): a label's name is a body field, never content.
 //
-// The exported copy is an index, not evidence (ADR 0021 §5): the
-// session file is the record, and a reader that needs the trail reads
-// Audit. Observation only: a logger that panics or refuses changes
-// nothing the session does.
+// The exported copy is an index, not evidence (ADR 0021, amendment
+// 2026-10-19): the session file is the record, and a reader that needs
+// the trail reads Audit. Observation only: a logger that panics or
+// refuses changes nothing the session does.
 const (
 	threadRecordKind = "thread"
 	threadEventPfx   = "weft.thread."
@@ -612,36 +612,49 @@ type summarizerCall struct {
 }
 
 // recordSummarizer files a summarizer call's span: under the run the
-// session names now — a child of its invoke_agent span when the
-// Session saw it. A call with no run to name, or one filed under the
-// turn in flight before that run reported (the pre-run trigger's
-// compaction), is held and opened, with its recorded times, under the
-// run when it reports (seeRun) — never as a trace of its own. Callers
-// must not hold s.mu.
+// session names now, a child of its invoke_agent span. A call with no
+// run to name, or one filed under the turn in flight before that run
+// reported (the pre-run trigger's compaction), is held and opened, with
+// its recorded times, under the run when it reports (seeRun) — never as
+// a trace of its own; at most maxHeldThread wait, the oldest dropped
+// past it with a Debug line. A call filed under a run this Session
+// never saw report (Open, then Compact before any turn: the last run is
+// a previous writer's) has no span to open under: it is dropped with a
+// Debug line, as a stale held call is — one opened on a bare context
+// would be a root in a trace of its own, read as a run (record contract
+// §3). Its usage is not lost: the compaction marker (summarizer_usage,
+// summarizer_model) or the branch record that call served is a session
+// record filed under that run all the same, and Studio's timeline
+// prices the marks; only obsdb's span sum (SessionRow.SummarizerUsage)
+// leaves it out. Callers must not hold s.mu.
 func (s *Session) recordSummarizer(c summarizerCall) {
 	var (
-		run   string
-		sight runSight
-		seen  bool
-		md    map[string]string
-		held  bool
+		run     string
+		sight   runSight
+		seen    bool
+		held    bool
+		evicted bool
 	)
 	s.locked(func() {
 		run = s.concernedRunLocked()
 		if run == "" || s.awaitsSightLocked(run) {
 			if s.closing != stateSealed {
 				c.run = run
+				if len(s.heldSummaries) >= maxHeldThread {
+					s.heldSummaries = slices.Delete(s.heldSummaries, 0, 1)
+					evicted = true
+				}
 				s.heldSummaries = append(s.heldSummaries, c)
 				held = true
 			}
 			return
 		}
 		sight, seen = s.sightLocked(run)
-		if !seen {
-			n, _ := runSeq(s.header.ID, run)
-			md = s.unseenRunMetadataLocked(n)
-		}
 	})
+	if evicted {
+		s.agent.Logger().Debug("thread: summarizer span dropped: too many held for a run that has not reported",
+			"session", s.header.ID, "held", maxHeldThread)
+	}
 	if held {
 		return
 	}
@@ -649,12 +662,12 @@ func (s *Session) recordSummarizer(c summarizerCall) {
 		s.agent.Logger().Debug("thread: summarizer span dropped: no run to file it under", "session", s.header.ID)
 		return
 	}
-	ctx := context.Background()
-	if seen {
-		ctx = trace.ContextWithSpanContext(ctx, sight.sc)
-		md = sight.md
+	if !seen {
+		s.agent.Logger().Debug("thread: summarizer span dropped: its run is not one this Session saw report",
+			"session", s.header.ID, "run", run)
+		return
 	}
-	s.emitSummarizer(ctx, run, md, c)
+	s.emitSummarizer(trace.ContextWithSpanContext(context.Background(), sight.sc), run, sight.md, c)
 }
 
 // takeHeldSummariesLocked splits the held summarizer calls as

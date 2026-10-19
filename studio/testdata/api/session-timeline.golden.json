@@ -85,7 +85,7 @@
       "status": "succeeded",
       "started": "2020-01-01T09:00:50.123Z",
       "finished": "2020-01-01T09:00:52.123Z",
-      "last_seen": "2020-01-01T09:00:53.123Z",
+      "last_seen": "2020-01-01T09:00:52.123Z",
       "steps": 1,
       "prompt_preview": "email me a confirmation",
       "usage": {

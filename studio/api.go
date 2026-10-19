@@ -1293,23 +1293,37 @@ func (s *Server) runSummarizer(r *http.Request, rr obsdb.RunRow) *summarizerCost
 
 // callerLinked fills a run page's caller_linked rows (U14): the runs
 // whose weft.caller.run.id names the run, oldest first, at most
-// callerLinkedCap; a panel token's public id's alone (inScope), the
-// rest counted.
+// callerLinkedCap; a panel token's public id's alone, read in its scope
+// (RunQuery.PublicID) so the page and caller_linked_more count what it
+// may see, the rest counted in caller_linked_hidden (the unscoped
+// total less the scoped one). The rows' subagent trees are primed
+// before they are priced: one children read per tree level, not one
+// per row.
 func (s *Server) callerLinked(ctx context.Context, c *coster, id string, out *runPage) {
-	page, err := s.db.Runs(ctx, obsdb.RunQuery{CallerRunID: id, ParentRunID: "*", Oldest: true, Limit: callerLinkedCap})
+	pub := scopeOf(ctx)
+	q := obsdb.RunQuery{CallerRunID: id, ParentRunID: "*", PublicID: pub, Oldest: true, Limit: callerLinkedCap}
+	page, err := s.db.Runs(ctx, q)
+	if err == nil && pub != "" {
+		q.PublicID, q.Limit = "", 1
+		var all obsdb.RunPage
+		if all, err = s.db.Runs(ctx, q); err == nil {
+			out.CallerLinkedHidden = max(all.Total-page.Total, 0)
+		}
+	}
 	if err != nil {
 		slog.DebugContext(ctx, "studio: a run's caller-linked runs could not be read", "run", id, "err", err)
 		out.CallerLinkedUnknown = true
+		out.CallerLinkedHidden = 0
 		return
 	}
-	pub := scopeOf(ctx)
 	recs := page.Runs
 	if len(recs) > callerLinkedCap { // the ties a page carries past its limit
 		recs = recs[:callerLinkedCap]
 	}
 	out.CallerLinkedMore = page.Total > len(recs)
+	c.primeTrees(recs)
 	for _, rec := range recs {
-		if !inScope(pub, rec) {
+		if !inScope(pub, rec) { // the query's scope already; kept as the wall
 			out.CallerLinkedHidden++
 			continue
 		}
@@ -2052,11 +2066,13 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 // the first delegatedCap of them, and the usage and cost of every
 // session delegated under it, walked breadth first — one paged
 // Sessions read per tree level (Parents IN the level), never one per
-// session — up to delegatedTreeCap sessions: past it, or when a read
-// fails, the delegated cost is not known and the reason says why (the
-// usage then a floor, said in the same reason). The direct level is
-// paged whole, so a session delegating more than delegatedCap still
-// has every one of them in its figures.
+// session, and one paged Runs read per level for the level's costs
+// (RunQuery.SessionIDs, sessionCosts) — up to delegatedTreeCap
+// sessions: past it, or when a read fails, the delegated cost is not
+// known and the reason says why (the usage then a floor, said in the
+// same reason). The direct level is paged whole, so a session
+// delegating more than delegatedCap still has every one of them in its
+// figures.
 func (s *Server) delegatedSessions(ctx context.Context, id, pub string, doc *sessionDoc) {
 	doc.Delegated = []sessionRow{}
 	seen := map[string]bool{id: true}
@@ -2065,9 +2081,33 @@ func (s *Server) delegatedSessions(ctx context.Context, id, pub string, doc *ses
 	var why string
 	walked := 0
 	allExact := true // every visited session's own cost reported its cache split exact
+	// price costs one level's sessions in one batched read and folds
+	// them into the figures, in the order the level listed them.
+	price := func(depth int, rows []obsdb.SessionRow) {
+		if len(rows) == 0 {
+			return
+		}
+		ids := make([]string, len(rows))
+		for i, sr := range rows {
+			ids[i] = sr.ID
+		}
+		costs := s.sessionCosts(ctx, ids, pub)
+		for _, sr := range rows {
+			sc := costs[sr.ID]
+			doc.DelegatedUsage = doc.DelegatedUsage.Add(sr.Usage)
+			allExact = allExact && sc.cache == cacheExact
+			parts = append(parts, runCost{id: sr.ID, own: sc, delegated: cost{known: true}})
+			if depth == 0 && len(doc.Delegated) < delegatedCap {
+				row := sessRow(sr)
+				row.costFields = sc.fields()
+				doc.Delegated = append(doc.Delegated, row)
+			}
+		}
+	}
 walk:
 	for depth := 0; len(level) > 0; depth++ {
 		var next []string
+		var rows []obsdb.SessionRow
 		q := obsdb.SessionQuery{Parents: level, PublicID: pub, Limit: 500}
 		for {
 			page, err := s.db.Sessions(ctx, q)
@@ -2077,6 +2117,7 @@ walk:
 					doc.DelegatedUnknown = true
 				}
 				why = fmt.Sprintf("the sessions delegated %d level(s) under this one could not be read; delegated_usage stops at the levels read", depth+1)
+				price(depth, rows)
 				break walk
 			}
 			if depth == 0 {
@@ -2089,18 +2130,11 @@ walk:
 				seen[sr.ID] = true
 				if walked == delegatedTreeCap {
 					why = fmt.Sprintf("more than %d sessions are delegated under this one: too many to price at read time; delegated_usage counts the first %d sessions", delegatedTreeCap, delegatedTreeCap)
+					price(depth, rows)
 					break walk
 				}
 				walked++
-				sc, _, _ := s.sessionCost(ctx, sr.ID, pub)
-				doc.DelegatedUsage = doc.DelegatedUsage.Add(sr.Usage)
-				allExact = allExact && sc.cache == cacheExact
-				parts = append(parts, runCost{id: sr.ID, own: sc, delegated: cost{known: true}})
-				if depth == 0 && len(doc.Delegated) < delegatedCap {
-					row := sessRow(sr)
-					row.costFields = sc.fields()
-					doc.Delegated = append(doc.Delegated, row)
-				}
+				rows = append(rows, sr)
 				next = append(next, sr.ID)
 			}
 			if page.NextBefore == nil || len(page.Sessions) == 0 {
@@ -2108,6 +2142,7 @@ walk:
 			}
 			q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
 		}
+		price(depth, rows)
 		level = next
 	}
 	if len(parts) == 0 && why == "" {
@@ -2158,9 +2193,10 @@ func withPublicID(runs []obsdb.RunRow, pub string) []obsdb.RunRow {
 // public id: its turns (withPublicID) and its row (scopedSessionRow).
 // The row's summarizer_usage is obsdb's over every run of the session
 // id; when a turn of another public id shares it (a colliding derived
-// run), the figure is re-read in pub's scope — the session list's own
-// query (SessionQuery.PublicID, the id as its Q) — and is absent when
-// that read fails or finds nothing, never another scope's.
+// run), the figure and its per-model split are re-read in pub's scope —
+// the session list's own query by id (SessionQuery.IDs, PublicID) — and
+// are absent when that read fails or finds nothing, never another
+// scope's.
 func (s *Server) scopeSessionDetail(ctx context.Context, det *obsdb.SessionDetail, pub string) {
 	all := len(det.Runs)
 	det.Runs = withPublicID(det.Runs, pub)
@@ -2168,14 +2204,14 @@ func (s *Server) scopeSessionDetail(ctx context.Context, det *obsdb.SessionDetai
 	if len(det.Runs) == all {
 		return
 	}
-	det.SummarizerUsage = core.Usage{}
-	page, err := s.db.Sessions(ctx, obsdb.SessionQuery{PublicID: pub, Q: det.ID, Limit: 500})
+	det.SummarizerUsage, det.SummarizerModels = core.Usage{}, nil
+	page, err := s.db.Sessions(ctx, obsdb.SessionQuery{IDs: []string{det.ID}, PublicID: pub, Limit: 1})
 	if err != nil {
 		return
 	}
 	for _, sr := range page.Sessions {
 		if sr.ID == det.ID {
-			det.SummarizerUsage = sr.SummarizerUsage
+			det.SummarizerUsage, det.SummarizerModels = sr.SummarizerUsage, sr.SummarizerModels
 			return
 		}
 	}
@@ -2188,10 +2224,11 @@ func (s *Server) scopeSessionDetail(ctx context.Context, det *obsdb.SessionDetai
 // count, first/last seen, summed usage, MAX(agent), and the newest
 // turn's status (by turn, then start), the newest titled turn's title
 // and the first turn's prompt preview and content-off mark. The
-// summarizer usage is row's, carried as is: it is not a turn aggregate
-// (scopeSessionDetail re-reads it when row's scope is wider than pub's).
+// summarizer usage and its per-model split are row's, carried as is:
+// not turn aggregates (scopeSessionDetail re-reads them when row's
+// scope is wider than pub's).
 func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) obsdb.SessionRow {
-	out := obsdb.SessionRow{ID: row.ID, PublicID: pub, SummarizerUsage: row.SummarizerUsage}
+	out := obsdb.SessionRow{ID: row.ID, PublicID: pub, SummarizerUsage: row.SummarizerUsage, SummarizerModels: row.SummarizerModels}
 	var newest, first, titled *obsdb.RunRow
 	later := func(a, b *obsdb.RunRow) bool { // a after b, by turn then start
 		return a.Turn > b.Turn || (a.Turn == b.Turn && a.Started.After(b.Started))

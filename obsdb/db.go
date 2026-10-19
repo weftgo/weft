@@ -238,6 +238,10 @@ type RunQuery struct {
 	// Generates. Pair it with ParentRunID "*" — a caller-linked run is
 	// top-level by ParentRunID.
 	CallerRunID string
+	// SessionIDs keeps the runs of any of these sessions (nil any; with
+	// SessionID both apply): one read for a set of sessions — Studio
+	// prices a level of delegated sessions with one.
+	SessionIDs []string
 	// TurnBelow and TurnAbove keep the runs whose RunRow.Turn is below
 	// / above them (0 = no bound): with SessionID, a turn's neighbours —
 	// TurnBelow N, Limit 1 the newest-started turn before N, and the

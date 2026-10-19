@@ -570,7 +570,7 @@ metadata and always rides. A resumed call's `execute_tool` span names
 who approved it — `weft.tool.approved_by` `user`, `grant` (with
 `weft.grant.id`), `approver`, `quorum` or `policy` (`weft.ApproveBy`).
 The file stays the record: the exported copy
-is an index, not evidence (ADR 0021 §5), and an Observability
+is an index, not evidence (ADR 0021, amendment 2026-10-19), and an Observability
 destination that drops one changes nothing the session does.
 
 What the module logs on its own. Through the agent's logger

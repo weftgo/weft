@@ -32,10 +32,13 @@ import (
 // span is ended even when an attribute call on it panicked: End is
 // contained on its own.
 
-// The provider kinds a run warns about, as bits of recorder.warned.
+// The provider kinds a run warns about, as bits of recorder.warned —
+// and coreRecords, core's own building of a record (not a provider's
+// call: recorder.contained tells the two apart).
 const (
 	providerTraces uint32 = 1 << iota
 	providerLogs
+	coreRecords
 )
 
 func providerKindName(kind uint32) string {
@@ -70,6 +73,31 @@ func (r *recorder) providerPanicked(ctx context.Context, kind uint32, p any) {
 		return
 	}
 	r.obs.warnProvider(ctx, r.runID, kind, p)
+}
+
+// coreRecordsPanicked counts a panic out of core's own building of a
+// record (a body or attribute set the provider never saw) and, the
+// first time this run sees one, leaves one Warn line naming it as
+// weft's, never the logger provider's: the record is dropped, the run
+// goes on.
+func (r *recorder) coreRecordsPanicked(ctx context.Context, what string, p any) {
+	if r == nil {
+		return
+	}
+	r.countPanic()
+	if r.warned.Or(coreRecords)&coreRecords != 0 || r.obs == nil {
+		return
+	}
+	func() {
+		defer func() { _ = recover() }()
+		attrs := []slog.Attr{slog.String("record", what), slog.String("panic", fmt.Sprintf("%T", p))}
+		if r.runID != "" {
+			attrs = append([]slog.Attr{slog.String(logRun, r.runID)}, attrs...)
+		}
+		r.obs.logger().LogAttrs(ctx, slog.LevelWarn,
+			"weft could not build a record (a weft bug); contained, the record dropped (later panics this run are counted, not logged)",
+			attrs...)
+	}()
 }
 
 // warnProvider writes the one Warn line: the run, the provider kind and

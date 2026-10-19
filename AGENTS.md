@@ -546,7 +546,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    held for that run; still held at Close → emitted held:true, under no run when none), decided under the
 //    session lock and emitted by one goroutine per Session (never under the lock; Close waits), ids/enums/counts always, who/reasons/texts under the body's "content" (the agent's
 //    Content, else the destination's policy; weft/otel strips it, otel.ContentThread for Redact); label names
-//    are metadata. An index, not evidence (ADR 0021 §5); the timeline that reads them is U12.2's.
+//    are metadata. An index, not evidence (ADR 0021, amendment 2026-10-19); the timeline that reads them is U12.2's.
 //    Approvals (ADR 0021): s.Pending(); s.Decide(ctx, thread.Approve(id) | Deny | Resolve | ResolveError |
 //    ApproveAlways) → auto-resume (turn.Next()) or s.Resume(ctx); s.Grant, s.Revoke, thread.WithApprover(a,
 //    timeout), Quorum(n), RequestExpiry(d), OnRequest(fn), s.Audit(). Signed: NewKeyring + WithKeyring (+

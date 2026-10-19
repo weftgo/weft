@@ -189,6 +189,16 @@ func runsInner(q obsdb.RunQuery) (string, []any) {
 	if q.PublicID != "" {
 		eq("PublicID", q.PublicID)
 	}
+	if len(q.SessionIDs) > 0 {
+		// eq's narrow over the set: the runs with a row of one of the
+		// sessions, the collapsed rows held to them.
+		in := " IN (" + placeholders(len(q.SessionIDs)) + ")"
+		narrow = append(narrow, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID"+in+")")
+		conds = append(conds, "SessionID"+in)
+		for _, id := range q.SessionIDs {
+			narrowArgs, args = append(narrowArgs, id), append(args, id)
+		}
+	}
 	if q.CallerRunID != "" {
 		eq("CallerRunID", q.CallerRunID)
 	}
@@ -1488,15 +1498,28 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		// grouped. The narrow reads those sessions' runs by
 		// idx_weft_session_id before the collapse; the cond holds the
 		// collapsed rows to them.
+		// The collapse reads only the runs one of whose rows carries
+		// every pair (the inner WHERE): the collapsed Meta is one row's
+		// (max), so that set holds every run the outer match keeps.
+		keys := slices.Sorted(maps.Keys(q.Meta))
+		var targs []any
+		inner := ""
+		for i, k := range keys {
+			if i > 0 {
+				inner += " AND "
+			}
+			inner += "JSONHas(Meta, ?) AND JSONExtractString(Meta, ?) = ?"
+			targs = append(targs, k, k, q.Meta[k])
+		}
 		tagged := "SELECT SessionID FROM (SELECT RunId, max(SessionID) AS SessionID, max(Meta) AS Meta, max(PublicID) AS PublicID," +
 			" max(ParentRunID) AS ParentRunID, max(CallerRunID) AS CallerRunID, max(Turn) AS Turn, max(Playground) AS Playground" +
-			" FROM weft_runs GROUP BY RunId) WHERE SessionID != '' AND Playground = 0 AND " + ownTurnCH
-		var targs []any
+			" FROM weft_runs WHERE RunId IN (SELECT t.RunId FROM weft_runs AS t WHERE " + inner + ")" +
+			" GROUP BY RunId) WHERE SessionID != '' AND Playground = 0 AND " + ownTurnCH
 		if q.PublicID != "" {
 			tagged += " AND PublicID = ?"
 			targs = append(targs, q.PublicID)
 		}
-		for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
+		for _, k := range keys {
 			tagged += " AND JSONHas(Meta, ?) AND JSONExtractString(Meta, ?) = ?"
 			targs = append(targs, k, k, q.Meta[k])
 		}

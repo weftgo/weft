@@ -250,8 +250,7 @@ func (e *inputError) Unwrap() error { return ErrInvalidToolInput }
 // inputErrorKind names the weft.tool.input_error of a tool error, ""
 // when it is not an INVALID_INPUT failure the loop decoded.
 func inputErrorKind(err error) string {
-	var ie *inputError
-	if errors.As(err, &ie) {
+	if ie, ok := errors.AsType[*inputError](err); ok {
 		return ie.kind
 	}
 	return ""

@@ -444,8 +444,20 @@ func TestAbandonedSendNamesNoBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// turn.Wait returns once the run is decided, a moment before the
+	// Session is idle: a Send in that window meets a busy Session and
+	// writes a queue receipt instead of its prompt, so the predicate,
+	// keyed on the prompt, would arm too late. Each failing Send waits
+	// for idle first.
+	idle := func() {
+		t.Helper()
+		if err := s.WaitIdle(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
 	r1 := recSendWait(t, s, "Plan Lisbon.")
 	after := s.Leaf()
+	idle()
 	failNext("Fails.")
 	if _, err := s.Send(ctx, core.User("Fails.")); err == nil {
 		t.Fatal("Send with a refused prompt flush succeeded")
@@ -458,6 +470,7 @@ func TestAbandonedSendNamesNoBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	r3 := recSendWait(t, s, "Seville instead.")
+	idle()
 	failNext("Fails again.")
 	if _, err := s.Send(ctx, core.User("Fails again.")); err == nil {
 		t.Fatal("Send with a refused prompt flush succeeded")

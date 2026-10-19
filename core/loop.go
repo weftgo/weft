@@ -1573,10 +1573,11 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handle
 		if def.approval || parkSet.parks(def.Name, a.hasOutput && def.Name == outputToolName) {
 			if c, _ := CallFromContext(ctx); !c.Approved {
 				if mark != nil {
-					mark.parkedBy = parkByApproval
+					by := parkByApproval
 					if !def.approval {
-						mark.parkedBy = parkSet.parkedBy(def.Name, a.hasOutput && def.Name == outputToolName)
+						by = parkSet.parkedBy(def.Name, a.hasOutput && def.Name == outputToolName)
 					}
+					mark.park(by)
 				}
 				return "", fmt.Errorf("%w: tool %q", ErrApprovalRequired, call.Name)
 			}
@@ -1597,7 +1598,7 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handle
 			}
 		}()
 		out, err := def.invoke(ctx, call.Args, strict)
-		mark.err = err
+		mark.returning(err)
 		return out, err
 	}
 	c := base
@@ -1645,19 +1646,21 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, p
 	}
 	defer func() { res.Content, cut = capResultN(res.Content, resultCap) }()
 
-	// mark belongs to this call's chain alone: the goroutine that runs
-	// the chain writes it and the same goroutine's recover reads it.
+	// mark belongs to this call's chain alone, but not to one goroutine:
+	// a middleware may call next more than once at a time (hedging) or
+	// abandon it on a deadline of its own while the handler returns
+	// late, so every field is read and written under its lock.
 	mark := new(handlerMark)
 	fn := a.chain(def, strict, parkSet, mark)
 	var out string
 	if timeout <= 0 {
-		out, fail = invokeContained(ctx, fn, call, mark)
+		out, fail = invokeContained(ctx, fn, call, mark, nil)
 	} else {
 		out, fail = invokeWithTimeout(ctx, fn, call, timeout, mark)
 	}
 	if fail.err != nil {
 		if fail.park {
-			park = mark.parkedBy
+			park = mark.parked()
 			if park == "" {
 				park = parkByMiddleware
 			}
@@ -1685,6 +1688,12 @@ type toolFailure struct {
 	// errors.As so a middleware's counts like a handler's (the chain's
 	// outcome is what the loop sees).
 	park, deadline, retry bool
+	// expired: the error matched context.DeadlineExceeded after the
+	// call's own Timeout had passed (settleToolError's expired). Nothing
+	// else was read — the Timeout path reports the timeout instead, as
+	// it did before any other fact was read (the deadline match comes
+	// first, ahead of the park check).
+	expired bool
 	// text is the result the model sees (Error()).
 	text string
 	// errType, panicLayer and inputKind are the execute_tool span's
@@ -1699,7 +1708,22 @@ type toolFailure struct {
 // and to the middleware otherwise. Read whether or not a span records
 // the call, so the model sees the same result with or without a tracer
 // (observability never changes behaviour, ADR 0016).
-func settleToolError(name string, err error, mark *handlerMark) (f toolFailure) {
+//
+// The attribution has limits, and they are the span's alone (the
+// model-visible result is the same "panicked" text whichever layer it
+// names): the error compared is the last one the handler returned — a
+// middleware that called next more than once is judged against the
+// last call to return — and the comparison is samePanicValue's, so a
+// middleware that builds a new error of the handler's own uncomparable
+// type (a struct holding a slice, say) reads as handler.
+//
+// expired, when not nil, is the Timeout path's question "has the
+// call's own deadline passed while the run's has not?". It is asked
+// first, before the park check and before Error, for an error matching
+// context.DeadlineExceeded: when it answers yes the call timed out, the
+// failure is marked expired and nothing else of the error is read —
+// the order the Timeout path always had (invokeWithTimeout).
+func settleToolError(name string, err error, mark *handlerMark, expired func() bool) (f toolFailure) {
 	defer func() {
 		if p := recover(); p != nil {
 			layer := panicLayerMiddleware
@@ -1709,6 +1733,9 @@ func settleToolError(name string, err error, mark *handlerMark) (f toolFailure) 
 			f = readToolError(&toolPanicError{name: name, value: p, layer: layer})
 		}
 	}()
+	if expired != nil && errors.Is(err, context.DeadlineExceeded) && expired() {
+		return toolFailure{err: err, deadline: true, expired: true}
+	}
 	return readToolError(err)
 }
 
@@ -1716,21 +1743,23 @@ func settleToolError(name string, err error, mark *handlerMark) (f toolFailure) 
 // own errors (a contained panic, a timeout, the run's cancellation) it
 // cannot panic — fmt contains a panic in a panic value's String or
 // Error. Its order is the loop's: the park check, the text, the RETRY
-// code, then the span's facts.
+// code, then the span's facts. Its errors.AsType targets live on the
+// stack (errors.As would box one per target on the heap: an untraced
+// failed call reads every fact too).
 func readToolError(err error) toolFailure {
 	f := toolFailure{err: err, park: errors.Is(err, ErrApprovalRequired)}
 	if f.park {
 		return f
 	}
 	f.text = err.Error()
-	var te *ToolError
-	f.retry = errors.As(err, &te) && te.Code == CodeRetry
+	te, isTE := errors.AsType[*ToolError](err)
+	f.retry = isTE && te.Code == CodeRetry
 	f.deadline = errors.Is(err, context.DeadlineExceeded)
-	f.errType = toolErrorType(err)
-	var pe *toolPanicError
-	if errors.As(err, &pe) {
+	pe, isPE := errors.AsType[*toolPanicError](err)
+	if isPE {
 		f.panicLayer = pe.layer
 	}
+	f.errType = classifyToolError(err, te, isTE, isPE)
 	f.inputKind = inputErrorKind(err)
 	return f
 }
@@ -1784,11 +1813,11 @@ const (
 // Containment sits outside the chain by design: no middleware can turn
 // a panic into a run failure. mark is the chain's handler mark (chain):
 // set when the panic unwound through the handler; nil reads as
-// middleware.
-func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart, mark *handlerMark) (string, toolFailure) {
+// middleware. expired is settleToolError's (nil off the Timeout path).
+func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart, mark *handlerMark, expired func() bool) (string, toolFailure) {
 	out, err := invokeChain(ctx, fn, call, mark)
 	if err != nil {
-		return out, settleToolError(call.Name, err, mark)
+		return out, settleToolError(call.Name, err, mark, expired)
 	}
 	return out, toolFailure{}
 }
@@ -1814,25 +1843,61 @@ func invokeChain(ctx context.Context, fn ToolCaller, call ToolCallPart, mark *ha
 // recovered and re-raised by a middleware — and the middleware's
 // otherwise, including a middleware that recovered the handler's panic
 // and later panicked with a value of its own.
+//
+// The base may run on several goroutines at once — a middleware that
+// calls next twice concurrently (hedging), or one that abandons next on
+// a deadline of its own while the handler returns late — so every field
+// is written and read under mu; the last write wins.
 type handlerMark struct {
+	mu       sync.Mutex
 	panicked bool
 	value    any
 	// parkedBy is the approval boundary's reason when the chain's base
 	// parked the call (parkByApproval, or the park rule's); a parked
 	// call whose base never ran was parked by a middleware.
 	parkedBy string
-	// err is the error the handler returned (nil: none, or it never
-	// returned).
+	// err is the error the handler last returned (nil: none, or it
+	// never returned).
 	err error
 }
 
-func (m *handlerMark) note(p any) { m.panicked, m.value = true, p }
+func (m *handlerMark) note(p any) {
+	m.mu.Lock()
+	m.panicked, m.value = true, p
+	m.mu.Unlock()
+}
 
-// returned reports whether err is the error the handler returned — the
-// layer a panic in its methods belongs to. An uncomparable error value
-// of the handler's type reads as the handler's (samePanicValue's rule).
+func (m *handlerMark) park(by string) {
+	m.mu.Lock()
+	m.parkedBy = by
+	m.mu.Unlock()
+}
+
+func (m *handlerMark) returning(err error) {
+	m.mu.Lock()
+	m.err = err
+	m.mu.Unlock()
+}
+
+// parked is parkedBy, read under the lock.
+func (m *handlerMark) parked() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.parkedBy
+}
+
+// returned reports whether err is the error the handler last returned —
+// the layer a panic in its methods belongs to. An uncomparable error
+// value of the handler's type reads as the handler's (samePanicValue's
+// rule).
 func (m *handlerMark) returned(err error) bool {
-	return m != nil && m.err != nil && samePanicValue(err, m.err)
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	last := m.err
+	m.mu.Unlock()
+	return last != nil && samePanicValue(err, last)
 }
 
 // from reports whether the recovered value p is the handler's panic.
@@ -1840,17 +1905,23 @@ func (m *handlerMark) returned(err error) bool {
 // it reads as the handler's when the handler panicked with one of the
 // same type.
 func (m *handlerMark) from(p any) bool {
-	if m == nil || !m.panicked {
+	if m == nil {
 		return false
 	}
-	tp, tv := reflect.TypeOf(p), reflect.TypeOf(m.value)
+	m.mu.Lock()
+	panicked, value := m.panicked, m.value
+	m.mu.Unlock()
+	if !panicked {
+		return false
+	}
+	tp, tv := reflect.TypeOf(p), reflect.TypeOf(value)
 	if tp != tv {
 		return false
 	}
 	if tp != nil && !tp.Comparable() {
 		return true
 	}
-	return samePanicValue(p, m.value)
+	return samePanicValue(p, value)
 }
 
 // samePanicValue is p == q, true when the comparison itself panics (a
@@ -1878,8 +1949,13 @@ func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, ti
 		fail toolFailure
 	}
 	done := make(chan outcome, 1)
+	// expired is the deadline fact, asked first of an error matching
+	// DeadlineExceeded (settleToolError): a call whose own deadline has
+	// passed timed out, whatever else its error says — parked or not,
+	// and without its Error being read.
+	expired := func() bool { return ctx.Err() == nil && tctx.Err() != nil }
 	go func() {
-		out, fail := invokeContained(tctx, fn, call, mark)
+		out, fail := invokeContained(tctx, fn, call, mark, expired)
 		done <- outcome{out, fail}
 	}()
 	// The timeout and the run's cancellation are core's own errors:
@@ -1892,9 +1968,16 @@ func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, ti
 		// A handler that honoured the deadline returns
 		// DeadlineExceeded itself; name the timeout rather than
 		// echoing the context error. The match was read in the
-		// handler's goroutine, contained (settleToolError).
-		if o.fail.deadline && ctx.Err() == nil && tctx.Err() != nil {
+		// handler's goroutine, contained (settleToolError), before
+		// anything else of the error.
+		if o.fail.deadline && expired() {
 			return "", timedOut()
+		}
+		if o.fail.expired {
+			// The run's own ctx ended between the goroutine's answer
+			// and this one: the error is the call's, read in full now
+			// (contained, as on the goroutine).
+			return o.out, settleToolError(call.Name, o.fail.err, mark, nil)
 		}
 		return o.out, o.fail
 	case <-tctx.Done():

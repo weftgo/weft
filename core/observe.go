@@ -867,7 +867,7 @@ func ctxErrorType(err error) (string, bool) {
 	return "", false
 }
 
-// toolErrorType classifies a tool error result for error.type: the
+// classifyToolError classifies a tool error result for error.type: the
 // ToolError's code when the chain produced one, "timeout" for a
 // timed-out call (the typed error), "panic" for a contained panic in
 // the handler or its middleware (the typed error; weft.panic.layer says
@@ -876,30 +876,34 @@ func ctxErrorType(err error) (string, bool) {
 // ErrorType() string when one in its chain declares it (a convention,
 // like a cancel cause's Kind(): weft/mcp's mcp_transport and
 // mcp_tool_error), and "tool_error" otherwise. The result text never
-// becomes a span attribute (ADR 0016).
-func toolErrorType(err error) string {
-	var te *ToolError
-	if errors.As(err, &te) && te.Code != "" {
+// becomes a span attribute (ADR 0016). te / isTE and isPE are err's
+// *ToolError and *toolPanicError matches, already read by the caller
+// (readToolError). Every target is errors.AsType's, on the stack.
+func classifyToolError(err error, te *ToolError, isTE, isPE bool) string {
+	if isTE && te.Code != "" {
 		return te.Code
 	}
-	var timeout *toolTimeoutError
-	if errors.As(err, &timeout) {
+	if _, ok := errors.AsType[*toolTimeoutError](err); ok {
 		return "timeout"
 	}
-	var pe *toolPanicError
-	if errors.As(err, &pe) {
+	if isPE {
 		return "panic"
 	}
 	if name, ok := ctxErrorType(err); ok {
 		return name
 	}
-	var typed interface{ ErrorType() string }
-	if errors.As(err, &typed) {
+	if typed, ok := errors.AsType[errorTyper](err); ok {
 		if t := typed.ErrorType(); t != "" {
 			return t
 		}
 	}
 	return "tool_error"
+}
+
+// errorTyper is an error declaring its own error.type (classifyToolError).
+type errorTyper interface {
+	error
+	ErrorType() string
 }
 
 // recorder emits the run's OTel log records (ADR 0024): every durable

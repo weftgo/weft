@@ -6609,6 +6609,201 @@ type panicTypeErr struct{}
 func (panicTypeErr) Error() string     { return "typed" }
 func (panicTypeErr) ErrorType() string { panic("panicTypeErr.ErrorType") }
 
+// toolResults maps a run's tool results by tool name.
+func toolResults(res *core.RunResult) map[string]core.ToolResultPart {
+	out := map[string]core.ToolResultPart{}
+	for _, m := range res.Messages {
+		for _, p := range m.Content {
+			if r, ok := p.(core.ToolResultPart); ok {
+				out[r.Name] = r
+			}
+		}
+	}
+	return out
+}
+
+// The chain's handler mark is safe on more than one goroutine
+// (P9-errortype-fix): a middleware that calls next twice at once
+// (hedging) and one that abandons next on a deadline of its own while
+// the handler returns late — its own error's Error panicking — are both
+// race-free under -race, and their results are what rule 1 says: the
+// hedge's first answer, and the contained-panic result attributed to the
+// middleware (the handler's late error is not the one that panicked).
+func TestToolMarkConcurrentCallers(t *testing.T) {
+	t.Run("hedging", func(t *testing.T) {
+		hedge := core.WrapTools(func(next core.ToolCaller) core.ToolCaller {
+			return func(ctx context.Context, call core.ToolCallPart) (string, error) {
+				type answer struct {
+					out string
+					err error
+				}
+				both := make(chan answer, 2)
+				for range 2 {
+					go func() {
+						out, err := next(ctx, call)
+						both <- answer{out, err}
+					}()
+				}
+				first := <-both
+				<-both
+				return first.out, first.err
+			}
+		})
+		ok := core.Tool("ok", "Works.", func(context.Context, struct{}) (string, error) { return "fine", nil })
+		for _, timeout := range []time.Duration{0, time.Minute} {
+			tp := newRecProvider()
+			agt := core.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "ok"}), wefttest.Say("done")),
+				core.Name("a"), hedge, ok, core.Timeout(timeout), core.TracerProvider(tp))
+			res, err := agt.Generate(context.Background(), core.Prompt("x"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := toolResults(res)["ok"]; r.IsError || r.Content != "fine" {
+				t.Errorf("timeout %v: result = %+v, want fine", timeout, r)
+			}
+		}
+	})
+	t.Run("abandoning", func(t *testing.T) {
+		var late sync.WaitGroup
+		defer late.Wait()
+		abandon := core.WrapTools(func(next core.ToolCaller) core.ToolCaller {
+			return func(ctx context.Context, call core.ToolCallPart) (string, error) {
+				release := make(chan struct{})
+				late.Add(1)
+				go func() {
+					defer late.Done()
+					<-release
+					_, _ = next(ctx, call) // returns late, writing the mark
+				}()
+				// The middleware's own deadline passed: it gives up and
+				// lets the handler go as it returns.
+				close(release)
+				return "", panicMsgErr{}
+			}
+		})
+		slow := core.Tool("slow", "Slow.", func(context.Context, struct{}) (string, error) {
+			return "", errors.New("too late")
+		})
+		for _, timeout := range []time.Duration{0, time.Minute} {
+			tp := newRecProvider()
+			agt := core.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "slow"}), wefttest.Say("done")),
+				core.Name("a"), abandon, slow, core.Timeout(timeout), core.TracerProvider(tp))
+			res, err := agt.Generate(context.Background(), core.Prompt("x"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := `tool "slow" panicked: panicMsgErr.Error`
+			if r := toolResults(res)["slow"]; !r.IsError || r.Content != want {
+				t.Errorf("timeout %v: result = %+v, want %q", timeout, r, want)
+			}
+			attrs := tp.find(t, "execute_tool slow").attrsMap()
+			if attrs["error.type"] != "panic" || attrs["weft.panic.layer"] != "middleware" {
+				t.Errorf("timeout %v: error.type %q, weft.panic.layer %q; want panic, middleware", timeout, attrs["error.type"], attrs["weft.panic.layer"])
+			}
+		}
+	})
+}
+
+// deadlineErr matches context.DeadlineExceeded; its Error panics and is
+// counted, so a test can say it was never called.
+type deadlineErr struct{ calls *atomic.Int32 }
+
+func (e deadlineErr) Error() string {
+	e.calls.Add(1)
+	panic("deadlineErr.Error")
+}
+func (deadlineErr) Is(target error) bool { return target == context.DeadlineExceeded }
+
+// The Timeout path reads the deadline fact first (P9-errortype-fix),
+// as it did before P9-errortype read every fact on the tool goroutine:
+// under an expired Timeout, an error matching DeadlineExceeded is the
+// "timed out" result even when it also wraps ErrApprovalRequired (no
+// park), and even when its Error panics (never called). A panicking Is
+// or Error on the Timeout path is still the contained-panic result, the
+// handler's layer; a middleware's own error whose Is panics is the
+// middleware's. Which of the Timeout path's two branches reports an
+// expired call is the scheduler's (the deadline wakes both); the
+// result is the same either way, and TestSettleReadsTheDeadlineFirst
+// pins the handler-returned branch's order deterministically.
+func TestToolTimeoutReadsTheDeadlineFirst(t *testing.T) {
+	waitThen := func(name string, err func(ctx context.Context) error) *core.ToolDef {
+		return core.Tool(name, "Waits.", func(ctx context.Context, _ struct{}) (string, error) {
+			<-ctx.Done()
+			return "", err(ctx)
+		}, core.Timeout(20*time.Millisecond))
+	}
+	fails := func(name string, err error) *core.ToolDef {
+		return core.Tool(name, "Fails.", func(context.Context, struct{}) (string, error) { return "", err },
+			core.Timeout(time.Minute))
+	}
+	var calls atomic.Int32
+	isPanics := core.WrapTools(func(next core.ToolCaller) core.ToolCaller {
+		return func(ctx context.Context, call core.ToolCallPart) (string, error) {
+			out, err := next(ctx, call)
+			if call.Name == "mw_is" {
+				return out, panicIsErr{}
+			}
+			return out, err
+		}
+	})
+	tools := []core.Option{
+		waitThen("park_and_deadline", func(ctx context.Context) error {
+			return fmt.Errorf("%w: %w", core.ErrApprovalRequired, ctx.Err())
+		}),
+		waitThen("deadline_msg_panics", func(context.Context) error { return deadlineErr{calls: &calls} }),
+		fails("msg_panics", panicMsgErr{}),
+		fails("is_panics", panicIsErr{}),
+		fails("mw_is", errors.New("handler's")),
+	}
+	cases := []struct{ tool, want, errType, layer string }{
+		{"park_and_deadline", `tool "park_and_deadline" timed out after 20ms`, "timeout", ""},
+		{"deadline_msg_panics", `tool "deadline_msg_panics" timed out after 20ms`, "timeout", ""},
+		{"msg_panics", `tool "msg_panics" panicked: panicMsgErr.Error`, "panic", "handler"},
+		{"is_panics", `tool "is_panics" panicked: panicIsErr.Is`, "panic", "handler"},
+		{"mw_is", `tool "mw_is" panicked: panicIsErr.Is`, "panic", "middleware"},
+	}
+	for _, traced := range []bool{true, false} {
+		t.Run(fmt.Sprintf("traced=%v", traced), func(t *testing.T) {
+			tp := newRecProvider()
+			var calls []wefttest.Call
+			for _, c := range cases {
+				calls = append(calls, wefttest.Call{Name: c.tool})
+			}
+			opts := append([]core.Option{core.Name("a"), isPanics}, tools...)
+			if traced {
+				opts = append(opts, core.TracerProvider(tp))
+			}
+			agt := core.New(wefttest.Script(wefttest.ToolCalls(calls...), wefttest.Say("done")), opts...)
+			res, err := agt.Generate(context.Background(), core.Prompt("x"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Pending) != 0 {
+				t.Errorf("pending = %v: a timed-out call parked", res.Pending)
+			}
+			results := toolResults(res)
+			for _, c := range cases {
+				if r := results[c.tool]; !r.IsError || r.Content != c.want {
+					t.Errorf("%s: result = %+v, want %q", c.tool, r, c.want)
+				}
+				if !traced {
+					continue
+				}
+				attrs := tp.find(t, "execute_tool "+c.tool).attrsMap()
+				if attrs["error.type"] != c.errType || attrs["weft.panic.layer"] != c.layer {
+					t.Errorf("%s: error.type %q, weft.panic.layer %q; want %q, %q", c.tool, attrs["error.type"], attrs["weft.panic.layer"], c.errType, c.layer)
+				}
+			}
+		})
+	}
+	// The abandoned goroutine may still be settling when Generate
+	// returns, so this catches a regression only when it is quick;
+	// TestSettleReadsTheDeadlineFirst (internal) pins it exactly.
+	if n := calls.Load(); n != 0 {
+		t.Errorf("a timed-out call's Error was called %d times, want never", n)
+	}
+}
+
 // A model error whose own methods panic is the user's, read outside the
 // provider containment (P9-core-panic-fix): it behaves exactly as before
 // the containment (88833750), under a recording tracer — never counted

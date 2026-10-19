@@ -12,6 +12,7 @@ package core_test
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"testing"
 
@@ -74,6 +75,34 @@ func TestWholeRunNoSDKAllocations(t *testing.T) {
 
 func BenchmarkWholeRunNoSDK(b *testing.B) {
 	agt := core.New(alternatingModel{}, allocEcho())
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := agt.Generate(context.Background(), core.Prompt("hello")); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// errFailingTool is allocFail's error: a plain sentinel, so the
+// benchmark measures the loop's settlement of a failed call and not the
+// error's construction.
+var errFailingTool = errors.New("echo is down")
+
+// allocFail is allocEcho's failing twin, under the same name and schema.
+func allocFail() *core.ToolDef {
+	return core.Tool("echo", "Echo.", func(ctx context.Context, in struct {
+		Msg string `json:"msg"`
+	}) (string, error) {
+		return "", errFailingTool
+	})
+}
+
+// BenchmarkFailedToolNoSDK is BenchmarkWholeRunNoSDK with the tool
+// failing: what an untraced failed call costs (P9-errortype-fix — the
+// failed call's facts are read whether or not a span records it, and
+// reading them must not pay a heap box per errors.As target).
+func BenchmarkFailedToolNoSDK(b *testing.B) {
+	agt := core.New(alternatingModel{}, allocFail())
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := agt.Generate(context.Background(), core.Prompt("hello")); err != nil {

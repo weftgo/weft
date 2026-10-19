@@ -55,6 +55,10 @@ export function compactionLine(c: RunCompaction): string {
  * produced the compacted context, so it reads as after this run. */
 export const SESSION_LABEL = "session compaction · after this run"
 
+/** The turn after a session compaction opens with it: it started on
+ * the compacted context (U15.2's card; the panel's turn, U16). */
+export const STARTED_COMPACTED = "started on a compacted context"
+
 /** What "show original" says for a session marker: it carries counts,
  * not a range — the context it replaced is not a seq range of this run. */
 export function sessionNote(c: RunCompaction): string {

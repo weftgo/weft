@@ -28,6 +28,7 @@ export type TitlePlace =
     }
   | { page: "trace"; id: string }
   | { page: "session"; id: string; title?: string; turns?: number }
+  | { page: "conversation"; id: string; turns?: number }
   | { page: "compare"; a?: string; b?: readonly string[] }
   | { page: "playground"; experiment?: string }
   | { page: "experiment"; id: string }
@@ -68,6 +69,10 @@ export function pageTitle(place: TitlePlace): string {
       break
     case "trace":
       parts.push(`trace ${shortId(place.id)}`)
+      break
+    case "conversation":
+      parts.push(`conversation ${shortId(place.id)}`)
+      if (place.turns !== undefined) parts.push(plural(place.turns, "turn"))
       break
     case "session":
       parts.push(

@@ -102,7 +102,12 @@
     {
       "id": "conv_7f3a",
       "agent": "support",
-      "turns": 2
+      "turns": 2,
+      "failed_turns": 1,
+      "outcomes": [
+        "succeeded",
+        "failed"
+      ]
     }
   ]
 }

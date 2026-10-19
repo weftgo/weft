@@ -80,7 +80,7 @@ describe("the panel's compaction marker (A9.2)", () => {
     expect(errors).not.toHaveBeenCalled()
   })
 
-  it("thread's session marker sits at the top of the turn with the token line", async () => {
+  it("thread's session marker sits at the end of the turn with the token line (U16)", async () => {
     const r = baseRoutes()
     r[`runs/${RUN}`] = {
       ...runRow({}),
@@ -91,10 +91,12 @@ describe("the panel's compaction marker (A9.2)", () => {
     const el = await mount()
     const m = $(el, '[data-weft-compaction="session"]')!
     expect(m).not.toBeNull()
-    // Before the first step card: the top of the turn.
+    // After the last step card: the session was compacted after the
+    // turn it is filed under (U16, UX-B-12's panel half).
+    const steps = all(el, "[data-weft-step]")
     expect(
-      m.compareDocumentPosition($(el, "[data-weft-step]")!) &
-        Node.DOCUMENT_POSITION_FOLLOWING
+      m.compareDocumentPosition(steps[steps.length - 1]) &
+        Node.DOCUMENT_POSITION_PRECEDING
     ).toBeTruthy()
     expect(m.textContent).toContain(
       "3 messages compacted into 1 · 2.1k → 1.0k tokens"

@@ -225,6 +225,13 @@ export interface SessionLink {
   search: SessionSearch
 }
 
+/** The conversation page (U16, UX-F-02): a public id's runs. */
+export interface ConversationLink {
+  to: "/conversations/$id"
+  params: { id: string }
+  search: Record<string, never>
+}
+
 export interface TraceSearch {
   /** The selected row's key — the run tree's (lib/waterfall.ts's
    * rowKeys; lib/trace-sel.ts): r:<run>, s<step>:m a model call,
@@ -401,6 +408,7 @@ export interface SettingsLink {
 export type StudioLink =
   | RunLink
   | SessionLink
+  | ConversationLink
   | TraceLink
   | PlaygroundLink
   | CompareLink
@@ -503,6 +511,13 @@ export function rawFromSearch(search: Record<string, unknown>): RawLinkState {
       ? RAW_KINDS.filter((k) => (search.hide as string).split(",").includes(k))
       : []
   return { q, hide, ev: ordinal(search.ev as number | undefined) }
+}
+
+/** conversationLink is a public id's conversation page (U16): every
+ * run carrying it, experiments nested — the page for a public id with
+ * no thread session as much as one with. */
+export function conversationLink(publicId: string): ConversationLink {
+  return { to: "/conversations/$id", params: { id: publicId }, search: {} }
 }
 
 /** sessionLink is a session's page (its timeline). */

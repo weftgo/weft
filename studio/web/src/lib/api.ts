@@ -85,6 +85,12 @@ export interface RunRow extends CostFields, DelegatedCostFields {
   playground: boolean
   experiment_id: string
   forked_from: string
+  /** A session turn's marks on a conversation's runs page (U16; only
+   * when /api/runs was narrowed by public_id or session): the session
+   * compaction markers filed under it (thread compacted after it) and
+   * the sessions its calls delegated. Absent when 0 or not read. */
+  session_compactions?: number
+  delegated_sessions?: number
   /** The parked run this run resumes (weft.resumed_from, core.ResumeOf;
    * U13.1). Absent when it resumes nothing. Its reverse, resumed_by on
    * the parked run, is the status word's link (lib/status.ts). */
@@ -499,7 +505,31 @@ export interface SessionRow extends CostFields {
   parent_turn?: number
   parent_call?: string
   parent_run?: string
+  /** The turns' state over time (U16; obsdb.SessionTurnFacts): the
+   * newest turn's pending calls when it is an open park (the session
+   * awaits a decision); the failed turns, and apart the turns thread's
+   * busy policy ended (never failures); the turns that resume a parked
+   * one; the newest 40 turns' outcomes, oldest first; a forked
+   * session's <origin>#<entry>. Each absent when zero / empty (and all
+   * of them from an older Studio). */
+  pending?: number
+  failed_turns?: number
+  ended_turns?: number
+  resumes?: number
+  outcomes?: TurnOutcome[]
+  forked_from_session?: string
 }
+
+/** One turn's mark on a session row's strip (obsdb.TurnOutcome). */
+export type TurnOutcome =
+  | "succeeded"
+  | "failed"
+  | "running"
+  | "interrupted"
+  | "cancelled"
+  | "ended"
+  | "parked"
+  | "resumed"
 
 /** GET /api/sessions → SessionsPage. */
 export interface SessionsPage {
@@ -2138,6 +2168,11 @@ export interface SessionFilters {
   before?: string
   /** The cursor's tie-breaker (RunsFilters.before_id). */
   before_id?: string
+  /** The turn-state filters (U16, obsdb.SessionQuery): the newest turn
+   * an open park; a failed turn; delegated (child) or forked (fork). */
+  awaiting?: boolean
+  failed?: boolean
+  lineage?: "child" | "fork"
 }
 
 /** GET /api/sessions: one page; next_before (with next_before_id) is
@@ -2149,6 +2184,9 @@ export function fetchSessions(
   if (filters.agent) params.set("agent", filters.agent)
   if (filters.public_id) params.set("public_id", filters.public_id)
   if (filters.q) params.set("q", filters.q)
+  if (filters.awaiting) params.set("awaiting", "1")
+  if (filters.failed) params.set("failed", "1")
+  if (filters.lineage) params.set("lineage", filters.lineage)
   if (filters.before) params.set("before", filters.before)
   if (filters.before && filters.before_id)
     params.set("before_id", filters.before_id)

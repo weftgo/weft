@@ -15,6 +15,12 @@
     "output_tokens": 7
   },
   "first_prompt": "Where is order 42?",
+  "failed_turns": 1,
+  "outcomes": [
+    "succeeded",
+    "failed",
+    "interrupted"
+  ],
   "cost_usd": null,
   "cost_known": false,
   "cost_badge": "unknown",

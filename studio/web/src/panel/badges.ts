@@ -28,6 +28,7 @@ import {
   requestCappedWords,
 } from "../lib/requests"
 import { UNRUN_CALL_REASON } from "../lib/events"
+import { TURN_CHIP } from "../lib/turn-chips"
 import type { Truncation } from "../lib/events"
 import {
   CACHE_HINT,
@@ -294,6 +295,16 @@ export function turnChips(
     )
   } else if (r.experiment_id)
     chip("experiment", `weft.experiment.id = ${r.experiment_id}`, "experiment")
+  // The turn's state marks (U16, UX-B-30; lib/turn-chips.ts): thread
+  // compacted the session after it, the sessions its calls delegated.
+  if (r.session_compactions)
+    chip(TURN_CHIP.compacted, TURN_CHIP.compactedTitle, "compacted")
+  if (r.delegated_sessions)
+    chip(
+      TURN_CHIP.delegated(r.delegated_sessions),
+      TURN_CHIP.delegatedTitle,
+      "delegated"
+    )
   // Settling (U2-fix2): the root is stored, its records may still
   // trail — the run page's header note, its words.
   if (r.settling) chip(SETTLING_WORD, SETTLING_HINT, "settling")

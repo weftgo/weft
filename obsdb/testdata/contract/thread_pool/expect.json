@@ -118,7 +118,10 @@
       "id": "01K00000000000000000000001",
       "agent": "lead",
       "turns": 1,
-      "first_prompt": "What is the answer?"
+      "first_prompt": "What is the answer?",
+      "outcomes": [
+        "succeeded"
+      ]
     },
     {
       "id": "01K00000000000000000000002",
@@ -127,7 +130,10 @@
       "first_prompt": "find the answer",
       "parent_session": "01K00000000000000000000001",
       "parent_call": "call_1",
-      "parent_run": "01K00000000000000000000001-t1"
+      "parent_run": "01K00000000000000000000001-t1",
+      "outcomes": [
+        "succeeded"
+      ]
     }
   ],
   "thread_records": [

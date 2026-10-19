@@ -13,6 +13,7 @@
 // goes anywhere, and the build's table says what it cost.
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
 import {
+  conversationLink,
   href,
   logsLink,
   playgroundLink,
@@ -38,7 +39,13 @@ import {
   SAVE_TEST_LABEL,
   SAVE_TEST_TITLE,
 } from "../lib/saves"
-import { atLeastCost, isScripted, sumRuns, unpricedLine } from "../lib/cost"
+import {
+  atLeastCost,
+  isScripted,
+  summarizerView,
+  sumRuns,
+  unpricedLine,
+} from "../lib/cost"
 import {
   paramFields,
   paramsLine,
@@ -74,6 +81,7 @@ import {
 } from "../lib/honesty"
 import type { HoleMark, ParkedKind } from "../lib/honesty"
 import { AWAITING, FILTER_KEYS, statusOf, turnTag } from "../lib/status"
+import { BUSY_CAUSE, TURN_CHIP } from "../lib/turn-chips"
 import {
   CALLS_HOLE,
   DECIDE_FIELD,
@@ -208,6 +216,7 @@ import {
   replacedBy,
   SESSION_LABEL,
   sessionNote,
+  STARTED_COMPACTED,
 } from "../lib/compaction"
 import {
   depthWord,
@@ -3010,6 +3019,20 @@ export class WeftDevtools extends HTMLElement {
       })
       h.append(a)
     }
+    // The conversation's page in Studio (U16): the session's timeline,
+    // else the public id's conversation page — through the hand-off.
+    const sid = narrowing.session || s.session?.id
+    if (sid || scope) {
+      const a = el("a", "weft-btn", `${sid ? "timeline" : "conversation"} ⤢`, {
+        href: href(this.base, sid ? sessionLink(sid) : conversationLink(scope)),
+        ...NEW_TAB,
+        "data-weft-conv": "",
+      })
+      on(a, "click", (e, n) => {
+        if (this.handoff((n as HTMLAnchorElement).href)) e.preventDefault()
+      })
+      h.append(a)
+    }
     const where = this.lay.mode === "float" ? "float" : `dock ${this.lay.side}`
     const lay = el("button", "weft-btn weft-layout", "⇆", {
       title: `layout: ${where} — next (Alt+Shift+W)`,
@@ -3258,15 +3281,26 @@ export class WeftDevtools extends HTMLElement {
   /** st words a turn (lib/status.ts): a session-scoped list holds every
    * turn newer than a loaded one, so its session turns' resumes were
    * looked for. */
-  private st(r: RunRow) {
-    return statusOf(r, this.last.turns, !!this.last.session)
+  private st(r: RunRow): Status {
+    const t = this.last.turns
+    const c = statusOf(r, t, !!this.last.session)
+    // A newer message ended it (thread's busy policy, U16): neutral,
+    // "✗ by t7" — the next turn, which the newer message started.
+    if (r.cancel_cause !== BUSY_CAUSE) return c
+    const by = nextTurn(r, t)
+    return {
+      ...c,
+      role: "resumed",
+      word: TURN_CHIP.ended(by ? turnTag(by, t) : "a newer message"),
+      hint: TURN_CHIP.endedTitle,
+    }
   }
 
   /** resumeChip is a turn's status chip; a decided park's hands off to
    * its resume (U1-fix, Studio's link): a click selects that turn when
    * loaded — the parked block's "resumed as" is the keyboard path. */
   private resumeChip(c: Status): HTMLElement {
-    const n = el("span", `weft-chip weft-st weft-${c.key}`, c.word, {
+    const n = el("span", `weft-chip weft-st weft-${c.role}`, c.word, {
       title: c.hint,
     })
     const to = c.resumedBy
@@ -3398,8 +3432,16 @@ export class WeftDevtools extends HTMLElement {
       el("span", "", duration(r.started, r.finished) || "…"),
     ])
     // Its cost beside its tokens (A5.3), only where Studio prices usage.
-    if (this.model && hasCapability(this.model.state, "pricing"))
+    if (this.model && hasCapability(this.model.state, "pricing")) {
       row2.insertBefore(turnCost(r), row2.lastChild)
+      // The open turn's summarizer calls, apart (U16, UX-B-13): the
+      // run document serves them; never in the turn's own figure.
+      const open = this.last.turn
+      const sum = summarizerView(
+        open?.id === r.id ? open.doc?.summarizer : null
+      )
+      if (sum) row2.insertBefore(costText(sum), row2.lastChild)
+    }
     row.append(row1, row2)
     // Its accessible name in words (UX-F-32), not every field run
     // together: "turn 3, parked, <title>, 2 steps, 60 in 30 out, 3h ago".
@@ -5266,17 +5308,15 @@ export class WeftDevtools extends HTMLElement {
       card.append(b)
       wrap.append(card)
     }
-    // thread's session markers (A9.2) at the top of the turn they are
-    // filed under; a run from before A9 names none and draws nothing.
-    const comps = compactionsOf(t.doc)
-    for (const c of comps.filter(isSessionMarker))
+    const row = this.rowOf(t.id)
+    // A turn that started on a context thread compacted after the turn
+    // before it (U16, UX-B-12): said where it opens.
+    if (row && prevTurn(row, s.turns)?.session_compactions)
       wrap.append(
-        compactionBox(c, comps, t.transcript, {
-          keys: this.openKeys,
-          scope: t.id,
+        el("div", "weft-note", STARTED_COMPACTED, {
+          "data-weft-compaction": "started",
         })
       )
-    const row = this.rowOf(t.id)
     wrap.append(
       renderFolded(
         withoutDecided(t.folded, t.doc),
@@ -5318,6 +5358,17 @@ export class WeftDevtools extends HTMLElement {
         }
       )
     )
+    // thread's session markers (A9.2) at the end of the turn they are
+    // filed under — the session was compacted after it (U16); a run from
+    // before A9 names none and draws nothing.
+    const comps = compactionsOf(t.doc)
+    for (const c of comps.filter(isSessionMarker))
+      wrap.append(
+        compactionBox(c, comps, t.transcript, {
+          keys: this.openKeys,
+          scope: t.id,
+        })
+      )
     const at = row ?? t.doc
     const kind = parkedKind(at, s.runtimes, nextTurn(at, s.turns))
     const running = (row?.status ?? t.doc?.status) === "running"

@@ -500,7 +500,18 @@
       "agent": "support",
       "turns": 8,
       "title": "Refund desk",
-      "content_off": true
+      "content_off": true,
+      "resumes": 4,
+      "outcomes": [
+        "resumed",
+        "succeeded",
+        "resumed",
+        "succeeded",
+        "resumed",
+        "succeeded",
+        "resumed",
+        "succeeded"
+      ]
     }
   ],
   "thread_records": [

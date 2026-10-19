@@ -23,7 +23,7 @@ import type {
   ToolCallPart,
   Transcript,
 } from "../lib/api"
-import { HOLES, isLive, linkedRun } from "../lib/honesty"
+import { childRun, HOLES, isLive, linkedRun } from "../lib/honesty"
 import { byStep } from "../lib/requests"
 import type { StepRequests } from "../lib/requests"
 import { serializeScope } from "../lib/scope"
@@ -1048,12 +1048,18 @@ export class PanelModel {
               : sessions.sessions[0]) ?? null
         }
       }
-      const page = await fetchRuns(
-        this.ep,
-        this.publicId
-          ? { public_id: this.publicId, limit: String(TURNS_LIMIT) }
-          : { limit: String(DEV_LIMIT) }
-      )
+      // The scope's session first (its own turns); none listed — the
+      // runs carry no session id, said not narrowed below — or no
+      // session named: the public id's list.
+      let page =
+        this.publicId && this.narrowing.session
+          ? await fetchRuns(this.ep, this.listParams()).catch(() => null)
+          : null
+      if (!page?.runs.length)
+        page = await fetchRuns(
+          this.ep,
+          this.publicId ? this.listParams(true) : { limit: String(DEV_LIMIT) }
+        )
       if (seq !== this.loadSeq || this.disposed) return
       const listed: (RunRow | null)[] = Array.isArray(page.runs)
         ? page.runs
@@ -1135,6 +1141,26 @@ export class PanelModel {
     return !want || !r.session_id || r.session_id === want
   }
 
+  /** listParams is the turn list's read: the public id's runs, or —
+   * the scope naming a session, unless byPub — the session's own turns
+   * (U16: a delegated session's turns carry a caller link, and maybe no
+   * public id, and are its turns all the same: runs?session= reads
+   * them so). */
+  private listParams(byPub?: boolean): Record<string, string> {
+    const sid = this.narrowing.session
+    return {
+      ...(sid && !byPub ? { session: sid } : { public_id: this.publicId }),
+      limit: String(TURNS_LIMIT),
+    }
+  }
+
+  /** notTurn: a run a call started is no turn of the list — unless the
+   * scope names a session, whose own turns may carry a caller link (a
+   * delegated session's): then only a child run (childRun) is not. */
+  private notTurn(r: RunRow | RunDoc): boolean {
+    return !!(this.narrowing.session ? childRun(r) : linkedRun(r))
+  }
+
   /** takePin is the scope's run pin: the id to select now — once per
    * run, when it is among the listed ones and the user has not clicked
    * a turn since the last pin — or "". A run that is not listed is
@@ -1179,7 +1205,7 @@ export class PanelModel {
     // id, but it is not a turn:
     // the list is top-level runs (runs?public_id= reads the same way)
     // and the child hangs off its parent's call.
-    if (linkedRun(run)) return
+    if (this.notTurn(run)) return
     // Another session's run is not a turn of the narrowed list.
     if (!this.inSession(run)) return
     for (const c of this.collectors) c.push(run)
@@ -1683,7 +1709,7 @@ export class PanelModel {
     }
     if (this.disposed || !raw || typeof raw !== "object") return "unreachable"
     const doc = raw as RunDoc
-    if (doc.id !== id || linkedRun(doc)) return "foreign"
+    if (doc.id !== id || this.notTurn(doc)) return "foreign"
     if (this.publicId && doc.public_id !== this.publicId) return "foreign"
     if (!this.inSession(doc)) return "foreign"
     // The row, not the document: children and holes stay the view's.
@@ -2675,8 +2701,7 @@ export class PanelModel {
     this.emit()
     try {
       const page = await fetchRuns(this.ep, {
-        public_id: this.publicId,
-        limit: String(TURNS_LIMIT),
+        ...this.listParams(),
         before: c.before,
         ...(c.id ? { before_id: c.id } : {}),
       })

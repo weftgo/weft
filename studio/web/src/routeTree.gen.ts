@@ -15,6 +15,7 @@ import { Route as LiveRouteImport } from './routes/live'
 import { Route as PlaygroundRouteImport } from './routes/playground'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as ConversationsIdRouteImport } from './routes/conversations.$id'
 import { Route as ExperimentsIndexRouteImport } from './routes/experiments.index'
 import { Route as ExperimentsIdRouteImport } from './routes/experiments.$id'
 import { Route as RunsIndexRouteImport } from './routes/runs.index'
@@ -52,6 +53,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/agents/',
   path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConversationsIdRoute = ConversationsIdRouteImport.update({
+  id: '/conversations/$id',
+  path: '/conversations/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ExperimentsIndexRoute = ExperimentsIndexRouteImport.update({
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/live': typeof LiveRoute
   '/playground': typeof PlaygroundRoute
   '/settings': typeof SettingsRoute
+  '/conversations/$id': typeof ConversationsIdRoute
   '/experiments/$id': typeof ExperimentsIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/sessions/$id': typeof SessionsIdRoute
@@ -117,6 +124,7 @@ export interface FileRoutesByTo {
   '/live': typeof LiveRoute
   '/playground': typeof PlaygroundRoute
   '/settings': typeof SettingsRoute
+  '/conversations/$id': typeof ConversationsIdRoute
   '/experiments/$id': typeof ExperimentsIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/sessions/$id': typeof SessionsIdRoute
@@ -134,6 +142,7 @@ export interface FileRoutesById {
   '/live': typeof LiveRoute
   '/playground': typeof PlaygroundRoute
   '/settings': typeof SettingsRoute
+  '/conversations/$id': typeof ConversationsIdRoute
   '/experiments/$id': typeof ExperimentsIdRoute
   '/runs/$id': typeof RunsIdRoute
   '/sessions/$id': typeof SessionsIdRoute
@@ -152,6 +161,7 @@ export interface FileRouteTypes {
     | '/live'
     | '/playground'
     | '/settings'
+    | '/conversations/$id'
     | '/experiments/$id'
     | '/runs/$id'
     | '/sessions/$id'
@@ -168,6 +178,7 @@ export interface FileRouteTypes {
     | '/live'
     | '/playground'
     | '/settings'
+    | '/conversations/$id'
     | '/experiments/$id'
     | '/runs/$id'
     | '/sessions/$id'
@@ -184,6 +195,7 @@ export interface FileRouteTypes {
     | '/live'
     | '/playground'
     | '/settings'
+    | '/conversations/$id'
     | '/experiments/$id'
     | '/runs/$id'
     | '/sessions/$id'
@@ -201,6 +213,7 @@ export interface RootRouteChildren {
   LiveRoute: typeof LiveRoute
   PlaygroundRoute: typeof PlaygroundRoute
   SettingsRoute: typeof SettingsRoute
+  ConversationsIdRoute: typeof ConversationsIdRoute
   ExperimentsIdRoute: typeof ExperimentsIdRoute
   RunsIdRoute: typeof RunsIdRoute
   SessionsIdRoute: typeof SessionsIdRoute
@@ -254,6 +267,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/conversations/$id': {
+      id: '/conversations/$id'
+      path: '/conversations/$id'
+      fullPath: '/conversations/$id'
+      preLoaderRoute: typeof ConversationsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/experiments/': {
@@ -321,6 +341,7 @@ const rootRouteChildren: RootRouteChildren = {
   LiveRoute: LiveRoute,
   PlaygroundRoute: PlaygroundRoute,
   SettingsRoute: SettingsRoute,
+  ConversationsIdRoute: ConversationsIdRoute,
   ExperimentsIdRoute: ExperimentsIdRoute,
   RunsIdRoute: RunsIdRoute,
   SessionsIdRoute: SessionsIdRoute,

@@ -378,7 +378,17 @@
       "id": "01K00000000000000000000001",
       "agent": "warroom",
       "turns": 7,
-      "first_prompt": "Check the current rps."
+      "first_prompt": "Check the current rps.",
+      "ended_turns": 2,
+      "outcomes": [
+        "succeeded",
+        "succeeded",
+        "succeeded",
+        "ended",
+        "succeeded",
+        "ended",
+        "succeeded"
+      ]
     }
   ],
   "thread_records": [

@@ -1219,6 +1219,40 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 			hargs = append(append(append(append(hargs, targs...), t), pargs...), t, t, t, t)
 		}
 	}
+	// The turn-state filters (U16): obsdb.SessionTurnFacts' rule over
+	// the scoped turns, in SQL.
+	if q.Failed {
+		having = append(having, `SUM(CASE WHEN failed = 1 AND cancel_cause <> ? THEN 1 ELSE 0 END) > 0`)
+		hargs = append(hargs, obsdb.BusyCancelCause)
+	}
+	if q.Awaiting {
+		// The newest turn (sessionRowsSQL's status read) an open park:
+		// succeeded, pending calls, no resumer (resumedByColumn's rule).
+		pubScope := ""
+		if q.PublicID != "" {
+			pubScope = ` AND r7.public_id = ? AND r7.public_id <> ''`
+		}
+		having = append(having, `COALESCE((SELECT r7.failed = 0 AND (r7.finished_ok = 1 OR r7.root_ended = 1) AND r7.pending > 0
+			AND NOT EXISTS (SELECT 1 FROM runs AS rb WHERE rb.resumed_from = r7.run_id AND rb.resumed_from <> '')
+			FROM runs r7 WHERE r7.session_id = runs.session_id AND r7.session_id <> '' AND `+ownTurn("r7")+` AND r7.playground = 0`+pubScope+`
+			ORDER BY r7.turn DESC, r7.started_ns DESC, r7.run_id DESC LIMIT 1), 0) = 1`)
+		if q.PublicID != "" {
+			hargs = append(hargs, q.PublicID)
+		}
+	}
+	switch q.Lineage {
+	case "":
+	case obsdb.LineageChild:
+		having = append(having, `COALESCE(MAX(`+sessionParentExpr("runs")+`), '') <> ''`)
+	case obsdb.LineageFork:
+		having = append(having, `COALESCE(MAX(json_extract(runs.meta, '$."`+obsdb.SessionForkedFromKey+`"')), '') <> ''`)
+	default:
+		having = append(having, `0`)
+	}
+	if !q.Since.IsZero() {
+		having = append(having, "MAX(last_seen_ns) >= ?")
+		hargs = append(hargs, q.Since.UnixNano())
+	}
 	scope, sargs := sessionScope, []any(nil)
 	if q.PublicID != "" {
 		scope += ` AND public_id = ? AND public_id <> ''`
@@ -1298,7 +1332,41 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		end := page.Sessions[len(page.Sessions)-1]
 		page.NextBefore, page.NextBeforeID = &end.LastSeen, end.ID
 	}
+	if err := d.fillTurnFacts(ctx, page.Sessions, q.PublicID, time.Unix(0, cutoff).Add(obsdb.InterruptedAfter)); err != nil {
+		return obsdb.SessionPage{}, err
+	}
 	return page, nil
+}
+
+// fillTurnFacts sets each session row's turn facts
+// (obsdb.SessionTurnFacts) from its own turns — the grouping's scope,
+// pub's turns when set — read as run rows in one query for the page,
+// their statuses on the page's clock (now).
+func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub string, now time.Time) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(rows)+1)
+	for _, r := range rows {
+		args = append(args, r.ID)
+	}
+	where := `session_id IN (?` + strings.Repeat(",?", len(rows)-1) + `) AND ` + sessionScope
+	if pub != "" {
+		where += ` AND public_id = ? AND public_id <> ''`
+		args = append(args, pub)
+	}
+	turns, err := d.queryRunRows(ctx, where, args, now)
+	if err != nil {
+		return err
+	}
+	by := map[string][]obsdb.RunRow{}
+	for _, t := range turns {
+		by[t.SessionID] = append(by[t.SessionID], t)
+	}
+	for i := range rows {
+		obsdb.SessionTurnFacts(&rows[i], by[rows[i].ID])
+	}
+	return nil
 }
 
 // sessionTitleExpr is a grouped session's title (SessionRow.Title):
@@ -1559,6 +1627,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	if err != nil {
 		return obsdb.SessionDetail{}, err
 	}
+	obsdb.SessionTurnFacts(&rows[0], runs)
 	return obsdb.SessionDetail{SessionRow: rows[0], Runs: runs}, nil
 }
 

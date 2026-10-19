@@ -138,6 +138,17 @@ type runRow struct {
 	Playground   bool           `json:"playground"`
 	ExperimentID string         `json:"experiment_id"`
 	ForkedFrom   string         `json:"forked_from"`
+	// SessionCompactions and DelegatedSessions are a session turn's
+	// marks on a conversation's runs list (U16, UX-B-30: the devtools
+	// panel's ⌗ and ↳ chips, read with the page so the panel needs no
+	// per-turn fetch): the session compaction markers filed under the
+	// turn (thread compacted after it — the session_events index,
+	// obsdb.SessionEventReader) and the sessions its calls delegated
+	// (SessionQuery.Parents' rows naming it as ParentRun). Only on a
+	// /api/runs page narrowed by public_id or session (at most
+	// turnMarksSessions sessions read); each absent when 0 or not read.
+	SessionCompactions int `json:"session_compactions,omitempty"`
+	DelegatedSessions  int `json:"delegated_sessions,omitempty"`
 	// ResumedFrom is the parked run this run resumes (its
 	// weft.resumed_from, core.ResumeOf) and ResumedBy, on a parked run,
 	// the run that resumed it (obsdb.RunRow; docs/record-contract.md
@@ -761,6 +772,22 @@ type sessionRow struct {
 	// captured)" for an untitled row instead of its id. Absent when
 	// false.
 	ContentOff bool `json:"content_off,omitempty"`
+	// The turns' state over time (U16; obsdb.SessionTurnFacts): pending
+	// is the newest turn's pending calls when it is an open park (the
+	// session awaits a decision; the status chip reads parked, as a
+	// run row's); failed_turns the failed turns and ended_turns, apart,
+	// the turns thread's busy policy ended (interrupt / rollback, never
+	// a failure); resumes the turns that resume a parked one (turns -
+	// resumes exchanges); outcomes the newest 40 turns' marks, oldest
+	// first (succeeded · failed · running · interrupted · cancelled ·
+	// ended · parked · resumed); forked_from_session a forked session's
+	// <origin>#<entry>. Each absent when zero / empty.
+	Pending     int      `json:"pending,omitempty"`
+	FailedTurns int      `json:"failed_turns,omitempty"`
+	EndedTurns  int      `json:"ended_turns,omitempty"`
+	Resumes     int      `json:"resumes,omitempty"`
+	Outcomes    []string `json:"outcomes,omitempty"`
+	ForkedFrom  string   `json:"forked_from_session,omitempty"`
 	// ParentSession, ParentTurn, ParentCall and ParentRun are a
 	// delegated session's lineage (thread/pool, ADR 0022;
 	// obsdb.SessionRow, U14): the session that delegated it, the
@@ -795,7 +822,18 @@ func sessRow(r obsdb.SessionRow) sessionRow {
 		Title: r.Title, FirstPrompt: r.FirstPrompt, ContentOff: r.ContentOff,
 		ParentSession: r.ParentSession, ParentTurn: turnOf(r.ParentSession, r.ParentRun),
 		ParentCall: r.ParentCall, ParentRun: r.ParentRun,
+		Pending: r.Pending, FailedTurns: r.FailedTurns, EndedTurns: r.EndedTurns,
+		Resumes: r.Resumes, Outcomes: outcomeWords(r.Outcomes), ForkedFrom: r.ForkedFrom,
 	}
+}
+
+// outcomeWords is a session row's strip as JSON strings.
+func outcomeWords(os []obsdb.TurnOutcome) []string {
+	out := make([]string, len(os))
+	for i, o := range os {
+		out[i] = string(o)
+	}
+	return out
 }
 
 // turnOf is n when run is session's <session>-t<n> (thread's id rule),
@@ -995,6 +1033,9 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range page.Runs {
 		out.Runs = append(out.Runs, c.row(rec))
 	}
+	if query.PublicID != "" || query.SessionID != "" {
+		s.turnMarks(r.Context(), out.Runs, panelPublicID(r))
+	}
 	// The cursor is the database's own: it knows whether the page was
 	// cut at its limit. Counting rows here cannot — a page may exceed
 	// the limit by the runs tied on the cursor time (they ride along so
@@ -1009,6 +1050,70 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, r, http.StatusOK, out)
+}
+
+// turnMarksSessions bounds the sessions one runs page reads turn marks
+// for: a conversation's page holds one or a few.
+const turnMarksSessions = 5
+
+// turnMarks fills a conversation page's session turns' marks
+// (runRow.SessionCompactions, DelegatedSessions; U16): per session on
+// the page (the first turnMarksSessions), one read of its compaction
+// markers under the page's turns and one of the sessions it delegated
+// — pub, a panel token's public id, scopes both. A read that fails
+// leaves the marks absent (a chip not drawn, never a wrong one).
+func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) {
+	bySession := map[string][]int{}
+	var order []string
+	for i, r := range rows {
+		if r.SessionID == "" {
+			continue
+		}
+		if _, ok := bySession[r.SessionID]; !ok {
+			if len(order) == turnMarksSessions {
+				continue
+			}
+			order = append(order, r.SessionID)
+		}
+		bySession[r.SessionID] = append(bySession[r.SessionID], i)
+	}
+	if len(order) == 0 {
+		return
+	}
+	byID := map[string]int{}
+	for _, idx := range bySession {
+		for _, i := range idx {
+			byID[rows[i].ID] = i
+		}
+	}
+	if er, ok := s.db.(obsdb.SessionEventReader); ok {
+		for _, sid := range order {
+			ids := make([]string, 0, len(bySession[sid]))
+			for _, i := range bySession[sid] {
+				ids = append(ids, rows[i].ID)
+			}
+			page, err := er.SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: sid, PublicID: pub, RunIDs: ids, Limit: obsdb.MaxSessionEventLimit})
+			if err != nil {
+				slog.DebugContext(ctx, "studio: a page's compaction marks could not be read", "session", sid, "err", err)
+				continue
+			}
+			for _, ev := range page.Events {
+				if i, ok := byID[ev.RunID]; ok && ev.Kind == obsdb.RecordCompaction {
+					rows[i].SessionCompactions++
+				}
+			}
+		}
+	}
+	kids, err := s.db.Sessions(ctx, obsdb.SessionQuery{Parents: order, PublicID: pub, Limit: 500})
+	if err != nil {
+		slog.DebugContext(ctx, "studio: a page's delegated sessions could not be read", "err", err)
+		return
+	}
+	for _, k := range kids.Sessions {
+		if i, ok := byID[k.ParentRun]; ok {
+			rows[i].DelegatedSessions++
+		}
+	}
 }
 
 // statusParam is the one status parser of /api/runs and /api/search
@@ -1794,7 +1899,8 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveSessions answers api/sessions (S4.2): public_id and agent
-// filters, q (obsdb.SessionQuery.Q: every term in the title, the first
+// filters, awaiting / failed / lineage / since (obsdb.SessionQuery's
+// turn-state filters, U16), q (obsdb.SessionQuery.Q: every term in the title, the first
 // turn's prompt, the id, the public id or the agent), tag.<k>=<v>
 // (obsdb.SessionQuery.Meta: the sessions one of whose own turns carries
 // every pair — thread.WithRunMetadata's tags; U12.2, D6), before (RFC
@@ -1818,6 +1924,36 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		query.Before = t
 		query.BeforeID = q.Get("before_id")
+	}
+	// The turn-state filters (U16, UX-B-28): awaiting / failed
+	// booleans, lineage child|fork, since (RFC 3339, on last-seen).
+	for _, f := range []struct {
+		key string
+		dst *bool
+	}{{"awaiting", &query.Awaiting}, {"failed", &query.Failed}} {
+		if v := q.Get(f.key); v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				badRequest(w, r, f.key+" must be true or false (1 or 0)")
+				return
+			}
+			*f.dst = b
+		}
+	}
+	switch v := q.Get("lineage"); v {
+	case "", obsdb.LineageChild, obsdb.LineageFork:
+		query.Lineage = v
+	default:
+		badRequest(w, r, "lineage must be child or fork")
+		return
+	}
+	if v := q.Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			badRequest(w, r, "since must be RFC 3339: "+err.Error())
+			return
+		}
+		query.Since = t
 	}
 	if n, ok := limitParam(w, r, q); !ok {
 		return
@@ -2098,6 +2234,14 @@ func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) ob
 	if titled != nil {
 		out.Title = titled.Meta[obsdb.SessionTitleKey]
 	}
+	// The turn facts (U16) over the same turns: the database's rule.
+	scoped := make([]obsdb.RunRow, 0, out.Turns)
+	for _, t := range turns {
+		if t.PublicID == pub {
+			scoped = append(scoped, t)
+		}
+	}
+	obsdb.SessionTurnFacts(&out, scoped)
 	return out
 }
 

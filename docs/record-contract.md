@@ -983,6 +983,30 @@ ClickHouse the collapsed row's `meta`, `RunQuery.Meta`'s rule): it
 selects sessions, never turns — a listed session is grouped over all
 its turns, tagged or not.
 
+A session row's **turn facts** (U16, `obsdb.SessionTurnFacts`, read
+time over the same turns as the rest of the row, scoped alike) say its
+state over time. Each turn has an outcome (`obsdb.OutcomeOf`): a
+`failed` turn whose `cancel_cause` is `thread.interrupted`
+(`obsdb.BusyCancelCause`: thread's Interrupt or Rollback busy policy
+cancelled it) is `ended`, never a failure; else a `failed` turn with
+`error_type` `cancelled` is `cancelled`; a `succeeded` turn with
+`pending` > 0 is `parked`, or `resumed` once a run's `resumed_from`
+names it (`resumed_by`); else its `status`. `outcomes` is the newest 40
+(`obsdb.MaxOutcomes`), oldest first; `failed_turns` counts the `failed`
+turns that are not `ended`, `ended_turns` the `ended` ones; `resumes`
+the turns with a `resumed_from` (so `turns - resumes` is the session's
+exchanges); `pending` is the newest turn's `pending` when it is
+`parked` — the session awaits a decision — else 0; `forked_from` the
+`weft.session.forked_from` (`<origin>#<entry>`) a turn carries. Each is
+omitted when zero or empty but `outcomes`. `SessionQuery`'s
+`Awaiting` (`pending` > 0), `Failed` (`failed_turns` > 0), `Lineage`
+(`child`: `parent_session` set; `fork`: `forked_from` set) and `Since`
+(last seen at or after it) state the same rules in SQL (Studio's
+`/api/sessions?awaiting=&failed=&lineage=&since=`); the fixtures'
+`sessions` and the `SessionTurnFacts` conformance case pin them
+(`thread_busy`: two `ended`, none failed; `thread_approvals`: four
+`resumed`).
+
 **A session's state log** (U12.2, D6, A3) is read from the
 `session_events` index, never from the runs' records: every `thread`
 record and `compaction` marker (§4) carrying a `weft.session.id`,

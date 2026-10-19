@@ -60,6 +60,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("SessionPaging", sessionPaging(open))
 	t.Run("SessionsScoped", sessionsScoped(open))
 	t.Run("SessionTitles", sessionTitles(open))
+	t.Run("SessionTurnFacts", sessionTurnFacts(open))
 	t.Run("EmptyIdentity", emptyIdentity(open))
 	t.Run("TranscriptRebuilt", transcriptRebuilt(open))
 	t.Run("TranscriptSteps", transcriptSteps(open))

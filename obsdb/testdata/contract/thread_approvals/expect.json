@@ -484,7 +484,18 @@
       "agent": "support",
       "turns": 8,
       "title": "Refund desk",
-      "first_prompt": "Refund A-1002 in full, please."
+      "first_prompt": "Refund A-1002 in full, please.",
+      "resumes": 4,
+      "outcomes": [
+        "resumed",
+        "succeeded",
+        "resumed",
+        "succeeded",
+        "resumed",
+        "succeeded",
+        "resumed",
+        "succeeded"
+      ]
     }
   ],
   "thread_records": [

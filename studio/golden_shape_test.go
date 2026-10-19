@@ -209,8 +209,11 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// The fixture's s_orders holds a thread summarizer span (§3); this
 		// run summarized nothing, so its sessions carry no summarizer_usage
 		// (TestSessionSummarizerUsage pins it from obsdb, scoped and not).
-		{"sessions.golden.json", "/api/sessions", []string{".sessions[].cost_usd=<nil>", ".sessions[].summarizer_usage"}},
-		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".summarizer_usage"}},
+		// The fixture's s_orders failed a turn; this run failed none, so its
+		// sessions carry no failed_turns (U16; the SessionTurnFacts
+		// conformance case pins the counts on every backend).
+		{"sessions.golden.json", "/api/sessions", []string{".sessions[].cost_usd=<nil>", ".sessions[].summarizer_usage", ".sessions[].failed_turns"}},
+		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".summarizer_usage", ".failed_turns"}},
 		{"public.golden.json", "/api/public/pub_x", nil},
 		{"session-public-id.golden.json", "/api/sessions/s_x/public_id", nil},
 		// The step goldens are recorded from TestStepRoute's real run;

@@ -240,7 +240,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    rule: a read token 403 hidden; the run document carries manifest_available: true when its hash resolves),
 //    //    runs (+status — running|succeeded|failed|interrupted and the read-time parked (open parks: pending, no resumer)|cancelled, one parser with search's, any other word a 400 (I3) — +session/public/playground/experiment_id/stopped_by/error_type/id_prefix filters — stopped_by exact, or a
 //    //    prefix ending ":" (has_tool_call:); id_prefix the runs whose id starts with it, byte for byte (obsdb.RunQuery.IDPrefix,
-//    //    both backends; the ⌘K palette's lookup of a pasted short id); turn_below / turn_above (obsdb.RunQuery.TurnBelow /
+//    //    both backends; the ⌘K palette's lookup of a pasted short id); session_compactions / delegated_sessions on a page narrowed by public_id or session (U16: a turn's session compaction markers and the sessions its calls delegated — the panel's ⌗ and ↳ n chips); turn_below / turn_above (obsdb.RunQuery.TurnBelow /
 //    //    TurnAbove: with session and limit=1 a turn's neighbour, total the count that side — the turn stepper's O(1) read) and oldest; all=1 lists child
 //    //    runs too; each row's stopped_by/cancel_cause (what ended it, U3.2; omitted when none); resumed_from / resumed_by (the approval link, U13.1: the parked run a resume names, and on the parked run the run that resumed it — read time, either ingest order; omitted when none); error_type (a failed run's kind, context errors read cancelled) and the problem counters attempts_retried/fallbacks/tool_errors/denied/truncated/repaired (U4, ingest time — retried counts a failed attempt a later one of its call followed, fallbacks the attempts weft.attempt.layer marks, tool_errors skips RETRY; log_warn/log_error on the run document, read time through obsdb.DB.CountLogs, logs_capped when they are floors (drawn ≥); each omitted when 0); each row's children_count / children_failed (H9: the runs whose parent is it, one level, from the cost's children read — no read per row; omitted when 0; children_unknown true when that read failed, the UI's "⑂ ?"); each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off; settling: true while its root is stored (not failed: a failed root is terminal) and its run_finish not, within 30 s — the UI's isLive follows it, record contract §6),
 //    //    search (?q= terms over prompt/answer/error/tool names — substrings, AND, a "phrase" one
@@ -293,7 +293,12 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    obsdb.SessionQuery.Q; a session is its own turns — <session>-t<turn> or a run linked to no run, D3 —
 //    //    so a thread/pool child session is listed, with its lineage parent_session/parent_turn/parent_call/parent_run,
 //    //    obsdb.SessionQuery.Parents listing the sessions any of them delegated, one tree level per read;
-//    //    tag.<k>=<v> — obsdb.SessionQuery.Meta: the sessions one of whose own turns carries every pair, U12.2), sessions/{id} (+ delegated: its delegated sessions,
+//    //    tag.<k>=<v> — obsdb.SessionQuery.Meta: the sessions one of whose own turns carries every pair, U12.2; U16: each row's turn facts
+//    //    (obsdb.SessionTurnFacts, both backends) pending (the newest turn an open park: the list's "⏸ awaiting a decision" and the header's
+//    //    decide…), failed_turns, ended_turns (thread's busy policy: never failures), resumes, outcomes (the newest 40, the strip) and
+//    //    forked_from_session; ?awaiting=1 / failed=1 / lineage=child|fork / since= — obsdb.SessionQuery Awaiting/Failed/Lineage/Since, a bad
+//    //    value a 400; the UI page /conversations/$id is a public id's runs, experiments nested, live — lib/links.ts conversationLink),
+//    //    sessions/{id} (+ delegated: its delegated sessions,
 //    //    each with its cost; delegated_usage and delegated_sessions_cost_* the whole delegated tree's, beside its own, U14),
 //    //    sessions/{id}/timeline (U12.2, capability "timeline" — obsdb.SessionEventReader over the session_events index,
 //    //    SQLite 0022 / ClickHouse 0025, every thread record and compaction marker by session, a record filed under no run

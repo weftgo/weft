@@ -6,8 +6,12 @@
 // sessionTitle: thread's title, else the first prompt, else "(content
 // not captured)" when the first turn kept none, else the id), the id
 // and public id a copyable line under it — the public id alone when the
-// id is the title. Every view is in the
-// URL (A3).
+// id is the title. U16: each row's state over time — the newest turn's
+// open park as "⏸ awaiting a decision", the outcome strip, failed turns
+// and busy-policy ends counted apart (lib/session-states.ts), exchanges
+// beside turns, a fork's lineage — and the turn-state filter chips
+// (?awaiting=1, ?failed=1, ?lineage=child|fork; /api/sessions'). Every
+// view is in the URL (A3).
 import { useEffect, useState } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
@@ -23,12 +27,7 @@ import {
   UnpricedNote,
   useCostCapable,
 } from "@/components/studio/cost"
-import {
-  CopyId,
-  IdChip,
-  StatusChip,
-  TitleText,
-} from "@/components/studio/runs-table"
+import { CopyId, IdChip, TitleText } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -42,6 +41,10 @@ import { sessionLink } from "@/lib/links"
 import { sessionTitle } from "@/lib/title"
 import { lineageOfSession } from "@/lib/delegation"
 import { LineageLine } from "@/components/studio/lineage"
+import { ForkOfLine } from "@/components/studio/fork-of"
+import { SessionState, OutcomeStrip } from "@/components/studio/session-state"
+import { exchangesOfRow, SESSION_FILTERS } from "@/lib/session-states"
+import { forkOf } from "@/lib/timeline"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 
 interface SessionsSearch {
@@ -49,7 +52,15 @@ interface SessionsSearch {
   public_id?: string
   /** Text: /api/sessions?q= — title, first prompt, id, public id, agent. */
   q?: string
+  /** The turn-state filters (U16): /api/sessions' awaiting / failed. */
+  awaiting?: boolean
+  failed?: boolean
+  /** Delegated (child) or forked (fork) sessions only. */
+  lineage?: "child" | "fork"
 }
+
+const flag = (v: unknown) =>
+  v === true || v === 1 || v === "1" || v === "true" ? true : undefined
 
 export const Route = createFileRoute("/sessions/")({
   validateSearch: (search: Record<string, unknown>): SessionsSearch => ({
@@ -67,6 +78,12 @@ export const Route = createFileRoute("/sessions/")({
         : typeof search.q === "number"
           ? String(search.q)
           : undefined,
+    awaiting: flag(search.awaiting),
+    failed: flag(search.failed),
+    lineage:
+      search.lineage === "child" || search.lineage === "fork"
+        ? search.lineage
+        : undefined,
   }),
   component: SessionsPage,
 })
@@ -112,8 +129,26 @@ function SessionsPage() {
     agent: search.agent,
     public_id: search.public_id,
     q: search.q,
+    awaiting: search.awaiting,
+    failed: search.failed,
+    lineage: search.lineage,
   }
-  const filtered = Boolean(search.agent || search.public_id || search.q)
+  const filtered = Boolean(
+    search.agent ||
+    search.public_id ||
+    search.q ||
+    search.awaiting ||
+    search.failed ||
+    search.lineage
+  )
+  // A chip's state and its toggle: awaiting / failed are flags, child /
+  // fork the one lineage value.
+  const on = (k: (typeof SESSION_FILTERS)[number]["key"]) =>
+    k === "awaiting" || k === "failed" ? !!search[k] : search.lineage === k
+  const toggle = (k: (typeof SESSION_FILTERS)[number]["key"]) =>
+    k === "awaiting" || k === "failed"
+      ? set({ [k]: search[k] ? undefined : true })
+      : set({ lineage: search.lineage === k ? undefined : k })
   // Pages accumulate through the next_before cursor (S4.3): the first
   // page is the newest 50 threads, never the whole list.
   const q = useInfiniteQuery({
@@ -166,6 +201,25 @@ function SessionsPage() {
           onApply={(v) => set({ q: v || undefined })}
         />
       </div>
+      <div
+        className="flex flex-wrap items-center gap-1.5"
+        role="group"
+        aria-label="session states"
+      >
+        {SESSION_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            data-session-filter={f.key}
+            aria-pressed={on(f.key)}
+            title={f.title}
+            onClick={() => toggle(f.key)}
+            className={`rounded-full border px-2 py-px font-mono text-[11px] ${on(f.key) ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            {f.word}
+          </button>
+        ))}
+      </div>
       {search.q ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <button
@@ -201,7 +255,14 @@ function SessionsPage() {
               variant="outline"
               size="sm"
               onClick={() =>
-                set({ agent: undefined, public_id: undefined, q: undefined })
+                set({
+                  agent: undefined,
+                  public_id: undefined,
+                  q: undefined,
+                  awaiting: undefined,
+                  failed: undefined,
+                  lineage: undefined,
+                })
               }
             >
               clear filters
@@ -221,7 +282,7 @@ function SessionsPage() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-28">status</TableHead>
+                  <TableHead className="w-40">status</TableHead>
                   <TableHead>session</TableHead>
                   <TableHead>agent</TableHead>
                   <TableHead className="text-right">turns</TableHead>
@@ -246,10 +307,16 @@ function SessionsPage() {
                 {sessions.map((s) => {
                   const t = sessionTitle(s)
                   const lin = lineageOfSession(s)
+                  const fork = forkOf(
+                    s.forked_from_session
+                      ? { "weft.session.forked_from": s.forked_from_session }
+                      : undefined
+                  )
                   return (
                     <TableRow key={s.id} className="group h-9">
                       <TableCell>
-                        <StatusChip row={s} />
+                        <SessionState row={s} />
+                        <OutcomeStrip row={s} />
                       </TableCell>
                       <TableCell className="max-w-80">
                         <Link
@@ -285,12 +352,23 @@ function SessionsPage() {
                             className="flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-faint"
                           />
                         ) : null}
+                        {fork ? (
+                          <div className="min-w-0 truncate font-mono text-[11px] text-faint">
+                            <ForkOfLine
+                              origin={fork.session}
+                              entry={fork.entry}
+                            />
+                          </div>
+                        ) : null}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {s.agent || <span className="text-faint">—</span>}
                       </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums">
-                        {s.turns}
+                      <TableCell
+                        className="text-right font-mono whitespace-nowrap tabular-nums"
+                        data-session-exchanges
+                      >
+                        {exchangesOfRow(s)}
                       </TableCell>
                       <TableCell className="text-right font-mono tabular-nums">
                         {tokens(s.usage.input_tokens)} /{" "}

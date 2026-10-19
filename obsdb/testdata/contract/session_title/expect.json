@@ -105,7 +105,11 @@
       "agent": "support",
       "turns": 2,
       "title": "Order desk",
-      "content_off": true
+      "content_off": true,
+      "outcomes": [
+        "succeeded",
+        "succeeded"
+      ]
     }
   ]
 }

@@ -38,7 +38,12 @@ import {
   turnsWord,
 } from "@/lib/delegation"
 import type { SessionDoc, SessionRow } from "@/lib/api"
-import { runLink, sessionLink, sessionViewLink } from "@/lib/links"
+import {
+  conversationLink,
+  runLink,
+  sessionLink,
+  sessionViewLink,
+} from "@/lib/links"
 import type { SessionPageView } from "@/lib/timeline"
 import { summarizerView } from "@/lib/cost"
 import {
@@ -74,6 +79,8 @@ import { LineageLine } from "@/components/studio/lineage"
 import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { THREAD_LINK } from "@/lib/status-class"
+import { AWAITING_TITLE, DECIDE } from "@/lib/session-states"
+import { SessionCounts } from "@/components/studio/session-state"
 
 export const Route = createFileRoute("/sessions/$id")({
   validateSearch: sessionPageSearch,
@@ -243,6 +250,20 @@ function SessionPage() {
         {/* The session's status is its newest turn's word (U1): parked
             while that turn's calls await a decision. */}
         <StatusChip row={turns.at(-1) ?? s} runs={turns} complete detail />
+        {/* U16 (UX-B-15): an open park at the newest turn is the
+            session's state — the way to decide it is the parked turn's
+            page (the approvals verbs, F4.3). */}
+        {s.pending && turns.at(-1) ? (
+          <Link
+            {...runLink(turns.at(-1)!.id)}
+            className={`font-mono text-[11px] ${THREAD_LINK}`}
+            title={AWAITING_TITLE}
+            data-session-decide={turns.at(-1)!.id}
+          >
+            {DECIDE}
+          </Link>
+        ) : null}
+        <SessionCounts row={s} />
         <span className="text-xs text-muted-foreground">{s.agent}</span>
         <span className="font-mono text-[11px] text-faint" data-session-counts>
           {exchangesWords(tlTurns)} · {tokens(s.usage.input_tokens)} in /{" "}
@@ -303,12 +324,14 @@ function SessionPage() {
           </span>
         ) : null}
         {s.public_id ? (
-          <span
-            className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-faint"
-            title="the public id (the browser-safe handle)"
+          <Link
+            {...conversationLink(s.public_id)}
+            className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-faint hover:text-foreground"
+            title="the public id (the browser-safe handle): its conversation — every run carrying it, experiments nested"
+            data-conversation-link={s.public_id}
           >
             {s.public_id}
-          </span>
+          </Link>
         ) : null}
         <span
           className="ml-auto font-mono text-[11px] text-faint"

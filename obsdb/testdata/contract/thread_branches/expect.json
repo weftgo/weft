@@ -187,7 +187,13 @@
       "id": "01K00000000000000000000001",
       "agent": "trip",
       "turns": 4,
-      "first_prompt": "Plan Lisbon."
+      "first_prompt": "Plan Lisbon.",
+      "outcomes": [
+        "succeeded",
+        "succeeded",
+        "succeeded",
+        "succeeded"
+      ]
     }
   ],
   "thread_records": [

@@ -428,6 +428,12 @@ describe("no panel-only badge strings", () => {
       "decisionsNote — the run page's decisions note (U13.2): calls derived from the transcript, not the hole",
     "decisions:derived from 's spans":
       "decisionsNote — the decisions note (U13.2-fix): calls derived from the resume's spans, not the hole",
+    "compaction:started on a compacted context":
+      "STARTED_COMPACTED — the run page's card on the turn after a session compaction (U15.2) and the panel's turn (U16), not the hole",
+    "turn-chips:thread.interrupted":
+      "BUSY_CAUSE — thread's cancel cause, matched to word a busy-policy end (U16), not the hole",
+    "turn-chips:the session was compacted after this turn":
+      "TURN_CHIP.compactedTitle — the turn list's ⌗ chip (U16), not the hole",
     "experiment-body:max_tokens must be ":
       "labOverrides — both drawers' option lab (plan F3): the server's refusal, naming the param, not the hole",
   }

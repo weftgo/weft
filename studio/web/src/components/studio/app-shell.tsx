@@ -151,7 +151,9 @@ function Nav() {
         render={<Link to={to} />}
         isActive={
           to === "/sessions"
-            ? location.pathname.startsWith(to) || inSession
+            ? location.pathname.startsWith(to) ||
+              location.pathname.startsWith("/conversations") ||
+              inSession
             : location.pathname.startsWith(to) && !(to === "/runs" && inSession)
         }
         tooltip={label}
@@ -273,6 +275,7 @@ function Place() {
   const places = [
     "runs",
     "sessions",
+    "conversations",
     "traces",
     "live",
     "agents",

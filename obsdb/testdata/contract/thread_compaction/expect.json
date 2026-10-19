@@ -160,6 +160,10 @@
             "output_tokens": 90
           }
         }
+      ],
+      "outcomes": [
+        "succeeded",
+        "succeeded"
       ]
     }
   ],

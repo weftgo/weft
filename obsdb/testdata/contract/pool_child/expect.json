@@ -120,7 +120,10 @@
       "public_id": "pub_pool",
       "agent": "investment-lead",
       "turns": 1,
-      "first_prompt": "Get a market analysis of ACME and give me a one-line recommendation."
+      "first_prompt": "Get a market analysis of ACME and give me a one-line recommendation.",
+      "outcomes": [
+        "succeeded"
+      ]
     },
     {
       "id": "01K00000000000000000000002",
@@ -129,7 +132,10 @@
       "first_prompt": "Analyse ACME",
       "parent_session": "01K00000000000000000000001",
       "parent_call": "d1",
-      "parent_run": "01K00000000000000000000001-t1"
+      "parent_run": "01K00000000000000000000001-t1",
+      "outcomes": [
+        "succeeded"
+      ]
     }
   ],
   "thread_records": [

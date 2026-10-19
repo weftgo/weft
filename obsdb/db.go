@@ -1,6 +1,7 @@
 package obsdb
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -652,12 +653,25 @@ const MaxGaps = 1000
 // gives a known set of sessions their rows (Studio's timeline reads the
 // sessions a session forked so, U15.2-fix) — every aggregate still over
 // all of each one's turns.
+//
+// Awaiting, Failed, Lineage and Since filter the groups (U16,
+// UX-B-28), each SessionTurnFacts' rule stated in SQL over the scoped
+// turns: Awaiting keeps the sessions whose newest turn is an open park
+// (SessionRow.Pending > 0), Failed those with a failed turn
+// (SessionRow.FailedTurns > 0: a turn thread's busy policy ended is no
+// failure), Lineage "child" the delegated sessions (ParentSession set)
+// and "fork" the forked ones (ForkedFrom set) — any other value keeps
+// none — and Since those last seen at or after it.
 type SessionQuery struct {
 	Agent, PublicID string
 	Q               string
 	Parents         []string
 	IDs             []string
 	Meta            map[string]string
+	Awaiting        bool
+	Failed          bool
+	Lineage         string    // "", LineageChild or LineageFork
+	Since           time.Time // zero = any
 	Before          time.Time // cursor on LastSeen; zero = newest
 	BeforeID        string    // with Before: the (LastSeen, ID) pair, as RunQuery.BeforeID
 	Limit           int       // 0 = 50, max 500
@@ -717,6 +731,115 @@ type SessionRow struct {
 	// weft 0.18 — its ParentRunID). "" for a session nothing delegated,
 	// and ParentRun "" for a child submitted outside a run (p.Submit).
 	ParentSession, ParentCall, ParentRun string
+	// The turns' state over time (U16; UX-B-15, UX-B-16), read by
+	// SessionTurnFacts over the same turns as every aggregate: Pending
+	// is the newest turn's pending calls when it is an open park
+	// (succeeded, pending calls, no resumer: the session awaits a
+	// decision), else 0; FailedTurns counts the failed turns and
+	// EndedTurns, apart, the turns thread's busy policy ended (Interrupt
+	// or Rollback: a cancel cause of BusyCancelCause, never a failure);
+	// Resumes the turns that resume a parked one (a stored ResumedFrom),
+	// so Turns - Resumes is the session's exchanges; Outcomes the newest
+	// MaxOutcomes turns' outcomes, oldest first (Turns - len(Outcomes)
+	// older ones are not in it); ForkedFrom the weft.session.forked_from
+	// (<origin>#<entry>) its turns carry, "" for a session no Fork made.
+	Pending, FailedTurns, EndedTurns, Resumes int
+	Outcomes                                  []TurnOutcome
+	ForkedFrom                                string
+}
+
+// SessionQuery.Lineage's values.
+const (
+	LineageChild = "child"
+	LineageFork  = "fork"
+)
+
+// TurnOutcome is one turn's mark on a session row's strip
+// (SessionRow.Outcomes): a run's derived status, with a park told open
+// from decided and a busy-policy end told from a failure.
+type TurnOutcome string
+
+// The outcomes.
+const (
+	OutcomeSucceeded   TurnOutcome = "succeeded"
+	OutcomeFailed      TurnOutcome = "failed"
+	OutcomeRunning     TurnOutcome = "running"
+	OutcomeInterrupted TurnOutcome = "interrupted" // the heartbeat went stale
+	OutcomeCancelled   TurnOutcome = "cancelled"   // failed, error type cancelled
+	OutcomeEnded       TurnOutcome = "ended"       // thread's busy policy cancelled it
+	OutcomeParked      TurnOutcome = "parked"      // pending calls, no resumer
+	OutcomeResumed     TurnOutcome = "resumed"     // pending calls a resumer decided
+)
+
+// MaxOutcomes bounds SessionRow.Outcomes: a strip, not the turn list.
+const MaxOutcomes = 40
+
+// BusyCancelCause is weft.cancel.cause on a turn thread's Interrupt or
+// Rollback busy policy cancelled — a newer message ended it on purpose:
+// SessionRow.EndedTurns, never FailedTurns.
+const BusyCancelCause = "thread.interrupted"
+
+// SessionForkedFromKey is the run metadata a forked thread session's
+// turns carry: <origin session>#<entry> (SessionRow.ForkedFrom).
+const SessionForkedFromKey = "weft.session.forked_from"
+
+// OutcomeOf is a turn's TurnOutcome: a failed turn with
+// BusyCancelCause ended, else cancelled with that error type; a
+// succeeded turn with pending calls parked, or resumed once a run
+// resumed it (ResumedBy); else its status.
+func OutcomeOf(r RunRow) TurnOutcome {
+	switch {
+	case r.Status == StatusFailed && r.CancelCause == BusyCancelCause:
+		return OutcomeEnded
+	case r.Status == StatusFailed && r.ErrorType == ErrorTypeCancelled:
+		return OutcomeCancelled
+	case r.Status == StatusSucceeded && r.Pending > 0 && r.ResumedBy == "":
+		return OutcomeParked
+	case r.Status == StatusSucceeded && r.Pending > 0:
+		return OutcomeResumed
+	}
+	return TurnOutcome(r.Status)
+}
+
+// SessionTurnFacts sets row's turn facts (Pending, FailedTurns,
+// EndedTurns, Resumes, Outcomes, ForkedFrom) from its turns, given in
+// any order: they are read by turn, then start, then id, the newest
+// last. Every backend and Studio's scoped session row read it; the
+// SessionQuery filters state the same rule in SQL.
+func SessionTurnFacts(row *SessionRow, turns []RunRow) {
+	sorted := slices.Clone(turns)
+	slices.SortFunc(sorted, func(a, b RunRow) int {
+		if a.Turn != b.Turn {
+			return cmp.Compare(a.Turn, b.Turn)
+		}
+		if c := a.Started.Compare(b.Started); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	row.Pending, row.FailedTurns, row.EndedTurns, row.Resumes = 0, 0, 0, 0
+	row.Outcomes, row.ForkedFrom = nil, ""
+	for i, t := range sorted {
+		o := OutcomeOf(t)
+		switch {
+		case o == OutcomeEnded:
+			row.EndedTurns++
+		case t.Status == StatusFailed:
+			row.FailedTurns++
+		}
+		if t.ResumedFrom != "" {
+			row.Resumes++
+		}
+		if row.ForkedFrom == "" {
+			row.ForkedFrom = t.Meta[SessionForkedFromKey]
+		}
+		if i == len(sorted)-1 && o == OutcomeParked {
+			row.Pending = t.Pending
+		}
+		if i >= len(sorted)-MaxOutcomes {
+			row.Outcomes = append(row.Outcomes, o)
+		}
+	}
 }
 
 // ModelUsage is one model's part of a summed usage figure: the

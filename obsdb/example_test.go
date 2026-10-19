@@ -27,6 +27,26 @@ func ExampleAttrTrue() {
 	// Output: true true false
 }
 
+// A session's state over time (U16): a busy-policy interrupt is ended,
+// never failed; a decided park resumed; the newest turn's open park is
+// the session's Pending — it awaits a decision.
+func ExampleSessionTurnFacts() {
+	turns := []obsdb.RunRow{
+		{ID: "s-t1", Turn: 1, Status: obsdb.StatusSucceeded, Pending: 1, ResumedBy: "s-t2"},
+		{ID: "s-t2", Turn: 2, Status: obsdb.StatusSucceeded, ResumedFrom: "s-t1"},
+		{ID: "s-t3", Turn: 3, Status: obsdb.StatusFailed, ErrorType: obsdb.ErrorTypeCancelled, CancelCause: obsdb.BusyCancelCause},
+		{ID: "s-t4", Turn: 4, Status: obsdb.StatusFailed, ErrorType: "model_error"},
+		{ID: "s-t5", Turn: 5, Status: obsdb.StatusSucceeded, Pending: 2},
+	}
+	var row obsdb.SessionRow
+	obsdb.SessionTurnFacts(&row, turns)
+	fmt.Println(row.Outcomes)
+	fmt.Println("pending", row.Pending, "failed", row.FailedTurns, "ended", row.EndedTurns, "resumes", row.Resumes)
+	// Output:
+	// [resumed succeeded ended failed parked]
+	// pending 2 failed 1 ended 1 resumes 1
+}
+
 func ExampleParseStatus() {
 	st, err := obsdb.ParseStatus("parked")
 	fmt.Println(st, st.Stored(), err)

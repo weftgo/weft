@@ -433,7 +433,17 @@
       "id": "01K00000000000000000000001",
       "agent": "sre",
       "turns": 7,
-      "first_prompt": "List the pods, list the dir, free some space."
+      "first_prompt": "List the pods, list the dir, free some space.",
+      "resumes": 5,
+      "outcomes": [
+        "resumed",
+        "resumed",
+        "resumed",
+        "succeeded",
+        "resumed",
+        "resumed",
+        "succeeded"
+      ]
     }
   ],
   "thread_records": [

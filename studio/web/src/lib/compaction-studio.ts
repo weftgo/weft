@@ -5,7 +5,11 @@
 // panel imports (the panel's words stay the shared table's,
 // src/panel/badges.test.ts).
 import type { RunCompaction } from "./api"
-import { compactionLine, isSessionMarker } from "./compaction"
+import {
+  compactionLine,
+  isSessionMarker,
+  STARTED_COMPACTED,
+} from "./compaction"
 
 /** compactionChip is a compaction on the run header: a view at its
  * step, a session marker after the run. */
@@ -36,8 +40,9 @@ export const SESSION_AFTER = "after this run · session compacted"
 export const SESSION_AFTER_NOTE =
   "informational (ADR 0028 §8): no request of this run saw it — the next turn starts from the summary"
 
-/** The card at the top of the turn after it. */
-export const STARTED_COMPACTED = "started on a compacted context"
+/** The card at the top of the turn after it (lib/compaction.ts's: the
+ * panel's turn says it too, U16). */
+export { STARTED_COMPACTED }
 
 /** startedCompactedLine: one compaction the turn started on, "compacted
  * after t4 · 11 messages compacted into 2 · 6.1k → 2.7k tokens ·

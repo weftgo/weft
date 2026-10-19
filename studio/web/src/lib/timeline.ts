@@ -8,6 +8,7 @@
 // and the links to the parking and resuming steps. Decision words are
 // lib/decisions.ts's (one vocabulary with the run page's parked and
 // resumed cards); plain TypeScript, no React.
+import { BUSY_CAUSE } from "./turn-chips"
 import type {
   DecidedCall,
   DecisionDoc,
@@ -900,8 +901,8 @@ export interface TurnEnd {
 }
 
 /** thread's cancel cause for a turn its Interrupt or Rollback busy
- * policy ended (weft.cancel.cause, record contract §3). */
-export const BUSY_CAUSE = "thread.interrupted"
+ * policy ended (lib/turn-chips.ts's, shared with the panel). */
+export { BUSY_CAUSE }
 
 /** endedByPolicy says a run was ended by a newer message on purpose:
  * its context cancelled by thread's busy policy, never a failure. */

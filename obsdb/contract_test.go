@@ -111,6 +111,14 @@ type contractSession struct {
 	// SummarizerModels is that usage split by the model each summarizer
 	// span named (§6, U15.1-fix): what a reader prices each part at.
 	SummarizerModels []contractModelUsage `json:"summarizer_models,omitempty"`
+	// The turn facts (§6, U16; obsdb.SessionTurnFacts): each omitted
+	// when zero / empty but the outcome strip.
+	Pending     int                 `json:"pending,omitempty"`
+	FailedTurns int                 `json:"failed_turns,omitempty"`
+	EndedTurns  int                 `json:"ended_turns,omitempty"`
+	Resumes     int                 `json:"resumes,omitempty"`
+	Outcomes    []obsdb.TurnOutcome `json:"outcomes"`
+	ForkedFrom  string              `json:"forked_from,omitempty"`
 }
 
 // contractModelUsage is one model's part of a usage figure.
@@ -528,7 +536,9 @@ func observeSessions(t *testing.T, db obsdb.DB) []contractSession {
 	for _, s := range page.Sessions {
 		cs := contractSession{ID: s.ID, PublicID: s.PublicID, Agent: s.Agent, Turns: s.Turns,
 			Title: s.Title, FirstPrompt: s.FirstPrompt, ContentOff: s.ContentOff,
-			ParentSession: s.ParentSession, ParentCall: s.ParentCall, ParentRun: s.ParentRun}
+			ParentSession: s.ParentSession, ParentCall: s.ParentCall, ParentRun: s.ParentRun,
+			Pending: s.Pending, FailedTurns: s.FailedTurns, EndedTurns: s.EndedTurns, Resumes: s.Resumes,
+			Outcomes: s.Outcomes, ForkedFrom: s.ForkedFrom}
 		if u := s.SummarizerUsage; u != (core.Usage{}) {
 			cs.SummarizerUsage = &contractUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 		}
@@ -542,6 +552,11 @@ func observeSessions(t *testing.T, db obsdb.DB) []contractSession {
 			t.Fatalf("Session(%s): %v", s.ID, err)
 		} else if d.SummarizerUsage != s.SummarizerUsage || !slices.Equal(d.SummarizerModels, s.SummarizerModels) {
 			t.Errorf("Session(%s).SummarizerUsage = %+v %+v, the list's %+v %+v", s.ID, d.SummarizerUsage, d.SummarizerModels, s.SummarizerUsage, s.SummarizerModels)
+		} else if d.Pending != s.Pending || d.FailedTurns != s.FailedTurns || d.EndedTurns != s.EndedTurns ||
+			d.Resumes != s.Resumes || !slices.Equal(d.Outcomes, s.Outcomes) || d.ForkedFrom != s.ForkedFrom {
+			t.Errorf("Session(%s) turn facts = %d %d %d %d %v %q, the list's %d %d %d %d %v %q", s.ID,
+				d.Pending, d.FailedTurns, d.EndedTurns, d.Resumes, d.Outcomes, d.ForkedFrom,
+				s.Pending, s.FailedTurns, s.EndedTurns, s.Resumes, s.Outcomes, s.ForkedFrom)
 		}
 		out = append(out, cs)
 	}

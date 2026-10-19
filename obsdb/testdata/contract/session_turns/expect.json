@@ -97,7 +97,11 @@
       "public_id": "pub_contract",
       "agent": "support",
       "turns": 2,
-      "first_prompt": "hi"
+      "first_prompt": "hi",
+      "outcomes": [
+        "succeeded",
+        "succeeded"
+      ]
     }
   ]
 }

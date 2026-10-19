@@ -225,6 +225,12 @@ describe("the run cards' facts (U25)", () => {
     expect(toolsLine(step, false, parked, decided)).toBe(
       `1 ${AWAITING} · 1 decided`
     )
+    // A decided call the pending list does not name (a span-derived
+    // run's): counted with neither, never "-1 awaiting" (P9-pre-web-fix2 8).
+    const line = toolsLine(step, false, [{ id: "r2" }], decided)
+    expect(line).toBe(`1 ${AWAITING} · 1 never finished`)
+    expect(line).not.toMatch(/-\d/)
+    expect(toolsLine(step, false, [], decided)).not.toMatch(/-\d|decided/)
   })
 
   it("appr.breakpoint-own: a ParkSource park is a breakpoint only on a playground run or a breakpoints_own runtime's", () => {

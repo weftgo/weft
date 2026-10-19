@@ -16,12 +16,21 @@ import {
 import { statusClass } from "@/lib/status-class"
 import { StatusChip } from "@/components/studio/runs-table"
 
+/** The outcomes that are a run's own status word: the run chip says them. */
+const RUN_WORDS: readonly string[] = [
+  "succeeded",
+  "failed",
+  "running",
+  "interrupted",
+]
+
 export function SessionState({ row }: { row: SessionRow }) {
   // The newest turn's outcome is the session page's word (a cancelled
   // turn reads cancelled, a busy-policy end ended, a decided park
-  // decided) — the row's status says only failed or succeeded for them.
-  const last = row.outcomes?.at(-1)
-  const o = last && last !== row.status ? outcomeOf(last) : undefined
+  // decided) — the row's status is that outcome, the run words' chip
+  // standing for the four a run reads alone.
+  const last = row.outcomes?.at(-1) ?? row.status
+  const o = RUN_WORDS.includes(last) ? undefined : outcomeOf(last)
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
       {row.pending ? (

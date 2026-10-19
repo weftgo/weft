@@ -98,11 +98,12 @@ export function ExportVerbs({
       ))}
       {subagents > 0 ? (
         <label
-          className="flex items-center gap-1 font-mono text-[11px] text-faint"
+          className="flex min-h-6 items-center gap-1 font-mono text-[11px] text-faint"
           title={EXPORT_TREE.title}
         >
           <input
             type="checkbox"
+            className="mx-1 size-4"
             checked={tree}
             disabled={busy !== ""}
             onChange={(e) => setTree(e.target.checked)}

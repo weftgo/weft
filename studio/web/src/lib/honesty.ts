@@ -196,7 +196,7 @@ export const CAUSES: Partial<
 export const HOLE_ORDER = Object.keys(HOLES) as Hole[]
 
 export function isHole(s: string | undefined): s is Hole {
-  return s !== undefined && Object.prototype.hasOwnProperty.call(HOLES, s)
+  return s !== undefined && Object.hasOwn(HOLES, s)
 }
 
 /** One hole as a surface holds it: the badge, and the words a response

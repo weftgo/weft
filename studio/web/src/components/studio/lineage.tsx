@@ -22,7 +22,8 @@ import { UNNAMED_AGENT } from "@/lib/format"
 import { runLink, sessionLink } from "@/lib/links"
 import { StatusChip } from "@/components/studio/runs-table"
 
-const linkClass = "font-mono hover:text-foreground hover:underline"
+const linkClass =
+  "inline-flex min-h-6 items-center font-mono hover:text-foreground hover:underline"
 
 /** LineageLine: "↳ delegated by <session> · turn N · call c", the
  * session and the turn links (the turn opens the parent's run). */

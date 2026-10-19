@@ -2068,7 +2068,7 @@ function RunPage() {
                         >
                           <button
                             type="button"
-                            className="rounded-md border px-1.5 py-0.5 disabled:opacity-40"
+                            className="min-h-6 min-w-6 rounded-md border px-1.5 py-0.5 disabled:opacity-40"
                             aria-label="previous call"
                             disabled={loopCall.i === 0}
                             onClick={() =>
@@ -2085,7 +2085,7 @@ function RunPage() {
                           </span>
                           <button
                             type="button"
-                            className="rounded-md border px-1.5 py-0.5 disabled:opacity-40"
+                            className="min-h-6 min-w-6 rounded-md border px-1.5 py-0.5 disabled:opacity-40"
                             aria-label="next call"
                             disabled={
                               loopCall.i === loopCall.tool.calls.length - 1

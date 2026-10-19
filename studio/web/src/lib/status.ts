@@ -172,7 +172,7 @@ export function statusOf(
     }
   }
   const k = r.status as StatusKey
-  return Object.prototype.hasOwnProperty.call(STATUS, k)
+  return Object.hasOwn(STATUS, k)
     ? { key: k, ...STATUS[k] }
     : { key: k, word: r.status, hint: r.status, role: "resumed" }
 }

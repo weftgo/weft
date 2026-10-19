@@ -109,11 +109,16 @@ type sessionEntry struct {
 	Content       map[string]any `json:"content,omitempty"`
 	ContentHidden bool           `json:"content_hidden,omitempty"`
 	// Actor is, on an approval.decision mark, the weft.approval.actor of
-	// the run it is filed under, else of the turn that resumed that run:
-	// metadata — an opaque id the app chose — so every identity reads it,
-	// as the run document's decided block's actor (decisions.go); the
-	// free-text who and reason stay in Content.
+	// the turn that resumed the run it is filed under (else that run's
+	// own, when no stored turn resumed it), narrowed to the call's own
+	// decider when the resume names several (decisionActor): metadata —
+	// an opaque id the app chose — so every identity reads it, as the run
+	// document's decided block's actor (decisions.go); the free-text who
+	// and reason stay in Content.
 	Actor string `json:"actor,omitempty"`
+	// ActorOf is "resume" when Actor is the resume's several deciders,
+	// comma-joined, and the record names none of them as its call's.
+	ActorOf string `json:"actor_of,omitempty"`
 }
 
 // timelineTurn is one turn on the timeline: its run, order, outcome and
@@ -215,9 +220,12 @@ type timelineDoc struct {
 // session's marks in record-time order (offset, limit ≤ 1000), the
 // session's whole count, the next page's offset (null on the last) and
 // the holes the page carries (the timeline's, but truncated: a page is
-// a read away, never a cut).
+// a read away, never a cut). Run is ?run=: the one run whose marks the
+// page holds (obsdb.SessionEventQuery.RunIDs), its total that run's
+// count; absent for the whole session.
 type entriesDoc struct {
 	SessionID  string         `json:"session_id"`
+	Run        string         `json:"run,omitempty"`
 	Entries    []sessionEntry `json:"entries"`
 	Total      int            `json:"total"`
 	Offset     int            `json:"offset"`
@@ -317,15 +325,25 @@ func (mb *markBuilder) scope(r *http.Request, er obsdb.SessionEventReader) (visi
 
 func (s *Server) newMarkBuilder(r *http.Request, det obsdb.SessionDetail) *markBuilder {
 	mb := &markBuilder{sessionID: det.ID, turns: map[string]int{}, actors: map[string]string{}, pub: panelPublicID(r), readsContent: readsThreadContent(r)}
+	// thread files approval.decision under the parked run, and the
+	// decider is its resume's actor: a run's own weft.approval.actor
+	// names who decided the run before it (a chained park: t4 resumes
+	// t3 as alice and parks, t5 resumes t4 as bob — t4's decisions are
+	// bob's). A resume's actor wins; a run's own stands in only when no
+	// stored run resumed it.
+	resumed := map[string]bool{}
 	for _, rr := range det.Runs {
 		mb.turns[rr.ID] = rr.Turn
-		if a := rr.Meta[approvalActorKey]; a != "" {
-			mb.actors[rr.ID] = a // a run's own actor wins over its resumer's
+		if rr.ResumedFrom != "" {
+			resumed[rr.ResumedFrom] = true
+			if a := rr.Meta[approvalActorKey]; a != "" {
+				mb.actors[rr.ResumedFrom] = a
+			}
 		}
 	}
 	for _, rr := range det.Runs {
-		if a := rr.Meta[approvalActorKey]; a != "" && rr.ResumedFrom != "" && mb.actors[rr.ResumedFrom] == "" {
-			mb.actors[rr.ResumedFrom] = a
+		if a := rr.Meta[approvalActorKey]; a != "" && !resumed[rr.ID] && mb.actors[rr.ID] == "" {
+			mb.actors[rr.ID] = a
 		}
 	}
 	return mb
@@ -351,9 +369,6 @@ func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
 		} else if n := turnOf(mb.sessionID, id); n > 0 {
 			out.Turn = &n
 		}
-		if kind == "approval.decision" {
-			out.Actor = mb.actors[id]
-		}
 	}
 	if e.Content == string(obsdb.HoleStripped) {
 		mb.stripped++
@@ -362,6 +377,7 @@ func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
 	if json.Unmarshal(e.Body, &body) != nil {
 		// A body that does not parse is shown as a mark of its kind and
 		// time with no fields (the record's attributes said what it is).
+		mb.decisionActor(&out, e.RunID, nil)
 		return out, true
 	}
 	for k, v := range body {
@@ -391,7 +407,39 @@ func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
 			out.Fields[k] = v
 		}
 	}
+	mb.decisionActor(&out, e.RunID, body)
 	return out, true
+}
+
+// decisionActor sets an approval.decision mark's actor: the resume's
+// weft.approval.actor. A resume deciding several calls carries every
+// decider, comma-joined (thread's decisionActors); the mark then names
+// its own call's — the key its record names (key_id: metadata), else,
+// for an identity that reads content, its who — when that is one of
+// them; otherwise the list stands and ActorOf "resume" says it is the
+// resume's, no one call's. The actor is metadata; who stays content.
+func (mb *markBuilder) decisionActor(out *sessionEntry, runID string, body map[string]any) {
+	if out.Kind != "approval.decision" || runID == "" {
+		return
+	}
+	a := mb.actors[runID]
+	if !strings.Contains(a, ",") {
+		out.Actor = a
+		return
+	}
+	list := strings.Split(a, ",")
+	key, _ := body["key_id"].(string)
+	var who string
+	if c, ok := body["content"].(map[string]any); ok && mb.readsContent {
+		who, _ = c["who"].(string)
+	}
+	for _, name := range []string{key, who} {
+		if name != "" && slices.Contains(list, name) {
+			out.Actor = name
+			return
+		}
+	}
+	out.Actor, out.ActorOf = a, "resume"
 }
 
 // recordEvidence is the first turn whose outcome thread must have
@@ -619,12 +667,20 @@ func (s *Server) serveSessionEntries(w http.ResponseWriter, r *http.Request, id 
 		dbError(w, r, "session events", id, err)
 		return
 	}
-	page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, PublicID: mb.pub, Offset: offset, Limit: limit})
+	// ?run= narrows the page to the marks filed under one run (a parked
+	// run's request expiry, read in one request whatever the session's
+	// size): total, offsets and next_offset are then that run's.
+	eq := obsdb.SessionEventQuery{SessionID: id, PublicID: mb.pub, Offset: offset, Limit: limit}
+	run := q.Get("run")
+	if run != "" {
+		eq.RunIDs = []string{run}
+	}
+	page, err := er.SessionEvents(r.Context(), eq)
 	if err != nil {
 		dbError(w, r, "session events", id, err)
 		return
 	}
-	doc := entriesDoc{SessionID: id, Entries: []sessionEntry{}, Total: page.Total, Offset: offset}
+	doc := entriesDoc{SessionID: id, Run: run, Entries: []sessionEntry{}, Total: page.Total, Offset: offset}
 	for _, e := range page.Events {
 		if m, ok := mb.mark(e); ok {
 			doc.Entries = append(doc.Entries, m)

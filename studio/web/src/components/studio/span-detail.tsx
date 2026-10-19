@@ -299,7 +299,7 @@ function Answer({
         {to ? (
           <button
             type="button"
-            className="ml-2 text-thread-ink hover:underline"
+            className="ml-2 inline-flex min-h-6 items-center text-thread-ink hover:underline"
             onClick={() => onTab(to)}
           >
             → {DRAWER_TAB_LABEL[to]}
@@ -460,7 +460,7 @@ function Verbs({
   const compare = has("diff") ? (
     <Link
       {...compareLink(doc.id, [], step)}
-      className="font-mono text-[11px] text-thread-ink hover:underline"
+      className="inline-flex min-h-6 items-center font-mono text-[11px] text-thread-ink hover:underline"
       title={DRAWER.compareHint}
       data-drawer-verb="compare"
     >
@@ -493,7 +493,7 @@ function Verbs({
       {onStory && step !== undefined ? (
         <button
           type="button"
-          className="ml-auto font-mono text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+          className="ml-auto inline-flex min-h-6 items-center font-mono text-[11px] text-muted-foreground hover:text-foreground hover:underline"
           title={DRAWER.storyHint}
           data-drawer-story
           onClick={onStory}
@@ -744,7 +744,7 @@ export function SpanDetail({
           <Button
             variant="ghost"
             size="xs"
-            className="ml-auto h-5 px-1.5 font-mono text-[10px] text-muted-foreground hover:text-foreground"
+            className="ml-auto h-6 px-1.5 font-mono text-[10px] text-muted-foreground hover:text-foreground"
             title={`move the playhead to the start of this row (event #${span.from})`}
             onClick={() => onJump(span.from + 1)}
           >

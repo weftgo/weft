@@ -88,6 +88,15 @@ export const CALLS_HOLE = {
   fix: "record the resume with a current weft core",
 }
 
+/** A parked run whose own marks (GET /entries?run=, past the timeline's
+ * cap) are more than one read holds (hole truncated): a request expiry
+ * past it is not read. */
+export const RUN_MARKS_HOLE = {
+  reason:
+    "this run's state-log marks are more than one read holds (1,000): a request expiry past them is not read",
+  fix: "page the rest: GET /api/sessions/{id}/entries?run=<run>&offset=1000",
+}
+
 /** The decider a call names: thread's who, else the signing key, else
  * the resume's one actor (weft.approval.actor — several are the run's,
  * not this call's; nor is it a split verdict's denier, or a decider the

@@ -4671,10 +4671,14 @@ export class WeftDevtools extends HTMLElement {
     )
     // The replayed run not read (a child whose history did not load):
     // its catalog is the registration's, said.
+    // A child's own status (ChildView.status, always a string) — read
+    // by its name, never `"status" in src`: a quoted name on an internal
+    // type is the mangle guard's refusal (scripts/panel-mangle.ts).
     const status =
-      src && "status" in src
-        ? src.status
-        : (this.rowOf(d.runId)?.status ?? src?.doc?.status ?? "")
+      (src as { status?: string } | undefined)?.status ??
+      this.rowOf(d.runId)?.status ??
+      src?.doc?.status ??
+      ""
     const cat = src
       ? catalogAt(
           src.requests,

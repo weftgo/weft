@@ -1061,8 +1061,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 269,014 B raw / 90,801 B gzip
-(88.7 KiB, the bundle of the ledger's row "P9-pre-web-fix"; 7,503 B — 7.3 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 268,996 B raw / 90,778 B gzip
+(88.7 KiB, the bundle of the ledger's row "P9-pre-web-fix2"; 7,526 B — 7.3 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1690,7 +1690,10 @@ if any, is not linked yet". A decided park's detail says "1 call decided
 · resumed in t2" only on the stored `resumed_by`; a park found by the
 next turn alone says "1 call · next turn t2 (decided or dropped)" — after
 a Branch, a Rollback or an undecided Send that turn is no resume. The
-sessions list's status is the newest turn's stored word, with its turn
+sessions list's status is the newest turn's outcome (`obsdb.OutcomeOf`:
+`cancelled`, `ended`, `parked` or `resumed` beside the four — the word
+`?status=` filters by, so a row and the filter agree; it was the stored
+word before 0.18.0), with its turn
 facts beside it since U16 (record contract §6): `pending` when the
 newest turn is an open park ("⏸ awaiting a decision"), each turn's
 parked / resumed / cancelled / ended word in `outcomes`, `failed_turns`
@@ -2668,7 +2671,10 @@ page (never skipped); clients dedupe by `trace_id`. `before_id` without
 `before` is ignored), `traces/{trace_id}` (any trace), `sessions`
 (`tag.<k>=<v>`: the sessions one of whose own turns carries the pair,
 U12.2), `sessions/{id}` (turns in order), `sessions/{id}/timeline` and
-`sessions/{id}/entries` (U12.2, capability `timeline`: the turns beside
+`sessions/{id}/entries` (`?offset=&limit=&run=` — `run` the marks
+filed under one run alone, its `total` and `next_offset` that run's,
+`obsdb.SessionEventQuery.RunIDs` on both backends: a parked run's
+request expiry in one read; U12.2, capability `timeline`: the turns beside
 the session's state log — thread records and compaction markers from
 the `session_events` index, on lanes, with their holes; a read token
 gets `content_hidden` instead of a mark's content; `summarizer` on a

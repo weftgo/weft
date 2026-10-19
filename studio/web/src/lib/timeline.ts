@@ -290,8 +290,9 @@ export function decisionOf(
     who: cs("who") || undefined,
     // The resume's weft.approval.actor (the mark's actor) is metadata,
     // read by every token as the run page's decided block reads it:
-    // who is hidden only when nothing else names the decider.
-    who_hidden: (m.content_hidden && !m.actor) || undefined,
+    // who is hidden only when nothing else names the decider — several,
+    // the resume's (actor_of), name no one call's.
+    who_hidden: (m.content_hidden && (!m.actor || !!m.actor_of)) || undefined,
     reason: cs("reason") || undefined,
     result: cs("content") || undefined,
     at: m.fact_at ?? m.at,

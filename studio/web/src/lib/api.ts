@@ -497,7 +497,11 @@ export interface SessionRow extends CostFields {
   turns: number
   first_seen: string
   last_seen: string
-  status: RunStatus
+  /** The newest turn's outcome (obsdb.OutcomeOf): the word ?status=
+   * filters by, so a row and the filter agree — a cancelled or
+   * busy-ended turn is not failed, a parked or decided one not
+   * succeeded. An older Studio sends the stored four alone. */
+  status: TurnOutcome
   usage: Usage
   /** thread's title (weft.session.title, the newest turn's): metadata,
    * so present under content-off too. Absent when none was set. */
@@ -634,8 +638,11 @@ export interface SessionMark {
   content?: Record<string, unknown>
   content_hidden?: boolean
   /** An approval.decision's weft.approval.actor (the resume's
-   * metadata): every token reads it, as the run page's decided block. */
+   * metadata): every token reads it, as the run page's decided block.
+   * The call's own decider when the resume names several and the record
+   * says which; else the whole list, actor_of "resume". */
   actor?: string
+  actor_of?: "resume"
 }
 
 /** GET /api/sessions/{id}/timeline (capability "timeline", U12.2):
@@ -2331,32 +2338,22 @@ export function fetchSessionEntries(id: string, offset: number, limit = 1000) {
 }
 
 /** The marks filed under one run past the timeline's 2,000-mark cap
- * (it keeps the oldest): the entries paged newest first until a page
- * holds a mark of that run and the next does not, at most 10 pages —
- * a parked run's own approval.request records (its request expiry). */
+ * (it keeps the oldest), in one read: GET /entries?run= (≤ 1,000) — a
+ * parked run's own approval.request records (its request expiry).
+ * capped says the run holds more marks than the page read. */
 export async function fetchRunMarks(
   session: string,
   run: string
-): Promise<SessionMark[]> {
-  const first = await fetchSessionEntries(session, 0, 1)
-  const out: SessionMark[] = []
-  let seen = false
-  for (
-    let end = first.total, pages = 0;
-    end > 0 && pages < 10;
-    end -= 1000, pages++
-  ) {
-    const from = Math.max(0, end - 1000)
-    const page = await fetchSessionEntries(session, from, end - from)
-    const mine = page.entries.filter((m) => m.run_id === run)
-    out.unshift(...mine)
-    if (mine.length) seen = true
-    else if (seen) break
-  }
-  return out
+): Promise<{ marks: SessionMark[]; capped: boolean }> {
+  const page = await get<EntriesPage>(
+    `sessions/${encodeURIComponent(session)}/entries?run=${encodeURIComponent(run)}&limit=1000`
+  )
+  return { marks: page.entries, capped: page.total > page.entries.length }
 }
 
-/** The run's own marks: read only when the timeline was cut. */
+/** The run's own marks: read only when the timeline was cut. Under the
+ * timeline's key, so a live session's refetch and a delete reach it —
+ * one request, never the pages it once took. */
 export function runMarksQuery(session: string, run: string) {
   return queryOptions({
     queryKey: ["session-timeline", session, "run", run],

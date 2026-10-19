@@ -48,7 +48,16 @@
 //     names is unknown to the checker) — the standard containers' own
 //     type parameters (Array, Map, Set, WeakMap, WeakSet, Promise and
 //     their constructors, STD_GENERICS) excepted: they hold the value
-//     and hand it back typed, never read its names;
+//     and hand it back typed, never read its names — read as the call
+//     instantiates them (P9-pre-web-fix2), so Map<string, unknown>'s set,
+//     unknown[]'s push, Set<unknown>'s add or Array.of<unknown> widen it
+//     as an unknown parameter does, and a container whose type argument
+//     is opaque (Promise<unknown>, Map<string, object>) is an opaque
+//     place to hold one; a type parameter whose constraint is or
+//     contains one (`keep<T extends TurnView>`) is no opaque parameter;
+//   - (P9-pre-web-fix2) an element access or an `in` by a quoted name on
+//     one (`state["turnList"]`, `"turnList" in state`): a quoted name is
+//     never mangled;
 //   - one returned by a call through its signature's type parameter
 //     (panelGet<T> / panelPost<T> / panelPut<T>: the response's JSON,
 //     whether T is written or inferred from an internal contextual
@@ -503,6 +512,12 @@ export function checkFlows(
     seen.add(t)
     for (const s of [t.aliasSymbol, t.getSymbol()])
       if (s && listed(s)) return s.name
+    // A type parameter is what its constraint is (`T extends TurnView`):
+    // a sink inside a generic helper reads the constraint's names.
+    if (t.flags & ts.TypeFlags.TypeParameter) {
+      const c = checker.getBaseConstraintOfType(t)
+      return c && c !== t ? mentions(c, classes, seen, depth + 1) : null
+    }
     if (t.isUnionOrIntersection())
       for (const u of t.types) {
         const m = mentions(u, classes, seen, depth + 1)
@@ -583,7 +598,9 @@ export function checkFlows(
     if (t.flags & ts.TypeFlags.Unknown) return "unknown"
     if (t.flags & ts.TypeFlags.NonPrimitive) return "object"
     if (t.flags & ts.TypeFlags.TypeParameter)
-      return stdParam(t) ? null : `type parameter ${checker.typeToString(t)}`
+      return stdParam(t) || constrained(t)
+        ? null
+        : `type parameter ${checker.typeToString(t)}`
     if (
       t.flags & ts.TypeFlags.Object &&
       !t.getProperties().length &&
@@ -602,22 +619,33 @@ export function checkFlows(
         ts.Type | undefined
       return el && !mentions(el) ? opaque(el) : null
     }
+    // A standard container of an opaque type argument (Set<unknown>,
+    // Map<string, object>, Promise<unknown>): what it hands back is held
+    // by no name either (P9-pre-web-fix2 2).
+    const sym = t.getSymbol()
+    if (
+      t.flags & ts.TypeFlags.Object &&
+      (t as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference &&
+      sym &&
+      STD_GENERICS.has(sym.name) &&
+      checker
+        .getTypeArguments(t as ts.TypeReference)
+        .some((a) => !mentions(a) && opaque(a))
+    )
+      return checker.typeToString(t)
     return null
   }
-  /** stdCallArg: e is (inside an array literal or parentheses) an
-   * argument of a standard container's call or constructor — a
-   * WeakMap's object key, Promise.resolve's value: held by the
-   * container, read back typed. */
-  const stdCallArg = (e: ts.Node): boolean => {
-    let n: ts.Node = e
-    while (
-      ts.isParenthesizedExpression(n.parent) ||
-      ts.isArrayLiteralExpression(n.parent)
-    )
-      n = n.parent
-    const call = n.parent
-    if (!(ts.isCallExpression(call) || ts.isNewExpression(call))) return false
-    if (!call.arguments?.includes(n as ts.Expression)) return false
+  /** constrained: a type parameter whose constraint is or contains an
+   * internal type (`keep<T extends TurnView>`): the callee reads it by
+   * the constraint's names — the ones the build renames — never
+   * opaquely. */
+  const constrained = (t: ts.Type): boolean => {
+    const c = checker.getBaseConstraintOfType(t)
+    return !!c && c !== t && !!mentions(c)
+  }
+  /** stdSig: the call's resolved signature is a standard container's
+   * (a lib declaration of STD_GENERICS). */
+  const stdSig = (call: ts.CallExpression | ts.NewExpression): boolean => {
     const d = checker.getResolvedSignature(call)?.getDeclaration()
     if (!d || !d.getSourceFile().isDeclarationFile) return false
     const p = ts.findAncestor(
@@ -650,7 +678,7 @@ export function checkFlows(
   const typeParamIn = (t: ts.Type, depth = 0): string | null => {
     if (depth > 4) return null
     if (t.flags & ts.TypeFlags.TypeParameter)
-      return stdParam(t) ? null : checker.typeToString(t)
+      return stdParam(t) || constrained(t) ? null : checker.typeToString(t)
     const inner = [
       ...(t.isUnionOrIntersection() ? t.types : []),
       ...(t.aliasTypeArguments ?? []),
@@ -695,7 +723,9 @@ export function checkFlows(
       // unknown, any, object, {}, an index signature alone, a type
       // parameter — loses the type every later sink would have named
       // (`const u: unknown = g; JSON.stringify(u)`). An argument is the
-      // call rules' (below), a standard container's exempt.
+      // call rules' (below); an element nested in one (a Map's entry) is
+      // read on the call's instantiated contextual type — Map<string,
+      // unknown>'s V is unknown, an inferred Map's the value's own type.
       if (
         ts.isExpression(n) &&
         !ts.isParenthesizedExpression(n.parent) &&
@@ -703,8 +733,7 @@ export function checkFlows(
         !(
           (ts.isCallExpression(n.parent) || ts.isNewExpression(n.parent)) &&
           !!n.parent.arguments?.includes(n)
-        ) &&
-        !stdCallArg(n)
+        )
       ) {
         const m = mentions(checker.getTypeAtLocation(n))
         const ctx = m ? checker.getContextualType(n) : undefined
@@ -772,15 +801,23 @@ export function checkFlows(
         if (sig && decl) {
           // An argument to a parameter the callee declares opaque: what
           // it does with the names (stringify them, walk them) the
-          // checker cannot see.
+          // checker cannot see. A standard container's parameter is read
+          // as this call instantiates it (P9-pre-web-fix2 2): its own V /
+          // T says nothing, Map<string, unknown>'s V is unknown.
+          const std = stdSig(n)
           ;(n.arguments ?? []).forEach((a, i) => {
             if (sunk.has(a)) return
             const m = mentions(checker.getTypeAtLocation(a))
             if (!m) return
             const ps = decl.parameters
             if (!ps.length) return
-            const pd = ps[Math.min(i, ps.length - 1)]
-            let pt = checker.getTypeAtLocation(pd)
+            const k = Math.min(i, ps.length - 1)
+            const pd = ps[k]
+            const given = sig.parameters[Math.min(i, sig.parameters.length - 1)]
+            let pt =
+              std && given
+                ? checker.getTypeOfSymbolAtLocation(given, n)
+                : checker.getTypeAtLocation(pd)
             if (pd.dotDotDotToken)
               pt =
                 checker.isArrayType(pt) || checker.isTupleType(pt)
@@ -821,6 +858,26 @@ export function checkFlows(
       if (ts.isForInStatement(n)) {
         const m = mentions(checker.getTypeAtLocation(n.expression))
         if (m) say(n.expression, `for…in over ${m}`)
+      }
+      // A quoted name is never mangled (P9-pre-web-fix2 2): an element
+      // access or an `in` by string on an internal type reads a name the
+      // build renamed — or keeps the name, and a value read by it, apart.
+      if (
+        ts.isElementAccessExpression(n) &&
+        ts.isStringLiteralLike(n.argumentExpression)
+      ) {
+        const m = mentions(checker.getTypeAtLocation(n.expression))
+        if (m)
+          say(n, `${m} read by the quoted name "${n.argumentExpression.text}"`)
+      }
+      if (
+        ts.isBinaryExpression(n) &&
+        n.operatorToken.kind === ts.SyntaxKind.InKeyword &&
+        ts.isStringLiteralLike(n.left)
+      ) {
+        const m = mentions(checker.getTypeAtLocation(n.right))
+        if (m)
+          say(n, `${m} tested with \`in\` by the quoted name "${n.left.text}"`)
       }
       // A spread copies the names into whatever the literal becomes.
       if (ts.isSpreadAssignment(n)) {

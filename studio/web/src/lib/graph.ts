@@ -234,6 +234,23 @@ export function nodeLine(n: GraphNode): string {
   return parts.join(" · ")
 }
 
+/** The least a fitted graph is scaled to: below it its text (10 px in
+ * the viewBox) drops under 9 px, so the pane scrolls sideways instead —
+ * the graph's own wrapper, never the page (P9-pre-web-fix2 3). */
+export const GRAPH_MIN_SCALE = 0.9
+
+/** A fitted graph's svg size: its pane's width, at most its own
+ * (viewBox) width, at least GRAPH_MIN_SCALE of it. */
+export function fittedSize(width: number) {
+  return { maxWidth: width, minWidth: Math.ceil(width * GRAPH_MIN_SCALE) }
+}
+
+/** The fitted graph's scroll wrapper's name (it takes the focus, so a
+ * graph wider than its pane scrolls from the keyboard:
+ * scrollable-region-focusable). */
+export const graphScrollLabel = (graph: string) =>
+  `${graph} — scrolls sideways when wider than its pane`
+
 /** A run's row where the page read one (the run document, its
  * children, an expanded child's): its status fields and steps. */
 export type GraphRow = StatusRow & { steps?: number }

@@ -329,6 +329,7 @@ select.weft-input { width: auto; min-width: 120px; }
   color: var(--weft-fg); cursor: pointer; }
 .weft-edit { display: block; margin: 3px 0; color: var(--weft-dim); }
 .weft-tq-err, [data-weft-editable], [data-weft-handoff] { display: inline-block; min-width: 24px; min-height: 24px; }
+div[data-weft-editable] { display: block; }
 .weft-run-btn {
   background: var(--weft-accent); color: var(--weft-on-accent); border: none; border-radius: var(--weft-radius-sm);
   padding: 5px 12px; font: inherit; font-weight: 600; cursor: pointer;

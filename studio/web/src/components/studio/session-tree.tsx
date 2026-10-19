@@ -229,7 +229,7 @@ function TreeMark({
     >
       <Link
         {...sessionViewLink(sessionID, { mark: k })}
-        className={`flex min-w-0 items-baseline gap-1.5 hover:underline ${TONE_TEXT[l.tone]}`}
+        className={`flex min-h-6 min-w-0 items-baseline gap-1.5 hover:underline ${TONE_TEXT[l.tone]}`}
         title="open the mark on the timeline"
       >
         <span aria-hidden>{l.icon}</span>

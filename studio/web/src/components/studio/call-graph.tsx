@@ -20,6 +20,8 @@ import type { CallGraph, GraphNode, GraphRow } from "@/lib/graph"
 import {
   EDGE_HINT,
   GRAPH_ALONE,
+  fittedSize,
+  graphScrollLabel,
   edgeLabel,
   graphUnsourced,
   loopLabel,
@@ -145,189 +147,204 @@ export function CallGraphView({
       className="rounded-lg border bg-background p-2 font-mono text-[11px]"
       data-call-graph
     >
-      {/* Fitted: at most its own size, scaled down to its pane. */}
-      <svg
-        width="100%"
-        viewBox={`0 0 ${width} ${height}`}
-        style={{ maxWidth: width }}
-        className="block h-auto"
-        role="group"
-        aria-label="call graph"
+      {/* Fitted: at most its own size, scaled down to its pane, never
+          under GRAPH_MIN_SCALE — past that this wrapper scrolls. */}
+      <div
+        className="max-w-full min-w-0 overflow-x-auto"
+        tabIndex={0}
+        role="region"
+        aria-label={graphScrollLabel("call graph")}
+        data-graph-scroll
       >
-        {graph.edges.map((e) => {
-          const a = at.get(e.from)
-          const b = at.get(e.to)
-          if (!a || !b) return null
-          if (e.from === e.to) {
-            // A loop over the node's top edge, its label beside it.
-            const x1 = a.x + W * 0.55
-            const x2 = a.x + W * 0.8
-            const y = a.y
+        <svg
+          width="100%"
+          viewBox={`0 0 ${width} ${height}`}
+          style={fittedSize(width)}
+          className="block h-auto"
+          role="group"
+          aria-label="call graph"
+        >
+          {graph.edges.map((e) => {
+            const a = at.get(e.from)
+            const b = at.get(e.to)
+            if (!a || !b) return null
+            if (e.from === e.to) {
+              // A loop over the node's top edge, its label beside it.
+              const x1 = a.x + W * 0.55
+              const x2 = a.x + W * 0.8
+              const y = a.y
+              return (
+                <g
+                  key={`${e.from}>${e.to}`}
+                  data-edge={`${e.from}>${e.to}`}
+                  data-self-loop
+                >
+                  <title>{EDGE_HINT}</title>
+                  <path
+                    d={`M${x1},${y} C${x1},${y - 16} ${x2},${y - 16} ${x2},${y - 3}`}
+                    className={`fill-none ${tone(e.fails)}`}
+                    strokeWidth={1.5}
+                  />
+                  <path
+                    d={`M${x2 - 4},${y - 7} L${x2},${y - 1} L${x2 + 4},${y - 7}`}
+                    className={`fill-none ${tone(e.fails)}`}
+                    strokeWidth={1.5}
+                  />
+                  <text
+                    x={x2 + 6}
+                    y={y - 8}
+                    className="fill-muted-foreground text-[10px]"
+                    data-edge-label
+                  >
+                    {loopLabel(e)}
+                  </text>
+                </g>
+              )
+            }
+            const x1 = a.x + W
+            const y1 = a.y + H / 2
+            const x2 = b.x
+            const y2 = b.y + H / 2
+            const mx = (x1 + x2) / 2
             return (
-              <g
-                key={`${e.from}>${e.to}`}
-                data-edge={`${e.from}>${e.to}`}
-                data-self-loop
-              >
+              <g key={`${e.from}>${e.to}`} data-edge={`${e.from}>${e.to}`}>
                 <title>{EDGE_HINT}</title>
                 <path
-                  d={`M${x1},${y} C${x1},${y - 16} ${x2},${y - 16} ${x2},${y - 3}`}
+                  d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2 - 4},${y2}`}
                   className={`fill-none ${tone(e.fails)}`}
                   strokeWidth={1.5}
                 />
                 <path
-                  d={`M${x2 - 4},${y - 7} L${x2},${y - 1} L${x2 + 4},${y - 7}`}
+                  d={`M${x2 - 8},${y2 - 4} L${x2},${y2} L${x2 - 8},${y2 + 4}`}
                   className={`fill-none ${tone(e.fails)}`}
                   strokeWidth={1.5}
                 />
                 <text
-                  x={x2 + 6}
-                  y={y - 8}
+                  x={mx}
+                  y={(y1 + y2) / 2 - 5}
+                  textAnchor="middle"
                   className="fill-muted-foreground text-[10px]"
                   data-edge-label
                 >
-                  {loopLabel(e)}
+                  {edgeLabel(e)}
                 </text>
               </g>
             )
-          }
-          const x1 = a.x + W
-          const y1 = a.y + H / 2
-          const x2 = b.x
-          const y2 = b.y + H / 2
-          const mx = (x1 + x2) / 2
-          return (
-            <g key={`${e.from}>${e.to}`} data-edge={`${e.from}>${e.to}`}>
-              <title>{EDGE_HINT}</title>
-              <path
-                d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2 - 4},${y2}`}
-                className={`fill-none ${tone(e.fails)}`}
-                strokeWidth={1.5}
-              />
-              <path
-                d={`M${x2 - 8},${y2 - 4} L${x2},${y2} L${x2 - 8},${y2 + 4}`}
-                className={`fill-none ${tone(e.fails)}`}
-                strokeWidth={1.5}
-              />
-              <text
-                x={mx}
-                y={(y1 + y2) / 2 - 5}
-                textAnchor="middle"
-                className="fill-muted-foreground text-[10px]"
-                data-edge-label
+          })}
+          {graph.nodes.map((n) => {
+            const p = at.get(n.id)!
+            const on = n.id === selected
+            const cost = n.kind === "agent" ? costOf?.(n.runs) : undefined
+            const st = nodeStatus(n, rowOf)
+            const line = st ? nodeStatusLine(st) : undefined
+            const paint =
+              ROLE_SVG[st ? studioVar(st.status.role) : "muted-foreground"]
+            const loud = st !== undefined && LOUD.has(st.status.key)
+            return (
+              <g
+                key={n.id}
+                transform={`translate(${p.x},${p.y})`}
+                ref={(el: SVGGElement | null) => {
+                  if (el) refs.current.set(n.id, el)
+                  else refs.current.delete(n.id)
+                }}
+                role="button"
+                tabIndex={n.id === stop ? 0 : -1}
+                aria-pressed={on}
+                // The name starts with the visible words, in their order
+                // (axe label-content-name-mismatch): the glyph is aria-hidden.
+                aria-label={`${n.label} ${nodeLine(n)}${line ? ` ${line.word}${line.rest}` : ""}${cost ? ` ${cost.text}` : ""}`}
+                data-node={n.id}
+                data-node-status={st?.status.key}
+                className="group cursor-pointer outline-none"
+                onClick={() => {
+                  setFocus(n.id)
+                  onSelect(n)
+                }}
+                onFocus={() => setFocus(n.id)}
+                onKeyDown={onKey(n)}
               >
-                {edgeLabel(e)}
-              </text>
-            </g>
-          )
-        })}
-        {graph.nodes.map((n) => {
-          const p = at.get(n.id)!
-          const on = n.id === selected
-          const cost = n.kind === "agent" ? costOf?.(n.runs) : undefined
-          const st = nodeStatus(n, rowOf)
-          const line = st ? nodeStatusLine(st) : undefined
-          const paint =
-            ROLE_SVG[st ? studioVar(st.status.role) : "muted-foreground"]
-          const loud = st !== undefined && LOUD.has(st.status.key)
-          return (
-            <g
-              key={n.id}
-              transform={`translate(${p.x},${p.y})`}
-              ref={(el: SVGGElement | null) => {
-                if (el) refs.current.set(n.id, el)
-                else refs.current.delete(n.id)
-              }}
-              role="button"
-              tabIndex={n.id === stop ? 0 : -1}
-              aria-pressed={on}
-              // The name starts with the visible words, in their order
-              // (axe label-content-name-mismatch): the glyph is aria-hidden.
-              aria-label={`${n.label} ${nodeLine(n)}${line ? ` ${line.word}${line.rest}` : ""}${cost ? ` ${cost.text}` : ""}`}
-              data-node={n.id}
-              data-node-status={st?.status.key}
-              className="group cursor-pointer outline-none"
-              onClick={() => {
-                setFocus(n.id)
-                onSelect(n)
-              }}
-              onFocus={() => setFocus(n.id)}
-              onKeyDown={onKey(n)}
-            >
-              {/* Selected: the thread's 2px frame on the page's fill
+                {/* Selected: the thread's 2px frame on the page's fill
                   (a status word in its ink clears 4.5:1 on paper; the
                   accent wash took interrupted's mustard to 4.19). */}
-              <rect
-                width={W}
-                height={H}
-                rx={6}
-                className={`fill-background ${
-                  on
-                    ? "stroke-thread"
-                    : loud
-                      ? paint.stroke
-                      : n.fails
-                        ? "stroke-ev-error"
-                        : "stroke-border"
-                }`}
-                strokeWidth={on || loud ? 2 : 1}
-                data-node-frame
-              />
-              {/* The keyboard focus: a ring outside the node (its own
+                <rect
+                  width={W}
+                  height={H}
+                  rx={6}
+                  className={`fill-background ${
+                    on
+                      ? "stroke-thread"
+                      : loud
+                        ? paint.stroke
+                        : n.fails
+                          ? "stroke-ev-error"
+                          : "stroke-border"
+                  }`}
+                  strokeWidth={on || loud ? 2 : 1}
+                  data-node-frame
+                />
+                {/* The keyboard focus: a ring outside the node (its own
                   stroke says selected or failed). */}
-              <rect
-                x={-3}
-                y={-3}
-                width={W + 6}
-                height={H + 6}
-                rx={8}
-                className="fill-none stroke-ring opacity-0 group-focus-visible:opacity-100"
-                strokeWidth={2}
-                aria-hidden
-                data-focus-ring
-              />
-              <text
-                x={10}
-                y={18}
-                className={`text-[11px] font-medium ${
-                  loud
-                    ? paint.fill
-                    : n.fails
-                      ? "fill-ev-error"
-                      : "fill-foreground"
-                }`}
-              >
-                <tspan aria-hidden>{n.kind === "agent" ? "▣ " : "⧉ "}</tspan>
-                {n.label}{" "}
-              </text>
-              <text x={10} y={34} className="fill-muted-foreground text-[10px]">
-                {nodeLine(n)}{" "}
-              </text>
-              {line ? (
-                <text x={10} y={50} className="text-[10px]" data-node-line>
-                  <tspan className={paint.fill} data-node-word>
-                    {line.word}
-                  </tspan>
-                  <tspan className="fill-muted-foreground">{line.rest} </tspan>
-                </text>
-              ) : null}
-              {cost ? (
+                <rect
+                  x={-3}
+                  y={-3}
+                  width={W + 6}
+                  height={H + 6}
+                  rx={8}
+                  className="fill-none stroke-ring opacity-0 group-focus-visible:opacity-100"
+                  strokeWidth={2}
+                  aria-hidden
+                  data-focus-ring
+                />
                 <text
-                  x={W - 8}
+                  x={10}
                   y={18}
-                  textAnchor="end"
-                  className="fill-muted-foreground text-[10px]"
-                  data-cost-known={cost.known ? "true" : "false"}
-                  data-graph-cost
+                  className={`text-[11px] font-medium ${
+                    loud
+                      ? paint.fill
+                      : n.fails
+                        ? "fill-ev-error"
+                        : "fill-foreground"
+                  }`}
                 >
-                  <title>{cost.title}</title>
-                  {cost.text}
+                  <tspan aria-hidden>{n.kind === "agent" ? "▣ " : "⧉ "}</tspan>
+                  {n.label}{" "}
                 </text>
-              ) : null}
-            </g>
-          )
-        })}
-      </svg>
+                <text
+                  x={10}
+                  y={34}
+                  className="fill-muted-foreground text-[10px]"
+                >
+                  {nodeLine(n)}{" "}
+                </text>
+                {line ? (
+                  <text x={10} y={50} className="text-[10px]" data-node-line>
+                    <tspan className={paint.fill} data-node-word>
+                      {line.word}
+                    </tspan>
+                    <tspan className="fill-muted-foreground">
+                      {line.rest}{" "}
+                    </tspan>
+                  </text>
+                ) : null}
+                {cost ? (
+                  <text
+                    x={W - 8}
+                    y={18}
+                    textAnchor="end"
+                    className="fill-muted-foreground text-[10px]"
+                    data-cost-known={cost.known ? "true" : "false"}
+                    data-graph-cost
+                  >
+                    <title>{cost.title}</title>
+                    {cost.text}
+                  </text>
+                ) : null}
+              </g>
+            )
+          })}
+        </svg>
+      </div>
       {graph.edges.length === 0 ? (
         <p className="px-1 pt-1 text-muted-foreground">{GRAPH_ALONE}</p>
       ) : null}

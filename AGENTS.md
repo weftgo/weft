@@ -302,13 +302,14 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    value a 400; the UI page /conversations/$id is a public id's runs, experiments nested, live — lib/links.ts conversationLink),
 //    //    sessions/{id} (+ delegated: its delegated sessions,
 //    //    each with its cost; delegated_usage and delegated_sessions_cost_* the whole delegated tree's, beside its own, U14; delegated_holes:
-//    //    one hidden hole counting the delegated sessions a panel token is not shown, the delegated cost then unknown with a reason;
-//    //    a panel token reads an unknown session id as it reads another public id's, 403 — sessions/{id}, its timeline, entries, export),
+//    //    one hidden hole counting the delegated sessions, at any depth, a panel token is not shown, the delegated cost then unknown with a reason;
+//    //    a panel token reads an unknown session id as it reads another public id's, 403 — sessions/{id}, its timeline, entries, export;
+//    //    a session of session-level marks alone answers sessions/{id} as its timeline, 200; the row status (and the document's) the newest turn's outcome, ?status='s word),
 //    //    sessions/{id}/timeline (U12.2, capability "timeline" — obsdb.SessionEventReader over the session_events index,
 //    //    SQLite 0022 / ClickHouse 0025, every thread record and compaction marker by session, a record filed under no run
 //    //    included: the turns in order, the marks in record-time order — kind, lane approvals|grants|compaction|steer_queue|
 //    //    branch_fork|pool(|other), run_id/turn (null: session-level), entry, fields, content (a read token: content_hidden), actor on a
-//    //    decision (the resume's weft.approval.actor: metadata, every token reads it) —
+//    //    decision (the weft.approval.actor of the turn that resumed it, never the parked run's own; one call's of several by key_id, else a content reader's who, else the list + actor_of resume: metadata, every token reads it) —
 //    //    ≤ 2,000, the lanes' counts, holes not_recorded (only when a turn parked or resumed: a plain send writes no
 //    //    record)/stripped/hidden (a panel token's counts exact, both routes alike)/truncated cause response_cap; summarizer on a turn and the
 //    //    session, U15.1: thread's summarizer calls priced at read time, never in usage — the page /sessions/$id draws it as its
@@ -317,8 +318,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    filter ?lanes= (dims, never hides), ?view=tree the lines the turns continue (weft.turn.parent: abandoned turns off the path, forks
 //    //    on the origin), a context lane per turn, interrupt / rollback ends worded as such, the page live on /api/live?session=; U15.2-fix:
 //    //    ?view=approvals every decision (call, tool, outcome, who / via / key, grant, parked → resumed turn, refused signatures) and grant
-//    //    (rule, scope, uses n of max with their calls, revoked / expired); the forks read in one obsdb.SessionQuery.IDs query, both backends) and sessions/{id}/entries?offset=&limit=
-//    //    (the same marks paged, ≤ 1,000, next_offset; sessions/{id}'s scope, 501 without the capability),
+//    //    (rule, scope, uses n of max with their calls, revoked / expired); the forks read in one obsdb.SessionQuery.IDs query, both backends) and sessions/{id}/entries?offset=&limit=&run=
+//    //    (the same marks paged, ≤ 1,000, next_offset; run= one run's marks alone, obsdb.SessionEventQuery.RunIDs — a parked run's request expiry in one read; sessions/{id}'s scope, 501 without the capability),
 //    //    sessions/{id}/export?format=jsonl (UX-B-29: the conversation as JSON lines, streamed — a session line
 //    //    {format, session_id, public_id, agent, turns, marks}, every turn's run jsonl export in turn order (≤ 200),
 //    //    the state log's session_mark lines (≤ 2,000), session_hole lines (truncated cause response_cap past a cap —

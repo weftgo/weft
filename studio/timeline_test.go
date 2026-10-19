@@ -230,6 +230,40 @@ func TestSessionTimeline(t *testing.T) {
 	if code, _, _ := get(t, h, "/studio/api/sessions/s_acme/entries?limit=x"); code != http.StatusBadRequest {
 		t.Errorf("entries?limit=x: %d, want 400", code)
 	}
+	// ?run= (P9-pre-web-fix2 9): one run's marks in one read — total,
+	// offsets and next_offset that run's — the session's scope kept.
+	var whole []struct {
+		RunID *string `json:"run_id"`
+	}
+	_, _, body = get(t, h, "/studio/api/sessions/s_acme/entries?limit=1000")
+	var all struct {
+		Entries json.RawMessage `json:"entries"`
+	}
+	decode(t, body, &all)
+	decode(t, string(all.Entries), &whole)
+	runMarks := 0
+	for _, m := range whole {
+		if m.RunID != nil && *m.RunID == "s_acme-t1" {
+			runMarks++
+		}
+	}
+	_, _, body = get(t, h, "/studio/api/sessions/s_acme/entries?run=s_acme-t1&limit=1")
+	var one struct {
+		Run     string `json:"run"`
+		Entries []struct {
+			RunID *string `json:"run_id"`
+		} `json:"entries"`
+		Total      int  `json:"total"`
+		NextOffset *int `json:"next_offset"`
+	}
+	decode(t, body, &one)
+	if runMarks < 2 || one.Run != "s_acme-t1" || one.Total != runMarks || len(one.Entries) != 1 || *one.Entries[0].RunID != "s_acme-t1" ||
+		one.NextOffset == nil || *one.NextOffset != 1 {
+		t.Errorf("entries?run=s_acme-t1&limit=1 = %s; want 1 of t1's %d marks, next 1", body, runMarks)
+	}
+	if _, _, body = get(t, h, "/studio/api/sessions/s_acme/entries?run=nope"); !strings.Contains(body, `"total":0`) {
+		t.Errorf("entries?run=nope = %s; want none", body)
+	}
 
 	// No mark and no turn that would have written one (a plain send):
 	// the timeline is its turns, no hole.
@@ -316,8 +350,20 @@ func TestSessionTimelineScope(t *testing.T) {
 	// id, the 403 an unknown session gets too: the refusal never says it
 	// exists.
 	for _, sid := range []string{"s_held", "s_never_stored"} {
-		if code, _, _ := getWith(t, h, "/studio/api/sessions/"+sid+"/timeline", tok("pub_other", scopeRead), ""); code != http.StatusForbidden {
-			t.Errorf("%s as another public id: %d, want 403", sid, code)
+		for _, sub := range []string{"/timeline", ""} {
+			if code, _, _ := getWith(t, h, "/studio/api/sessions/"+sid+sub, tok("pub_other", scopeRead), ""); code != http.StatusForbidden {
+				t.Errorf("%s%s as another public id: %d, want 403", sid, sub, code)
+			}
+		}
+	}
+	// P9-pre-web-fix2 10: its own public id's token reads the plain
+	// route as it reads the timeline — 200, no turn — never a 403 the
+	// page sticks on; so does the dev token.
+	for _, bearer := range []string{tok("pub_acme", scopeRead), "srv"} {
+		for _, sub := range []string{"/timeline", ""} {
+			if code, _, body := getWith(t, h, "/studio/api/sessions/s_held"+sub, bearer, ""); code != http.StatusOK || !strings.Contains(body, `"s_held"`) {
+				t.Errorf("s_held%s as its own public id / the dev token: %d %s, want 200", sub, code, body)
+			}
 		}
 	}
 	_, _, body = getWith(t, h, "/studio/api/sessions/s_acme/entries", tok("pub_acme", scopeRead), "")

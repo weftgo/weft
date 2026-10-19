@@ -760,7 +760,11 @@ func spans(in []obsdb.Span) spansDoc {
 }
 
 // sessionRow is one thread: turns, usage, first/last seen, the newest
-// turn's status (S4.3).
+// turn's status (S4.3) — its outcome (obsdb.OutcomeOf, the session
+// page's word and SessionQuery.Status's rule, so a row and ?status=
+// agree): succeeded, failed, running or interrupted, else cancelled,
+// ended (thread's busy policy), parked (an open park) or resumed (a
+// decided one), which no ?status= keeps.
 type sessionRow struct {
 	ID        string     `json:"id"`
 	PublicID  string     `json:"public_id"`
@@ -836,13 +840,23 @@ func sessRow(r obsdb.SessionRow) sessionRow {
 		SummarizerUsage: sum,
 		ID:              r.ID, PublicID: r.PublicID, Agent: r.Agent, Turns: r.Turns,
 		FirstSeen: r.FirstSeen, LastSeen: r.LastSeen,
-		Status: string(r.Status), Usage: r.Usage,
+		Status: sessionStatus(r), Usage: r.Usage,
 		Title: r.Title, FirstPrompt: r.FirstPrompt, ContentOff: r.ContentOff,
 		ParentSession: r.ParentSession, ParentTurn: turnOf(r.ParentSession, r.ParentRun),
 		ParentCall: r.ParentCall, ParentRun: r.ParentRun,
 		Pending: r.Pending, FailedTurns: r.FailedTurns, EndedTurns: r.EndedTurns,
 		Cancelled: r.CancelledTurns, Resumes: r.Resumes, Outcomes: outcomeWords(r.Outcomes), ForkedFrom: r.ForkedFrom,
 	}
+}
+
+// sessionStatus is a session row's status: its newest turn's outcome
+// (the strip's last mark), else — a row that read no turn facts — its
+// stored status.
+func sessionStatus(r obsdb.SessionRow) string {
+	if n := len(r.Outcomes); n > 0 {
+		return string(r.Outcomes[n-1])
+	}
+	return string(r.Status)
 }
 
 // outcomeWords is a session row's strip as JSON strings.
@@ -2145,21 +2159,33 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		notFound(w, r, "no such api route "+r.URL.Path)
 		return
 	}
-	if !s.scopeSessionID(w, r, id) {
-		return
-	}
-	det, err := s.db.Session(r.Context(), id)
-	if err != nil {
-		sessionReadError(w, r, id, err)
-		return
-	}
 	pub := panelPublicID(r)
-	if pub != "" {
-		// A panel token's session is its public id's turns (the runs
-		// list's rule): a run of another app sharing the session id — a
-		// derived run whose gen_ai.conversation.id collides — is neither
-		// listed nor summed (docs/record-contract.md §9).
-		s.scopeSessionDetail(r.Context(), &det, pub)
+	var det obsdb.SessionDetail
+	if er, ok := s.db.(obsdb.SessionEventReader); ok {
+		// The timeline's read (sessionScopeFor): a session no turn of
+		// which is stored still answers when its state log has marks —
+		// session-level records alone, every one held at Close — so the
+		// plain route agrees with its /timeline (P9-pre-web-fix2 10).
+		if det, ok = s.sessionScopeFor(w, r, er, id); !ok {
+			return
+		}
+	} else {
+		if !s.scopeSessionID(w, r, id) {
+			return
+		}
+		var err error
+		if det, err = s.db.Session(r.Context(), id); err != nil {
+			sessionReadError(w, r, id, err)
+			return
+		}
+		if pub != "" {
+			// A panel token's session is its public id's turns (the
+			// runs list's rule): a run of another app sharing the
+			// session id — a derived run whose gen_ai.conversation.id
+			// collides — is neither listed nor summed
+			// (docs/record-contract.md §9). sessionScopeFor does the same.
+			s.scopeSessionDetail(r.Context(), &det, pub)
+		}
 	}
 	doc := sessionDoc{sessionRow: sessRow(det.SessionRow), Runs: make([]runRow, 0, len(det.Runs))}
 	sc, c, _ := s.sessionCost(r.Context(), id, pub)
@@ -2194,8 +2220,8 @@ func (s *Server) delegatedSessions(ctx context.Context, id, pub string, doc *ses
 	var parts []runCost
 	var why string
 	walked := 0
-	scopedTotal := -1 // the direct level's total in the request's scope, once read
-	allExact := true  // every visited session's own cost reported its cache split exact
+	hidden := 0      // the sessions a panel token's scope left out, every level's
+	allExact := true // every visited session's own cost reported its cache split exact
 	// price costs one level's sessions in one batched read and folds
 	// them into the figures, in the order the level listed them.
 	price := func(depth int, rows []obsdb.SessionRow) {
@@ -2224,6 +2250,7 @@ walk:
 		var next []string
 		var rows []obsdb.SessionRow
 		q := obsdb.SessionQuery{Parents: level, PublicID: pub, Limit: 500}
+		scopedTotal := -1 // this level's total in the request's scope, once read
 		for {
 			page, err := s.db.Sessions(ctx, q)
 			if err != nil {
@@ -2235,11 +2262,15 @@ walk:
 				price(depth, rows)
 				break walk
 			}
+			if scopedTotal < 0 {
+				scopedTotal = page.Total
+				// The level's sessions the scope left out — a visible
+				// child's own delegated session under another public id
+				// as much as a direct one.
+				hidden += s.hiddenDelegated(ctx, id, level, pub, scopedTotal)
+			}
 			if depth == 0 {
 				doc.DelegatedMore = page.Total > delegatedCap
-				if scopedTotal < 0 {
-					scopedTotal = page.Total
-				}
 			}
 			for _, sr := range page.Sessions {
 				if seen[sr.ID] {
@@ -2263,7 +2294,7 @@ walk:
 		price(depth, rows)
 		level = next
 	}
-	if hidden := s.hiddenDelegated(ctx, id, pub, scopedTotal); hidden > 0 {
+	if hidden > 0 {
 		h := hiddenDelegatedHole(hidden)
 		doc.DelegatedHoles = append(doc.DelegatedHoles, h)
 		if why != "" {
@@ -2298,16 +2329,17 @@ walk:
 	doc.delegatedSessionsFields = out
 }
 
-// hiddenDelegated is how many sessions id delegated directly that a
-// panel token's scope left out of its delegated block: the unscoped
-// total less the scoped one (callerLinked's rule). 0 for an unscoped
-// read, or when either total could not be read (the walk's own error
-// already says so).
-func (s *Server) hiddenDelegated(ctx context.Context, id, pub string, scopedTotal int) int {
+// hiddenDelegated is how many sessions one level of id's delegated
+// tree (the sessions level delegated) a panel token's scope left out:
+// the level's unscoped total less its scoped one (callerLinked's rule),
+// one Limit 1 read per level. 0 for an unscoped read, or when the
+// unscoped total could not be read (logged; the walk's own error says
+// a failed scoped read).
+func (s *Server) hiddenDelegated(ctx context.Context, id string, level []string, pub string, scopedTotal int) int {
 	if pub == "" || scopedTotal < 0 {
 		return 0
 	}
-	all, err := s.db.Sessions(ctx, obsdb.SessionQuery{Parents: []string{id}, Limit: 1})
+	all, err := s.db.Sessions(ctx, obsdb.SessionQuery{Parents: level, Limit: 1})
 	if err != nil {
 		slog.DebugContext(ctx, "studio: a session's unscoped delegated count could not be read", "session", id, "err", err)
 		return 0

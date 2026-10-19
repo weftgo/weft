@@ -18,6 +18,7 @@ import { BREAKPOINT } from "@/lib/cards"
 import { absoluteTime } from "@/lib/format"
 import {
   CALLS_HOLE,
+  RUN_MARKS_HOLE,
   DECIDE_FIELD,
   WHO_HOLE,
   decidedCall,
@@ -463,10 +464,12 @@ function useRequestExpiries(doc: RunDoc) {
   })
   const exp = on
     ? requestExpiries(
-        [...(tl.data?.marks ?? []), ...(cut ? (own.data ?? []) : [])],
+        [...(tl.data?.marks ?? []), ...(cut ? (own.data?.marks ?? []) : [])],
         doc.id
       )
     : new Map<string, string>()
+  // The run's own read capped too: an expiry past it is not read, said.
+  const capped = on && cut && !!own.data?.capped
   const [now, setNow] = useState(() => Date.now())
   const ticking = [...exp.values()].some((e) => Date.parse(e) > now)
   useEffect(() => {
@@ -474,7 +477,7 @@ function useRequestExpiries(doc: RunDoc) {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [ticking])
-  return { exp, now }
+  return { exp, now, capped }
 }
 
 export function ParkedCalls({
@@ -554,6 +557,9 @@ export function ParkedCalls({
             ? BREAKPOINT
             : AWAITING}
       </span>
+      {expiry.capped && shown !== "resumed" ? (
+        <HoleBadge hole="truncated" cause="response_cap" {...RUN_MARKS_HOLE} />
+      ) : null}
       <ul className="mt-1 space-y-0.5">
         {pending.map((p) => (
           <li key={p.id} className="font-mono" data-pending-call={p.id}>

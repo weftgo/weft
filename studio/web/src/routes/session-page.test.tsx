@@ -397,4 +397,61 @@ describe("a parked call's request expiry (UX-B-41)", () => {
       "expired " + clockTime(at, false) + " — denied at the next touch"
     )
   })
+  it("past the timeline's cap reads the run's own marks in one request, and says a capped read (P9-pre-web-fix2 9)", async () => {
+    cleanup()
+    const fake = serveAppTurn(new FakeStudio(), { studioMeta: true })
+    const at = new Date(Date.now() + 60_000).toISOString()
+    const reads: string[] = []
+    fake
+      .on(`GET sessions/${APP_SESSION}/timeline`, {
+        session_id: APP_SESSION,
+        agent: "approvals-example",
+        status: "succeeded",
+        turns: [],
+        marks: [],
+        lanes: [],
+        marks_total: 2001,
+        holes: [{ hole: "truncated", cause: "response_cap", reason: "r" }],
+      })
+      .on(`GET sessions/${APP_SESSION}/entries`, (req) => {
+        reads.push(req.query.toString())
+        return {
+          session_id: APP_SESSION,
+          run: req.query.get("run"),
+          entries: [
+            {
+              at,
+              record: "thread",
+              kind: "approval.request",
+              event: "weft.thread.approval.request",
+              lane: "approvals",
+              run_id: PARKED,
+              turn: 1,
+              content_mark: "none",
+              fields: { call_id: CALL.id, expiry: at },
+            },
+          ],
+          total: 1001,
+          offset: 0,
+          next_offset: 1,
+          holes: [],
+        }
+      })
+      .install()
+    renderApp(`/runs/${encodeURIComponent(PARKED)}?view=story`)
+    const el = await waitFor(() => {
+      const n = document.querySelector<HTMLElement>(
+        `[data-pending-call="${CALL.id}"] [data-request-expiry]`
+      )
+      expect(n).toBeTruthy()
+      return n!
+    })
+    expect(el.getAttribute("data-request-expiry")).not.toBe("lapsed")
+    expect(reads).toEqual([`run=${encodeURIComponent(PARKED)}&limit=1000`])
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-parked] [data-hole="truncated"]')
+      ).toBeTruthy()
+    )
+  })
 })

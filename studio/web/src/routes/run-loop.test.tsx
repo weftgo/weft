@@ -47,6 +47,7 @@ import {
 } from "@/test/loop-fixtures"
 import type { FxRun } from "@/test/loop-fixtures"
 import { LoopGraphView } from "@/components/studio/loop-graph"
+import { fittedSize, GRAPH_MIN_SCALE } from "@/lib/graph"
 import { loopGraph, NO_SEL } from "@/lib/loopgraph"
 import { ALL_RUNS } from "@/lib/run-tree"
 import { treeRows } from "@/lib/waterfall-tree"
@@ -437,6 +438,34 @@ describe("rw.deep-delegation", () => {
       expect(document.querySelector("[data-call-graph]")).not.toBeNull()
     )
     expect(loopOf()).toBeNull()
+  })
+
+  it("both graphs fit their pane down to GRAPH_MIN_SCALE, then their own wrapper scrolls (P9-pre-web-fix2 3)", async () => {
+    expect(GRAPH_MIN_SCALE * 10).toBeGreaterThanOrEqual(9) // 10 px text ≥ 9 px
+    expect(fittedSize(644)).toEqual({ maxWidth: 644, minWidth: 580 })
+    serve(DIRECTOR)
+    const { router } = renderApp(`/runs/${DIRECTOR.id}?scale=graph`)
+    await waitFor(() => expect(loopOf()).not.toBeNull())
+    const check = (svg: SVGSVGElement) => {
+      const w = Number(svg.getAttribute("viewBox")!.split(" ")[2])
+      expect(svg.style.maxWidth).toBe(`${w}px`)
+      expect(svg.style.minWidth).toBe(`${Math.ceil(w * GRAPH_MIN_SCALE)}px`)
+      const wrap = svg.closest<HTMLElement>("[data-graph-scroll]")!
+      expect(wrap.className).toContain("overflow-x-auto")
+      expect(wrap.tabIndex).toBe(0)
+      expect(wrap.getAttribute("aria-label")).toBeTruthy()
+    }
+    check(document.querySelector<SVGSVGElement>("[data-loop-svg]")!)
+    void router.navigate({
+      to: ".",
+      search: (s: Record<string, unknown>) => ({ ...s, level: "agents" }),
+    } as never)
+    const cg = await waitFor(() => {
+      const n = document.querySelector<SVGSVGElement>("[data-call-graph] svg")
+      expect(n).not.toBeNull()
+      return n!
+    })
+    check(cg)
   })
 })
 

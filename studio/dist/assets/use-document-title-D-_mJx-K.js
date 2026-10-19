@@ -1,0 +1,1 @@
+import{S as e,la as t,sa as n}from"./use-capabilities-BkeSs3Et.js";var r=t(n(),1);function i(t){let n=e(t);(0,r.useEffect)(()=>{typeof document<`u`&&(document.title=n)},[n])}export{i as t};

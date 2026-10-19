@@ -169,7 +169,7 @@ export function SubagentBlock({
       <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2">
         <button
           type="button"
-          className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-left"
+          className="flex min-h-6 flex-wrap items-center gap-x-3 gap-y-0.5 text-left"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-label={`${eyebrow} ${child.agent || UNNAMED_AGENT}: ${open ? "close" : "open"} the child run`}
@@ -245,7 +245,7 @@ export function SubagentBlock({
         ) : null}
         <Link
           {...runLink(child.id)}
-          className={`flex items-center gap-0.5 font-mono text-[11px] hover:underline ${kind === "delegated" ? "text-muted-foreground" : "text-foreground"}`}
+          className={`flex min-h-6 items-center gap-0.5 font-mono text-[11px] hover:underline ${kind === "delegated" ? "text-muted-foreground" : "text-foreground"}`}
         >
           {OPEN_RUN}
           <ArrowUpRight className="size-3" data-slot="icon" />

@@ -2,7 +2,9 @@ package studio
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -205,5 +207,64 @@ func TestTimelineDecisionActor(t *testing.T) {
 		if tok == read && strings.Contains(body, "need a photo") {
 			t.Errorf("read token: the deny reason leaked: %s", body)
 		}
+	}
+}
+
+// TestTimelineDecisionActorChained (P9-pre-web-fix2 1): thread files a
+// decision under the parked run, so its actor is the resume's — never
+// the parked run's own, which names who decided the run before it. t3
+// parks; t4 resumes it as alice and parks again; t5 resumes t4 as bob:
+// t3's marks read alice, t4's bob. An app stamping an actor on every
+// turn (t3's own "carol") changes nothing. A run no stored turn resumed
+// keeps its own. One resume deciding several calls (t6 resumes t5 as
+// "bob,k_dave") names each call's own — the key its record names, else,
+// to a content reader, its who — and otherwise the list, as the
+// resume's (actor_of).
+func TestTimelineDecisionActorChained(t *testing.T) {
+	const sess = "01K00000000000000000000009"
+	run := func(n int, actor, from string) obsdb.RunRow {
+		rr := obsdb.RunRow{ID: fmt.Sprintf("%s-t%d", sess, n), Turn: n, ResumedFrom: from, Meta: map[string]string{}}
+		if actor != "" {
+			rr.Meta[approvalActorKey] = actor
+		}
+		return rr
+	}
+	t3, t4, t5, t6 := run(3, "carol", ""), run(4, "alice", sess+"-t3"), run(5, "bob", sess+"-t4"), run(6, "bob,k_dave", sess+"-t5")
+	lone := run(8, "erin", "")
+	det := obsdb.SessionDetail{SessionRow: obsdb.SessionRow{ID: sess}, Runs: []obsdb.RunRow{t3, t4, t5, t6, lone}}
+	srv := &Server{}
+	mark := func(reads bool, runID, body string) sessionEntry {
+		mb := srv.newMarkBuilder(httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess+"/timeline", nil), det)
+		mb.readsContent = reads
+		m, ok := mb.mark(obsdb.SessionEvent{SessionID: sess, RunID: runID, Kind: obsdb.RecordThread, Name: "weft.thread.approval.decision", Body: json.RawMessage(body)})
+		if !ok {
+			t.Fatalf("mark %s left out", runID)
+		}
+		return m
+	}
+	plain := `{"kind":"approval.decision","call_id":"c1","outcome":"approve"}`
+	for _, c := range []struct {
+		run, body  string
+		reads      bool
+		actor, off string
+	}{
+		{t3.ID, plain, true, "alice", ""},
+		{t4.ID, plain, true, "bob", ""},
+		{t4.ID, plain, false, "bob", ""},
+		{t5.ID, `{"kind":"approval.decision","call_id":"c1","outcome":"approve","key_id":"k_dave","content":{"who":"dave"}}`, false, "k_dave", ""},
+		{t5.ID, `{"kind":"approval.decision","call_id":"c2","outcome":"deny","content":{"who":"bob"}}`, true, "bob", ""},
+		{t5.ID, `{"kind":"approval.decision","call_id":"c2","outcome":"deny","content":{"who":"bob"}}`, false, "bob,k_dave", "resume"},
+		{t5.ID, `not json`, true, "bob,k_dave", "resume"},
+		{lone.ID, plain, true, "erin", ""},
+	} {
+		m := mark(c.reads, c.run, c.body)
+		if m.Actor != c.actor || m.ActorOf != c.off {
+			t.Errorf("%s %s (reads %v): actor %q of %q, want %q of %q", c.run[len(sess):], c.body, c.reads, m.Actor, m.ActorOf, c.actor, c.off)
+		}
+	}
+	// Any other kind carries no actor.
+	mb := srv.newMarkBuilder(httptest.NewRequest(http.MethodGet, "/", nil), det)
+	if m, _ := mb.mark(obsdb.SessionEvent{SessionID: sess, RunID: t3.ID, Kind: obsdb.RecordThread, Name: "weft.thread.approval.request", Body: json.RawMessage(plain)}); m.Actor != "" {
+		t.Errorf("a request mark carries actor %q", m.Actor)
 	}
 }

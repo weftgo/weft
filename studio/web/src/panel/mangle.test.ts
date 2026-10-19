@@ -313,6 +313,48 @@ export {}
     ["void `${tree as unknown}`", /TreeState widened to unknown/],
     ["void `${state}`", /PanelState interpolated into a template/],
     ["export const f = (): {} => model", /PanelModel widened to \{\}/],
+    // (i) P9-pre-web-fix2 2: a standard container's opaque type argument
+    // widens the value as much as an opaque parameter does — read on the
+    // call's instantiated signature, never the container's bare V / T.
+    [
+      'const m = new Map<string, unknown>(); m.set("a", state); JSON.stringify(m.get("a"))',
+      /PanelState passed to m\.set's parameter typed unknown/,
+    ],
+    [
+      "const xs: unknown[] = []; xs.push(tree)",
+      /TreeState passed to xs\.push's parameter typed unknown/,
+    ],
+    [
+      "export const p: Promise<unknown> = Promise.resolve(turn)",
+      /TurnView widened to Promise<unknown>/,
+    ],
+    [
+      "const set = new Set<unknown>(); set.add(cur)",
+      /Cursor passed to set\.add's parameter typed unknown/,
+    ],
+    [
+      "void Array.of<unknown>(model)",
+      /PanelModel passed to Array\.of's parameter typed unknown/,
+    ],
+    [
+      'const m = new Map<string, unknown>([["a", state]]); void m',
+      /PanelState widened to unknown/,
+    ],
+    [
+      "const byID: Map<string, object> = new Map([[s, turn]]); void byID",
+      /TurnView widened to Map<string, object>/,
+    ],
+    // A quoted name is never mangled: an element access or an `in` by
+    // string on an internal type reads a name the build renamed.
+    ['void state["turnList"]', /PanelState read by the quoted name "turnList"/],
+    [
+      'void ("tooNew" in state)',
+      /PanelState tested with `in` by the quoted name "tooNew"/,
+    ],
+    [
+      'export const has = (v: TreeState | TurnView) => "applied" in v',
+      /TreeState tested with `in` by the quoted name "applied"/,
+    ],
   ])("%s", (body, want) => {
     expect(() => analyze(body)).toThrow(want)
   })
@@ -349,9 +391,16 @@ export async function f() {
   const all: TurnView[] = await Promise.all([Promise.resolve(turn), turn])
   const xs: PanelState[] = [state].map((x) => x).filter((x) => !!x)
   const w = new WeakMap<object, TreeState>([[el, tree]])
-  return [got, set, all, xs, w, Array.from(set)]
+  const views: TurnView[] = []
+  views.push(turn)
+  const of = Array.of(turn)
+  const byID = new Map([[s, turn]])
+  return [got, set, all, xs, w, Array.from(set), views, of, byID]
 }
-export function isTree(v: TreeState | TurnView): v is TreeState { return "applied" in v }
+// A type parameter whose constraint is internal reads it by the names
+// the build renames (P9-pre-web-fix2 2's nit): not opaque.
+function keep<T extends TurnView>(t: T): T { return t.folded ? t : t }
+void keep(turn).folded
 fmt(turn.folded)
 fmt({ folded: turn.folded })
 const held: TurnView[] = [turn]

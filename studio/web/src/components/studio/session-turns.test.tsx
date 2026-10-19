@@ -102,4 +102,35 @@ describe("SessionTurns", () => {
       )
     ).toEqual(["s_x-t1", "s_x-t2", "s_x-t3"])
   })
+
+  it("a sessionless conversation (plain Generate runs on one public id) reads its gaps in the public id's run order (P9-pre-web-fix2 12a)", async () => {
+    const [first] = session.runs
+    const at = (s: number) =>
+      new Date(Date.UTC(2026, 9, 1, 9, 0, s)).toISOString()
+    const run = (id: string, s: number, session_id = ""): RunRow => ({
+      ...first,
+      id,
+      session_id,
+      turn: 0,
+      pending: 0,
+      public_id: "pub_plain",
+      started: at(s),
+      finished: at(s + 1),
+      last_seen: at(s + 1),
+    })
+    const turns = [run("g1", 0), run("s_y-t1", 2, "s_y"), run("g2", 5)]
+    const { container } = await renderWithRouter(
+      <SessionTurns turns={turns} experiments={new Map()} order="oldest" />
+    )
+    const gaps = [...container.querySelectorAll("tr[data-turn]")].map((tr) => [
+      tr.getAttribute("data-turn"),
+      tr.querySelector("[data-turn-gap]")?.textContent ?? "",
+    ])
+    // g2 follows g1 (+4s), never the other session's s_y-t1; s_y-t1
+    // has no turn before it in its own session.
+    expect(gaps[0]).toEqual(["g1", ""])
+    expect(gaps[1]).toEqual(["s_y-t1", ""])
+    expect(gaps[2][0]).toBe("g2")
+    expect(gaps[2][1]).toContain("+4")
+  })
 })

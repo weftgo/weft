@@ -693,6 +693,14 @@ func TestAuthMatrix(t *testing.T) {
 		// content a read token's hidden too: TestSessionTimelineScope).
 		{name: "GET /api/sessions/{id}/timeline", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/timeline" }, resources: all, want: sessionScoped(ok)},
 		{name: "GET /api/sessions/{id}/entries", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/entries?limit=10" }, resources: all, want: sessionScoped(ok)},
+		// ?run= narrows the page to one run's marks (P9-pre-web-fix2 9):
+		// the same scope and capability, whatever run it names.
+		{name: "GET /api/sessions/{id}/entries?run=", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/entries?run=" + run[res] }, resources: all, want: sessionScoped(ok)},
+		// HEAD answers as GET does on the session reads (P9-pre-web-fix2 12c).
+		{name: "HEAD /api/sessions/{id}", method: "HEAD", path: func(res string) string { return "/api/sessions/" + session[res] }, resources: all, want: sessionScoped(ok)},
+		{name: "HEAD /api/sessions/{id}/timeline", method: "HEAD", path: func(res string) string { return "/api/sessions/" + session[res] + "/timeline" }, resources: all, want: sessionScoped(ok)},
+		{name: "HEAD /api/sessions/{id}/entries", method: "HEAD", path: func(res string) string { return "/api/sessions/" + session[res] + "/entries?limit=10" }, resources: all, want: sessionScoped(ok)},
+		{name: "HEAD /api/sessions/{id}/entries?run=", method: "HEAD", path: func(res string) string { return "/api/sessions/" + session[res] + "/entries?run=" + run[res] }, resources: all, want: sessionScoped(ok)},
 		// The conversation export (UX-B-29): sessions/{id}'s scope, HEAD
 		// answering as GET does.
 		{name: "GET /api/sessions/{id}/export", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/export?format=jsonl" }, resources: all, want: sessionScoped(ok)},

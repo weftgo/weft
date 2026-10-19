@@ -1111,8 +1111,9 @@ body's content object)), the six lanes with their counts — `approvals`
 `uncompact`, `pin`), `steer_queue` (`receipt`, `interrupt`, `rewind`),
 `branch_fork` (`branch`, `fork`, `label`), `pool` (`pool.*`), plus
 `other` for a kind this build does not know — `marks_total` and the
-holes — and `GET /api/sessions/{id}/entries?offset=&limit=` (the same
-marks paged, ≤ 1,000, `next_offset`). Holes: `not_recorded` (not one
+holes — and `GET /api/sessions/{id}/entries?offset=&limit=&run=` (the same
+marks paged, ≤ 1,000, `next_offset`; `run` one run's marks alone,
+`obsdb.SessionEventQuery.RunIDs`, its total that run's). Holes: `not_recorded` (not one
 mark although a turn shows what thread records — it parked a call
 (`pending`, stopped by `parked`) or is half of an approval link
 (`resumed_from` / `resumed_by`) — so the state log never reached the
@@ -1130,7 +1131,13 @@ says it is a floor, on `/entries` it is the page's), `truncated` (`cause:
 offset). A
 panel token reads its public id's session only (`sessions/{id}`'s
 scope); a session of session-level marks alone (no turn stored)
-answers with no turns. The exported state log is an index, not
+answers with no turns, on `sessions/{id}` as on its timeline. A
+decision mark's `actor` (metadata, every token reads it) is the
+`weft.approval.actor` of the turn that resumed the run it is filed
+under — never that run's own, which names who decided the run before
+it — narrowed, when the resume names several, to the call's own: the
+record's `key_id`, else to a token that reads content its `who`; else
+the list with `actor_of: "resume"`. The exported state log is an index, not
 evidence (ADR 0021, amendment 2026-10-19). The timeline also prices the summarizer at
 read time (U15.1, UX-B-13; never stored): a turn carries `summarizer`
 (`usage` + the cost block) when marks filed under it — a compaction
@@ -1354,7 +1361,9 @@ dropped and the kind stays in the hint. Studio and the devtools panel
 draw these words from one table (`studio/web/src/lib/status.ts`), each
 in one colour role (`lib/palette.ts`'s `ROLE`); the `run` host event
 keeps the plain words (`parked` = succeeded with pending calls). The
-sessions list's status is the newest turn's stored word, and since U16
+sessions list's status is the newest turn's outcome (`obsdb.OutcomeOf`,
+the word `SessionQuery.Status` filters by: `cancelled`, `ended`,
+`parked` or `resumed` beside the four), and since U16
 the row carries its turn facts beside it (§6): `pending` when the
 newest turn is an open park (the list's "awaiting a decision"),
 `outcomes` with each turn's parked / resumed / cancelled / ended word,

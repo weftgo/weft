@@ -356,6 +356,31 @@ func TestDelegatedHiddenScoped(t *testing.T) {
 	if len(p.Delegated) != 0 || len(p.Holes) != 1 || p.CostKnown || p.CostUSD != nil {
 		t.Errorf("only a hidden child: delegated %+v holes %+v known %v usd %v; want none listed, one hole, unknown", p.Delegated, p.Holes, p.CostKnown, p.CostUSD)
 	}
+	// P9-pre-web-fix2 6: a visible child's own delegated session under
+	// another public id — a grandchild — is counted in the hole too, the
+	// cost then unknown; never a silent drop with the cost known.
+	db3, err := sqlite.Open(t.TempDir() + "/hidden3.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db3.Close() })
+	db = db3
+	seedRun(t, db, "s_p-t1", "pub_a", "s_p", "", nil)
+	child("s_mine", "pub_a")
+	seedRun(t, db, "s_gc-t1", "pub_b", "s_gc", "", map[string]any{
+		"weft.session.parent": "s_mine", "weft.session.parent_call": "d_gc",
+		"weft.caller.run.id": "s_mine-t1", "weft.caller.call.id": "d_gc",
+	})
+	h = Handler(DB(db), Token("srv"))
+	p = read(panel)
+	if strings.Contains(fmt.Sprint(p), "s_gc") || len(p.Delegated) != 1 || len(p.Holes) != 1 || p.Holes[0].Count != 1 ||
+		p.CostKnown || p.CostUSD != nil || !strings.Contains(p.CostReason, "another public id") {
+		t.Errorf("a hidden grandchild: delegated %+v holes %+v known %v usd %v reason %q; want [s_mine], one hole counting 1, unknown, said",
+			p.Delegated, p.Holes, p.CostKnown, p.CostUSD, p.CostReason)
+	}
+	if s := read("srv"); len(s.Holes) != 0 || !s.CostKnown {
+		t.Errorf("a hidden grandchild, server token: holes %+v known %v; want none, known", s.Holes, s.CostKnown)
+	}
 }
 
 // failDeepSessions fails every delegated read below root's own level.

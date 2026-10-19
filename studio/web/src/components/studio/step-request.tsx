@@ -1103,7 +1103,7 @@ export function RequestSection({
           <button
             ref={toggleRef}
             type="button"
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            className="flex min-h-6 items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
             aria-expanded={open}
             onClick={() => setOpen((x) => !x)}
           >

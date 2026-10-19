@@ -51,6 +51,7 @@ import type { CostView } from "@/lib/cost"
 import type { HoleMark } from "@/lib/honesty"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { OPEN_RUN } from "@/lib/waterfall"
+import { fittedSize, graphScrollLabel } from "@/lib/graph"
 import { HoleBadge } from "@/components/studio/hole-badge"
 
 const PAD = 12
@@ -389,7 +390,7 @@ export function LoopGraphView({
             <button
               key={`${ins.kind}${i}`}
               type="button"
-              className="rounded-md border px-1.5 py-0.5 text-ev-error hover:bg-secondary"
+              className="min-h-6 rounded-md border px-1.5 py-0.5 text-ev-error hover:bg-secondary"
               data-insight={ins.kind}
               onClick={() => {
                 if (ins.node.startsWith("o:")) {
@@ -412,13 +413,20 @@ export function LoopGraphView({
           ))}
         </div>
       ) : null}
-      <div>
-        {/* Fitted: at most its own size, scaled down to its pane — the
-            page never scrolls sideways beside the drawer. */}
+      <div
+        className="max-w-full min-w-0 overflow-x-auto"
+        tabIndex={0}
+        role="region"
+        aria-label={graphScrollLabel("loop graph")}
+        data-graph-scroll
+      >
+        {/* Fitted: at most its own size, scaled down to its pane, never
+            under GRAPH_MIN_SCALE (its text stays readable) — past that
+            this wrapper scrolls, never the page beside the drawer. */}
         <svg
           width="100%"
           viewBox={`0 0 ${width} ${height}`}
-          style={{ maxWidth: width }}
+          style={fittedSize(width)}
           className="block h-auto"
           data-loop-svg
           role="group"
@@ -792,7 +800,7 @@ export function LoopGraphView({
               key={s.n}
               type="button"
               aria-pressed={s.n === step}
-              className={`min-w-6 rounded-md border px-1.5 py-0.5 ${
+              className={`min-h-6 min-w-6 rounded-md border px-1.5 py-0.5 ${
                 s.n === step
                   ? "border-thread/60 bg-secondary"
                   : "text-muted-foreground hover:text-foreground"
@@ -805,7 +813,7 @@ export function LoopGraphView({
           ))}
           <button
             type="button"
-            className="ml-1 rounded-md border px-1.5 py-0.5 text-muted-foreground hover:text-foreground disabled:opacity-50"
+            className="ml-1 min-h-6 rounded-md border px-1.5 py-0.5 text-muted-foreground hover:text-foreground disabled:opacity-50"
             disabled={reduced}
             title={reduced ? PLAY_OFF_HINT : undefined}
             aria-pressed={playing}

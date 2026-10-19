@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
 )
 
@@ -54,8 +55,14 @@ func TestSessionStatesAndFilters(t *testing.T) {
 	for _, r := range list("/api/sessions") {
 		byID[r.ID] = r
 	}
-	if p := byID["s_park"]; p.Status != "succeeded" || p.Pending != 1 || !slices.Equal(p.Outcomes, []string{"parked"}) {
-		t.Errorf("s_park = %+v; want succeeded, pending 1, outcomes [parked]", p)
+	// The row's status is the newest turn's outcome — ?status='s rule,
+	// so a parked newest turn reads parked, never succeeded, and
+	// ?status=succeeded (below) leaves it out (P9-pre-web-fix2 11).
+	if p := byID["s_park"]; p.Status != "parked" || p.Pending != 1 || !slices.Equal(p.Outcomes, []string{"parked"}) {
+		t.Errorf("s_park = %+v; want parked, pending 1, outcomes [parked]", p)
+	}
+	if p := byID["s_plain"]; p.Status != "succeeded" {
+		t.Errorf("s_plain status = %q; want succeeded", p.Status)
 	}
 	if p := byID["s_plain"]; p.Pending != 0 || !slices.Equal(p.Outcomes, []string{"succeeded"}) {
 		t.Errorf("s_plain = %+v; want no pending, outcomes [succeeded]", p)
@@ -90,5 +97,30 @@ func TestSessionStatesAndFilters(t *testing.T) {
 	var doc row
 	if code != http.StatusOK || json.Unmarshal([]byte(out), &doc) != nil || doc.Pending != 1 {
 		t.Errorf("GET /api/sessions/s_park = %d %s; want pending 1", code, out)
+	}
+}
+
+// TestSessionRowStatus (P9-pre-web-fix2 11): a session row's status is
+// its newest turn's outcome — the word SessionQuery.Status filters by —
+// so a cancelled or busy-ended newest turn never reads failed and a
+// parked or decided one never succeeded; a row with no turn facts keeps
+// its stored status.
+func TestSessionRowStatus(t *testing.T) {
+	for _, c := range []struct {
+		stored   obsdb.Status
+		outcomes []obsdb.TurnOutcome
+		want     string
+	}{
+		{obsdb.StatusFailed, []obsdb.TurnOutcome{obsdb.OutcomeSucceeded, obsdb.OutcomeCancelled}, "cancelled"},
+		{obsdb.StatusFailed, []obsdb.TurnOutcome{obsdb.OutcomeEnded}, "ended"},
+		{obsdb.StatusFailed, []obsdb.TurnOutcome{obsdb.OutcomeCancelled, obsdb.OutcomeFailed}, "failed"},
+		{obsdb.StatusSucceeded, []obsdb.TurnOutcome{obsdb.OutcomeParked}, "parked"},
+		{obsdb.StatusSucceeded, []obsdb.TurnOutcome{obsdb.OutcomeResumed}, "resumed"},
+		{obsdb.StatusRunning, []obsdb.TurnOutcome{obsdb.OutcomeRunning}, "running"},
+		{obsdb.StatusSucceeded, nil, "succeeded"},
+	} {
+		if got := sessRow(obsdb.SessionRow{Status: c.stored, Outcomes: c.outcomes}).Status; got != c.want {
+			t.Errorf("stored %s, outcomes %v: status %q, want %q", c.stored, c.outcomes, got, c.want)
+		}
 	}
 }

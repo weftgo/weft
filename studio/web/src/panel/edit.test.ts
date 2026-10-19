@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { WeftDevtools } from "./element"
 import { marksBlock } from "./editor"
+import { PANEL_CSS } from "./styles"
 import {
   $,
   all,
@@ -99,6 +100,22 @@ async function makeDoneEdits(el: WeftDevtools) {
 }
 
 describe("the Story's editor (F2's Done line, panel half)", () => {
+  it("an editable result, message or insert stays a block on its own line, 24 px tall (P9-pre-web-fix2 7)", async () => {
+    fakeStudio(routes(), META_PV)
+    const el = await mount()
+    await makeDoneEdits(el)
+    const fields = all(el, "[data-weft-editable]")
+    expect(fields.some((f) => f.tagName === "DIV")).toBe(true)
+    // Every editable 24 px tall; a div one a block (div[…] outranks the
+    // inline-block rule whatever the order); the args, a span in the
+    // call's head beside its name, inline-block there as before.
+    expect(PANEL_CSS).toContain(
+      ".weft-tq-err, [data-weft-editable], [data-weft-handoff] { display: inline-block; min-width: 24px; min-height: 24px; }"
+    )
+    expect(PANEL_CSS).toContain("div[data-weft-editable] { display: block; }")
+    for (const f of fields)
+      if (f.tagName !== "DIV") expect(f.closest(".weft-call-h")).not.toBeNull()
+  })
   it("a user message, a call's args, a tool result and an insert: one command, listed by kind, from_step implied", async () => {
     const studio = fakeStudio(routes(), META_PV)
     const el = await mount()

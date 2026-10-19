@@ -278,7 +278,7 @@ export function Waterfall({
           >
             <button
               type="button"
-              className="hover:text-foreground"
+              className="inline-flex min-h-6 min-w-6 items-center justify-center hover:text-foreground"
               aria-label="expand every row"
               title="expand every row"
               onClick={() => setFolded(new Set())}
@@ -291,7 +291,7 @@ export function Waterfall({
             </span>
             <button
               type="button"
-              className="hover:text-foreground"
+              className="inline-flex min-h-6 min-w-6 items-center justify-center hover:text-foreground"
               aria-label="collapse every row"
               title="collapse every row"
               onClick={() =>

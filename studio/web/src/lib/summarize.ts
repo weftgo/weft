@@ -444,9 +444,12 @@ export function toolsLine(
   const unrun = calls.filter((c) => c.unrun).length
   // A pending call never finished and was never cut (rule 11); one the
   // run's decided block holds (a resume decided it) is decided, no
-  // longer held (the block holds the parked run's pending calls only).
-  const held = calls.filter((c) => parked.some((p) => p.id == c.callId)).length
-  const dec = calls.filter((c) => decidedCall(decided, c.callId)).length
+  // longer held (the block holds the parked run's pending calls only) —
+  // counted over the held calls alone: a span-derived run's block can
+  // name a call its pending list does not (never "-1 awaiting").
+  const h = calls.filter((c) => parked.some((p) => p.id == c.callId))
+  const held = h.length
+  const dec = h.filter((c) => decidedCall(decided, c.callId)).length
   const open = calls.length - done.length - unrun - held
   return [
     done.length || !(unrun || held) ? `${done.length} ran` : "",

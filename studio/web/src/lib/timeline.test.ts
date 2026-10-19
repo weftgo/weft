@@ -11,6 +11,7 @@ import {
   busyEndSpans,
   compactionStarts,
   contextRows,
+  decisionOf,
   endedByPolicy,
   endLine,
   isoCompare,
@@ -242,6 +243,32 @@ describe("markLine", () => {
     expect(markLine(deny, parked).text).toBe(
       "expired · 'no decision in 10m' → t2"
     )
+  })
+  it("names a decision's own actor, never the resume's several (P9-pre-web-fix2 1)", () => {
+    const parked = [
+      turn(1, { pending: 2, stopped_by: "parked", resumed_by: `${S}-t2` }),
+      turn(2, { resumed_from: `${S}-t1` }),
+    ]
+    const own = mark(
+      "approval.decision",
+      1,
+      { call_id: "r1", outcome: "approve", key_id: "k_dave" },
+      { lane: "approvals", content_hidden: true, actor: "k_dave" }
+    )
+    expect(markLine(own, parked).text).toBe("approved · k_dave → t2")
+    const list = mark(
+      "approval.decision",
+      1,
+      { call_id: "r2", outcome: "deny" },
+      {
+        lane: "approvals",
+        content_hidden: true,
+        actor: "bob,k_dave",
+        actor_of: "resume",
+      }
+    )
+    expect(decisionOf(list).c.who_hidden).toBe(true)
+    expect(markLine(list, parked).text).not.toContain("bob")
   })
 })
 

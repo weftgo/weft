@@ -72,13 +72,18 @@ export function SessionTurns({
   const costCapable = useCostCapable()
   const sessionAgent = agent ?? (turns.length ? turns[0].agent : "")
   // Titles and gaps read the turn before in run order — of the same
-  // thread session: a conversation's runs may span several sessions
-  // (or none), and a gap between two sessions' turns means nothing.
+  // thread session: a conversation's runs may span several sessions,
+  // and a gap between two sessions' turns means nothing. A run of no
+  // session (a plain Generate on the public id) reads the public id's
+  // run before it that has none either: that is its conversation.
   // The rows are drawn in the order asked.
+  const lineOf = (r: RunRow) =>
+    r.session_id ? `s:${r.session_id}` : r.public_id ? `p:${r.public_id}` : ""
   const rows = turns.map((r, i) => {
     let prev: RunRow | undefined
-    for (let j = i - 1; r.session_id && j >= 0 && !prev; j--)
-      if (turns[j].session_id === r.session_id) prev = turns[j]
+    const line = lineOf(r)
+    for (let j = i - 1; line && j >= 0 && !prev; j--)
+      if (lineOf(turns[j]) === line) prev = turns[j]
     return { r, prev }
   })
   if (order === "newest") rows.reverse()

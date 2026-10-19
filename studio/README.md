@@ -2664,7 +2664,11 @@ gets `content_hidden` instead of a mark's content; `summarizer` on a
 turn and on the session: thread's summarizer calls priced at read time,
 never in a turn's usage, U15.1; docs/record-contract.md §6 — the
 session page's default view draws it: exchanges on a time axis, a
-drawer per mark at `?mark=`, the table at `?view=table`),
+drawer per mark at `?mark=`, the table at `?view=table`; U15.2: `forks`
+— each fork mark's forked session with its stored turns and status, 0
+turns for a fork that ran none — the lane filter `?lanes=` (dims, never
+hides), the tree at `?view=tree`, the context lane, the page live on
+`/api/live?session=`),
 `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
 public_id}`, the public id `thread.PublicID` stamped on the session's
 turns — MAX(`weft.public_id`) over its top-level turns: one value per

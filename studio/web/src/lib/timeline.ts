@@ -45,10 +45,6 @@ export const VIEWS: { view: SessionView; word: string; title: string }[] = [
   { view: "table", word: "table", title: "one row per turn" },
 ]
 
-/** The tree view until it is drawn (U15.2's lanes and tree). */
-export const TREE_PENDING =
-  "the branch and fork tree is not drawn on this page yet — the timeline lists every turn and every branch, fork and label mark in order"
-
 /** The timeline's read failed: the turns still draw, from the session. */
 export const timelineUnread = (why: string) =>
   `the session's state log could not be read (${why}): the turns are drawn without their marks`
@@ -326,30 +322,34 @@ export function markLine(
     case "receipt":
       return receiptLine(m, tag, quoted)
     case "interrupt": {
+      // A busy policy's outcome, never a failure (UX-B-09): neutral.
       const by = str(f.by_run)
-      const word = str(f.policy) === "rollback" ? "rolled back" : "interrupted"
+      const rollback = str(f.policy) === "rollback"
       return {
-        icon: "✗",
-        text: `${word}${by ? ` by ${tag(by)}` : ""}${num(f.denied_calls) ? ` · ${plural(num(f.denied_calls), "call")} denied` : ""}`,
-        tone: "bad",
+        icon: rollback ? "↶" : "✗",
+        text: `${rollback ? END_WORDS.rolled_back : END_WORDS.interrupted}${by ? ` by ${tag(by)}` : ""}${str(f.target) === "boundary" ? " · at its approval boundary" : ""}${num(f.denied_calls) ? ` · ${plural(num(f.denied_calls), "call")} denied` : ""}`,
+        tone: "step",
       }
     }
     case "rewind":
       return {
         icon: "↶",
-        text: `rewound · ${str(f.reason)}`,
-        tone: "error",
+        text:
+          str(f.reason) === "rollback"
+            ? `rewound · ${OFF_PATH} (rollback)`
+            : `rewound · ${str(f.reason)}`,
+        tone: "step",
       }
     case "branch":
       return {
         icon: "⑂",
-        text: `branched${f.summarized ? " · the left branch summarized" : ""}`,
+        text: `branched · the leaf moved off this line${f.summarized ? " · the left branch summarized" : ""}`,
         tone: "step",
       }
     case "fork":
       return {
         icon: "⑃",
-        text: `forked into ${str(f.new_session)}`,
+        text: `${FORKED_INTO} ${str(f.new_session)}`,
         tone: "step",
       }
     case "label":
@@ -737,3 +737,291 @@ export const forksWords = (n: number) =>
   `${n} ${n === 1 ? "experiment" : "experiments"} forked from these turns`
 export const FORKS_TITLE =
   "the table view lists each experiment under the turn it forked"
+
+// ── U15.2: lanes, ends, ids, forks, the context lane ────────────────
+
+/** The timeline's lanes (timeline.go's laneOf), in the filter's order,
+ * with their chips' words and titles. */
+export const LANES: { lane: string; word: string; title: string }[] = [
+  {
+    lane: "approvals",
+    word: "approvals",
+    title: "parked calls, their decisions and refused signatures",
+  },
+  {
+    lane: "grants",
+    word: "grants",
+    title: "grants minted, used, revoked or lapsed",
+  },
+  {
+    lane: "compaction",
+    word: "compaction",
+    title: "session compactions, uncompacts and pins",
+  },
+  {
+    lane: "steer_queue",
+    word: "steer / queue",
+    title:
+      "busy-policy receipts (queued, delivered, dropped), interrupts and rollbacks",
+  },
+  {
+    lane: "branch_fork",
+    word: "branch / fork",
+    title: "branches, forks and labels",
+  },
+  { lane: "pool", word: "pool", title: "delegated sessions (thread/pool)" },
+  {
+    lane: "other",
+    word: "other",
+    title: "marks of a kind this Studio does not know",
+  },
+]
+
+/** The lane filter's note: a filter dims, it never hides. */
+export const LANES_NOTE =
+  "lanes: a filter dims the other lanes' marks — it never hides one"
+
+/** The filter's "every lane" chip. */
+export const ALL_LANES = "all lanes"
+
+/** parseLanes reads ?lanes= back: the known lanes it names, undefined
+ * for none (every lane bright). */
+export function parseLanes(v: string | undefined): Set<string> | undefined {
+  if (!v) return undefined
+  const known = new Set(LANES.map((l) => l.lane))
+  const out = new Set(v.split(",").filter((l) => known.has(l)))
+  return out.size ? out : undefined
+}
+
+/** lanesParam is a lane set as ?lanes= writes it: LANES' order, ""
+ * for none (every lane). */
+export function lanesParam(set: ReadonlySet<string>): string {
+  return LANES.map((l) => l.lane)
+    .filter((l) => set.has(l))
+    .join(",")
+}
+
+/** toggleLane is the filter after a chip's click. */
+export function toggleLane(
+  set: ReadonlySet<string> | undefined,
+  lane: string
+): string {
+  const next = new Set(set ?? [])
+  if (next.has(lane)) next.delete(lane)
+  else next.add(lane)
+  return lanesParam(next)
+}
+
+/** How a busy policy ended a turn (UX-B-09): words, never a failure's. */
+export const END_WORDS = {
+  interrupted: "interrupted",
+  rolled_back: "rolled back",
+  /** The run page's chip before (or without) the timeline's mark. */
+  byNewer: "✗ interrupted by a newer message",
+}
+
+/** A turn off the session's current path. */
+export const OFF_PATH = "off path"
+
+/** The fork mark's words. */
+export const FORKED_INTO = "forked into"
+
+/** A turn a busy policy ended: its chip's words and the hover. */
+export interface TurnEnd {
+  kind: "interrupted" | "rolled_back"
+  /** The turn whose send ended it. */
+  by?: string
+  text: string
+  title: string
+  /** The interrupt mark's key (?mark=). */
+  mark: string
+}
+
+/** The hovers: what an interrupt and a rollback did. */
+export const END_TITLES = {
+  interrupted:
+    "a newer message (thread's Interrupt busy policy) cancelled this turn: its context was cancelled on purpose, not a failure — its entries stay on the path",
+  rolled_back:
+    "a newer message (thread's Rollback busy policy) cancelled this turn and took its entries off the path: the model's later turns do not see it",
+}
+
+/** turnEnds reads the interrupt marks (thread's weft.thread.interrupt,
+ * filed under the felled run): the turns a busy policy ended, by run. */
+export function turnEnds(
+  marks: readonly SessionMark[],
+  turns: readonly TimelineTurn[]
+): Map<string, TurnEnd> {
+  const keys = markKeys(marks)
+  const out = new Map<string, TurnEnd>()
+  marks.forEach((m, i) => {
+    if (m.kind !== "interrupt" || !m.run_id || out.has(m.run_id)) return
+    const kind =
+      str(m.fields.policy) === "rollback" ? "rolled_back" : "interrupted"
+    const by = str(m.fields.by_run) || undefined
+    const tag = by ? turnTag(by, turns.map(asStatusRow)) : ""
+    out.set(m.run_id, {
+      kind,
+      by,
+      text: `${END_WORDS[kind]}${tag ? ` by ${tag}` : ""}${kind === "rolled_back" ? ` · ${OFF_PATH}` : ""}`,
+      title: END_TITLES[kind],
+      mark: keys[i],
+    })
+  })
+  return out
+}
+
+/** The header's turn-number line (UX-B-10): "turn ids t1–t9 · 7 ran ·
+ * 2 receipts never ran" — "" when the numbers have no gap. */
+export function turnIdsWords(
+  turns: readonly TimelineTurn[],
+  marks: readonly SessionMark[]
+): string {
+  if (turns.length < 2) return ""
+  const gaps = turnGaps(turns, marks)
+  if (!gaps.length) return ""
+  const nums = turns.map((t) => t.turn)
+  const receipts = gaps.filter((g) => g.mark).length
+  const unrecorded = gaps
+    .filter((g) => g.reason)
+    .reduce((n, g) => n + g.to - g.turn + 1, 0)
+  const parts = [
+    `turn ids ${gapRange(Math.min(...nums), Math.max(...nums))}`,
+    `${new Set(nums).size} ran`,
+  ]
+  if (receipts)
+    parts.push(
+      `${receipts} ${receipts === 1 ? "receipt" : "receipts"} never ran`
+    )
+  if (unrecorded) parts.push(`${unrecorded} not recorded`)
+  return parts.join(" · ")
+}
+
+/** The turn-number line's hover. */
+export const TURN_IDS_TITLE =
+  "thread mints a turn number for every input it accepts while a turn runs; a steer delivered into that turn, or dropped, never runs as its own turn — the timeline names the receipt that took each number"
+
+/** forkWords is a fork's state as the origin reads it (UX-B-07). */
+export function forkWords(f: {
+  turns: number
+  status?: string
+  hidden?: boolean
+  unknown?: boolean
+}): string {
+  if (f.hidden) return "its state is not your token's to read"
+  if (f.unknown) return "not looked up"
+  if (!f.turns) return "no turn recorded yet"
+  return plural(f.turns, "turn")
+}
+
+/** The forked session's page cannot open before it runs a turn. */
+export const FORK_NO_PAGE =
+  "the fork ran no turn yet: this Studio has no page for it until it does (thread records the fork on the origin only)"
+
+/** forkOf reads a fork's lineage, weft.session.forked_from
+ * (`<origin session>#<entry id>`, record contract §2). */
+export function forkOf(
+  meta: Readonly<Record<string, string>> | undefined
+): { session: string; entry: string } | undefined {
+  const v = meta?.["weft.session.forked_from"]
+  if (!v) return undefined
+  const i = v.lastIndexOf("#")
+  return i > 0
+    ? { session: v.slice(0, i), entry: v.slice(i + 1) }
+    : { session: v, entry: "" }
+}
+
+/** The lineage line of a forked session or turn. */
+export const forkOfWords = (entry: string) =>
+  `⑃ fork of${entry ? ` · at entry ${entry}` : ""}`
+
+/** The origin's header line: the sessions it forked. */
+export const forkedIntoWords = (n: number) =>
+  `⑃ ${FORKED_INTO} ${n === 1 ? "1 session" : `${n} sessions`}`
+
+/** The session page's live line (UX-B-22). */
+export const LIVE_WORDS = {
+  on: "● live",
+  running: "● live · a turn is running",
+  down: "○ live stream lost · reconnecting",
+  title:
+    "the page follows this session's runs (/api/live?session=): a new turn, a step, a park or an end refetches the turns and the marks",
+}
+
+/** The context lane's words (UX-B-42). */
+export const CONTEXT_LANE = {
+  eyebrow: "context per turn",
+  title:
+    "each turn's input tokens (every step's prompt, summed) with the session compactions filed under it: tokens before → after, by reason; the summarizer's calls are priced apart, never in the turn's usage",
+  startedOn: "started on a compacted context",
+  reasons:
+    "reasons: trim (old tool results cleared), threshold (the context window's limit), manual (Compact), overflow (a provider's context error re-ran once), from_hook (BeforeCompact replaced it)",
+}
+
+/** One session compaction as the context lane reads it. */
+export interface ContextMark {
+  key: string
+  reason: string
+  before: number
+  after: number
+  replaced: number
+  entries: number
+}
+
+/** One turn of the context lane. */
+export interface ContextRow {
+  run_id: string
+  turn: number
+  input: number
+  marks: ContextMark[]
+  /** The turn this one followed, when that one's run left a session
+   * compaction: this turn's context is the compacted one. */
+  after?: string
+}
+
+/** contextRows is the context lane (UX-B-42): every turn's input
+ * tokens with the session compactions filed under it, and which turn
+ * started on a compacted context — the turn after the one the marker
+ * is filed under (ADR 0028 §8: the run that produced the context). */
+export function contextRows(
+  turns: readonly TimelineTurn[],
+  marks: readonly SessionMark[]
+): ContextRow[] {
+  const keys = markKeys(marks)
+  const byRun = new Map<string, ContextMark[]>()
+  marks.forEach((m, i) => {
+    if (m.kind !== "compaction" || !m.run_id) return
+    const l = byRun.get(m.run_id) ?? []
+    l.push({
+      key: keys[i],
+      reason: str(m.fields.reason),
+      before: num(m.fields.tokens_before),
+      after: num(m.fields.tokens_after),
+      replaced: num(m.fields.replaced),
+      entries: num(m.fields.entries),
+    })
+    byRun.set(m.run_id, l)
+  })
+  const sorted = [...turns].sort((a, b) => a.turn - b.turn)
+  return sorted.map((t, i) => {
+    const prev = sorted[i - 1]
+    return {
+      run_id: t.run_id,
+      turn: t.turn,
+      input: t.usage.input_tokens,
+      marks: byRun.get(t.run_id) ?? [],
+      after: i > 0 && byRun.has(prev.run_id) ? prev.run_id : undefined,
+    }
+  })
+}
+
+/** A context mark as one line: "⌗ trim 11.1k → 6.7k". */
+export function contextMarkLine(c: ContextMark): string {
+  const toks =
+    c.before && c.after ? ` ${tokens(c.before)} → ${tokens(c.after)}` : ""
+  return `⌗ ${c.reason || "compaction"}${toks}`
+}
+
+/** The words of a turn that started on a compacted context, the
+ * compaction filed under the turn before it. */
+export const startedCompacted = (tag: string) =>
+  `${CONTEXT_LANE.startedOn} · compacted after ${tag}`

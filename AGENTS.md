@@ -302,7 +302,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    ≤ 2,000, the lanes' counts, holes not_recorded (only when a turn parked or resumed: a plain send writes no
 //    //    record)/stripped/hidden (a panel token's counts exact, both routes alike)/truncated cause response_cap; summarizer on a turn and the
 //    //    session, U15.1: thread's summarizer calls priced at read time, never in usage — the page /sessions/$id draws it as its
-//    //    default view: exchanges on a time axis, a drawer per mark ?mark=, ?view=table|tree; a turn's run page steps { }) and sessions/{id}/entries?offset=&limit=
+//    //    default view: exchanges on a time axis, a drawer per mark ?mark=, ?view=table|tree; a turn's run page steps { }; U15.2: forks — each
+//    //    fork mark's forked session, its stored turns and status (0 turns: it ran none, no page yet; hidden to a panel token) — the lanes
+//    //    filter ?lanes= (dims, never hides), ?view=tree the lines the turns continue (weft.turn.parent: abandoned turns off the path, forks
+//    //    on the origin), a context lane per turn, interrupt / rollback ends worded as such, the page live on /api/live?session=) and sessions/{id}/entries?offset=&limit=
 //    //    (the same marks paged, ≤ 1,000, next_offset; sessions/{id}'s scope, 501 without the capability),
 //    //    sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, DELETE runs/{id} and DELETE

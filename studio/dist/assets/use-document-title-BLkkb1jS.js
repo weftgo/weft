@@ -1,0 +1,1 @@
+import{$i as e,S as t,ta as n}from"./use-capabilities-DJzw0pH-.js";var r=n(e(),1);function i(e){let n=t(e);(0,r.useEffect)(()=>{typeof document<`u`&&(document.title=n)},[n])}export{i as t};

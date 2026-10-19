@@ -1070,6 +1070,16 @@ never folded into a turn's usage or `cost_usd`. A session turn's run
 document (`GET /api/runs/{id}`) carries the same `summarizer` figure,
 from the session events filed under that run alone
 (`SessionEventQuery.RunIDs`), the run's model the stand-in.
+The timeline names its forks (U15.2, UX-B-07; read time, never stored):
+`forks` — one per `fork` mark read, in mark order: `session_id` (the
+mark's `new_session`), `entry` (the fork point), `run_id` (the run the
+mark is filed under), and the forked session as this Studio stored it —
+`turns` and `status` (`DB.Session`), `turns` 0 and no `status` when no
+turn of it was recorded (a fork that ran none has no session page: thread
+records the fork on the origin only, §4); the first 20 looked up, the
+rest `unknown: true` (as is a failed read); `hidden: true` with no turns
+or status for a panel token — the forked session carries no public id of
+its own. Absent when the session forked none.
 Its `usage` is its turns' own; `summarizer_usage`
 (`obsdb.SessionRow.SummarizerUsage`, audit O15) is apart: the summed
 `gen_ai.usage.*` of the summarizer `chat` spans (`weft.chat.role`

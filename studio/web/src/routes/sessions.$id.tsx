@@ -5,12 +5,19 @@
 // mark (?mark=); the table of turns, experiments nested under their
 // source turn via forked_from, is ?view=table. The header and the tab
 // lead with the session's title (U6, lib/title.ts's sessionTitle), the
-// id a copyable line under it.
-import { useQuery } from "@tanstack/react-query"
+// id a copyable line under it. U15.2: the timeline's lane filter
+// (?lanes=, dims never hides) and context lane, the tree (?view=tree:
+// the lines the turns continue, abandoned turns marked, forks on the
+// origin), a forked session's lineage, the turn-number line and the
+// page live — a run frame of this session refetches the session and
+// its timeline.
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { useCallback } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import { metaQuery, sessionQuery, timelineQuery } from "@/lib/api"
+import { openLive, throttle } from "@/lib/live"
+import { useCapabilities } from "@/hooks/use-capabilities"
 import { fetchSessionForks, nestExperiments } from "@/lib/experiments"
 import { absoluteTime, relativeTime, tokens, UNNAMED_AGENT } from "@/lib/format"
 import { IdChip, StatusChip, TitleText } from "@/components/studio/runs-table"
@@ -42,16 +49,29 @@ import { summarizerView } from "@/lib/cost"
 import {
   decisionsWords,
   exchangesWords,
+  FORK_NO_PAGE,
+  forkOf,
+  forkOfWords,
+  forkedIntoWords,
   FORKS_TITLE,
   forksWords,
   grantsWords,
+  LIVE_WORDS,
+  parseLanes,
   TIMELINE_OFF,
   timelineUnread,
-  TREE_PENDING,
+  TURN_IDS_TITLE,
+  turnIdsWords,
   turnOfRow,
   VIEWS,
 } from "@/lib/timeline"
-import { SessionTimeline } from "@/components/studio/session-timeline"
+import {
+  ContextLane,
+  ForkState,
+  LaneFilter,
+  SessionTimeline,
+} from "@/components/studio/session-timeline"
+import { SessionTree } from "@/components/studio/session-tree"
 import { LineageLine } from "@/components/studio/lineage"
 import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
 import { HoleBadge } from "@/components/studio/hole-badge"
@@ -72,6 +92,48 @@ function SessionPage() {
   const timelineCapable = !!meta.data?.capabilities.includes("timeline")
   const tl = useQuery({ ...timelineQuery(id), enabled: timelineCapable })
   const costCapable = useCostCapable()
+  // Live (UX-B-22): a run frame of this session — a turn started,
+  // stepped, parked or ended — refetches the session and its timeline
+  // (marks ride with the run's records), at most once a second.
+  const qc = useQueryClient()
+  const { has } = useCapabilities()
+  const liveCapable = has("live")
+  const [liveState, setLiveState] = useState<"off" | "on" | "down">("off")
+  useEffect(() => {
+    if (!liveCapable) return
+    const refetch = throttle(() => {
+      void qc.invalidateQueries({ queryKey: ["session", id] })
+      void qc.invalidateQueries({ queryKey: ["session-timeline", id] })
+    }, 1000)
+    const live = openLive({
+      selector: { session: id },
+      kinds: ["run"],
+      onRun: () => refetch(),
+      onOpen: (again) => {
+        setLiveState("on")
+        if (again) refetch()
+      },
+      onOverflow: () => {
+        setLiveState(live.overflowed() ? "down" : "on")
+        refetch()
+      },
+      onRefused: () => setLiveState("off"),
+      onGaveUp: () => setLiveState("down"),
+    })
+    return () => {
+      refetch.cancel()
+      live.close()
+    }
+  }, [id, liveCapable, qc])
+  const lanes = parseLanes(search.lanes)
+  const setLanes = useCallback(
+    (l: string) =>
+      void navigate({
+        search: (prev) => ({ ...prev, lanes: l || undefined }),
+        replace: true,
+      }),
+    [navigate]
+  )
   const select = useCallback(
     (mark: string | undefined) =>
       void navigate({
@@ -139,6 +201,15 @@ function SessionPage() {
   const sum = summarizerView(tl.data?.summarizer)
   const decided = decisionsWords(marks)
   const grants = grantsWords(marks)
+  const ids = turnIdsWords(tlTurns, marks)
+  const forksOut = tl.data?.forks ?? []
+  // A forked session's lineage (UX-B-07): its turns carry
+  // weft.session.forked_from (<origin>#<entry>).
+  const forkedFrom = forkOf(turns.find((r) => forkOf(r.meta))?.meta)
+  const running = tlTurns.some((t) => t.status === "running")
+  const compacting = (tl.data?.lanes ?? []).some(
+    (l) => l.lane === "compaction" && l.marks > 0
+  )
   const tlNote = !meta.data
     ? ""
     : !timelineCapable
@@ -161,6 +232,20 @@ function SessionPage() {
               className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-faint"
             />
           ) : null}
+          {forkedFrom ? (
+            <p
+              className="flex min-w-0 flex-wrap items-center gap-1 font-mono text-xs text-faint"
+              data-fork-of={forkedFrom.session}
+            >
+              <span>{forkOfWords(forkedFrom.entry)}</span>
+              <Link
+                {...sessionLink(forkedFrom.session)}
+                className={THREAD_LINK}
+              >
+                {forkedFrom.session}
+              </Link>
+            </p>
+          ) : null}
         </div>
         {/* The session's status is its newest turn's word (U1): parked
             while that turn's calls await a decision. */}
@@ -170,6 +255,28 @@ function SessionPage() {
           {exchangesWords(tlTurns)} · {tokens(s.usage.input_tokens)} in /{" "}
           {tokens(s.usage.output_tokens)} out
         </span>
+        {ids ? (
+          <span
+            className="font-mono text-[11px] text-faint"
+            title={TURN_IDS_TITLE}
+            data-turn-ids
+          >
+            {ids}
+          </span>
+        ) : null}
+        {liveState !== "off" ? (
+          <span
+            className={`font-mono text-[11px] ${running ? "text-status-run-ink" : "text-faint"}`}
+            title={LIVE_WORDS.title}
+            data-session-live={liveState}
+          >
+            {liveState === "down"
+              ? LIVE_WORDS.down
+              : running
+                ? LIVE_WORDS.running
+                : LIVE_WORDS.on}
+          </span>
+        ) : null}
         {decided ? (
           <span
             className="font-mono text-[11px] text-faint"
@@ -218,6 +325,20 @@ function SessionPage() {
         </span>
       </div>
 
+      {forksOut.length ? (
+        <div
+          className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs"
+          data-forked-into
+        >
+          <span className="font-mono text-faint" title={FORK_NO_PAGE}>
+            {forkedIntoWords(forksOut.length)}
+          </span>
+          {forksOut.map((f) => (
+            <ForkState key={`${f.session_id}:${f.entry ?? ""}`} f={f} />
+          ))}
+        </div>
+      ) : null}
+
       <nav
         aria-label="session views"
         className="flex items-center gap-1 text-xs"
@@ -225,7 +346,7 @@ function SessionPage() {
         {VIEWS.map((v) => (
           <Link
             key={v.view}
-            {...sessionViewLink(id, { view: v.view })}
+            {...sessionViewLink(id, { view: v.view, lanes: search.lanes })}
             aria-current={view === v.view ? "page" : undefined}
             title={v.title}
             className={`rounded-sm border px-2 py-0.5 font-mono ${view === v.view ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
@@ -253,6 +374,13 @@ function SessionPage() {
               ))}
             </div>
           ) : null}
+          {tl.data ? (
+            <LaneFilter
+              lanes={lanes}
+              counts={tl.data.lanes}
+              onChange={setLanes}
+            />
+          ) : null}
           {timelineCapable && tl.isPending ? (
             <div className="flex justify-center py-6">
               <Spinner />
@@ -260,10 +388,18 @@ function SessionPage() {
           ) : tlTurns.length > 0 || marks.length > 0 ? (
             <SessionTimeline
               sessionID={id}
-              doc={{ turns: tlTurns, marks }}
+              doc={{ turns: tlTurns, marks, forks: forksOut }}
               rows={turns}
               selected={search.mark}
               onSelect={select}
+              lanes={lanes}
+            />
+          ) : null}
+          {compacting && tlTurns.length > 0 ? (
+            <ContextLane
+              turns={tlTurns}
+              marks={marks}
+              onSelect={(k) => select(k)}
             />
           ) : null}
         </>
@@ -272,12 +408,27 @@ function SessionPage() {
           <SessionTurns turns={turns} experiments={experiments} />
         </div>
       ) : (
-        <p
-          className="py-6 text-center font-mono text-xs text-muted-foreground"
-          data-tree-pending
-        >
-          {TREE_PENDING}
-        </p>
+        <>
+          {tlNote ? (
+            <p
+              className="font-mono text-[11px] text-muted-foreground"
+              data-timeline-note
+            >
+              {tlNote}
+            </p>
+          ) : null}
+          {timelineCapable && tl.isPending ? (
+            <div className="flex justify-center py-6">
+              <Spinner />
+            </div>
+          ) : (
+            <SessionTree
+              sessionID={id}
+              doc={{ turns: tlTurns, marks, forks: forksOut }}
+              rows={turns}
+            />
+          )}
+        </>
       )}
       {delegated.length > 0 || s.delegated_unknown ? (
         <DelegatedSessions doc={s} rows={delegated} />

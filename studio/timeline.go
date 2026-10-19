@@ -144,6 +144,29 @@ type summarizerCost struct {
 	costFields
 }
 
+// timelineFork is one fork an origin's fork mark names (thread's
+// weft.thread.fork, record contract §4): the forked session, the
+// origin's entry it was taken at, the run the mark is filed under (the
+// run whose line was forked), and the forked session as stored here —
+// its turns and newest status (Turns 0, no status: no turn of it was
+// recorded, the fork ran none yet). Hidden for a panel token (another
+// session's state is not its to learn: a fork carries no public id of
+// its own); Unknown when it was not looked up (past timelineForkCap)
+// or the read failed.
+type timelineFork struct {
+	SessionID string  `json:"session_id"`
+	Entry     string  `json:"entry,omitempty"`
+	RunID     *string `json:"run_id"`
+	Turns     int     `json:"turns"`
+	Status    string  `json:"status,omitempty"`
+	Hidden    bool    `json:"hidden,omitempty"`
+	Unknown   bool    `json:"unknown,omitempty"`
+}
+
+// timelineForkCap bounds the forked sessions one timeline looks up. A
+// var so a test can lower it.
+var timelineForkCap = 20
+
 // timelineLane is one lane's count of the marks read.
 type timelineLane struct {
 	Lane  string `json:"lane"`
@@ -168,6 +191,11 @@ type timelineDoc struct {
 	Lanes      []timelineLane `json:"lanes"`
 	MarksTotal int            `json:"marks_total"`
 	Holes      []stepHole     `json:"holes"`
+	// Forks are the sessions this one forked (UX-B-07): one per fork
+	// mark read, in mark order, each with what this Studio stored of the
+	// forked session — its turns (0: it ran none yet, so it has no page
+	// of its own) and its newest status. Absent when it forked none.
+	Forks []timelineFork `json:"forks,omitempty"`
 	// Summarizer is the session's whole summarizer bill (UX-B-13):
 	// obsdb.SessionRow.SummarizerUsage — every summarizer chat span
 	// under the session's runs — priced as the turns' figures are, the
@@ -474,6 +502,7 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 		doc.Turns = append(doc.Turns, t)
 	}
 	s.priceSummarizer(&doc, det)
+	s.lookUpForks(r, &doc)
 	for _, l := range timelineLanes {
 		doc.Lanes = append(doc.Lanes, timelineLane{Lane: l, Marks: lanes[l]})
 	}
@@ -482,6 +511,44 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 	}
 	doc.Holes = mb.holes(det.Runs, all, truncatedAt, false)
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// lookUpForks fills doc.Forks from the fork marks read: each forked
+// session's stored turns and status (UX-B-07: a fork that ran no turn
+// yet is said so, never a link to a page that cannot open), the first
+// timelineForkCap looked up, the rest Unknown. A panel token gets them
+// hidden — the ids are its session's record, the forked sessions'
+// state is not.
+func (s *Server) lookUpForks(r *http.Request, doc *timelineDoc) {
+	pub := panelPublicID(r)
+	looked := 0
+	for _, m := range doc.Marks {
+		if m.Kind != "fork" {
+			continue
+		}
+		id, _ := m.Fields["new_session"].(string)
+		if id == "" {
+			continue
+		}
+		f := timelineFork{SessionID: id, Entry: m.Entry, RunID: m.RunID}
+		switch {
+		case pub != "":
+			f.Hidden = true
+		case looked >= timelineForkCap:
+			f.Unknown = true
+		default:
+			looked++
+			det, err := s.db.Session(r.Context(), id)
+			switch {
+			case errors.Is(err, obsdb.ErrNotFound):
+			case err != nil:
+				f.Unknown = true
+			default:
+				f.Turns, f.Status = det.Turns, string(det.Status)
+			}
+		}
+		doc.Forks = append(doc.Forks, f)
+	}
 }
 
 // serveSessionEntries answers api/sessions/{id}/entries?offset=&limit=.

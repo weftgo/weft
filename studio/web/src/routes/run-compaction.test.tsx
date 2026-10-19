@@ -159,7 +159,7 @@ describe("the compaction marker on the run page (A9.2)", () => {
     )
   })
 
-  it("thread's session marker sits at the top of the run with the token line", async () => {
+  it("thread's session marker closes the run it is filed under, with the token line (U15.2)", async () => {
     const session = golden<RunDoc>("run-session-compacted")
     serve({ doc: { compactions: session.compactions } })
     renderApp(`/runs/${RUN}?view=story`)
@@ -167,15 +167,17 @@ describe("the compaction marker on the run page (A9.2)", () => {
     expect(m.querySelector("[data-compaction-line]")?.textContent).toBe(
       "3 messages compacted into 1 · 2.1k → 1.0k tokens"
     )
-    expect(m.querySelector('[data-hole="compacted"]')).toBeTruthy()
+    // No request of this run saw it (UX-B-12): no compacted badge here —
+    // the next turn's card carries it.
+    expect(m.querySelector('[data-hole="compacted"]')).toBeNull()
     expect(m.textContent).toContain("manual")
-    // At the top: before the first step card.
+    // At the end: after the step cards.
     expect(
-      m.compareDocumentPosition(card(0)) & Node.DOCUMENT_POSITION_FOLLOWING
+      m.compareDocumentPosition(card(0)) & Node.DOCUMENT_POSITION_PRECEDING
     ).toBeTruthy()
     expect(document.querySelector("[data-step] [data-compaction]")).toBeNull()
     showOriginal(m)
-    expect(m.textContent).toContain("session compaction · after this run")
+    expect(m.textContent).toContain("after this run · session compacted")
     expect(m.querySelector("[data-compaction-original]")?.textContent).toBe(
       "thread compacted the session context this run belongs to: 3 of its messages were replaced by 1; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages. (For entries appended by hand that no run produced, thread files the marker under the run that follows, which starts on the compacted context.)"
     )

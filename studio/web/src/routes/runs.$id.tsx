@@ -52,6 +52,7 @@ import type {
   TreeHole,
 } from "@/lib/api"
 import { compactionsOf } from "@/lib/compaction"
+import { compactionBadges } from "@/lib/compaction-studio"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import { overrideOf, overrideParallelism } from "@/lib/request-pane"
@@ -1027,7 +1028,12 @@ function RunPage() {
     () => waterfallRows({ ...treeInput, expanded }, treeScale),
     [treeInput, expanded, treeScale]
   )
-  const treeRows = useMemo(() => treeSpans(tree), [tree])
+  // A step whose request saw a compacted view is marked on its row
+  // (U15.2, UX-S5b-05): compaction is not the story's alone.
+  const treeRows = useMemo(
+    () => compactionBadges(treeSpans(tree), id, compactionsOf(run.data)),
+    [tree, id, run.data]
+  )
   // WARN / ERROR ticks (U11.2): read only when the run document counts
   // such lines (log_warn / log_error), at warn and above.
   const tickRead =

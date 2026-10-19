@@ -8,10 +8,14 @@ import { ArrowUpRight, Check, Link2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import {
+  metaQuery,
   sessionQuery,
   storedManifestQuery,
+  timelineQuery,
   turnNeighboursQuery,
 } from "@/lib/api"
+import { compactionsOf, isSessionMarker } from "@/lib/compaction"
+import { COMPACTION_CHIP_TITLE, compactionChip } from "@/lib/compaction-studio"
 import { concurrencyWords } from "@/lib/request-pane"
 import {
   attachmentsOf,
@@ -93,7 +97,15 @@ import {
   StartedBy,
 } from "@/components/studio/lineage"
 import { LINEAGE_KEYS, lineageOfRun, linkedHoles } from "@/lib/delegation"
-import { TURN_STEPPER } from "@/lib/timeline"
+import {
+  END_TITLES,
+  END_WORDS,
+  forkOf,
+  forkOfWords,
+  TURN_STEPPER,
+  turnEnds,
+} from "@/lib/timeline"
+import { EndChip } from "@/components/studio/session-timeline"
 import { isPlainShortcut } from "@/lib/keys"
 import type { ToolFactsMap } from "@/lib/error-kind"
 
@@ -148,6 +160,67 @@ function TurnStepper({ doc }: { doc: RunDoc }) {
       ) : null}
     </nav>
   )
+}
+
+/** CompactionChips puts the run's compactions on its header (U15.2,
+ * UX-S5b-05): a view at its step, linking the step's card in the
+ * story; a session marker after the run, linking the story's end. */
+function CompactionChips({ doc }: { doc: RunDoc }) {
+  const all = compactionsOf(doc)
+  if (!all.length) return null
+  return (
+    <>
+      {all.map((c, i) => {
+        const session = isSessionMarker(c)
+        return (
+          <Link
+            key={`${c.hash}:${c.index ?? i}`}
+            {...runLink(doc.id, {
+              view: "story",
+              step: session ? undefined : c.step,
+            })}
+            className="rounded-sm border border-thread/40 px-1.5 py-px font-mono text-[11px] text-thread-ink hover:underline"
+            title={
+              session
+                ? COMPACTION_CHIP_TITLE.session
+                : COMPACTION_CHIP_TITLE.view
+            }
+            data-compaction-chip={session ? "session" : String(c.step ?? "")}
+          >
+            {compactionChip(c)}
+          </Link>
+        )
+      })}
+    </>
+  )
+}
+
+/** InterruptedBy names the turn a busy policy ended (U15.2, UX-B-09):
+ * "interrupted by t7" / "rolled back by t9 · off path", from thread's
+ * interrupt mark on the session's timeline — read only for a run whose
+ * cancel cause is thread's interrupt. */
+function InterruptedBy({ doc }: { doc: RunDoc }) {
+  const meta = useQuery(metaQuery())
+  const on =
+    doc.cancel_cause === "thread.interrupted" &&
+    !!doc.session_id &&
+    !!meta.data?.capabilities.includes("timeline")
+  const tl = useQuery({ ...timelineQuery(doc.session_id), enabled: on })
+  if (!on) return null
+  const end = tl.data
+    ? turnEnds(tl.data.marks, tl.data.turns).get(doc.id)
+    : undefined
+  if (!end)
+    return (
+      <span
+        className="rounded-sm border px-1.5 py-px font-mono text-[11px] text-muted-foreground"
+        title={END_TITLES.interrupted}
+        data-turn-end="interrupted"
+      >
+        {END_WORDS.byNewer}
+      </span>
+    )
+  return <EndChip end={end} />
 }
 
 /** StoppedByChip is what ended the run (U3.2), in lib/stopped-by.ts's
@@ -500,6 +573,7 @@ export function RunHeader({
   useDocumentTitle(runPlace(doc))
   // A delegated session's turn names its parent session (U14).
   const lineage = lineageOfRun(doc)
+  const forked = forkOf(doc.meta)
   // The words this run was asked: the last user message it was fed
   // (in a thread the first one is an earlier turn's).
   const prompt = turnPrompt(transcript?.batches ?? [])
@@ -602,7 +676,9 @@ export function RunHeader({
           </span>
         ) : null}
         <KindChip errorType={doc.error_type} />
+        <InterruptedBy doc={doc} />
         <StoppedByChip doc={doc} drawn={folded.steps.map((s) => s.index)} />
+        <CompactionChips doc={doc} />
         <Badge variant="outline" className="font-mono text-[11px] font-normal">
           {doc.model.provider}/{doc.model.name}
         </Badge>
@@ -826,6 +902,19 @@ export function RunHeader({
         ) : doc.caller_run_id ? (
           <StartedBy run={doc.caller_run_id} call={doc.caller_call_id} />
         ) : null}
+        {/* A fork's turn names its origin (U15.2, UX-B-07): a link,
+            never the raw weft.session.forked_from pair. */}
+        {forked ? (
+          <span className="flex items-center gap-1 font-mono" data-fork-of>
+            {forkOfWords(forked.entry)}
+            <Link
+              {...sessionLink(forked.session)}
+              className="hover:text-foreground hover:underline"
+            >
+              {forked.session}
+            </Link>
+          </span>
+        ) : null}
         {/* The public id and the metadata pairs filter the runs list
             on click (UX-S4-14): the list's own URL chips. */}
         {doc.public_id ? (
@@ -840,6 +929,7 @@ export function RunHeader({
         ) : null}
         {Object.entries(doc.meta)
           .filter(([k]) => !lineage || !LINEAGE_KEYS.includes(k))
+          .filter(([k]) => !forked || k !== "weft.session.forked_from")
           .map(([k, v]) => (
             <Link
               key={k}

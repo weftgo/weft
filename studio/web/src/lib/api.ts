@@ -601,6 +601,23 @@ export interface TimelineDoc {
   holes: StepHole[]
   /** The session's whole summarizer bill; absent when none. */
   summarizer?: SummarizerCost
+  /** The sessions this one forked (U15.2, timeline.go's timelineFork):
+   * absent when it forked none. */
+  forks?: TimelineFork[]
+}
+
+/** One fork an origin's fork mark names, with the forked session as
+ * this Studio stored it: turns 0 and no status — it ran no turn yet
+ * (no page of its own); hidden for a panel token; unknown when it was
+ * not looked up (past the cap) or the read failed. */
+export interface TimelineFork {
+  session_id: string
+  entry?: string
+  run_id: string | null
+  turns: number
+  status?: RunStatus
+  hidden?: boolean
+  unknown?: boolean
 }
 
 /** GET /api/public/{public_id}. */

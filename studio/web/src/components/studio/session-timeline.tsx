@@ -11,30 +11,49 @@ import { Link } from "@tanstack/react-router"
 import { X } from "lucide-react"
 import { Fragment, useEffect, useMemo, useRef } from "react"
 
-import type { RunRow, SessionMark, TimelineDoc, TimelineTurn } from "@/lib/api"
+import type {
+  RunRow,
+  SessionMark,
+  TimelineDoc,
+  TimelineFork,
+  TimelineTurn,
+} from "@/lib/api"
+import { sessionTree } from "@/lib/session-tree"
 import { summarizerView } from "@/lib/cost"
 import { WHO_HOLE } from "@/lib/decisions"
 import { absoluteTime, duration, stepCount, tokens } from "@/lib/format"
-import { runLink } from "@/lib/links"
-import { statusOf } from "@/lib/status"
+import { runLink, sessionLink } from "@/lib/links"
+import { statusOf, turnTag } from "@/lib/status"
 import { statusClass, THREAD_LINK, TONE_TEXT } from "@/lib/status-class"
 import { turnLabel, turnTitle } from "@/lib/title"
 import {
+  ALL_LANES,
   axisOf,
   barOf,
   clockTime,
+  CONTEXT_LANE,
+  contextMarkLine,
+  contextRows,
   exchanges,
+  FORK_NO_PAGE,
+  forkWords,
+  LANES,
+  LANES_NOTE,
   markDetail,
   markKeys,
   markLine,
   marksByTurn,
+  OFF_PATH,
   SESSION_LEVEL,
+  startedCompacted,
+  toggleLane,
   toolsByCall,
   TRAIL_NOTE,
+  turnEnds,
   turnGaps,
   UNLISTED_RUN,
 } from "@/lib/timeline"
-import type { TurnGap } from "@/lib/timeline"
+import type { ContextRow, TurnEnd, TurnGap } from "@/lib/timeline"
 import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
 import { DerivedChip, HoleBadge } from "@/components/studio/hole-badge"
 import {
@@ -52,18 +71,43 @@ export function SessionTimeline({
   rows,
   selected,
   onSelect,
+  lanes,
 }: {
   sessionID: string
-  /** The timeline: its turns and marks (marks [] when unread). */
-  doc: Pick<TimelineDoc, "turns" | "marks">
-  /** The session document's run rows: each turn's cost. */
+  /** The timeline: its turns and marks (marks [] when unread), the
+   * forks its fork marks name. */
+  doc: Pick<TimelineDoc, "turns" | "marks" | "forks">
+  /** The session document's run rows: each turn's cost and meta. */
   rows: readonly RunRow[]
   /** The open mark's key (?mark=). */
   selected?: string
   onSelect: (key: string | undefined) => void
+  /** The lanes kept bright (?lanes=); undefined: every lane. */
+  lanes?: ReadonlySet<string>
 }) {
   const costCapable = useCostCapable()
   const keys = useMemo(() => markKeys(doc.marks), [doc.marks])
+  const ends = useMemo(
+    () => turnEnds(doc.marks, doc.turns),
+    [doc.marks, doc.turns]
+  )
+  // Off the newest turn's line (the tree's rule): a branch or a
+  // rollback took it off the model's context.
+  const offPath = useMemo(() => {
+    const out = new Set<string>()
+    const walk = (ns: ReturnType<typeof sessionTree>) => {
+      for (const n of ns) {
+        if (!n.onPath) out.add(n.turn.run_id)
+        walk(n.children)
+      }
+    }
+    walk(sessionTree(doc.turns, rows, doc.marks))
+    return out
+  }, [doc.turns, rows, doc.marks])
+  const ctx = useMemo(
+    () => new Map(contextRows(doc.turns, doc.marks).map((c) => [c.run_id, c])),
+    [doc.turns, doc.marks]
+  )
   const tools = useMemo(() => toolsByCall(doc.marks), [doc.marks])
   const groups = useMemo(() => exchanges(doc.turns), [doc.turns])
   const gaps = useMemo(
@@ -109,6 +153,7 @@ export function SessionTimeline({
         tools={tools}
         selected={selected === keys[i]}
         onSelect={onSelect}
+        dim={!!lanes && !lanes.has(doc.marks[i].lane)}
       />
     ))
   const marks = (run: string) => markList(byRun.get(run) ?? [])
@@ -121,8 +166,37 @@ export function SessionTimeline({
       row={rowOf.get(t.run_id)}
       statusRows={statusRows}
       costCapable={costCapable}
+      end={ends.get(t.run_id)}
+      offPath={offPath.has(t.run_id)}
+      onSelect={onSelect}
     />
   )
+  // A turn that started on a compacted context (UX-B-12): its first
+  // line, linking the compaction filed under the turn before it.
+  const compactedStart = (t: TimelineTurn) => {
+    const c = ctx.get(t.run_id)
+    const before = c?.after ? ctx.get(c.after) : undefined
+    if (!c?.after || !before?.marks.length) return null
+    const last = before.marks.at(-1)!
+    return (
+      <li>
+        <button
+          type="button"
+          onClick={() => onSelect(last.key)}
+          className={`flex w-full min-w-0 items-baseline gap-1.5 rounded-sm px-1.5 py-0.5 text-left font-mono text-[11px] hover:ring-1 hover:ring-border ${lanes && !lanes.has("compaction") ? "opacity-40" : ""}`}
+          data-started-compacted={t.run_id}
+        >
+          <span aria-hidden className={TONE_TEXT.step}>
+            ⌗
+          </span>
+          <span className="truncate">
+            {startedCompacted(turnTag(c.after, statusRows))} ·{" "}
+            {contextMarkLine(last).slice(2)}
+          </span>
+        </button>
+      </li>
+    )
+  }
 
   return (
     <div
@@ -155,8 +229,9 @@ export function SessionTimeline({
                     data-resume-of={i > 0 ? chain[i - 1].run_id : undefined}
                   >
                     {turnRow(t, chain[i - 1], i === 0)}
-                    {(byRun.get(t.run_id) ?? []).length ? (
+                    {(byRun.get(t.run_id) ?? []).length || compactedStart(t) ? (
                       <ul className="mt-1 space-y-0.5 pl-[7.25rem] max-sm:pl-2">
+                        {compactedStart(t)}
                         {marks(t.run_id)}
                       </ul>
                     ) : null}
@@ -192,10 +267,251 @@ export function SessionTimeline({
           m={open}
           turns={doc.turns}
           tools={tools}
+          forks={doc.forks}
           onClose={() => onSelect(undefined)}
         />
       ) : null}
     </div>
+  )
+}
+
+/** LaneFilter is the timeline's lane chips (U15.2, UX-B-01's filters):
+ * each lane with its count from the timeline's lanes; a click keeps it
+ * bright and dims the others' marks — never hides them. */
+export function LaneFilter({
+  lanes,
+  counts,
+  onChange,
+}: {
+  lanes?: ReadonlySet<string>
+  counts: readonly { lane: string; marks: number }[]
+  onChange: (lanes: string) => void
+}) {
+  const n = new Map(counts.map((c) => [c.lane, c.marks]))
+  const shown = LANES.filter((l) => n.has(l.lane))
+  if (!shown.length) return null
+  return (
+    <div
+      role="group"
+      aria-label={LANES_NOTE}
+      className="flex flex-wrap items-center gap-1 font-mono text-[11px]"
+      data-lane-filter
+    >
+      <button
+        type="button"
+        aria-pressed={!lanes}
+        onClick={() => onChange("")}
+        className={`rounded-sm border px-1.5 py-0.5 ${!lanes ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+        title={LANES_NOTE}
+      >
+        {ALL_LANES}
+      </button>
+      {shown.map((l) => {
+        const on = !!lanes?.has(l.lane)
+        const count = n.get(l.lane) ?? 0
+        return (
+          <button
+            key={l.lane}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onChange(toggleLane(lanes, l.lane))}
+            className={`rounded-sm border px-1.5 py-0.5 ${on ? "bg-secondary text-foreground" : count ? "text-muted-foreground hover:text-foreground" : "text-faint"}`}
+            title={l.title}
+            data-lane={l.lane}
+          >
+            {l.word} <span className="tabular-nums">{count}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** ContextLane is the context size per turn (U15.2, UX-B-42): each
+ * turn's input tokens as a bar, the session compactions filed under it
+ * (reason, tokens before → after; a click opens the mark), the turn
+ * that started on a compacted context, the summarizer's cost apart. */
+export function ContextLane({
+  turns,
+  marks,
+  onSelect,
+}: {
+  turns: readonly TimelineTurn[]
+  marks: readonly SessionMark[]
+  onSelect: (key: string) => void
+}) {
+  const costCapable = useCostCapable()
+  const rows = contextRows(turns, marks)
+  const byRun = new Map(turns.map((t) => [t.run_id, t]))
+  const max = Math.max(1, ...rows.map((r) => r.input))
+  const tags = turns.map((t) => ({
+    id: t.run_id,
+    status: t.status,
+    turn: t.turn,
+  }))
+  return (
+    <section
+      className="space-y-1.5 rounded-lg border bg-background px-3 py-2"
+      aria-labelledby="context-lane-heading"
+      data-context-lane
+    >
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h2
+          id="context-lane-heading"
+          className="eyebrow"
+          title={CONTEXT_LANE.title}
+        >
+          {CONTEXT_LANE.eyebrow}
+        </h2>
+        <span className="font-mono text-[10px] text-faint">
+          {CONTEXT_LANE.reasons}
+        </span>
+      </div>
+      <ol className="space-y-1">
+        {rows.map((r) => (
+          <ContextLaneRow
+            key={r.run_id}
+            r={r}
+            max={max}
+            t={byRun.get(r.run_id)}
+            tag={(id) => turnTag(id, tags)}
+            costCapable={costCapable}
+            onSelect={onSelect}
+          />
+        ))}
+      </ol>
+    </section>
+  )
+}
+
+function ContextLaneRow({
+  r,
+  max,
+  t,
+  tag,
+  costCapable,
+  onSelect,
+}: {
+  r: ContextRow
+  max: number
+  t?: TimelineTurn
+  tag: (id: string) => string
+  costCapable: boolean
+  onSelect: (key: string) => void
+}) {
+  const sum = summarizerView(t?.summarizer)
+  return (
+    <li
+      className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-2 text-[11px] sm:grid-cols-[3rem_minmax(6rem,16rem)_minmax(0,1fr)]"
+      data-context-turn={r.turn}
+    >
+      <Link
+        {...runLink(r.run_id)}
+        className={`font-mono ${THREAD_LINK}`}
+        title={r.run_id}
+      >
+        t{r.turn}
+      </Link>
+      <div className="flex min-w-0 items-center gap-2">
+        <div
+          className="relative h-2 min-w-0 flex-1 rounded-sm bg-secondary"
+          aria-hidden
+        >
+          <div
+            className="absolute inset-y-0 left-0 rounded-sm bg-thread"
+            style={{ width: `${Math.max((r.input / max) * 100, 0.6)}%` }}
+          />
+        </div>
+        <span
+          className="shrink-0 font-mono text-faint tabular-nums"
+          data-context-input
+        >
+          {tokens(r.input)} in
+        </span>
+      </div>
+      <div className="col-start-2 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono sm:col-start-3">
+        {r.after ? (
+          <span className="text-muted-foreground" data-context-after>
+            ({startedCompacted(tag(r.after))})
+          </span>
+        ) : null}
+        {r.marks.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => onSelect(c.key)}
+            className={`text-left ${THREAD_LINK}`}
+            data-context-mark={c.key}
+          >
+            {contextMarkLine(c)}
+          </button>
+        ))}
+        {costCapable && sum ? (
+          <CostText v={sum} chip={false} label="summarizer" />
+        ) : t?.summarizer ? (
+          <span className="text-faint">
+            summarizer {tokens(t.summarizer.usage.input_tokens)} in /{" "}
+            {tokens(t.summarizer.usage.output_tokens)} out
+          </span>
+        ) : null}
+      </div>
+    </li>
+  )
+}
+
+/** EndChip is a turn a busy policy ended (UX-B-09): "interrupted by
+ * t7" / "rolled back by t9 · off path", neutral — red is for failures;
+ * a click opens the interrupt mark. */
+export function EndChip({
+  end,
+  onSelect,
+}: {
+  end: TurnEnd
+  onSelect?: (key: string) => void
+}) {
+  const cls =
+    "shrink-0 rounded-sm border px-1.5 py-px font-mono text-[11px] text-muted-foreground"
+  return onSelect ? (
+    <button
+      type="button"
+      className={`${cls} hover:text-foreground`}
+      title={end.title}
+      onClick={() => onSelect(end.mark)}
+      data-turn-end={end.kind}
+    >
+      <span aria-hidden>{end.kind === "rolled_back" ? "↶ " : "✗ "}</span>
+      {end.text}
+    </button>
+  ) : (
+    <span className={cls} title={end.title} data-turn-end={end.kind}>
+      <span aria-hidden>{end.kind === "rolled_back" ? "↶ " : "✗ "}</span>
+      {end.text}
+    </span>
+  )
+}
+
+/** ForkState is a fork mark's forked session (UX-B-07): a link when it
+ * ran a turn, else its words — a fork that ran none has no page yet. */
+export function ForkState({ f }: { f: TimelineFork }) {
+  const words = forkWords(f)
+  if (f.turns > 0 && !f.hidden)
+    return (
+      <Link
+        {...sessionLink(f.session_id)}
+        className={`font-mono ${THREAD_LINK}`}
+        data-fork-link={f.session_id}
+      >
+        {f.session_id} · {words}
+      </Link>
+    )
+  return (
+    <span
+      className="font-mono text-muted-foreground"
+      title={!f.turns && !f.hidden && !f.unknown ? FORK_NO_PAGE : undefined}
+      data-fork-pending={f.session_id}
+    >
+      {f.session_id} · {words}
+    </span>
   )
 }
 
@@ -207,6 +523,9 @@ function TurnRow({
   row,
   statusRows,
   costCapable,
+  end,
+  offPath,
+  onSelect,
 }: {
   t: TimelineTurn
   prev?: TimelineTurn
@@ -215,6 +534,11 @@ function TurnRow({
   row?: RunRow
   statusRows: Parameters<typeof statusOf>[1]
   costCapable: boolean
+  /** A busy policy ended it: its chip instead of the status word. */
+  end?: TurnEnd
+  /** Off the newest turn's line. */
+  offPath?: boolean
+  onSelect?: (key: string) => void
 }) {
   const sr = statusRows?.find((r) => r.id === t.run_id) ?? {
     id: t.run_id,
@@ -246,7 +570,19 @@ function TurnRow({
         >
           {turnLabel(t)}
         </Link>
-        <StatusChip row={sr} runs={statusRows} complete />
+        {end ? (
+          <EndChip end={end} onSelect={onSelect} />
+        ) : (
+          <StatusChip row={sr} runs={statusRows} complete />
+        )}
+        {offPath && end?.kind !== "rolled_back" ? (
+          <span
+            className="shrink-0 font-mono text-[11px] text-muted-foreground"
+            data-off-path
+          >
+            {OFF_PATH}
+          </span>
+        ) : null}
         <span
           className="shrink-0 font-mono text-[11px] text-muted-foreground"
           title={stepCount(t.steps)}
@@ -292,9 +628,12 @@ function TurnRow({
         />
       </div>
       {row?.err ? (
+        // An interrupted turn's error is the cancel its policy caused:
+        // muted, never the failure red.
         <div
-          className="col-start-2 truncate font-mono text-[11px] text-status-bad"
+          className={`col-start-2 truncate font-mono text-[11px] ${end ? "text-muted-foreground" : "text-status-bad"}`}
           title={row.err}
+          data-turn-err={end ? "ended" : "failed"}
         >
           {row.err}
         </div>
@@ -310,6 +649,7 @@ function MarkButton({
   tools,
   selected,
   onSelect,
+  dim,
 }: {
   m: SessionMark
   k: string
@@ -317,6 +657,8 @@ function MarkButton({
   tools: ReadonlyMap<string, string>
   selected: boolean
   onSelect: (key: string | undefined) => void
+  /** Outside the lane filter: dimmed, still listed and clickable. */
+  dim?: boolean
 }) {
   const l = markLine(m, turns, tools)
   return (
@@ -325,9 +667,11 @@ function MarkButton({
         type="button"
         aria-pressed={selected}
         onClick={() => onSelect(selected ? undefined : k)}
-        className={`flex w-full min-w-0 items-baseline gap-1.5 rounded-sm px-1.5 py-0.5 text-left font-mono text-[11px] hover:ring-1 hover:ring-border ${selected ? "ring-2 ring-thread-ink" : ""}`}
+        className={`flex w-full min-w-0 items-baseline gap-1.5 rounded-sm px-1.5 py-0.5 text-left font-mono text-[11px] hover:ring-1 hover:ring-border ${selected ? "ring-2 ring-thread-ink" : ""} ${dim && !selected ? "opacity-40" : ""}`}
         data-mark={k}
         data-mark-kind={m.kind}
+        data-mark-lane={m.lane}
+        data-dimmed={dim ? "" : undefined}
       >
         <span aria-hidden className={TONE_TEXT[l.tone]}>
           {l.icon}
@@ -379,6 +723,7 @@ function MarkDrawer({
   m,
   turns,
   tools,
+  forks,
   onClose,
 }: {
   /** The open mark's key: focus and scroll follow a new selection,
@@ -387,11 +732,26 @@ function MarkDrawer({
   m: SessionMark
   turns: readonly TimelineTurn[]
   tools: ReadonlyMap<string, string>
+  forks?: readonly TimelineFork[]
   onClose: () => void
 }) {
   const heading = useRef<HTMLHeadingElement>(null)
   const l = markLine(m, turns, tools)
-  const { rows, links } = markDetail(m, turns, tools)
+  const detail = markDetail(m, turns, tools)
+  const rows = detail.rows
+  // A fork that ran no turn has no page: its state instead of a link
+  // that cannot open (UX-B-07).
+  const fork =
+    m.kind === "fork"
+      ? forks?.find(
+          (f) =>
+            f.session_id === m.fields.new_session &&
+            (f.entry ?? "") === (m.entry ?? "")
+        )
+      : undefined
+  const links = fork
+    ? detail.links.filter((x) => !x.label.includes(fork.session_id))
+    : detail.links
   // Focus follows the opened mark; Escape closes it.
   useEffect(() => {
     heading.current?.focus({ preventScroll: true })
@@ -448,6 +808,11 @@ function MarkDrawer({
           </Fragment>
         ))}
       </dl>
+      {fork ? (
+        <p className="font-mono" data-drawer-fork>
+          <ForkState f={fork} />
+        </p>
+      ) : null}
       {links.length ? (
         <ul className="flex flex-wrap gap-x-3 gap-y-1" data-drawer-links>
           {links.map((x) => (

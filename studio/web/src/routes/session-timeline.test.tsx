@@ -214,8 +214,17 @@ describe("the session timeline (U15.1)", () => {
     expect(container.querySelectorAll("tbody tr[data-turn]")).toHaveLength(6)
     fireEvent.click(screen.getByRole("link", { name: "tree" }))
     await waitFor(() =>
-      expect(container.querySelector("[data-tree-pending]")).toBeTruthy()
+      expect(container.querySelector("[data-session-tree]")).toBeTruthy()
     )
+    // A linear session is one column, every turn on the current path.
+    const nodes = container.querySelectorAll("[data-tree-turn]")
+    expect(nodes).toHaveLength(6)
+    expect(
+      [...nodes].every(
+        (n) =>
+          n.hasAttribute("data-on-path") && n.getAttribute("data-depth") === "0"
+      )
+    ).toBe(true)
   })
 
   it("a read token's drawer: who is a hidden badge, the mark says content hidden", async () => {

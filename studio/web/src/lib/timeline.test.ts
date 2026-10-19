@@ -187,8 +187,14 @@ describe("markLine", () => {
       "🗑 steer dropped",
       "⏭ send accepted → ran as t5",
       "✗ interrupted by t7",
-      "✗ rolled back by t9",
+      "↶ rolled back by t9",
     ])
+    // A busy policy's end is no failure (UX-B-09): neutral, never red.
+    expect(
+      marks
+        .filter((m) => m.kind === "interrupt")
+        .map((m) => markLine(m, turns).tone)
+    ).toEqual(["step", "step"])
   })
   it("words a compaction with its counts", () => {
     const c = mark(

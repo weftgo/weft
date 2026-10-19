@@ -10,20 +10,31 @@
 // count when that is cached — it never fetches. Every hole is a badge:
 // a range that cannot be placed against the transcript is a gap.
 import { useQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
 import { useState } from "react"
 
-import { stepQuery } from "@/lib/api"
-import type { RunCompaction, Transcript } from "@/lib/api"
+import { runQuery, stepQuery, turnNeighboursQuery } from "@/lib/api"
+import type { RunCompaction, RunDoc, Transcript } from "@/lib/api"
 import {
   compactionLine,
+  compactionsOf,
   isSessionMarker,
   messageLine,
   originalOf,
   replacementNote,
-  SESSION_LABEL,
   sessionNote,
 } from "@/lib/compaction"
+import {
+  SEE_MARKER,
+  SESSION_AFTER,
+  SESSION_AFTER_NOTE,
+  STARTED_COMPACTED,
+  startedCompactedLine,
+} from "@/lib/compaction-studio"
+import { ownTurn, poolParent } from "@/lib/honesty"
+import { runLink } from "@/lib/links"
+import { THREAD_LINK } from "@/lib/status-class"
 import { HoleBadge } from "@/components/studio/hole-badge"
 
 export function CompactionMarker({
@@ -51,12 +62,20 @@ export function CompactionMarker({
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow text-thread-ink">
-          {session ? SESSION_LABEL : "compaction"}
+          {session ? SESSION_AFTER : "compaction"}
         </span>
         <span data-compaction-line className="font-mono">
           {compactionLine(c)}
         </span>
-        <HoleBadge hole="compacted" />
+        {/* A session marker is no request's view: this run's model
+            calls never saw it (ADR 0028 §8) — no compacted badge. */}
+        {session ? (
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {SESSION_AFTER_NOTE}
+          </span>
+        ) : (
+          <HoleBadge hole="compacted" />
+        )}
         {session && c.reason ? (
           <span
             className="font-mono text-[10px] text-faint"
@@ -91,6 +110,48 @@ export function CompactionMarker({
           />
         )
       ) : null}
+    </div>
+  )
+}
+
+/** StartedCompacted is the card at the top of a session turn whose
+ * previous turn left a session compaction (U15.2, UX-B-12): this
+ * turn's requests ran on the compacted context — the `compacted`
+ * badge belongs here — with a link to the marker it came from. It
+ * reads the turn stepper's neighbour query (one row) and the previous
+ * turn's document, nothing else. */
+export function StartedCompacted({ doc }: { doc: RunDoc }) {
+  const turn = ownTurn(doc) && !poolParent(doc)
+  const nb = useQuery({
+    ...turnNeighboursQuery(doc.session_id, doc.turn),
+    enabled: turn,
+  })
+  const prev = nb.data?.prev_turn
+  const before = useQuery({
+    ...runQuery(prev?.id ?? ""),
+    enabled: turn && !!prev,
+  })
+  const markers = compactionsOf(before.data).filter(isSessionMarker)
+  if (!prev || !markers.length) return null
+  const c = markers.at(-1)!
+  return (
+    <div
+      className="rounded-md border border-dashed border-thread/40 bg-thread/5 px-3 py-1.5 text-xs"
+      data-started-compacted={prev.id}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="eyebrow text-thread-ink">{STARTED_COMPACTED}</span>
+        <span className="font-mono">
+          {startedCompactedLine(`t${prev.turn}`, c)}
+        </span>
+        <HoleBadge hole="compacted" />
+        <Link
+          {...runLink(prev.id, { view: "story" })}
+          className={`ml-auto font-mono text-[11px] ${THREAD_LINK}`}
+        >
+          {SEE_MARKER} (t{prev.turn})
+        </Link>
+      </div>
     </div>
   )
 }

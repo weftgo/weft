@@ -213,6 +213,10 @@ export interface SessionSearch {
    * kind:at:run (lib/timeline.ts's markKeys — stable while the
    * session grows). */
   mark?: string
+  /** The timeline's lane filter (U15.2): the lanes kept bright, comma
+   * separated in lib/timeline.ts's LANES order — the others' marks are
+   * dimmed, never hidden. Absent: every lane. */
+  lanes?: string
 }
 
 export interface SessionLink {
@@ -511,11 +515,12 @@ export function sessionLink(id: string): SessionLink {
  * panel, which links the page alone, carries none of it. */
 export function sessionViewLink(
   id: string,
-  opts: { view?: SessionView; mark?: string }
+  opts: { view?: SessionView; mark?: string; lanes?: string }
 ): SessionLink {
   const search: SessionSearch = {}
   if (opts.view === "tree" || opts.view === "table") search.view = opts.view
   if (opts.mark) search.mark = opts.mark
+  if (opts.lanes) search.lanes = opts.lanes
   return { to: "/sessions/$id", params: { id }, search }
 }
 
@@ -528,6 +533,7 @@ export function sessionSearch(search: Record<string, unknown>): SessionSearch {
   const m = search.mark
   if (typeof m === "string" && m) out.mark = m
   else if (typeof m === "number") out.mark = String(m)
+  if (typeof search.lanes === "string" && search.lanes) out.lanes = search.lanes
   return out
 }
 

@@ -76,7 +76,10 @@ import { tokens } from "@/lib/format"
 import { replayBounds } from "@/lib/experiment-body"
 import { bytes, STORY_SHAPE, stepHasProblem } from "@/lib/summarize"
 import { CodeWin } from "@/components/studio/codewin"
-import { CompactionMarker } from "@/components/studio/compaction-marker"
+import {
+  CompactionMarker,
+  StartedCompacted,
+} from "@/components/studio/compaction-marker"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import {
   AttemptsSection,
@@ -1383,16 +1386,9 @@ export function StepList({
           ) : null}
           <EditsMark row={doc} batches={transcript?.batches} />
           <ResumedCard doc={doc} calls={preStep} />
-          {sessionMarkers.map((c, i) => (
-            <CompactionMarker
-              key={c.hash || `session-${i}`}
-              c={c}
-              all={compactions}
-              runId={doc.id}
-              transcript={transcript}
-              transcriptError={transcriptError}
-            />
-          ))}
+          {/* The turn before left a session compaction (U15.2,
+              UX-B-12): this turn started on the compacted context. */}
+          <StartedCompacted doc={doc} />
           {virtual ? (
             // Virtualised (plan H2): a list whose items say where they sit
             // in the whole; the DOM holds the cards in view plus overscan.
@@ -1450,6 +1446,18 @@ export function StepList({
             <InsertHere step={maxFrom} last />
           ) : null}
           {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}
+          {/* thread's session markers close the run they are filed
+              under (U15.2, UX-B-12): the compaction came after it. */}
+          {sessionMarkers.map((c, i) => (
+            <CompactionMarker
+              key={c.hash || `session-${i}`}
+              c={c}
+              all={compactions}
+              runId={doc.id}
+              transcript={transcript}
+              transcriptError={transcriptError}
+            />
+          ))}
           {view.steps.length === 0 ? (
             <p className="py-6 text-center font-mono text-xs text-muted-foreground">
               {replaying || upTo === 0

@@ -7,7 +7,7 @@
 // keys and values (case-insensitive), opens the path to each match and
 // marks it; copy-node, copy-all and download hand the JSON out.
 import { plural } from "../lib/format"
-import { el, on, stringify } from "./render"
+import { el, fmtJSON, on } from "./render"
 
 /** A string longer than this many characters (UTF-16 units, so 2,048
  * characters — not 2 KiB) shows its head and a "+N bytes" expander. */
@@ -103,13 +103,7 @@ const at = (p: string, k: string) =>
   `${p}/${k.replace(/~/g, "~0").replace(/\//g, "~1")}`
 
 /** json is a node's JSON text; never throws (a cycle reads as text). */
-export function json(v: unknown, indent = 2): string {
-  try {
-    return stringify(v, indent) ?? String(v)
-  } catch {
-    return String(v)
-  }
-}
+export const json = fmtJSON
 
 /** autoOpen is the default opening: breadth-first while the rows it
  * would show stay within AUTO_ROWS. */
@@ -270,12 +264,9 @@ export function treeView(
   const draw = (k: string, v: unknown, p: string, depth: number) => {
     const box = isBox(v)
     const open = box && isOpen(p)
-    const r = el(
-      "div",
-      `weft-tn${found?.hits.has(p) ? " weft-hit" : ""}`,
-      undefined,
-      { "data-key": `n${p}` }
-    )
+    const r = el("div", `weft-tn${found?.hits.has(p) ? " weft-hit" : ""}`, "", {
+      "data-key": `n${p}`,
+    })
     r.style.paddingLeft = `${depth * 12}px`
     if (box) {
       const t = el("button", "weft-tt", open ? "▾" : "▸", {
@@ -288,13 +279,13 @@ export function treeView(
         "click",
         act(() => st.open.set(p, !open))
       )
-      r.appendChild(t)
-    } else r.appendChild(el("span", "weft-tt", "", { "aria-hidden": "true" }))
-    r.appendChild(el("span", "weft-tk", `${k}: `))
-    if (box) r.appendChild(el("span", "weft-tv", preview(v)))
+      r.append(t)
+    } else r.append(el("span", "weft-tt", "", { "aria-hidden": "true" }))
+    r.append(el("span", "weft-tk", `${k}: `))
+    if (box) r.append(el("span", "weft-tv", preview(v)))
     else if (typeof v === "string" && v.length > STR_CAP && !st.full.has(p)) {
       const end = cut(v)
-      r.appendChild(
+      r.append(
         el(
           "span",
           "weft-tv",
@@ -312,15 +303,15 @@ export function treeView(
         "click",
         act(() => st.full.add(p))
       )
-      r.appendChild(more)
-    } else r.appendChild(el("span", "weft-tv", json(v, 0)))
+      r.append(more)
+    } else r.append(el("span", "weft-tv", json(v, 0)))
     const c = el("button", "weft-tc", "⧉", {
       type: "button",
       title: "copy this node's JSON",
       "aria-label": `copy ${k}`,
     })
     on(c, "click", () => copy(st, json(v), cx))
-    r.appendChild(c)
+    r.append(c)
     rows.push(r)
     if (open) kids(v, p, depth + 1)
   }
@@ -351,8 +342,8 @@ export function treeView(
   if (isBox(root)) kids(root, "", 0)
   else draw("value", root, "", 0)
 
-  const bar = el("div", "weft-tbar", undefined, { "data-key": "tbar" })
-  const input = el("input", "weft-input weft-tree-q", undefined, {
+  const bar = el("div", "weft-tbar", "", { "data-key": "tbar" })
+  const input = el("input", "weft-input weft-tree-q", "", {
     type: "search",
     "aria-label": "filter keys and values",
     placeholder: "/ filter keys and values",
@@ -370,19 +361,19 @@ export function treeView(
       cx.redraw()
     }, FILTER_MS)
   })
-  bar.appendChild(input)
+  bar.append(input)
   // Every match is counted; the paths opened (and rows marked) are the
   // first OPEN_HITS, and the count says so past them.
   const count = found
     ? `${plural(found.n, "match", "matches")}${found.n > found.hits.size ? ` · first ${found.hits.size} opened` : ""}`
     : ""
-  bar.appendChild(el("span", "weft-tree-n", count))
+  bar.append(el("span", "weft-tree-n", count))
   const all = el("button", "weft-btn", "copy all", {
     type: "button",
     title: "copy the whole document's JSON",
   })
   on(all, "click", () => copy(st, json(root), cx))
-  bar.appendChild(all)
+  bar.append(all)
   const dl = el("a", "weft-btn weft-dl", "download", {
     href: "#",
     download: `${name}.json`,
@@ -403,11 +394,11 @@ export function treeView(
       )
     }
   })
-  bar.appendChild(dl)
-  if (st.said) bar.appendChild(el("span", "weft-tree-said", st.said))
+  bar.append(dl)
+  if (st.said) bar.append(el("span", "weft-tree-said", st.said))
   const out = el("div", "weft-raw", [bar], { "data-key": "raw" })
   if (st.box) {
-    const ta = el("textarea", "weft-input weft-copybox", undefined, {
+    const ta = el("textarea", "weft-input weft-copybox", "", {
       readonly: "",
       "aria-label": "the JSON to copy",
       rows: "4",
@@ -426,7 +417,7 @@ export function treeView(
         drop()
       }
     })
-    out.appendChild(ta)
+    out.append(ta)
   }
   const list = el("div", "weft-tree", rows, { "data-key": "tree" })
   // ArrowRight opens a node, ArrowLeft closes it (Enter and Space are
@@ -444,6 +435,6 @@ export function treeView(
     e.preventDefault()
     t.click()
   })
-  out.appendChild(list)
+  out.append(list)
   return out
 }

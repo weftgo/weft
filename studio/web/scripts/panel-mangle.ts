@@ -105,6 +105,13 @@ export const INTERNAL_CLASSES = ["PanelModel", "ThemeWatch", "Push"]
  *   RequestTabDeps    element.ts's arguments to renderRequestTab
  *   HeaderRungOptions element.ts's arguments to installHeaderRung
  *   MarkerRungOptions element.ts's arguments to installMarkerRung
+ * and (P9-trim2) state.ts's ChildView (a loaded child's view), Lane (a
+ * followed run's fold), Cursor (the runs page cursor) and EventWalk (one
+ * events walk); editor.ts's PanelPreview (the drawer's preview state, the
+ * response kept under its doc); element.ts's OpenState,
+ * AckCatalog, ReplayCtx, FoldCtx and EdCtx (its own render contexts);
+ * tree.ts's TreeCtx; playground.ts's TurnWords; layout.ts's Geometry
+ * (the dock's computed box — the stored Layout stays verbatim).
  * A type that starts crossing one of those lines comes off this list. */
 export const INTERNAL_TYPES = [
   "PanelState",
@@ -114,6 +121,19 @@ export const INTERNAL_TYPES = [
   "RequestTabDeps",
   "HeaderRungOptions",
   "MarkerRungOptions",
+  "ChildView",
+  "Lane",
+  "Cursor",
+  "EventWalk",
+  "OpenState",
+  "AckCatalog",
+  "ReplayCtx",
+  "FoldCtx",
+  "EdCtx",
+  "TreeCtx",
+  "TurnWords",
+  "PanelPreview",
+  "Geometry",
 ]
 
 export interface MangleAnalysis {

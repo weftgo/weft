@@ -8,16 +8,31 @@
 export function el(
   tag: string,
   cls?: string,
-  textOrChildren?: string | Node[],
+  textOrChildren?: string | (Node | string)[],
   attrs?: Record<string, string>
 ): HTMLElement {
   const n = document.createElement(tag)
   if (cls) n.className = cls
   if (typeof textOrChildren === "string") n.textContent = textOrChildren
   else if (Array.isArray(textOrChildren))
-    for (const c of textOrChildren) n.appendChild(c)
+    for (const c of textOrChildren) n.append(c)
   if (attrs) for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v)
   return n
+}
+
+/** option appends one <option> to sel and returns it: its words, its
+ * attributes in the order given (value among them), and — when given —
+ * its selectedness, set before it joins the list. */
+export function option(
+  sel: HTMLElement,
+  text: string,
+  attrs: Record<string, string>,
+  selected?: boolean
+): HTMLOptionElement {
+  const o = el("option", "", text, attrs) as HTMLOptionElement
+  if (selected !== undefined) o.selected = selected
+  sel.append(o)
+  return o
 }
 
 /** NEW_TAB is a link's attributes for a new tab (Studio, a hand-off),
@@ -29,7 +44,7 @@ export const h = (
   tag: string,
   attrs?: Record<string, string>,
   kids?: string | Node[]
-): HTMLElement => el(tag, undefined, kids, attrs)
+): HTMLElement => el(tag, "", kids, attrs)
 
 // ── The keyed renderer (D3) ───────────────────────────────────────
 // Every draw builds the dock afresh, then patch() reconciles it into
@@ -161,11 +176,12 @@ export function stringify(v: unknown, indent?: number): string | undefined {
   return JSON.stringify(v, null, indent)
 }
 
-/** fmtJSON pretty-prints for the raw toggle; a cycle or a BigInt
- * falls back to String so the toggle never throws into the page. */
-export function fmtJSON(v: unknown): string {
+/** fmtJSON pretty-prints for the raw toggle (indent 0: one line, a JSON
+ * tree row's value); a cycle or a BigInt falls back to String so the
+ * toggle never throws into the page. */
+export function fmtJSON(v: unknown, indent = 2): string {
   try {
-    return stringify(v, 2) ?? String(v)
+    return stringify(v, indent) ?? String(v)
   } catch {
     return String(v)
   }

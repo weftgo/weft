@@ -3,6 +3,7 @@
 import type { Message, WireEvent } from "./api"
 import type { FoldedStep } from "./events"
 import { msText } from "./attempts"
+import { byteSize } from "./format"
 import { AWAITING } from "./status"
 import { CHIP_CATALOG, CHIP_PROMPT_CHANGED } from "./request-pane"
 import { endCard, failedAtStep, stopDetail, stoppedByWords } from "./stopped-by"
@@ -144,7 +145,9 @@ export function dominantKind(kinds: EventKind[]): EventKind {
   return best
 }
 
-function clip(s: unknown, n: number): string {
+/** clip is s on one line (whitespace runs one space), cut to n
+ * characters with "…"; "" for a non-string. */
+export function clip(s: unknown, n: number): string {
   if (typeof s !== "string") return ""
   const one = s.replace(/\s+/g, " ").trim()
   return one.length > n ? `${one.slice(0, n - 1)}…` : one
@@ -159,11 +162,7 @@ function short(v: unknown, n: number): string {
   }
 }
 
-export function bytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
+export const bytes = (n: number): string => byteSize(n)
 
 /** The event's type name as the wire spells it. */
 export function eventType(ev: WireEvent): string {

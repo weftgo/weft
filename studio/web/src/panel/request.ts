@@ -61,7 +61,7 @@ import { badge, requestCapped, requestHole } from "./badges"
 import type { BadgeNote } from "./badges"
 import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
 import { el, NEW_TAB, on } from "./render"
-import { href, runLink } from "../lib/links"
+import { href, runPage } from "../lib/links"
 import type { PanelRequests, TurnView } from "./state"
 import { treeView } from "./tree"
 import type { TreeCtx, TreeState } from "./tree"
@@ -142,7 +142,7 @@ function picker(
   pick: (n: number) => void,
   words = (n: number) => `${label} ${n}`
 ): HTMLElement {
-  const box = el("div", "weft-holes weft-rq-pick", undefined, {
+  const box = el("div", "weft-holes weft-rq-pick", "", {
     role: "group",
     "aria-label": label,
     "data-key": label,
@@ -159,7 +159,7 @@ function picker(
       }
     )
     on(b, "click", () => pick(n))
-    box.appendChild(b)
+    box.append(b)
   }
   return box
 }
@@ -309,7 +309,7 @@ function diffView(
   )
   if (cut(r) || base.truncated) {
     // A cut tail would read as lines a PrepareStep removed.
-    box.appendChild(hole("truncated", { label: REQUEST_DIFF_CUT_LABEL }))
+    box.append(hole("truncated", { label: REQUEST_DIFF_CUT_LABEL }))
     return box
   }
   let m = diffMemo.get(r)
@@ -320,7 +320,7 @@ function diffView(
     )
   const diff = m.diff
   if ("tooLarge" in diff) {
-    box.appendChild(
+    box.append(
       el(
         "div",
         "weft-reason",
@@ -331,7 +331,7 @@ function diffView(
     return box
   }
   for (const d of diff.rows)
-    box.appendChild(
+    box.append(
       el(
         "div",
         `weft-diff-row weft-diff-${d.kind}`,
@@ -399,7 +399,7 @@ function promptView(
   const foot = el("div", "weft-holes", [
     mono(shortHash(p.hash), "weft-rq-hash"),
   ])
-  if (more) foot.appendChild(more)
+  if (more) foot.append(more)
   out.push(foot)
   if (p.truncated_bytes > 0)
     out.push(hole("truncated", { bytes: p.truncated_bytes }))
@@ -419,7 +419,7 @@ function toolChips(t: ToolEntry): HTMLElement {
     t.sequential ? "sequential" : "",
     `source ${t.source || "?"}`,
   ])
-    if (c) box.appendChild(el("span", "weft-chip", c))
+    if (c) box.append(el("span", "weft-chip", c))
   return box
 }
 
@@ -447,14 +447,14 @@ function catalogView(
     const key = `${scope}\u0000rq-tool\u0000${t.name}`
     const [b, open] = toggle(d, key, (o) => `${o ? "▾" : "▸"} ${t.name}`)
     b.className = "weft-btn weft-rq-tool"
-    const item = el("div", undefined, [b], {
+    const item = el("div", "", [b], {
       "data-key": `tool:${t.name}`,
       "data-weft-tool": t.name,
     })
     if (open) {
-      item.appendChild(el("div", "weft-res", t.description))
-      item.appendChild(toolChips(t))
-      item.appendChild(
+      item.append(
+        el("div", "weft-res", t.description),
+        toolChips(t),
         treeView(
           t.schema,
           d.tree(`schema\u0000${step}\u0000${t.name}`),
@@ -463,7 +463,7 @@ function catalogView(
         )
       )
     }
-    list.appendChild(item)
+    list.append(item)
   }
   const out: Node[] = [
     list,
@@ -529,11 +529,11 @@ function messagesView(d: RequestTabDeps, r: RequestRow, step: number): Node[] {
           })
     )
   if (m.last.length) {
-    const list = el("div", undefined, undefined, {
+    const list = el("div", "", "", {
       "data-weft-messages-last": "",
     })
     for (const msg of m.last)
-      list.appendChild(el("div", "weft-res", messageLine(msg)))
+      list.append(el("div", "weft-res", messageLine(msg)))
     out.push(list)
   }
   if (m.before.length) {
@@ -549,7 +549,7 @@ function messagesView(d: RequestTabDeps, r: RequestRow, step: number): Node[] {
       out.push(
         el(
           "div",
-          undefined,
+          "",
           [
             treeView(
               m.before,
@@ -581,11 +581,11 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
   // A run-wide hole: the badge and its words, nothing else (a
   // read-scoped token's hidden; a run older than the record).
   if (req?.badge) {
-    box.appendChild(runHole(req.badge, { reason: req.reason, fix: req.fix }))
+    box.append(runHole(req.badge, { reason: req.reason, fix: req.fix }))
     return box
   }
   if (!req) {
-    box.appendChild(
+    box.append(
       t.doc?.requests_badge
         ? runHole(t.doc.requests_badge)
         : runHole("not_recorded", { cause: "not_served", reason: d.notServed })
@@ -593,7 +593,7 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
     return box
   }
   if (req.error) {
-    box.appendChild(
+    box.append(
       el(
         "span",
         "weft-badge weft-err",
@@ -606,12 +606,12 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
   const step =
     d.step !== undefined && steps.includes(d.step) ? d.step : (steps[0] ?? 0)
   // The step picker: J/K move it too (D1), a click selects (⤢ carries it).
-  box.appendChild(picker("step", steps, step, d.select))
-  const pane = el("div", "weft-rq-pane", undefined, {
+  box.append(picker("step", steps, step, d.select))
+  const pane = el("div", "weft-rq-pane", "", {
     "data-key": `rq${step}`,
     "data-weft-rq-pane": String(step),
   })
-  box.appendChild(pane)
+  box.append(pane)
 
   // The compaction markers this step's request saw (A9): the session
   // marker at the first step (the run started on a compacted context),
@@ -619,12 +619,12 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
   const comps = compactionsOf(t.doc)
   for (const c of comps)
     if (isSessionMarker(c) ? step === steps[0] : c.step === step)
-      pane.appendChild(d.compaction(c))
+      pane.append(d.compaction(c))
 
   const mine = req.steps.get(step)
   const rows = mine?.rows ?? []
   if (!rows.length) {
-    pane.appendChild(
+    pane.append(
       d.running
         ? el("div", "weft-reason", REQUEST_NOT_STORED)
         : req.truncated
@@ -640,13 +640,13 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
   const facts = factsOf(d, req, prev.get(step), step, first)
 
   // The header: model, the attempts, the chips.
-  const head = el("div", "weft-holes weft-rq-head", undefined, {
+  const head = el("div", "weft-holes weft-rq-head", "", {
     "data-key": "head",
   })
   const model = [r.body.model.provider, r.body.model.name]
     .filter(Boolean)
     .join("/")
-  if (model) head.appendChild(mono(model))
+  if (model) head.append(mono(model))
   const folded = t.folded.steps.find((s) => s.index === step)
   const line = attemptLine(
     factsFromRows(
@@ -656,11 +656,11 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
     )
   )
   if (line)
-    head.appendChild(
+    head.append(
       el("span", "weft-badge weft-info", line, { "data-weft-attempts": "" })
     )
   if (facts.prompt)
-    head.appendChild(
+    head.append(
       chip(
         "prompt",
         facts.prompt === "either" ? CHIP_PROMPT_CHANGED : CHIP_PREPARE_STEP
@@ -669,30 +669,30 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
   // The step's PrepareStep parts (O9) and the run's overridden knobs
   // (UX-S5b-03), the run page's chips.
   const prep = preparedChip(first.body.prepared)
-  if (prep) head.appendChild(chip("prepared", prep))
+  if (prep) head.append(chip("prepared", prep))
   if (
     !prev.get(step) &&
     overrideOf(d.t.spans ?? undefined, d.t.id)?.fields.length
   )
-    head.appendChild(chip("experiment", CHIP_EXPERIMENT))
-  if (mine?.catalogChanged) head.appendChild(chip("catalog", CHIP_CATALOG))
+    head.append(chip("experiment", CHIP_EXPERIMENT))
+  if (mine?.catalogChanged) head.append(chip("catalog", CHIP_CATALOG))
   // The wire pair lives in Studio (A6.2): one link, when a row has it.
   if (rows.some(hasWire))
-    head.appendChild(
+    head.append(
       el("a", "weft-btn", "wire ↗", {
         href: href(
           d.base,
-          runLink(t.id, { step, view: "story", pane: "wire" })
+          runPage(t.id, { step, view: "story", pane: "wire" })
         ),
         ...NEW_TAB,
         title: "the step's wire request and response, in Studio",
         "data-weft-wire-link": "",
       })
     )
-  pane.appendChild(head)
+  pane.append(head)
   // The attempts: each one's request, picked here (a retry may differ).
   if (rows.length > 1)
-    pane.appendChild(
+    pane.append(
       picker(
         "attempt",
         rows.map((x) => x.attempt),
@@ -706,11 +706,11 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
     )
 
   if (r.content)
-    pane.appendChild(
+    pane.append(
       hole(r.content, r.content === "stripped" ? req.stripped : undefined)
     )
   if (facts.noManifest)
-    pane.appendChild(
+    pane.append(
       el(
         "div",
         "weft-reason",
@@ -727,15 +727,17 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
     facts.base && r.system_hash === first.system_hash
       ? facts
       : { ...facts, base: undefined }
-  pane.appendChild(row("system", promptView(d, r, f, scope), "system"))
-  pane.appendChild(row("messages", messagesView(d, r, step), "messages"))
-  pane.appendChild(row("tools", catalogView(d, r, scope, step), "tools"))
+  pane.append(
+    row("system", promptView(d, r, f, scope), "system"),
+    row("messages", messagesView(d, r, step), "messages"),
+    row("tools", catalogView(d, r, scope, step), "tools")
+  )
   const params = el("div", "weft-rq-params")
   for (const [k, v] of paramFields(r))
-    params.appendChild(
+    params.append(
       el(
         "div",
-        undefined,
+        "",
         [
           el("span", "weft-rq-pk", k),
           el("span", v === "adapter default" ? "weft-rq-def" : "weft-res", v),
@@ -743,8 +745,8 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
         { "data-weft-param": k }
       )
     )
-  pane.appendChild(row("params", [params], "params"))
-  pane.appendChild(
+  pane.append(
+    row("params", [params], "params"),
     row(
       "tool choice",
       [
@@ -755,15 +757,13 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
         ),
       ],
       "tool_choice"
-    )
-  )
-  pane.appendChild(
+    ),
     row("thinking", [mono(thinkingWords(b.thinking))], "thinking")
   )
   // The step's subagent calls: the child's own step-0 request (A10).
   const calls = folded?.toolCalls.filter((c) => c.childRunId) ?? []
   if (calls.length)
-    pane.appendChild(
+    pane.append(
       row(
         "subagents",
         calls.map((c) => d.child(c)),

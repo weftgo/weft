@@ -413,8 +413,34 @@ function ordinal(n: number | undefined): number | undefined {
 
 /** runLink is a run page: the run, and optionally the step (its
  * ordinal), the call or span selected, the view, the scale and the
- * replay position. */
+ * replay position — runPage's keys, then the raw view's and the replay
+ * drawer's. */
 export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
+  const link = runPage(id, opts)
+  const search = link.search
+  if (opts.raw) {
+    const raw = rawSearch(opts.raw)
+    if (raw.q !== undefined) search.q = raw.q
+    if (raw.hide !== undefined) search.hide = raw.hide
+    if (raw.ev !== undefined) search.ev = raw.ev
+  }
+  if (opts.replay) {
+    const r = replaySearch(opts.replay)
+    search.replay = r.replay
+    search.from = r.from
+    if (r.of) search.of = r.of
+  }
+  return link
+}
+
+/** runPage is runLink without the raw view's state and the replay
+ * drawer's (the devtools panel writes neither, so its bundle carries
+ * neither): the same keys, in the same order, for every option it
+ * takes. */
+export function runPage(
+  id: string,
+  opts: Omit<RunLinkOptions, "raw" | "replay"> = {}
+): RunLink {
   const step = ordinal(opts.step)
   const search: RunSearch = {}
   // Key order is the URL's order: step first, then the view.
@@ -431,18 +457,6 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
     search.scale = opts.scale
   const t = ordinal(opts.t)
   if (t !== undefined) search.t = t
-  if (opts.raw) {
-    const raw = rawSearch(opts.raw)
-    if (raw.q !== undefined) search.q = raw.q
-    if (raw.hide !== undefined) search.hide = raw.hide
-    if (raw.ev !== undefined) search.ev = raw.ev
-  }
-  if (opts.replay) {
-    const r = replaySearch(opts.replay)
-    search.replay = r.replay
-    search.from = r.from
-    if (r.of) search.of = r.of
-  }
   return { to: "/runs/$id", params: { id }, search }
 }
 
@@ -450,7 +464,7 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
  * step's row selected in the run tree, its drawer's Logs tab open —
  * the devtools panel's 📄 ⤢. */
 export const logsLink = (id: string, step: number) =>
-  runLink(id, { sel: `s${step}`, tab: "logs" })
+  runPage(id, { sel: `s${step}`, tab: "logs" })
 
 /** rawSearch is the raw view's state as search keys, every one
  * present (undefined clears it): the raw view merges them into the
@@ -523,10 +537,16 @@ export function traceLink(
   id: string,
   opts: { span?: string; view?: "tree" | "chat" } = {}
 ): TraceLink {
-  const search: TraceSearch = {}
-  if (opts.span) search.span = opts.span
-  if (opts.view === "chat") search.view = "chat"
-  return { to: "/traces/$id", params: { id }, search }
+  const link = tracePage(id)
+  if (opts.span) link.search.span = opts.span
+  if (opts.view === "chat") link.search.view = "chat"
+  return link
+}
+
+/** tracePage is a trace's page alone: traceLink with no option (the
+ * devtools panel's, whose bundle so carries no other). */
+export function tracePage(id: string): TraceLink {
+  return { to: "/traces/$id", params: { id }, search: {} }
 }
 
 /** traceSelectionLink is a trace's page with a row selected by its
@@ -756,7 +776,7 @@ export function href(base: string, link: StudioLink): string {
  * wefttest zip with Studio's own bearer (never a token in the URL) and
  * drops ?save= — the devtools panel's "save as test" hands off here. */
 export function saveTestLink(id: string): RunLink {
-  const l = runLink(id)
+  const l = runPage(id)
   return { ...l, search: { ...l.search, save: "test" } }
 }
 

@@ -109,3 +109,11 @@ export function usageSummary(u: Usage): string {
     (Number.isFinite(v) ? (v as number) : 0).toLocaleString()
   return `${n(u.input_tokens)} in / ${n(u.output_tokens)} out`
 }
+
+/** byteSize is a byte count in words: "92 B", "12.3 KB" — or, with
+ * i = "i", "12.3 KiB" (a badge's: lib/honesty.ts's kib). */
+export function byteSize(n: number, i = ""): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} K${i}B`
+  return `${(n / (1024 * 1024)).toFixed(1)} M${i}B`
+}

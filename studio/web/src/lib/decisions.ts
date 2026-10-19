@@ -112,6 +112,12 @@ export function decisionLine(
   d: DecisionDoc,
   to?: string
 ): string {
+  return decisionWords(c, d) + (to ? ` → ${to}` : "")
+}
+
+/** decisionWords is decisionLine without the turn (the devtools
+ * panel draws that one as its own button). */
+export function decisionWords(c: DecidedCall, d: DecisionDoc): string {
   const o = outcomeOf(c.outcome)
   const who = decider(c, d)
   const parts = c.approved_by
@@ -124,7 +130,7 @@ export function decisionLine(
   const why =
     c.outcome === "expired" ? c.reason?.replace(/^expired: /, "") : c.reason
   if (why) parts.push(`'${why}'`)
-  return parts.filter(Boolean).join(" · ") + (to ? ` → ${to}` : "")
+  return parts.filter(Boolean).join(" · ")
 }
 
 /** How and when: "via signed · key k_alice · grant e_… · <time>" — the

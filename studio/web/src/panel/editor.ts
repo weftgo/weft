@@ -41,26 +41,25 @@ export function previewBlock(p: PanelPreview, fromStep: number): HTMLElement {
     { "data-weft-preview": "", "data-key": "preview" }
   )
   if (p.error)
-    box.appendChild(
+    box.append(
       line("weft-note weft-warn", p.error, {
         role: "alert",
         "data-weft-preview-error": "",
       })
     )
   if (p.pending && p.doc)
-    box.appendChild(
+    box.append(
       line("weft-reason", "reading it again for the changed command…", {
         "data-weft-preview-pending": "",
       })
     )
   const v = p.doc && previewView(p.doc)
   if (!v) {
-    if (!p.error)
-      box.appendChild(line("weft-reason", "assembling the request…", {}))
+    if (!p.error) box.append(line("weft-reason", "assembling the request…", {}))
     return box
   }
   const head = el("div", "weft-res", [
-    el("span", undefined, `system ${v.system}`, {
+    el("span", "", `system ${v.system}`, {
       "data-weft-preview-system": v.system,
     }),
   ])
@@ -72,17 +71,17 @@ export function previewBlock(p: PanelPreview, fromStep: number): HTMLElement {
       })
     )
   for (const h of v.holes) head.append(" ", badge(h.hole))
-  box.appendChild(head)
+  box.append(head)
   const tools = [
     v.added.length ? `tools added: ${v.added.join(", ")}` : "",
     v.removed.length ? `tools removed: ${v.removed.join(", ")}` : "",
   ].filter(Boolean)
   if (tools.length)
-    box.appendChild(
+    box.append(
       line("weft-res", tools.join(" · "), { "data-weft-preview-tools": "" })
     )
   if (v.rows) {
-    const list = el("ol", "weft-verdicts", undefined, {
+    const list = el("ol", "weft-verdicts", "", {
       "aria-label": "messages",
     })
     for (const r of v.rows) {
@@ -93,23 +92,23 @@ export function previewBlock(p: PanelPreview, fromStep: number): HTMLElement {
         { "data-weft-preview-op": r.op }
       )
       if (r.was)
-        li.appendChild(
+        li.append(
           el("s", "weft-reason", r.was, { "data-weft-preview-was": "" })
         )
       if (r.will)
-        li.appendChild(
+        li.append(
           el("span", "weft-reason", r.will, { "data-weft-preview-will": "" })
         )
-      list.appendChild(li)
+      list.append(li)
     }
-    box.appendChild(list)
+    box.append(list)
   }
   for (const w of v.warnings)
-    box.appendChild(
+    box.append(
       line("weft-reason", w.message, { "data-weft-preview-warning": w.kind })
     )
   if (v.unchecked)
-    box.appendChild(
+    box.append(
       line("weft-reason", v.unchecked, { "data-weft-preview-unchecked": "" })
     )
   return box
@@ -122,7 +121,7 @@ export function editList(
   drop: (e: ReplayEdit) => void
 ): HTMLElement | null {
   if (!edits.length) return null
-  const list = el("ul", "weft-verdicts", undefined, {
+  const list = el("ul", "weft-verdicts", "", {
     "aria-label": "transcript edits",
     "data-key": "edits",
   })
@@ -132,8 +131,8 @@ export function editList(
       "aria-label": `drop ${editLine(e)}`,
     })
     on(b, "click", () => drop(e))
-    list.appendChild(
-      el("li", undefined, [el("span", "weft-reason", editLine(e)), b], {
+    list.append(
+      el("li", "", [el("span", "weft-reason", editLine(e)), b], {
         "data-weft-edit-kind": kindOf(e),
         "data-key": editKey(e),
       })
@@ -169,7 +168,7 @@ export function marksBlock(
     { "data-weft-edits-mark": "" }
   )
   for (const m of marks)
-    box.appendChild(
+    box.append(
       el(
         "div",
         "weft-res",
@@ -177,14 +176,14 @@ export function marksBlock(
           el("span", "weft-badge weft-err", MARK_CHIPS[m.what]),
           ` ${markLine(m)} `,
           markedPart(batches, m, from),
-        ].map((x) => (typeof x === "string" ? document.createTextNode(x) : x)),
+        ],
         {
           "data-weft-edit-mark": m.what,
         }
       )
     )
   if (more)
-    box.appendChild(
+    box.append(
       el("div", "weft-reason", `+${more} more (the mark is capped at 1024 B)`)
     )
   return box

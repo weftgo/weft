@@ -7,6 +7,7 @@
 // response's when the server sent them (badge, reason, fix, holes[]),
 // the table's else. element.ts and the Request tab (E1.2) call these;
 // no other panel file spells a hole's words (badges.test.ts greps).
+import { el } from "./render"
 import { plural } from "../lib/format"
 import type { Meta, RunRow } from "../lib/api"
 import {
@@ -28,9 +29,6 @@ import {
 } from "../lib/requests"
 import { UNRUN_CALL_REASON } from "../lib/events"
 import type { Truncation } from "../lib/events"
-import { el } from "./render"
-import { stopChip } from "../lib/stopped-by"
-import { kindChip, problemBadges } from "../lib/error-kind"
 import {
   CACHE_HINT,
   cacheNotReported,
@@ -41,6 +39,8 @@ import {
   scriptedChip,
 } from "../lib/cost"
 import type { CostView } from "../lib/cost"
+import { stopChip } from "../lib/stopped-by"
+import { kindChip, problemBadges } from "../lib/error-kind"
 
 /** What a response (or the panel's own reading) says about one hole:
  * its words win over the table's; label replaces the badge's text
@@ -80,7 +80,7 @@ export function badge(hole: string, note: BadgeNote = {}): HTMLElement {
   // inline words. A reader that also reads title may say them twice:
   // accepted, over a description browse mode may never read.
   // badgeLabel reads the label back.
-  b.appendChild(el("span", "weft-sr", ` — ${badgeTitle(w.reason, w.fix)}`))
+  b.append(el("span", "weft-sr", ` — ${badgeTitle(w.reason, w.fix)}`))
   return b
 }
 
@@ -94,7 +94,7 @@ export function badgeLabel(b: Element | null | undefined): string {
 export function holeBadges(holes: HoleMark[]): HTMLElement | null {
   if (!holes.length) return null
   const box = el("span", "weft-holes")
-  for (const m of holes) box.appendChild(badge(m.hole, m))
+  for (const m of holes) box.append(badge(m.hole, m))
   return box
 }
 
@@ -107,7 +107,7 @@ export function holeLine(m: HoleMark): HTMLElement {
   b.lastChild?.remove()
   return el("div", `weft-note${w.tone === "loss" ? " weft-warn" : ""}`, [
     b,
-    document.createTextNode(` — ${w.reason}${w.fix ? ` · fix: ${w.fix}` : ""}`),
+    ` — ${w.reason}${w.fix ? ` · fix: ${w.fix}` : ""}`,
   ])
 }
 
@@ -340,7 +340,7 @@ export function refusedVerb(
   return el(
     tag,
     tag === "button" ? "weft-btn" : "weft-chip",
-    [document.createTextNode(label), el("span", "weft-sr", ` — ${words}`)],
+    [label, el("span", "weft-sr", ` — ${words}`)],
     {
       title: words,
       "data-weft-refused": why,
@@ -367,7 +367,7 @@ export function catalogReadError(error: string): HoleMark {
 export function ackCatalogHole(m: HoleMark, registered: boolean): HTMLElement {
   const box = holeLine(m)
   box.setAttribute("data-weft-catalog-hole", m.hole)
-  box.appendChild(
+  box.append(
     el(
       "div",
       "weft-reason",
@@ -426,13 +426,13 @@ export function promptReadError(error: string): HoleMark {
  * " partial: <title>" —
  * "—" is never a 0. */
 export function costText(v: CostView): HTMLElement {
-  const n = el("span", undefined, v.text, {
+  const n = el("span", "", v.text, {
     title: v.title,
     "data-weft-cost": v.known ? String(v.usd) : "unknown",
   })
   // A partial sum (atLeastCost's "≥ $x", usd its known part) is not "not known".
   if (!v.known)
-    n.appendChild(
+    n.append(
       el(
         "span",
         "weft-sr",
@@ -453,7 +453,7 @@ export function costText(v: CostView): HTMLElement {
  * figure priced without cache splits. */
 export function turnCost(r: RunRow): HTMLElement {
   const own = costView(r)
-  const n = el("span", undefined, [costText(own)], {
+  const n = el("span", "", [costText(own)], {
     "data-weft-turn-cost": "",
   })
   const d = delegatedView(r)
@@ -462,7 +462,7 @@ export function turnCost(r: RunRow): HTMLElement {
   if (own.known && cacheNotReported(r))
     n.append(
       " ",
-      el("span", undefined, "cache not reported", {
+      el("span", "", "cache not reported", {
         title: CACHE_HINT,
         "data-weft-cache-hint": "",
       })

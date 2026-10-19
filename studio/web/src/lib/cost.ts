@@ -301,28 +301,51 @@ export function costNotRead(inFlight: boolean, failed = false): CostView {
 export function sumCost(
   rows: readonly (CostRow | CostView | null | undefined)[]
 ): CostView {
-  if (!rows.length) return view(null, false, "no run to total")
-  let usd = 0
-  // Every run a scripted model's $0: the total is "$0 · scripted" too.
-  let scripted = true
-  for (const r of rows) {
+  return total(rows, (r) => {
     // COST_NOT_READ_YET's words, spelt out: a shared const would be
     // hoisted into the panel's bundle (cost.test.ts holds them equal).
     if (!r) return view(null, false, "a run's cost is not read yet")
-    if ("text" in r) {
-      // An already drawn figure (lostCellCost): known adds, unknown is the total's reason.
-      if (!r.known) return view(null, false, r.title, r.badge)
-      usd += r.usd ?? 0
-      scripted &&= r.badge === "scripted" && !r.usd
-      continue
-    }
-    const t = runTotal(r)
-    if (!t.known) return totalUnknown(r)
-    usd += t.usd
-    // A scripted parent whose subagents bill is not scripted: its whole
-    // bill (runTotal, delegated included) must be an exact $0 too —
-    // pricing.go's setCost rule (U5U7-fix 1).
-    scripted &&= r.cost_badge === "scripted" && t.usd === 0
+    // An already drawn figure (lostCellCost): known adds, unknown is the total's reason.
+    if ("text" in r)
+      return r.known
+        ? [r.usd ?? 0, r.badge === "scripted" && !r.usd]
+        : view(null, false, r.title, r.badge)
+    return runPart(r)
+  })
+}
+
+/** sumRuns is sumCost over run rows alone — every one read, none a
+ * figure already drawn: atLeastCost's total and the devtools panel's,
+ * whose bundle so carries no other kind of row. */
+export const sumRuns = (rows: readonly CostRow[]): CostView =>
+  total(rows, runPart)
+
+/** One row's part of a total: its known figure and whether it is a
+ * scripted model's exact $0, or the unknown view that is the total. */
+type Part = [usd: number, scripted: boolean] | CostView
+
+/** runPart is a run's whole bill as a total's part. A scripted parent
+ * whose subagents bill is not scripted: its whole bill (runTotal,
+ * delegated included) must be an exact $0 too — pricing.go's setCost
+ * rule (U5U7-fix 1). */
+function runPart(r: CostRow): Part {
+  const t = runTotal(r)
+  return t.known
+    ? [t.usd, r.cost_badge === "scripted" && t.usd === 0]
+    : totalUnknown(r)
+}
+
+/** total adds the rows' parts, in order: the first unknown part is the
+ * total; every run a scripted model's $0 is "$0 · scripted" too. */
+function total<TRow>(rows: readonly TRow[], part: (r: TRow) => Part): CostView {
+  if (!rows.length) return view(null, false, "no run to total")
+  let usd = 0
+  let scripted = true
+  for (const r of rows) {
+    const p = part(r)
+    if (!Array.isArray(p)) return p
+    usd += p[0]
+    scripted &&= p[1]
   }
   return scripted
     ? view(0, true, scriptedTitle(rows) || undefined, "scripted")
@@ -392,7 +415,7 @@ export function atLeastCost(
     const w = own.known ? `delegated: ${u.title}` : u.title
     if (!why.includes(w)) why.push(w)
   }
-  if (!why.length && !more) return sumCost(rows)
+  if (!why.length && !more) return sumRuns(rows)
   // "k of n runs priced": plural always, as pricing.go's tally counts.
   const counted = `${k} of ${rows.length} ${noun}s priced`
   const priced = why.length ? counted : ""

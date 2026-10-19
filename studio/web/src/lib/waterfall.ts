@@ -20,7 +20,7 @@
 import type { Span as TimedSpan } from "./api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "./events"
 import { plural, spanMs, stepCount, UNNAMED_AGENT } from "./format"
-import { NOT_EXECUTED } from "./summarize"
+import { clip, NOT_EXECUTED } from "./summarize"
 import type { SpanKind, SpanTone } from "./trace"
 
 /** The axis: wall time from spans, or stream order from events. */
@@ -336,12 +336,7 @@ export function opOf(s: TimedSpan): string {
 
 const GIST = 60
 
-function clip(s: string): string {
-  const one = s.replace(/\s+/g, " ").trim()
-  return one.length > GIST ? `${one.slice(0, GIST - 1)}…` : one
-}
-
-const quote = (s: string) => `“${clip(s)}”`
+const quote = (s: string) => `“${clip(s, GIST)}”`
 
 /** A ToolError renders "CODE: message" — the code is the error. */
 const CODED = /^([A-Z][A-Z0-9_]+): /
@@ -457,7 +452,7 @@ const toolRow = (
     // Content-off, the result's text is empty: its size (metadata,
     // kept content-off) says what came back.
     gist: call?.result?.content
-      ? clip(call.result.content)
+      ? clip(call.result.content, GIST)
       : int(bytes) !== undefined
         ? `${int(bytes)} B`
         : undefined,

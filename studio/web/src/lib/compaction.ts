@@ -165,9 +165,16 @@ export function replacementNote(
   c: RunCompaction,
   requestCount?: number
 ): string {
-  const inAll =
+  return replacedBy(
+    c,
     requestCount != null
       ? ` — the step's request carried ${plural(requestCount, "message")} in all`
       : ""
-  return `in their place, ${plural(c.entries, "message")}${inAll}; the view's body stays in its record (export the run: compactions[].messages)`
+  )
 }
+
+/** replacedBy is replacementNote with the request's count as words
+ * (inAll), or none: the devtools panel's, which has no count to give —
+ * so its bundle carries only these words. */
+export const replacedBy = (c: RunCompaction, inAll = ""): string =>
+  `in their place, ${plural(c.entries, "message")}${inAll}; the view's body stays in its record (export the run: compactions[].messages)`

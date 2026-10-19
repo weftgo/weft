@@ -31,11 +31,11 @@
 // scope only when no rung above it names one.
 import { tokenScopeOf } from "../lib/replay"
 import { parseScope, serializeScope } from "../lib/scope"
-import { isLoopback } from "./detect"
 import { migrateDebug } from "./layout"
 import { themeSetting } from "./theme"
 import type { ThemeSetting } from "./theme"
 import type { Scope } from "../lib/scope"
+import { isLoopback } from "./detect"
 
 /** data-position — where the dock sits (mount's option). */
 export type PanelPosition = "bottom-right" | "bottom-left" | "right-dock"

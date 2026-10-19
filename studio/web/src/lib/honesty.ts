@@ -8,7 +8,7 @@
 // (hole-badge.tsx) and the devtools panel both read this one module.
 
 import { DONE } from "./decisions"
-import { plural } from "./format"
+import { byteSize, plural } from "./format"
 
 export type Hole =
   | "truncated"
@@ -223,11 +223,7 @@ export interface ContentAttrs {
 }
 
 /** kib is a byte count as a badge says it: "92 B", "12.3 KiB". */
-export function kib(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MiB`
-}
+export const kib = (n: number): string => byteSize(n, "i")
 
 /** contentHoles reads an event's attrs: a recorder cap's cut is
  * truncated (with the bytes), a content-off chain's mark — or the

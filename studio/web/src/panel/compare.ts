@@ -6,7 +6,10 @@
 // is same, changed (the two values beneath), not comparable or
 // missing; each side's marks are chips and its holes badges.ts's
 // badges. Vanilla, at panel width.
-import { compareLink, href, runLink } from "../lib/links"
+import { compareLink, href, runPage } from "../lib/links"
+import type { DiffDoc, SideView } from "../lib/stepdiff"
+import { badge, holeBadges, holeLine } from "./badges"
+import { el, NEW_TAB } from "./render"
 import {
   CELL_REASONS,
   CELL_WORDS,
@@ -18,9 +21,6 @@ import {
   stepDiffView,
   summaryWords,
 } from "../lib/stepdiff"
-import type { DiffDoc, SideView } from "../lib/stepdiff"
-import { badge, holeBadges, holeLine } from "./badges"
-import { el, NEW_TAB } from "./render"
 
 /** sideMarks is one side's marks and holes, labelled a or b. */
 function sideMarks(which: string, side: SideView): HTMLElement | null {
@@ -29,7 +29,7 @@ function sideMarks(which: string, side: SideView): HTMLElement | null {
     "data-weft-diff-side": which,
   })
   for (const m of side.marks)
-    box.appendChild(
+    box.append(
       m.hole
         ? badge(m.hole)
         : el("span", "weft-chip weft-tag", m.label, {
@@ -38,7 +38,7 @@ function sideMarks(which: string, side: SideView): HTMLElement | null {
           })
     )
   const holes = holeBadges(side.holes)
-  if (holes) box.appendChild(holes)
+  if (holes) box.append(holes)
   return box
 }
 
@@ -47,7 +47,7 @@ function sideMarks(which: string, side: SideView): HTMLElement | null {
  * Studio's compare page under base (the panel's endpoint). */
 export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
   const v = stepDiffView(doc)
-  const box = el("div", "weft-diff", undefined, {
+  const box = el("div", "weft-diff", "", {
     "data-weft-step-diff": "",
     "data-key": "step-diff",
   })
@@ -56,32 +56,29 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
     ...NEW_TAB,
     "aria-label": `open the step compare of ${v.a.run_id} and ${v.b.run_id} in Studio`,
   })
-  box.appendChild(
-    el("div", "weft-diff-h", [
-      document.createTextNode(`steps vs source: ${summaryWords(v)} `),
-      link,
-    ])
+  box.append(
+    el("div", "weft-diff-h", [`steps vs source: ${summaryWords(v)} `, link])
   )
-  for (const h of v.holes) box.appendChild(holeLine(h))
+  for (const h of v.holes) box.append(holeLine(h))
   if (v.markers.length) {
-    const list = el("ul", "weft-diff-markers", undefined, {
+    const list = el("ul", "weft-diff-markers", "", {
       "aria-label": "changed steps",
     })
     for (const r of v.rows)
       if (r.changed) {
         // The marker is a link to the step, as Studio's: the compared run's.
-        const a = el("a", undefined, markerWords(r), {
-          href: href(base, runLink(v.b.run_id, { step: r.step })),
+        const a = el("a", "", markerWords(r), {
+          href: href(base, runPage(v.b.run_id, { step: r.step })),
           ...NEW_TAB,
         })
-        list.appendChild(
-          el("li", undefined, [a], { "data-weft-diff-marker": String(r.step) })
+        list.append(
+          el("li", "", [a], { "data-weft-diff-marker": String(r.step) })
         )
       }
-    box.appendChild(list)
+    box.append(list)
   }
   const table = el("table", "weft-diff-table")
-  table.appendChild(
+  table.append(
     el(
       "caption",
       "weft-sr",
@@ -89,27 +86,24 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
     )
   )
   const head = el("tr")
-  head.appendChild(el("th", undefined, "step", { scope: "col" }))
+  head.append(el("th", "", "step", { scope: "col" }))
   for (const c of DIFF_COLUMNS)
-    head.appendChild(el("th", undefined, COLUMN_LABELS[c], { scope: "col" }))
-  table.appendChild(el("thead", undefined, [head]))
+    head.append(el("th", "", COLUMN_LABELS[c], { scope: "col" }))
+  table.append(el("thead", "", [head]))
   const body = el("tbody")
   for (const r of v.rows) {
-    const tr = el(
-      "tr",
-      r.changed ? "weft-diff-changed" : undefined,
-      undefined,
-      { "data-weft-diff-step": String(r.step) }
-    )
-    const th = el("th", undefined, String(r.step), { scope: "row" })
+    const tr = el("tr", r.changed ? "weft-diff-changed" : undefined, "", {
+      "data-weft-diff-step": String(r.step),
+    })
+    const th = el("th", "", String(r.step), { scope: "row" })
     for (const [which, side] of [
       ["a", r.a],
       ["b", r.b],
     ] as const) {
       const marks = sideMarks(which, side)
-      if (marks) th.appendChild(marks)
+      if (marks) th.append(marks)
     }
-    tr.appendChild(th)
+    tr.append(th)
     for (const c of DIFF_COLUMNS) {
       const state = r.cells[c]
       const td = el("td", `weft-diff-${state}`, CELL_WORDS[state], {
@@ -121,22 +115,19 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
       // (the server compared the hashes).
       const hole = cellHole(c, r.a.side, r.b.side)
       if (hole) {
-        td.appendChild(document.createTextNode(" "))
-        td.appendChild(badge(hole))
+        td.append(" ", badge(hole))
       }
       if (state === "changed") {
-        td.appendChild(
-          el("div", "weft-diff-row weft-diff-a", `a ${cellText(r.a.side, c)}`)
-        )
-        td.appendChild(
+        td.append(
+          el("div", "weft-diff-row weft-diff-a", `a ${cellText(r.a.side, c)}`),
           el("div", "weft-diff-row weft-diff-b", `b ${cellText(r.b.side, c)}`)
         )
       }
-      tr.appendChild(td)
+      tr.append(td)
     }
-    body.appendChild(tr)
+    body.append(tr)
   }
-  table.appendChild(body)
-  box.appendChild(table)
+  table.append(body)
+  box.append(table)
   return box
 }

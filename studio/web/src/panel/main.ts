@@ -100,7 +100,7 @@ function mountDock(): void {
   ;(dock as WeftDevtools).autoMounted = true
   // The decision runs once the page is parsed (boot), so <body> is
   // there — unless the page has none (a frameset): no dock.
-  ;(document.body as HTMLElement | null)?.appendChild(dock)
+  ;(document.body as HTMLElement | null)?.append(dock)
 }
 
 /** boot is the entry's whole effect. */

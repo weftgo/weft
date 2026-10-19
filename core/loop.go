@@ -520,7 +520,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// consumed on the span's context, so an adapter's own HTTP spans
 		// parent under chat.
 		info := InfoOf(model)
-		mctx, endModel := a.obs.model(ctx, cfg.id, step, info)
+		mctx, endModel := a.obs.model(ctx, &records, cfg.id, step, info)
 		// What this call is given, recorded beside it (ADR 0028): the
 		// prompt and tools records when their hash is new to the run,
 		// then the request record (attempt 1), on the chat span's
@@ -1169,7 +1169,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			// and a child run's invoke_agent hangs under it — ended with
 			// the call's outcome, before ToolFinish is emitted so no span
 			// operation runs under emitMu (ADR 0016).
-			callCtx, endTool := a.obs.tool(callCtx, c, startSeq, toolStartFacts{timeout: a.callTimeout(def), queue: queue, contentOff: a.content != nil && !*a.content,
+			callCtx, endTool := a.obs.tool(callCtx, rec, c, startSeq, toolStartFacts{timeout: a.callTimeout(def), queue: queue, contentOff: a.content != nil && !*a.content,
 				approvedBy: prov.by, grantID: prov.grant})
 			var retry bool
 			var callErr error
@@ -1324,7 +1324,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 		// A denied call never ran: no event (ADR 0007), a zero-length
 		// execute_tool span naming its kind (UX-E-17), and the run's
 		// root counts it (weft.run.denied).
-		a.obs.deniedTool(ctx, cfg.id, c, kind)
+		a.obs.deniedTool(ctx, rec, cfg.id, c, kind)
 		rec.noteDenied()
 	}
 	return results, pending, sub, nil

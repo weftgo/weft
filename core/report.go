@@ -340,7 +340,11 @@ func (s *stepReport) attempt(a AttemptInfo) {
 	}
 	timed := !a.Start.IsZero() && !a.End.Before(a.Start)
 	ctx := s.Context
-	if trace.SpanFromContext(ctx).IsRecording() {
+	func() {
+		defer s.containTraces()
+		if !trace.SpanFromContext(ctx).IsRecording() {
+			return
+		}
 		start := []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindClient)}
 		if timed {
 			start = append(start, trace.WithTimestamp(a.Start))
@@ -389,7 +393,7 @@ func (s *stepReport) attempt(a AttemptInfo) {
 		} else {
 			span.End()
 		}
-	}
+	}()
 	if l := s.obs.logger(); l.Enabled(ctx, slog.LevelDebug) {
 		attrs := []slog.Attr{
 			slog.String(logRun, s.runID),
@@ -436,6 +440,7 @@ func (s *stepReport) attempt(a AttemptInfo) {
 func (s *stepReport) requestAttempt(ctx context.Context, index int64, a AttemptInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.containLogs() // runs before the unlock
 	if !s.ended.Load() {
 		s.request.attempt(ctx, index, a)
 	}

@@ -281,10 +281,14 @@ func runLinkAttrs(ctx context.Context) []attribute.KeyValue {
 // a reader tells "no logger" (0) from "emitted M, stored fewer" (a
 // destination lost them) by them. Counts, never content (ADR 0016).
 func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo, extra []attribute.KeyValue, rec *recorder) (context.Context, func(res *RunResult, err error, end runEnd)) {
-	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameInvokeAgent, agent),
+	ctx, span := o.startSpan(ctx, rec, spanName(semconv.GenAIOperationNameInvokeAgent, agent),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
-	if span.IsRecording() {
+	func() {
+		defer rec.containTraces(ctx)
+		if !span.IsRecording() {
+			return
+		}
 		attrs := []attribute.KeyValue{semconv.GenAIOperationNameInvokeAgent, attrRunID.String(runID)}
 		if agent != "" {
 			attrs = append(attrs, semconv.GenAIAgentName(agent))
@@ -298,7 +302,7 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 		attrs = append(attrs, extra...)
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
-	}
+	}()
 	if l := o.logger(); l.Enabled(ctx, slog.LevelDebug) {
 		attrs := []slog.Attr{slog.String(logRun, runID)}
 		if agent != "" {
@@ -314,7 +318,11 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 	}
 	return ctx, func(res *RunResult, err error, end runEnd) {
 		dur := time.Since(start)
-		if span.IsRecording() {
+		func() {
+			defer rec.containTraces(ctx)
+			if !span.IsRecording() {
+				return
+			}
 			attrs := []attribute.KeyValue{
 				semconv.GenAIUsageInputTokens(int(res.Usage.InputTokens)),
 				semconv.GenAIUsageOutputTokens(int(res.Usage.OutputTokens)),
@@ -350,7 +358,7 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 				attrs = append(attrs, attrOutputSubmitted.Bool(end.submitted))
 			}
 			span.SetAttributes(attrs...)
-		}
+		}()
 		var l *slog.Logger
 		debug := false
 		if l = o.logger(); l.Enabled(ctx, slog.LevelDebug) {
@@ -359,11 +367,14 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 		if err != nil {
 			// err is the *RunError fail built; its cause decides the
 			// type, the span records the failure itself.
-			if span.IsRecording() {
-				span.SetStatus(codes.Error, err.Error())
-				span.RecordError(err)
-				span.SetAttributes(semconv.ErrorTypeKey.String(runErrorType(err)))
-			}
+			func() {
+				defer rec.containTraces(ctx)
+				if span.IsRecording() {
+					span.SetStatus(codes.Error, err.Error())
+					span.RecordError(err)
+					span.SetAttributes(semconv.ErrorTypeKey.String(runErrorType(err)))
+				}
+			}()
 			if debug {
 				// The line names the cause — the ctx error for a
 				// cancelled run — with the step; the full RunError text
@@ -384,9 +395,12 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 					slog.Duration(logDur, dur))
 			}
 		} else {
-			if span.IsRecording() {
-				span.SetStatus(codes.Ok, "")
-			}
+			func() {
+				defer rec.containTraces(ctx)
+				if span.IsRecording() {
+					span.SetStatus(codes.Ok, "")
+				}
+			}()
 			if debug {
 				attrs := []slog.Attr{
 					slog.String(logRun, runID),
@@ -404,7 +418,7 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 				l.LogAttrs(ctx, slog.LevelDebug, "run finish", attrs...)
 			}
 		}
-		span.End()
+		rec.endSpan(ctx, span)
 	}
 }
 
@@ -422,11 +436,15 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 // 2026-10-07 A4 note); it is set only on a call that finished. The
 // span carries weft.stream=true — the loop always consumes a stream —
 // and weft.ttft_ms when a TextDelta or ToolArgsDelta arrived.
-func (o *observer) model(ctx context.Context, runID string, step int, info ModelInfo) (context.Context, func(finish ModelFinish, finished bool, calls int, err error, t callTiming)) {
-	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameChat, info.Name),
+func (o *observer) model(ctx context.Context, rec *recorder, runID string, step int, info ModelInfo) (context.Context, func(finish ModelFinish, finished bool, calls int, err error, t callTiming)) {
+	ctx, span := o.startSpan(ctx, rec, spanName(semconv.GenAIOperationNameChat, info.Name),
 		trace.WithSpanKind(trace.SpanKindClient))
 	start := time.Now()
-	if span.IsRecording() {
+	func() {
+		defer rec.containTraces(ctx)
+		if !span.IsRecording() {
+			return
+		}
 		attrs := []attribute.KeyValue{
 			semconv.GenAIOperationNameChat,
 			attrRunID.String(runID),
@@ -441,14 +459,18 @@ func (o *observer) model(ctx context.Context, runID string, step int, info Model
 		}
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
-	}
+	}()
 	return ctx, func(finish ModelFinish, finished bool, calls int, err error, t callTiming) {
 		dur := time.Since(start)
 		// finished is the loop's own flag: a ModelFinish arrived. It is
 		// not inferred from the reason — the loop accepts an empty one —
 		// so a stream that failed before finishing carries no usage and
 		// no finish reason; the error status is the whole story.
-		if span.IsRecording() {
+		func() {
+			defer rec.containTraces(ctx)
+			if !span.IsRecording() {
+				return
+			}
 			if finished {
 				attrs := []attribute.KeyValue{
 					semconv.GenAIUsageInputTokens(int(finish.Usage.InputTokens)),
@@ -475,7 +497,7 @@ func (o *observer) model(ctx context.Context, runID string, step int, info Model
 			} else {
 				span.SetStatus(codes.Ok, "")
 			}
-		}
+		}()
 		if l := o.logger(); l.Enabled(ctx, slog.LevelDebug) {
 			attrs := []slog.Attr{
 				slog.String(logRun, runID),
@@ -506,7 +528,7 @@ func (o *observer) model(ctx context.Context, runID string, step int, info Model
 			}
 			l.LogAttrs(ctx, slog.LevelDebug, "model call", attrs...)
 		}
-		span.End()
+		rec.endSpan(ctx, span)
 	}
 }
 
@@ -563,11 +585,15 @@ type toolStartFacts struct {
 	approvedBy, grantID string
 }
 
-func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartFacts) (context.Context, func(res ToolResultPart, park string, err error, cut int, retry retryMark, end time.Time)) {
-	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameExecuteTool, c.Name),
+func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, facts toolStartFacts) (context.Context, func(res ToolResultPart, park string, err error, cut int, retry retryMark, end time.Time)) {
+	ctx, span := o.startSpan(ctx, rec, spanName(semconv.GenAIOperationNameExecuteTool, c.Name),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
-	if span.IsRecording() {
+	func() {
+		defer rec.containTraces(ctx)
+		if !span.IsRecording() {
+			return
+		}
 		attrs := []attribute.KeyValue{
 			semconv.GenAIOperationNameExecuteTool,
 			semconv.GenAIToolName(c.Name),
@@ -593,14 +619,18 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartF
 		}
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
-	}
+	}()
 	return ctx, func(res ToolResultPart, park string, err error, cut int, retry retryMark, end time.Time) {
 		pending := park != ""
 		if end.IsZero() {
 			end = time.Now()
 		}
 		dur := end.Sub(start)
-		if span.IsRecording() {
+		func() {
+			defer rec.containTraces(ctx)
+			if !span.IsRecording() {
+				return
+			}
 			switch {
 			case pending:
 				span.SetAttributes(attrToolPending.Bool(true), attrToolPendingSource.String(park))
@@ -627,7 +657,7 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartF
 			if cut > 0 && !pending {
 				span.SetAttributes(attrToolTruncated.Int(cut))
 			}
-		}
+		}()
 		if l := o.logger(); l.Enabled(ctx, slog.LevelDebug) {
 			attrs := []slog.Attr{
 				slog.String(logRun, c.RunID),
@@ -648,7 +678,7 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartF
 			}
 			l.LogAttrs(ctx, slog.LevelDebug, "tool call", attrs...)
 		}
-		span.End(trace.WithTimestamp(end))
+		rec.endSpan(ctx, span, trace.WithTimestamp(end))
 	}
 }
 
@@ -662,10 +692,11 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartF
 // reason, which is the transcript's (ids and enums only on spans, ADR
 // 0016). The invoke_agent span's weft.run.denied still counts these
 // calls; a reader counts them there, not here (record contract §6).
-func (o *observer) deniedTool(ctx context.Context, runID string, call ToolCallPart, kind string) {
+func (o *observer) deniedTool(ctx context.Context, rec *recorder, runID string, call ToolCallPart, kind string) {
 	now := time.Now()
-	_, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameExecuteTool, call.Name),
+	_, span := o.startSpan(ctx, rec, spanName(semconv.GenAIOperationNameExecuteTool, call.Name),
 		trace.WithSpanKind(trace.SpanKindInternal), trace.WithTimestamp(now))
+	defer rec.containTraces(ctx)
 	if span.IsRecording() {
 		attrs := []attribute.KeyValue{
 			semconv.GenAIOperationNameExecuteTool,
@@ -939,6 +970,10 @@ type recorder struct {
 	// weft.tap.panics. OnRunEnd observers run after the span ended, so
 	// theirs reach TapPanics alone.
 	runPanics atomic.Int64
+	// warned holds the provider kinds (providerTraces, providerLogs)
+	// whose contained panic this run has already named in its one Warn
+	// line (providerpanic.go).
+	warned atomic.Uint32
 
 	// stepModel is the model that answered the step whose StepFinish is
 	// being emitted (callTiming.answered): set by the loop goroutine
@@ -1018,6 +1053,7 @@ func (r *recorder) noteDenied() {
 // its own records, and recording the parent's wrapper copy would store
 // every child event twice (ADR 0024 D3).
 func (r *recorder) recordEvent(ctx context.Context, ev Event) {
+	defer r.contain(ctx, -1, "event")
 	var kind, eventName string
 	switch ev.(type) {
 	case RunStart, StepStart, ToolStart, ToolFinish, StepFinish, Steered, RunFinish:
@@ -1135,6 +1171,7 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 // a cancelled batch's results ride RunError.Result — but the record
 // stream stops where the event stream does.
 func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message, input bool) {
+	defer r.contain(ctx, step, eventNameMessages)
 	if len(msgs) == 0 || ctx.Err() != nil || !r.captureOn(ctx) {
 		return
 	}

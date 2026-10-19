@@ -119,7 +119,13 @@ Placement, wired in `loop.go`:
   a guard that ends the span (`error.type run_panicked`) and re-panics,
   so the crash still reaches the caller and the span still closes. The
   ctx it returns carries the span: every chat, execute_tool and tap
-  below parents under it.
+  below parents under it. Every call the loop makes into its providers
+  on its own scope — `Tracer`/`Logger` at `New`, `Start` and every span
+  call, `Enabled`, `Emit`, the reporter's spans and records — is
+  contained: a panic there drops that report, is counted with the tap
+  panics and named in one Warn line on the agent's `Logger` per run per
+  provider kind (P9-core-panic), and the run goes on exactly as it would
+  with no provider (`TestProviderPanicsNeverChangeTheRun`).
 - **Model call** (around `consume`): started after `PrepareStep` has
   built the request (a PrepareStep function rewrites the request; it is
   not the model call), ended when the stream is consumed, before the

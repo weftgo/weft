@@ -692,16 +692,18 @@ func New(m Model, opts ...Option) *Agent {
 	a.records = lp
 	a.traces = tp
 	a.obs = observer{
-		tracer: tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(version)),
-		elog:   lp.Logger(instrumentationName, log.WithInstrumentationVersion(version)),
-		log:    a.logger,
-		lp:     lp,
+		log: a.logger,
+		lp:  lp,
 		// No LoggerProvider option: the raw marker is read off the
 		// global provider in force at each ask (raw.go), since the one
 		// resolved here may be the delegating placeholder an SDK
 		// registered later replaces.
 		globalLP: a.loggerProvider == nil,
 	}
+	// A provider that panics handing out core's tracer or logger leaves
+	// the agent a no-op one (providerpanic.go).
+	a.obs.tracer = a.obs.resolveTracer(tp, &a.tapPanics)
+	a.obs.elog = a.obs.resolveLogger(lp, &a.tapPanics)
 	// The manifest hash is computed once, here, for the named agent: the
 	// agent is immutable after this, so one hash serves every run (the
 	// store used to recompute it per run through AgentFromContext; ADR
@@ -966,9 +968,11 @@ func clonePtr[T any](p *T) *T {
 
 // TapPanics reports how many tap invocations have panicked and been
 // contained since construction — taps, OnMessages and OnRunEnd
-// observers, and reports (ReportFromContext) whose tracer or logger
-// panicked. A rising counter means an observer is
-// broken; runs are unaffected by design.
+// observers, reports (ReportFromContext) whose tracer or logger
+// panicked, and every other call the loop made into its TracerProvider
+// or LoggerProvider that panicked (each run also names such a provider
+// in one Warn line on the agent's Logger). A rising counter means an
+// observer is broken; runs are unaffected by design.
 func (a *Agent) TapPanics() int64 { return a.tapPanics.Load() }
 
 // narrowTools keeps the named subset of a snapshot, in the snapshot's

@@ -39,13 +39,13 @@ func TestObserverNoopAllocations(t *testing.T) {
 		t.Errorf("run span allocs = %.0f, want < 10", n)
 	}
 	if n := testing.AllocsPerRun(100, func() {
-		_, end := o.model(ctx, "r", 0, ModelInfo{})
+		_, end := o.model(ctx, nil, "r", 0, ModelInfo{})
 		end(finish, true, 0, nil, callTiming{})
 	}); n >= 10 {
 		t.Errorf("model span allocs = %.0f, want < 10", n)
 	}
 	if n := testing.AllocsPerRun(100, func() {
-		_, end := o.tool(ctx, Call{RunID: "r"}, 1, toolStartFacts{})
+		_, end := o.tool(ctx, nil, Call{RunID: "r"}, 1, toolStartFacts{})
 		end(out, "", nil, 0, retryMark{}, time.Time{})
 	}); n >= 10 {
 		t.Errorf("tool span allocs = %.0f, want < 10", n)
@@ -73,11 +73,11 @@ func BenchmarkObserverNoop(b *testing.B) {
 		end(res, nil, runEnd{})
 	})
 	bench("model", func() {
-		_, end := o.model(ctx, "r", 0, ModelInfo{})
+		_, end := o.model(ctx, nil, "r", 0, ModelInfo{})
 		end(finish, true, 0, nil, callTiming{})
 	})
 	bench("tool", func() {
-		_, end := o.tool(ctx, Call{RunID: "r"}, 1, toolStartFacts{})
+		_, end := o.tool(ctx, nil, Call{RunID: "r"}, 1, toolStartFacts{})
 		end(out, "", nil, 0, retryMark{}, time.Time{})
 	})
 }
@@ -103,8 +103,8 @@ func TestLoggerNoAllocWhenDisabled(t *testing.T) {
 	}
 	ctx := context.Background()
 	_, endRun := o.run(ctx, "r", "a", ModelInfo{Provider: "p", Name: "m"}, nil, nil)
-	_, endModel := o.model(ctx, "r", 0, ModelInfo{Provider: "p", Name: "m"})
-	_, endTool := o.tool(ctx, Call{RunID: "r", Name: "t"}, 1, toolStartFacts{})
+	_, endModel := o.model(ctx, nil, "r", 0, ModelInfo{Provider: "p", Name: "m"})
+	_, endTool := o.tool(ctx, nil, Call{RunID: "r", Name: "t"}, 1, toolStartFacts{})
 	endTool(ToolResultPart{Content: "x"}, "", nil, 0, retryMark{}, time.Time{})
 	endModel(ModelFinish{Reason: StopEndTurn}, true, 0, nil, callTiming{})
 	endRun(&RunResult{}, nil, runEnd{})
@@ -133,7 +133,7 @@ func (h *gateHandler) WithGroup(string) slog.Handler      { return h }
 // outside a run.
 func TestReportAttemptNoopAllocations(t *testing.T) {
 	o := newNoopObserver()
-	mctx, end := o.model(context.Background(), "r", 0, ModelInfo{})
+	mctx, end := o.model(context.Background(), nil, "r", 0, ModelInfo{})
 	defer end(ModelFinish{}, true, 0, nil, callTiming{})
 	ctx := o.withReport(mctx, "r", 0, nil)
 	a := AttemptInfo{Model: "m", Provider: "p", Start: time.Now(), End: time.Now()}
@@ -150,7 +150,7 @@ func TestReportAttemptNoopAllocations(t *testing.T) {
 // under a stub observer (no SDK registered, logger at Info).
 func BenchmarkReportAttempt(b *testing.B) {
 	o := newNoopObserver()
-	mctx, end := o.model(context.Background(), "r", 0, ModelInfo{})
+	mctx, end := o.model(context.Background(), nil, "r", 0, ModelInfo{})
 	defer end(ModelFinish{}, true, 0, nil, callTiming{})
 	inRun := o.withReport(mctx, "r", 0, nil)
 	a := AttemptInfo{Model: "m", Provider: "p", Start: time.Now(), End: time.Now()}
@@ -174,7 +174,7 @@ func BenchmarkReportAttempt(b *testing.B) {
 // -race).
 func TestLateReportCannotNameTheModel(t *testing.T) {
 	o := newNoopObserver()
-	mctx, endModel := o.model(context.Background(), "r", 0, ModelInfo{})
+	mctx, endModel := o.model(context.Background(), nil, "r", 0, ModelInfo{})
 	defer endModel(ModelFinish{}, true, 0, nil, callTiming{})
 	rep := o.withReport(mctx, "r", 0, nil)
 	ReportFromContext(rep).Attempt(AttemptInfo{Model: "glm-b"})
@@ -231,7 +231,7 @@ func (*endWatchLogger) Enabled(context.Context, log.EnabledParameters) bool { re
 func TestLateReportAddsNoRequestRecord(t *testing.T) {
 	for range 50 {
 		o := newNoopObserver()
-		mctx, endModel := o.model(context.Background(), "r", 0, ModelInfo{})
+		mctx, endModel := o.model(context.Background(), nil, "r", 0, ModelInfo{})
 		rep := o.withReport(mctx, "r", 0, nil)
 		on := true
 		lg := &endWatchLogger{rep: rep}

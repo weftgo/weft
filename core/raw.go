@@ -173,11 +173,9 @@ func (s *stepReport) rawWanted() (ok bool) {
 		return false
 	}
 	defer func() {
-		if recover() != nil {
+		if p := recover(); p != nil {
 			ok = false
-			if s.panics != nil {
-				s.panics.Add(1)
-			}
+			s.providerPanicked(providerLogs, p)
 		}
 	}()
 	return s.obs.rawMarked() && s.rec.elog.Enabled(s.Context, log.EnabledParameters{EventName: eventNameRaw})

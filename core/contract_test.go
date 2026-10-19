@@ -24,7 +24,13 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	otellog "go.opentelemetry.io/otel/log"
+	logembedded "go.opentelemetry.io/otel/log/embedded"
+	lognoop "go.opentelemetry.io/otel/log/noop"
+	"go.opentelemetry.io/otel/trace"
+	traceembedded "go.opentelemetry.io/otel/trace/embedded"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/weftgo/weft/core"
@@ -6029,4 +6035,256 @@ func TestApproveByIsReportingOnly(t *testing.T) {
 	if string(ja) != string(jb) || a.Text() != b.Text() {
 		t.Errorf("ApproveBy changed the run:\n Approve:   %s\n ApproveBy: %s", ja, jb)
 	}
+}
+
+// ---- Observability providers never change a run (ADR 0016, P9) ----
+
+// coreScope is the instrumentation scope core asks its providers for.
+const coreScope = "github.com/weftgo/weft/core"
+
+// panicTP / panicLP are providers broken on core's scope alone. mode:
+// "provider" — Tracer/Logger themselves panic (at New); "calls" — Start,
+// Enabled and Emit panic; "span" — Start succeeds but every span call
+// panics, and so do Enabled and Emit; "late" — only the late calls
+// panic: span End and the logger's Emit (IsRecording and Enabled say
+// yes, so every attribute and record is built first).
+type panicTP struct {
+	traceembedded.TracerProvider
+	mode string
+}
+
+func (p panicTP) Tracer(name string, _ ...trace.TracerOption) trace.Tracer {
+	if name != coreScope {
+		return tracenoop.NewTracerProvider().Tracer(name)
+	}
+	if p.mode == "provider" {
+		panic("broken tracer provider")
+	}
+	return panicTracer{mode: p.mode}
+}
+
+type panicTracer struct {
+	traceembedded.Tracer
+	mode string
+}
+
+func (t panicTracer) Start(ctx context.Context, name string, _ ...trace.SpanStartOption) (context.Context, trace.Span) {
+	if t.mode == "calls" {
+		panic("broken Start: " + name)
+	}
+	s := panicSpan{late: t.mode == "late"}
+	return trace.ContextWithSpan(ctx, s), s
+}
+
+type panicSpan struct {
+	traceembedded.Span
+	late bool
+}
+
+func (s panicSpan) early() {
+	if !s.late {
+		panic("broken span call")
+	}
+}
+func (s panicSpan) End(...trace.SpanEndOption)              { panic("broken End") }
+func (s panicSpan) AddEvent(string, ...trace.EventOption)   { s.early() }
+func (s panicSpan) AddLink(trace.Link)                      { s.early() }
+func (s panicSpan) IsRecording() bool                       { s.early(); return true }
+func (s panicSpan) RecordError(error, ...trace.EventOption) { s.early() }
+func (s panicSpan) SpanContext() trace.SpanContext          { s.early(); return trace.SpanContext{} }
+func (s panicSpan) SetStatus(codes.Code, string)            { s.early() }
+func (s panicSpan) SetName(string)                          { s.early() }
+func (s panicSpan) SetAttributes(...attribute.KeyValue)     { s.early() }
+func (s panicSpan) TracerProvider() trace.TracerProvider {
+	s.early()
+	return tracenoop.NewTracerProvider()
+}
+
+type panicLP struct {
+	logembedded.LoggerProvider
+	mode string
+}
+
+func (p panicLP) Logger(name string, _ ...otellog.LoggerOption) otellog.Logger {
+	if name != coreScope {
+		return lognoop.NewLoggerProvider().Logger(name)
+	}
+	if p.mode == "provider" {
+		panic("broken logger provider")
+	}
+	return panicRecordLogger{late: p.mode == "late"}
+}
+
+type panicRecordLogger struct {
+	logembedded.Logger
+	late bool
+}
+
+func (l panicRecordLogger) Enabled(context.Context, otellog.EnabledParameters) bool {
+	if !l.late {
+		panic("broken Enabled")
+	}
+	return true
+}
+func (panicRecordLogger) Emit(context.Context, otellog.Record) { panic("broken Emit") }
+
+// providerRun is what a run hands its caller — the result, the error,
+// the event stream (JSON, the measured latency_ms / ttft_ms removed:
+// clocks, not behaviour) — plus the Warn lines and contained panics.
+type providerRun struct {
+	res    *core.RunResult
+	err    error
+	events []string
+	warns  []map[string]any
+	panics int64
+}
+
+// runUnderProviders runs one scripted run that makes a tool call, takes a
+// model retry (mw.Retry over a failed attempt) and delegates to a
+// subagent (which makes a tool call of its own), with tp and lp on both
+// agents.
+func runUnderProviders(t *testing.T, tp trace.TracerProvider, lp otellog.LoggerProvider) providerRun {
+	t.Helper()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	child := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"msg":"in child"}`}),
+		wefttest.Say("found: 3 orders"),
+	), core.Name("researcher"), allocEcho(),
+		core.TracerProvider(tp), core.LoggerProvider(lp), core.Logger(logger))
+	agt := core.New(wefttest.Script(
+		wefttest.Fail(errors.New("503 overloaded")),
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"msg":"hi"}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"find orders"}`}),
+		wefttest.Say("done"),
+	), core.Name("support"), allocEcho(),
+		core.Subagent("research", "Research a topic.", child),
+		core.WrapModel(mw.Retry(mw.BaseDelay(0), mw.Classifier(func(error) bool { return true }))),
+		core.TracerProvider(tp), core.LoggerProvider(lp), core.Logger(logger))
+	run := agt.Stream(context.Background(), core.Prompt("where are my orders?"), core.RunID("run-p9"))
+	var out providerRun
+	for ev, err := range run.Events() {
+		if err != nil {
+			break
+		}
+		b, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v any
+		if err := json.Unmarshal(b, &v); err != nil {
+			t.Fatal(err)
+		}
+		dropClockFields(v)
+		b, _ = json.Marshal(v)
+		out.events = append(out.events, string(b))
+	}
+	out.res, out.err = run.Wait()
+	for line := range bytes.Lines(logs.Bytes()) {
+		var m map[string]any
+		if err := json.Unmarshal(line, &m); err != nil {
+			t.Fatalf("log line %q: %v", line, err)
+		}
+		out.warns = append(out.warns, m)
+	}
+	out.panics = agt.TapPanics() + child.TapPanics()
+	return out
+}
+
+func dropClockFields(v any) {
+	switch v := v.(type) {
+	case map[string]any:
+		delete(v, "latency_ms")
+		delete(v, "ttft_ms")
+		for _, e := range v {
+			dropClockFields(e)
+		}
+	case []any:
+		for _, e := range v {
+			dropClockFields(e)
+		}
+	}
+}
+
+// checkSameRun compares a run under broken providers with the
+// no-provider run: result (text, messages, steps, usage, stop reason),
+// error and event stream identical; the contained panics counted and
+// named in at most one Warn line per run per provider kind.
+func checkSameRun(t *testing.T, want, got providerRun, perRun bool) {
+	t.Helper()
+	if want.err != nil {
+		t.Fatalf("the no-provider run failed: %v", want.err)
+	}
+	if got.err != nil {
+		t.Fatalf("run under a panicking provider failed: %v", got.err)
+	}
+	if got.res.Text() != "done" || want.res.Text() != "done" {
+		t.Errorf("text = %q / %q, want done", got.res.Text(), want.res.Text())
+	}
+	if !reflect.DeepEqual(got.res, want.res) {
+		t.Errorf("RunResult differs from the no-provider run:\n got %+v\nwant %+v", got.res, want.res)
+	}
+	if !slices.Equal(got.events, want.events) {
+		t.Errorf("event stream differs from the no-provider run:\n got %s\nwant %s",
+			strings.Join(got.events, "\n"), strings.Join(want.events, "\n"))
+	}
+	if len(want.warns) != 0 {
+		t.Errorf("the no-provider run logged %v", want.warns)
+	}
+	if got.panics == 0 {
+		t.Error("no contained provider panic counted (TapPanics)")
+	}
+	if len(got.warns) == 0 {
+		t.Fatal("no Warn line names the panicking provider")
+	}
+	seen := map[string]bool{}
+	for _, w := range got.warns {
+		msg, _ := w["msg"].(string)
+		if w["level"] != "WARN" || !strings.HasPrefix(msg, "observability provider panicked") {
+			t.Errorf("unexpected line %v", w)
+			continue
+		}
+		if p, _ := w["panic"].(string); p != "string" {
+			t.Errorf("panic = %q, want the value's type only", p)
+		}
+		run, _ := w["run"].(string)
+		provider, _ := w["provider"].(string)
+		key := run + "|" + provider
+		if run != "" && seen[key] {
+			t.Errorf("a second Warn line for run %q, provider %s: once per run per kind", run, provider)
+		}
+		seen[key] = true
+	}
+	if perRun {
+		for _, k := range []string{"run-p9|tracer_provider", "run-p9|logger_provider"} {
+			if !seen[k] {
+				t.Errorf("no Warn line for %s; lines: %v", k, got.warns)
+			}
+		}
+	}
+}
+
+// A TracerProvider and a LoggerProvider that panic on every call core
+// makes for its scope — handing out the tracer or logger, Start, every
+// span call, Enabled, Emit — change nothing about the run: its result
+// and event stream equal the no-provider run's, for a run with a tool
+// call, a model retry and a subagent (ADR 0016: reporting decides
+// nothing).
+func TestProviderPanicsNeverChangeTheRun(t *testing.T) {
+	want := runUnderProviders(t, tracenoop.NewTracerProvider(), lognoop.NewLoggerProvider())
+	for _, mode := range []string{"provider", "calls", "span"} {
+		t.Run(mode, func(t *testing.T) {
+			got := runUnderProviders(t, panicTP{mode: mode}, panicLP{mode: mode})
+			checkSameRun(t, want, got, mode != "provider")
+		})
+	}
+}
+
+// Providers that panic only on the late calls — span End, the logger's
+// Emit, after every attribute and record body was built — change
+// nothing either.
+func TestProviderLatePanicsNeverChangeTheRun(t *testing.T) {
+	want := runUnderProviders(t, tracenoop.NewTracerProvider(), lognoop.NewLoggerProvider())
+	got := runUnderProviders(t, panicTP{mode: "late"}, panicLP{mode: "late"})
+	checkSameRun(t, want, got, true)
 }

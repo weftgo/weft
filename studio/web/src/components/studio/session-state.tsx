@@ -6,6 +6,7 @@ import type { SessionRow } from "@/lib/api"
 import {
   AWAITING_TITLE,
   awaitingWords,
+  cancelledWords,
   COUNT_TITLES,
   endedWords,
   failedWords,
@@ -34,15 +35,16 @@ export function SessionState({ row }: { row: SessionRow }) {
   )
 }
 
-/** SessionCounts: the failed turns red, the busy-policy ends apart and
- * neutral; nothing when there are none. */
+/** SessionCounts: the failed turns red, the busy-policy ends and the
+ * other cancelled turns apart and neutral; nothing when there are none. */
 export function SessionCounts({
   row,
 }: {
-  row: Pick<SessionRow, "failed_turns" | "ended_turns">
+  row: Pick<SessionRow, "failed_turns" | "ended_turns" | "cancelled_turns">
 }) {
   const failed = failedWords(row.failed_turns)
   const ended = endedWords(row.ended_turns)
+  const cancelled = cancelledWords(row.cancelled_turns)
   return (
     <>
       {failed ? (
@@ -61,6 +63,15 @@ export function SessionCounts({
           data-session-ended={row.ended_turns}
         >
           {ended}
+        </span>
+      ) : null}
+      {cancelled ? (
+        <span
+          className="font-mono text-[11px] text-muted-foreground"
+          title={COUNT_TITLES.cancelled}
+          data-session-cancelled={row.cancelled_turns}
+        >
+          {cancelled}
         </span>
       ) : null}
     </>

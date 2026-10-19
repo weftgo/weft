@@ -163,6 +163,29 @@ func sessionEvents(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if got, n := turns(obsdb.SessionEventQuery{SessionID: sid, RunIDs: []string{"s_nope-t1"}}); len(got) != 0 || n != 0 {
 			t.Errorf("SessionEvents(RunIDs unknown) = %q (total %d), want none", got, n)
 		}
+		// Kinds (U16-fix): SessionEventKind's values alone — the marker by
+		// its record kind, a thread record by its event name's kind — with
+		// RunIDs and paging alike; Total counts them alone.
+		if got, n := turns(obsdb.SessionEventQuery{SessionID: sid, Kinds: []string{"compaction", "grant.mint", "grant.revoke"}}); !slices.Equal(got, []string{
+			"s_acme-t4 compaction", "s_acme-t5 grant.mint", " grant.revoke",
+		}) || n != 3 {
+			t.Errorf("SessionEvents(Kinds compaction, grant.*) = %q (total %d), want the marker, the mint and the revoke", got, n)
+		}
+		if got, n := turns(obsdb.SessionEventQuery{SessionID: sid, Kinds: []string{"approval.decision"}, RunIDs: []string{sid + "-t3", sid + "-t5"}, Offset: 1}); !slices.Equal(got, []string{
+			"s_acme-t5 approval.decision",
+		}) || n != 2 {
+			t.Errorf("SessionEvents(Kinds approval.decision, RunIDs t3 t5, offset 1) = %q (total %d), want t5's of 2", got, n)
+		}
+		if got, n := turns(obsdb.SessionEventQuery{SessionID: sid, Kinds: []string{"interrupt"}}); len(got) != 0 || n != 0 {
+			t.Errorf("SessionEvents(Kinds interrupt) = %q (total %d), want none", got, n)
+		}
+		// SessionQuery.Compacted keeps the sessions with a marker.
+		if c, err := db.Sessions(ctx(), obsdb.SessionQuery{Compacted: true}); err != nil || len(c.Sessions) != 1 || c.Sessions[0].ID != sid {
+			t.Errorf("Sessions(Compacted) = %+v, %v; want s_acme", c.Sessions, err)
+		}
+		if c, err := db.Sessions(ctx(), obsdb.SessionQuery{Compacted: true, PublicID: "pub_elsewhere"}); err != nil || len(c.Sessions) != 0 {
+			t.Errorf("Sessions(Compacted, another public id) = %+v, %v; want none", c.Sessions, err)
+		}
 
 		// The tag filter selects sessions, never turns: t6 carries no tag,
 		// the session still lists its six turns.

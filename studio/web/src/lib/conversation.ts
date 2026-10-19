@@ -4,8 +4,11 @@
 // thread session (a harness, a non-thread app): /sessions/$id is the
 // session's page, /conversations/$id the public id's. Studio only.
 import type { RunRow } from "./api"
+import { costView, delegatedView, sumCost } from "./cost"
+import type { CostView } from "./cost"
 import { nestExperiments } from "./experiments"
 import { plural } from "./format"
+import { exchangesOfRow } from "./session-states"
 
 /** splitConversation splits a public id's runs (/api/runs?public_id=,
  * playground runs included) into its turns, oldest first, and the
@@ -37,12 +40,48 @@ export function splitConversation(runs: readonly RunRow[]): {
   }
 }
 
+/** conversationCost is the header's two figures (lib/cost.ts's rule:
+ * own and delegated, never folded): the turns' own, summed, and their
+ * delegated — null when no turn delegated anything. */
+export function conversationCost(turns: readonly RunRow[]): {
+  own: CostView
+  delegated: CostView | null
+} {
+  const own = sumCost(turns.map(costView))
+  const del = turns.some(
+    (r) =>
+      r.delegated_cost_known === false ||
+      (r.delegated_cost_usd ?? 0) > 0 ||
+      (r.delegated_unpriced_models?.length ?? 0) > 0
+  )
+  return {
+    own,
+    delegated: del
+      ? sumCost(
+          turns.map((r) =>
+            r.delegated_cost_known === undefined &&
+            r.delegated_cost_usd === undefined
+              ? costView({ cost_usd: 0, cost_known: true })
+              : delegatedView(r)
+          )
+        )
+      : null,
+  }
+}
+
 /** The page's words. */
 export const CONVERSATION = {
   eyebrow: "conversation",
   title: "the public id: the browser-safe handle the devtools panel follows",
-  counts: (turns: number, experiments: number) =>
-    `${plural(turns, "turn")}${experiments ? ` · ${plural(experiments, "experiment")}` : ""}`,
+  /** "1 exchange · 2 turns · 1 experiment": a resume folds into the
+   * exchange it continues (U16-fix, the session header's words). */
+  counts: (turns: readonly RunRow[], experiments: number) =>
+    `${exchangesOfRow({ turns: turns.length, resumes: turns.filter((r) => r.resumed_from).length })}${experiments ? ` · ${plural(experiments, "experiment")}` : ""}`,
+  own: "own",
+  ownTitle: "the turns' own cost: their own model calls, priced at read time",
+  delegated: "delegated",
+  delegatedTitle:
+    "what the turns' subagents cost, apart: never folded into the own figure",
   sessions: "thread sessions of this public id:",
   sessionTitle: "the session's own page: its timeline, marks and views",
   noSession:

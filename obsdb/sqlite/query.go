@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -1229,8 +1230,31 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	// The turn-state filters (U16): obsdb.SessionTurnFacts' rule over
 	// the scoped turns, in SQL.
 	if q.Failed {
-		having = append(having, `SUM(CASE WHEN failed = 1 AND cancel_cause <> ? THEN 1 ELSE 0 END) > 0`)
-		hargs = append(hargs, obsdb.BusyCancelCause)
+		having = append(having, `SUM(`+failedTurnSQL+`) > 0`)
+		hargs = append(hargs, obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled)
+	}
+	if q.Status != "" {
+		// The newest turn's derived status: sessionRowsSQL's read (r2).
+		pubScope := ""
+		hargs = append(hargs, cutoff)
+		if q.PublicID != "" {
+			pubScope = ` AND r8.public_id = ? AND r8.public_id <> ''`
+			hargs = append(hargs, q.PublicID)
+		}
+		having = append(having, `(SELECT `+statusExpr+` FROM runs r8 WHERE r8.session_id = runs.session_id AND r8.session_id <> ''
+			AND `+ownTurn("r8")+` AND r8.playground = 0`+pubScope+`
+			ORDER BY r8.turn DESC, r8.started_ns DESC LIMIT 1) = ?`)
+		hargs = append(hargs, string(q.Status))
+	}
+	if q.Compacted {
+		// A compaction marker in the session_events index (0022), the
+		// public id's under the scope.
+		c := `session_id IN (SELECT se.session_id FROM session_events se WHERE se.kind = 'compaction'`
+		if q.PublicID != "" {
+			c += ` AND se.public_id = ?`
+			hargs = append(hargs, q.PublicID)
+		}
+		having = append(having, c+`)`)
 	}
 	if q.Awaiting {
 		// The newest turn (sessionRowsSQL's status read) an open park:
@@ -1345,10 +1369,22 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	return page, nil
 }
 
+// failedTurnSQL is 1 for a failed turn obsdb.SessionTurnFacts counts
+// as FailedTurns — neither a busy-policy end nor cancelled — else 0;
+// its parameters BusyCancelCause, ErrorTypeCancelled.
+const failedTurnSQL = `CASE WHEN failed = 1 AND cancel_cause <> ? AND error_type <> ? THEN 1 ELSE 0 END`
+
 // fillTurnFacts sets each session row's turn facts
 // (obsdb.SessionTurnFacts) from its own turns — the grouping's scope,
-// pub's turns when set — read as run rows in one query for the page,
-// their statuses on the page's clock (now).
+// pub's turns when set — in two narrow reads for the page: the counts
+// in SQL (one GROUP BY over runs_session), and the newest
+// obsdb.MaxOutcomes turns of each session (one LIMIT per session over
+// runs_session) with only the columns an outcome reads — status inputs on the
+// page's clock (now), pending, cancel cause, error type and a resumer —
+// for the strip and the newest turn's open park. No run row, prompt
+// preview or count is read: a page of 500 sessions of 1,000 turns
+// reads 500 × 40 narrow rows (BenchmarkSessionsTurnFacts: a page of
+// 50 sessions of 1,000 turns reads its facts in ~45 ms).
 func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub string, now time.Time) error {
 	if len(rows) == 0 {
 		return nil
@@ -1362,16 +1398,84 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 		where += ` AND public_id = ? AND public_id <> ''`
 		args = append(args, pub)
 	}
-	turns, err := d.queryRunRows(ctx, where, args, now)
+	type counts struct{ failed, ended, cancelled, resumes int }
+	by := map[string]counts{}
+	forked := map[string]string{}
+	rs, err := d.reads.QueryContext(ctx, `SELECT session_id, SUM(`+failedTurnSQL+`),
+		SUM(CASE WHEN failed = 1 AND cancel_cause = ? THEN 1 ELSE 0 END),
+		SUM(CASE WHEN failed = 1 AND cancel_cause <> ? AND error_type = ? THEN 1 ELSE 0 END),
+		SUM(CASE WHEN resumed_from <> '' THEN 1 ELSE 0 END),
+		COALESCE(MAX(json_extract(meta, '$."`+obsdb.SessionForkedFromKey+`"')), '')
+		FROM runs WHERE `+where+` GROUP BY session_id`,
+		append([]any{obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled, obsdb.BusyCancelCause,
+			obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled}, args...)...)
 	if err != nil {
 		return err
 	}
-	by := map[string][]obsdb.RunRow{}
-	for _, t := range turns {
-		by[t.SessionID] = append(by[t.SessionID], t)
+	for rs.Next() {
+		var sid, fork string
+		var c counts
+		if err := rs.Scan(&sid, &c.failed, &c.ended, &c.cancelled, &c.resumes, &fork); err != nil {
+			_ = rs.Close()
+			return err
+		}
+		by[sid], forked[sid] = c, fork
+	}
+	if err := errors.Join(rs.Err(), rs.Close()); err != nil {
+		return err
+	}
+	// The newest turns: one LIMIT per session over runs_session
+	// (session_id, turn), a compound select per chunk of sessions
+	// (SQLite's compound limit is 500).
+	cutoff := now.Add(-obsdb.InterruptedAfter).UnixNano()
+	one := `SELECT * FROM (SELECT session_id, run_id, turn, started_ns, ` + statusExpr + `,
+		pending, cancel_cause, error_type,
+		EXISTS (SELECT 1 FROM runs AS rb WHERE rb.resumed_from = runs.run_id AND rb.resumed_from <> '')
+		FROM runs WHERE session_id = ? AND ` + sessionScope
+	if pub != "" {
+		one += ` AND public_id = ? AND public_id <> ''`
+	}
+	one += ` ORDER BY turn DESC, started_ns DESC, run_id DESC LIMIT ?)`
+	newest := map[string][]obsdb.RunRow{}
+	for chunk := range slices.Chunk(rows, 100) {
+		parts := make([]string, 0, len(chunk))
+		var cargs []any
+		for _, r := range chunk {
+			parts = append(parts, one)
+			cargs = append(cargs, cutoff, r.ID)
+			if pub != "" {
+				cargs = append(cargs, pub)
+			}
+			cargs = append(cargs, obsdb.MaxOutcomes)
+		}
+		rs, err = d.reads.QueryContext(ctx, strings.Join(parts, " UNION ALL "), cargs...)
+		if err != nil {
+			return err
+		}
+		for rs.Next() {
+			var t obsdb.RunRow
+			var started int64
+			var status string
+			var resumed bool
+			if err := rs.Scan(&t.SessionID, &t.ID, &t.Turn, &started, &status, &t.Pending, &t.CancelCause, &t.ErrorType, &resumed); err != nil {
+				_ = rs.Close()
+				return err
+			}
+			t.Started, t.Status = time.Unix(0, started).UTC(), obsdb.Status(status)
+			if resumed {
+				t.ResumedBy = "?" // a resumer exists: OutcomeOf reads no more
+			}
+			newest[t.SessionID] = append(newest[t.SessionID], t)
+		}
+		if err := errors.Join(rs.Err(), rs.Close()); err != nil {
+			return err
+		}
 	}
 	for i := range rows {
-		obsdb.SessionTurnFacts(&rows[i], by[rows[i].ID])
+		r := &rows[i]
+		obsdb.SessionTurnFacts(r, newest[r.ID])
+		c := by[r.ID]
+		r.FailedTurns, r.EndedTurns, r.CancelledTurns, r.Resumes, r.ForkedFrom = c.failed, c.ended, c.cancelled, c.resumes, forked[r.ID]
 	}
 	return nil
 }

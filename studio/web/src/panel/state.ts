@@ -22,6 +22,7 @@ import type {
   Span,
   ToolCallPart,
   Transcript,
+  TreeHole,
 } from "../lib/api"
 import { childRun, HOLES, isLive, linkedRun } from "../lib/honesty"
 import { byStep } from "../lib/requests"
@@ -320,6 +321,9 @@ export interface PanelState {
   /** The scope names a session but no listed run carries a session id:
    * the list is not narrowed, and says so. */
   sessionUnrecorded: boolean
+  /** The list's turn marks hole (U16-fix, the runs page's
+   * turn_marks_capped): turns drawn without their ⌗ / ✗ / ↳ chips. */
+  marksCapped?: TreeHole
   /** The conversation (listKey: public id and session) whose turn list
    * was read last, "" before the first read: the host events (plan C4)
    * take a conversation's first read as its history, not as
@@ -563,6 +567,12 @@ export class PanelModel {
   private notify: PanelNotify
   private ep: PanelEndpoint
   private scopeSub?: PanelLiveHandle
+  /** The scope's session's own lane (U16-fix): a delegated session's
+   * turns may carry no public id, so the public id's lane misses them. */
+  private sessSub?: PanelLiveHandle
+  /** The turn list was read by session (runs?session=), not by public
+   * id: what loadOlder pages and inSession judges by. */
+  private bySession = false
   private runSub?: PanelLiveHandle
   private expSub?: PanelLiveHandle
   /** The fallback's agent stream (no public id). */
@@ -734,6 +744,7 @@ export class PanelModel {
     s.result = null
     s.pinMissing = ""
     s.sessionUnrecorded = false
+    this.bySession = false
     this.pinApplied = ""
     this.pinChecks = 0
     this.pinTimer = null // clearTimers above dropped it
@@ -756,8 +767,18 @@ export class PanelModel {
    * wants exactly one): history only, and the dot says so. */
   private subscribe(seq: number) {
     this.scopeSub?.close()
-    this.scopeSub = undefined
+    this.sessSub?.close()
+    this.scopeSub = this.sessSub = undefined
     if (!this.publicId) return
+    // The scope's session's lane beside it, quietly: its turns heard
+    // even without the public id (a delegated session's, U16-fix).
+    const sid = this.narrowing.session
+    if (sid)
+      this.sessSub = openPanelLive(this.ep, {
+        selector: { session: sid },
+        kinds: ["run"],
+        onRun: (f) => this.onRunFrame(f),
+      })
     const again = async () => {
       if (seq !== this.loadSeq || this.disposed) return
       this.subscribe(seq)
@@ -1035,13 +1056,16 @@ export class PanelModel {
     this.collectors.add(during)
     try {
       if (this.publicId) {
-        // The header's row; without it the list still loads.
-        const sessions = await fetchSessions(this.ep, {
-          public_id: this.publicId,
-        }).catch(() => null)
+        // The header's row; without it the list still loads. A named
+        // session is read by its id (U16-fix: a delegated session's
+        // turns may carry no public id), else the public id's newest.
+        const want = this.narrowing.session
+        const sessions = await fetchSessions(
+          this.ep,
+          want ? { q: want } : { public_id: this.publicId }
+        ).catch(() => null)
         if (seq !== this.loadSeq || this.disposed) return
         if (sessions && Array.isArray(sessions.sessions)) {
-          const want = this.narrowing.session
           this.state.session =
             (want
               ? sessions.sessions.find((x) => x.id === want)
@@ -1050,23 +1074,40 @@ export class PanelModel {
       }
       // The scope's session first (its own turns); none listed — the
       // runs carry no session id, said not narrowed below — or no
-      // session named: the public id's list.
-      let page =
-        this.publicId && this.narrowing.session
-          ? await fetchRuns(this.ep, this.listParams()).catch(() => null)
-          : null
-      if (!page?.runs.length)
+      // session named: the public id's list. Which read made the page
+      // is what loadOlder pages (U16-fix).
+      let bySession = !!(this.publicId && this.narrowing.session)
+      let page = bySession
+        ? await fetchRuns(this.ep, this.listParams(true)).catch(() => null)
+        : null
+      // A session's list holds no experiment (a playground run carries
+      // no session id): the public id's are read beside it, its turns'
+      // kept (inSession), so a replay started here stays listed.
+      const xs =
+        page?.runs.length &&
+        (await fetchRuns(this.ep, {
+          public_id: this.publicId,
+          playground: "1",
+          limit: String(TURNS_LIMIT),
+        }).catch(() => null))
+      if (!page?.runs.length) {
+        bySession = false
         page = await fetchRuns(
           this.ep,
-          this.publicId ? this.listParams(true) : { limit: String(DEV_LIMIT) }
+          this.publicId ? this.listParams() : { limit: String(DEV_LIMIT) }
         )
+      }
       if (seq !== this.loadSeq || this.disposed) return
-      const listed: (RunRow | null)[] = Array.isArray(page.runs)
-        ? page.runs
-        : []
+      this.bySession = bySession
+      const listed: (RunRow | null)[] = [
+        ...(Array.isArray(page.runs) ? page.runs : []),
+        ...((xs && xs.runs) || []),
+      ]
       const runs = listed.filter(
-        (r): r is RunRow => !!r && typeof r.id === "string"
+        (r): r is RunRow =>
+          !!r && typeof r.id === "string" && (!bySession || this.inSession(r))
       )
+      this.state.marksCapped = page.turn_marks_capped
       const { turns, experiments } = partitionRuns(runs)
       const want = this.narrowing.session
       const s = this.state
@@ -1135,21 +1176,29 @@ export class PanelModel {
 
   /** inSession keeps a row under the scope's session: every row when
    * the scope names none, and a row that carries no session id (an
-   * experiment, a run outside a thread) is not judged. */
+   * experiment, a run outside a thread) is not judged — unless the list
+   * was read by session (U16-fix): then a turn is the session's own and
+   * an experiment one sourced from its turns (thread's <session>-t<n>
+   * ids) or from none. */
   private inSession(r: RunRow): boolean {
     const want = this.narrowing.session
+    const src = r.forked_from.split("#")[0]
+    if (want && this.bySession)
+      return r.playground || r.experiment_id || src
+        ? !src || src.startsWith(want + "-")
+        : r.session_id === want
     return !want || !r.session_id || r.session_id === want
   }
 
   /** listParams is the turn list's read: the public id's runs, or —
-   * the scope naming a session, unless byPub — the session's own turns
-   * (U16: a delegated session's turns carry a caller link, and maybe no
-   * public id, and are its turns all the same: runs?session= reads
-   * them so). */
-  private listParams(byPub?: boolean): Record<string, string> {
-    const sid = this.narrowing.session
+   * by session — the scope's session's own turns (U16: a delegated
+   * session's turns carry a caller link, and maybe no public id, and
+   * are its turns all the same: runs?session= reads them so). */
+  private listParams(by = this.bySession): Record<string, string> {
     return {
-      ...(sid && !byPub ? { session: sid } : { public_id: this.publicId }),
+      ...(by
+        ? { session: this.narrowing.session! }
+        : { public_id: this.publicId }),
       limit: String(TURNS_LIMIT),
     }
   }
@@ -1710,7 +1759,15 @@ export class PanelModel {
     if (this.disposed || !raw || typeof raw !== "object") return "unreachable"
     const doc = raw as RunDoc
     if (doc.id !== id || this.notTurn(doc)) return "foreign"
-    if (this.publicId && doc.public_id !== this.publicId) return "foreign"
+    // A delegated session's turns may carry no public id: the scope's
+    // session's are its turns all the same (U16-fix).
+    const sid = this.narrowing.session
+    if (
+      this.publicId &&
+      doc.public_id !== this.publicId &&
+      (!sid || doc.session_id !== sid)
+    )
+      return "foreign"
     if (!this.inSession(doc)) return "foreign"
     // The row, not the document: children and holes stay the view's.
     const { children: _c, holes: _h, compactions: _x, ...row } = doc
@@ -2793,6 +2850,7 @@ export class PanelModel {
     this.raf = 0
     this.clearTimers()
     this.scopeSub?.close()
+    this.sessSub?.close()
     this.runSub?.close()
     this.expSub?.close()
     this.devSub?.close()

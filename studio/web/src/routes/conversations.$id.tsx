@@ -11,12 +11,16 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
 import { fetchRuns, fetchSessions } from "@/lib/api"
+import type { RunRow } from "@/lib/api"
 import { openLive, throttle } from "@/lib/live"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { tokens } from "@/lib/format"
-import { atLeastCost } from "@/lib/cost"
-import { CONVERSATION, splitConversation } from "@/lib/conversation"
+import {
+  CONVERSATION,
+  conversationCost,
+  splitConversation,
+} from "@/lib/conversation"
 import { runLink, runsLink, sessionLink } from "@/lib/links"
 import { LIVE_WORDS } from "@/lib/timeline"
 import { THREAD_LINK } from "@/lib/status-class"
@@ -32,6 +36,35 @@ const LIMIT = 500
 export const Route = createFileRoute("/conversations/$id")({
   component: ConversationPage,
 })
+
+/** The header's cost: the turns' own figure and, apart, their
+ * delegated one ("+ $y delegated"), as the session header and the
+ * panel say them. */
+function ConversationCost({ turns }: { turns: RunRow[] }) {
+  const { own, delegated } = conversationCost(turns)
+  return (
+    <span
+      className="flex items-baseline gap-1 text-[11px]"
+      data-conversation-cost
+    >
+      <span className="font-mono text-faint" title={CONVERSATION.ownTitle}>
+        {CONVERSATION.own}
+      </span>
+      <CostText v={own} chip={false} />
+      {delegated ? (
+        <span
+          className="flex items-baseline gap-1"
+          title={CONVERSATION.delegatedTitle}
+          data-conversation-delegated
+        >
+          <span className="font-mono text-faint">+</span>
+          <CostText v={delegated} chip={false} />
+          <span className="font-mono text-faint">{CONVERSATION.delegated}</span>
+        </span>
+      ) : null}
+    </span>
+  )
+}
 
 function ConversationPage() {
   const { id } = Route.useParams()
@@ -129,13 +162,11 @@ function ConversationPage() {
           className="font-mono text-[11px] text-faint"
           data-conversation-counts
         >
-          {CONVERSATION.counts(turns.length, nested + orphans.length)} ·{" "}
+          {CONVERSATION.counts(turns, nested + orphans.length)} ·{" "}
           {tokens(usage.input_tokens)} in / {tokens(usage.output_tokens)} out
         </span>
         {costCapable && turns.length ? (
-          <span className="text-[11px]" data-conversation-cost>
-            <CostText v={atLeastCost(turns, undefined, "turn")} chip={false} />
-          </span>
+          <ConversationCost turns={turns} />
         ) : null}
         {live !== "off" ? (
           <span

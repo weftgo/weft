@@ -91,6 +91,12 @@ export interface RunRow extends CostFields, DelegatedCostFields {
    * the sessions its calls delegated. Absent when 0 or not read. */
   session_compactions?: number
   delegated_sessions?: number
+  /** What ended a turn a busy policy felled (U16-fix; the same pages):
+   * the interrupt record's by_run, by_turn and policy. Absent when no
+   * such record was read — the panel then names the next turn. */
+  ended_by?: string
+  ended_by_turn?: number
+  ended_kind?: "interrupt" | "rollback"
   /** The parked run this run resumes (weft.resumed_from, core.ResumeOf;
    * U13.1). Absent when it resumes nothing. Its reverse, resumed_by on
    * the parked run, is the status word's link (lib/status.ts). */
@@ -203,6 +209,11 @@ export interface RunsPage {
    * after (next_before, next_before_id). Absent on a Studio older than
    * the field — `before` alone then pages by time. */
   next_before_id?: string | null
+  /** The turn marks' hole (U16-fix): the page's session turns left
+   * without their marks (truncated · response_cap, count the turns) —
+   * past the sessions one page marks. Absent when every mark was read
+   * or none was asked for. */
+  turn_marks_capped?: TreeHole
 }
 
 /** A list page's cursor, as the next request sends it: `before`, and
@@ -515,6 +526,9 @@ export interface SessionRow extends CostFields {
   pending?: number
   failed_turns?: number
   ended_turns?: number
+  /** The other turns whose context was cancelled (thread.closed,
+   * studio.cancel, a deadline): no failure, counted apart (U16-fix). */
+  cancelled_turns?: number
   resumes?: number
   outcomes?: TurnOutcome[]
   forked_from_session?: string
@@ -2172,7 +2186,13 @@ export interface SessionFilters {
    * an open park; a failed turn; delegated (child) or forked (fork). */
   awaiting?: boolean
   failed?: boolean
+  /** A compaction marker (U16-fix). */
+  compacted?: boolean
   lineage?: "child" | "fork"
+  /** Last seen at or after (RFC 3339). */
+  since?: string
+  /** The newest turn's derived status (U16-fix). */
+  status?: "running" | "succeeded" | "failed" | "interrupted"
 }
 
 /** GET /api/sessions: one page; next_before (with next_before_id) is
@@ -2186,7 +2206,10 @@ export function fetchSessions(
   if (filters.q) params.set("q", filters.q)
   if (filters.awaiting) params.set("awaiting", "1")
   if (filters.failed) params.set("failed", "1")
+  if (filters.compacted) params.set("compacted", "1")
   if (filters.lineage) params.set("lineage", filters.lineage)
+  if (filters.since) params.set("since", filters.since)
+  if (filters.status) params.set("status", filters.status)
   if (filters.before) params.set("before", filters.before)
   if (filters.before && filters.before_id)
     params.set("before_id", filters.before_id)

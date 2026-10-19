@@ -1006,19 +1006,48 @@ cancelled it) is `ended`, never a failure; else a `failed` turn with
 `pending` > 0 is `parked`, or `resumed` once a run's `resumed_from`
 names it (`resumed_by`); else its `status`. `outcomes` is the newest 40
 (`obsdb.MaxOutcomes`), oldest first; `failed_turns` counts the `failed`
-turns that are not `ended`, `ended_turns` the `ended` ones; `resumes`
+turns that are neither `ended` nor `cancelled`, `ended_turns` the
+`ended` ones and `cancelled_turns` (U16-fix) the `cancelled` ones — a
+cancel for any cause but the busy policy (`thread.closed`,
+`studio.cancel`, a deadline): no failure of the agent, never red; `resumes`
 the turns with a `resumed_from` (so `turns - resumes` is the session's
 exchanges); `pending` is the newest turn's `pending` when it is
 `parked` — the session awaits a decision — else 0; `forked_from` the
 `weft.session.forked_from` (`<origin>#<entry>`) a turn carries. Each is
-omitted when zero or empty but `outcomes`. `SessionQuery`'s
-`Awaiting` (`pending` > 0), `Failed` (`failed_turns` > 0), `Lineage`
-(`child`: `parent_session` set; `fork`: `forked_from` set) and `Since`
-(last seen at or after it) state the same rules in SQL (Studio's
-`/api/sessions?awaiting=&failed=&lineage=&since=`); the fixtures'
-`sessions` and the `SessionTurnFacts` conformance case pin them
-(`thread_busy`: two `ended`, none failed; `thread_approvals`: four
-`resumed`).
+omitted when zero or empty but `outcomes`; `forked_from` is the
+greatest a turn carries, should two differ. A backend counts them in
+SQL and reads only the newest 40 turns per session, narrow columns, for
+`outcomes` and `pending` (`BenchmarkSessionsTurnFacts`: a page of 50
+sessions of 1,000 turns). `SessionQuery`'s `Awaiting` (`pending` > 0),
+`Failed` (`failed_turns` > 0), `Compacted` (U16-fix: a `compaction`
+marker in the session's `session_events`, under `PublicID` that public
+id's), `Status` (U16-fix: the newest turn's derived status, one of the
+four; a read-time word keeps none), `Lineage` (`child`:
+`parent_session` set; `fork`: `forked_from` set) and `Since` (last seen
+at or after it) state the same rules in SQL (Studio's
+`/api/sessions?awaiting=&failed=&compacted=&status=&lineage=&since=`);
+the fixtures' `sessions` and the `SessionTurnFacts` conformance case
+pin them (`thread_busy`: two `ended`, none failed; `thread_approvals`:
+four `resumed`), and `obsdbtest.CheckTurnFactFilters` — run over every
+contract fixture on both backends — holds the list's SQL facts and the
+`Awaiting` / `Failed` filters to `SessionTurnFacts` over each session's
+runs in Go.
+
+A conversation's runs page (`GET /api/runs` the request itself narrowed
+by `public_id` or `session`; a panel token's implied scope is not a
+narrowing) carries each session turn's **turn marks** (U16, U16-fix),
+read time from the `session_events` index: `session_compactions` (the
+`compaction` markers filed under the turn), `delegated_sessions` (the
+sessions whose `parent_run` it is), and `ended_by` / `ended_by_turn` /
+`ended_kind` — the `by_run`, `by_turn` and `policy` (`interrupt` |
+`rollback`) of the `weft.thread.interrupt` record (`target` `run`)
+filed under a turn a busy policy felled. They are read with
+`SessionEventQuery.Kinds` (`compaction`, `interrupt`: the events whose
+`obsdb.SessionEventKind` is one of them, on both backends — the kind
+filter `Total` and offsets count alone), paged by offset until `Total`
+is read, for at most 50 sessions per page; what is not read is the
+page's `turn_marks_capped` hole (`truncated`, cause `response_cap`,
+`count` the turns left without their marks), never a silent cap.
 
 **A session's state log** (U12.2, D6, A3) is read from the
 `session_events` index, never from the runs' records: every `thread`
@@ -1051,8 +1080,10 @@ ones, and on ClickHouse their `otel_logs` rows, included); ClickHouse's
 the runless record, the paging, the dedup, the same-time tie order, the
 `PublicID` filter, the `RunIDs` filter (the named runs' events alone, a
 runless one under none, `Total` and the offsets counting them — what
-Studio's decisions read, U13.2), the tag filter, the deletions and the
-sweep.
+Studio's decisions read, U13.2), the `Kinds` filter (U16-fix: the
+events of those `SessionEventKind`s alone, the marker by its record
+kind, a thread record by its event name's kind, with `RunIDs` and the
+offsets alike), the tag filter, the deletions and the sweep.
 
 Studio derives two reads from it (U12.2): `GET
 /api/sessions/{id}/timeline` — the session's turns (`DB.Session`'s,

@@ -45,10 +45,15 @@ type SessionEventReader interface {
 // events filed under one of those runs (a runless record is under none
 // of them) — one turn's facts without paging the whole session; the
 // page, the offsets and Total count those alone, as under PublicID.
+// Kinds, when set, keeps only the events whose SessionEventKind is one
+// of them ("compaction", "interrupt", "rewind", …) — a reader after a
+// few kinds pages those alone (Studio's turn marks, U16-fix); the page,
+// the offsets and Total count those alone, as under RunIDs.
 type SessionEventQuery struct {
 	SessionID string
 	PublicID  string
 	RunIDs    []string
+	Kinds     []string
 	Offset    int
 	Limit     int
 }

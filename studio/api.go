@@ -145,10 +145,19 @@ type runRow struct {
 	// turn (thread compacted after it — the session_events index,
 	// obsdb.SessionEventReader) and the sessions its calls delegated
 	// (SessionQuery.Parents' rows naming it as ParentRun). Only on a
-	// /api/runs page narrowed by public_id or session (at most
-	// turnMarksSessions sessions read); each absent when 0 or not read.
+	// /api/runs page the request narrowed by public_id or session (at
+	// most turnMarksSessions sessions read: past it, the page's
+	// turn_marks_capped hole); each absent when 0 or not read.
 	SessionCompactions int `json:"session_compactions,omitempty"`
 	DelegatedSessions  int `json:"delegated_sessions,omitempty"`
+	// EndedBy, EndedByTurn and EndedKind name what ended a turn a busy
+	// policy felled (U16-fix): the weft.thread.interrupt record filed
+	// under it (target run) — by_run, by_turn and its policy
+	// (interrupt | rollback). Read with the marks above, on the same
+	// pages; absent when no such record was read.
+	EndedBy     string `json:"ended_by,omitempty"`
+	EndedByTurn int    `json:"ended_by_turn,omitempty"`
+	EndedKind   string `json:"ended_kind,omitempty"`
 	// ResumedFrom is the parked run this run resumes (its
 	// weft.resumed_from, core.ResumeOf) and ResumedBy, on a parked run,
 	// the run that resumed it (obsdb.RunRow; docs/record-contract.md
@@ -366,6 +375,12 @@ type runsPage struct {
 	// one started — a page rides a tie along only up to obsdb.MaxTies.
 	// Null on the last page, like next_before.
 	NextBeforeID *string `json:"next_before_id"`
+	// TurnMarksCapped is the turn marks' hole (U16-fix): truncated,
+	// cause response_cap, Count the page's session turns left without
+	// their marks — sessions past turnMarksSessions, or a session whose
+	// marks ran past turnMarksPages pages. Absent when every turn's
+	// marks were read (or none were asked for).
+	TurnMarksCapped *treeHole `json:"turn_marks_capped,omitempty"`
 }
 
 // runDoc is GET /api/runs/{id}: the row and the subagent children
@@ -777,7 +792,9 @@ type sessionRow struct {
 	// session awaits a decision; the status chip reads parked, as a
 	// run row's); failed_turns the failed turns and ended_turns, apart,
 	// the turns thread's busy policy ended (interrupt / rollback, never
-	// a failure); resumes the turns that resume a parked one (turns -
+	// a failure); cancelled_turns, apart again, the other turns whose
+	// context was cancelled (thread.closed, studio.cancel, a deadline:
+	// no failure, the strip's ⊘); resumes the turns that resume a parked one (turns -
 	// resumes exchanges); outcomes the newest 40 turns' marks, oldest
 	// first (succeeded · failed · running · interrupted · cancelled ·
 	// ended · parked · resumed); forked_from_session a forked session's
@@ -785,6 +802,7 @@ type sessionRow struct {
 	Pending     int      `json:"pending,omitempty"`
 	FailedTurns int      `json:"failed_turns,omitempty"`
 	EndedTurns  int      `json:"ended_turns,omitempty"`
+	Cancelled   int      `json:"cancelled_turns,omitempty"`
 	Resumes     int      `json:"resumes,omitempty"`
 	Outcomes    []string `json:"outcomes,omitempty"`
 	ForkedFrom  string   `json:"forked_from_session,omitempty"`
@@ -823,7 +841,7 @@ func sessRow(r obsdb.SessionRow) sessionRow {
 		ParentSession: r.ParentSession, ParentTurn: turnOf(r.ParentSession, r.ParentRun),
 		ParentCall: r.ParentCall, ParentRun: r.ParentRun,
 		Pending: r.Pending, FailedTurns: r.FailedTurns, EndedTurns: r.EndedTurns,
-		Resumes: r.Resumes, Outcomes: outcomeWords(r.Outcomes), ForkedFrom: r.ForkedFrom,
+		Cancelled: r.CancelledTurns, Resumes: r.Resumes, Outcomes: outcomeWords(r.Outcomes), ForkedFrom: r.ForkedFrom,
 	}
 }
 
@@ -1033,8 +1051,10 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range page.Runs {
 		out.Runs = append(out.Runs, c.row(rec))
 	}
-	if query.PublicID != "" || query.SessionID != "" {
-		s.turnMarks(r.Context(), out.Runs, panelPublicID(r))
+	// The marks only on a page the request itself narrowed: a panel
+	// token's scope sets PublicID on every page (scopeRunsQuery).
+	if q.Get("public_id") != "" || q.Get("session") != "" {
+		out.TurnMarksCapped = s.turnMarks(r.Context(), out.Runs, panelPublicID(r))
 	}
 	// The cursor is the database's own: it knows whether the page was
 	// cut at its limit. Counting rows here cannot — a page may exceed
@@ -1053,32 +1073,48 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 // turnMarksSessions bounds the sessions one runs page reads turn marks
-// for: a conversation's page holds one or a few.
-const turnMarksSessions = 5
+// for: a conversation's page holds one or a few; turnMarksPages the
+// pages one read follows (SessionEvents' MaxSessionEventLimit and
+// Sessions' 500 each) before it stops and says so.
+const (
+	turnMarksSessions = 50
+	turnMarksPages    = 10
+)
+
+// turnMarkKinds are the session events a turn mark reads: the
+// compaction markers (⌗) and the interrupt records (ended_by).
+var turnMarkKinds = []string{obsdb.RecordCompaction, "interrupt"}
 
 // turnMarks fills a conversation page's session turns' marks
-// (runRow.SessionCompactions, DelegatedSessions; U16): per session on
-// the page (the first turnMarksSessions), one read of its compaction
-// markers under the page's turns and one of the sessions it delegated
-// — pub, a panel token's public id, scopes both. A read that fails
-// leaves the marks absent (a chip not drawn, never a wrong one).
-func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) {
+// (runRow.SessionCompactions, DelegatedSessions, EndedBy / EndedByTurn
+// / EndedKind; U16, U16-fix): per session on the page (the first
+// turnMarksSessions), its compaction markers and interrupt records
+// under the page's turns — one SessionEvents read with those kinds,
+// paged by offset while Total says more — and the sessions it
+// delegated, paged by cursor. pub, a panel token's public id, scopes
+// every read. What it could not read is the returned hole (nil when
+// none): a turn left unmarked is said, never a chip drawn wrong; a read
+// that fails leaves its marks absent and is logged at Debug.
+func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) *treeHole {
 	bySession := map[string][]int{}
 	var order []string
+	skipped := 0
 	for i, r := range rows {
 		if r.SessionID == "" {
 			continue
 		}
-		if _, ok := bySession[r.SessionID]; !ok {
+		idx, ok := bySession[r.SessionID]
+		if !ok {
 			if len(order) == turnMarksSessions {
+				skipped++ // a session past the bound: its turns unmarked
 				continue
 			}
 			order = append(order, r.SessionID)
 		}
-		bySession[r.SessionID] = append(bySession[r.SessionID], i)
+		bySession[r.SessionID] = append(idx, i)
 	}
 	if len(order) == 0 {
-		return
+		return capHole(skipped)
 	}
 	byID := map[string]int{}
 	for _, idx := range bySession {
@@ -1092,27 +1128,86 @@ func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) {
 			for _, i := range bySession[sid] {
 				ids = append(ids, rows[i].ID)
 			}
-			page, err := er.SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: sid, PublicID: pub, RunIDs: ids, Limit: obsdb.MaxSessionEventLimit})
-			if err != nil {
-				slog.DebugContext(ctx, "studio: a page's compaction marks could not be read", "session", sid, "err", err)
-				continue
-			}
-			for _, ev := range page.Events {
-				if i, ok := byID[ev.RunID]; ok && ev.Kind == obsdb.RecordCompaction {
-					rows[i].SessionCompactions++
+			read, total := 0, 0
+			for range turnMarksPages {
+				page, err := er.SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: sid, PublicID: pub, RunIDs: ids,
+					Kinds: turnMarkKinds, Offset: read, Limit: obsdb.MaxSessionEventLimit})
+				if err != nil {
+					slog.DebugContext(ctx, "studio: a page's turn marks could not be read", "session", sid, "err", err)
+					break
+				}
+				total = page.Total
+				for _, ev := range page.Events {
+					if i, ok := byID[ev.RunID]; ok {
+						markTurn(&rows[i], ev)
+					}
+				}
+				read += len(page.Events)
+				if len(page.Events) == 0 || read >= total {
+					break
 				}
 			}
+			if read < total {
+				skipped += len(ids)
+			}
 		}
 	}
-	kids, err := s.db.Sessions(ctx, obsdb.SessionQuery{Parents: order, PublicID: pub, Limit: 500})
-	if err != nil {
-		slog.DebugContext(ctx, "studio: a page's delegated sessions could not be read", "err", err)
-		return
-	}
-	for _, k := range kids.Sessions {
-		if i, ok := byID[k.ParentRun]; ok {
-			rows[i].DelegatedSessions++
+	q := obsdb.SessionQuery{Parents: order, PublicID: pub, Limit: 500}
+	for p := 0; ; p++ {
+		if p == turnMarksPages {
+			// The delegated counts are floors: every listed turn's.
+			skipped += len(byID)
+			break
 		}
+		kids, err := s.db.Sessions(ctx, q)
+		if err != nil {
+			slog.DebugContext(ctx, "studio: a page's delegated sessions could not be read", "err", err)
+			break
+		}
+		for _, k := range kids.Sessions {
+			if i, ok := byID[k.ParentRun]; ok {
+				rows[i].DelegatedSessions++
+			}
+		}
+		if kids.NextBefore == nil || len(kids.Sessions) == 0 {
+			break
+		}
+		q.Before, q.BeforeID = *kids.NextBefore, kids.NextBeforeID
+	}
+	return capHole(min(skipped, len(rows)))
+}
+
+// markTurn adds one session event to its turn's marks: a compaction
+// marker counts, an interrupt record that felled the turn (target run)
+// names what ended it — its first, should two arrive.
+func markTurn(r *runRow, ev obsdb.SessionEvent) {
+	switch obsdb.SessionEventKind(ev) {
+	case obsdb.RecordCompaction:
+		r.SessionCompactions++
+	case "interrupt":
+		var f struct {
+			Policy string `json:"policy"`
+			Target string `json:"target"`
+			ByRun  string `json:"by_run"`
+			ByTurn int    `json:"by_turn"`
+		}
+		if r.EndedKind != "" || json.Unmarshal(ev.Body, &f) != nil || (f.Target != "" && f.Target != "run") {
+			return
+		}
+		r.EndedBy, r.EndedByTurn, r.EndedKind = f.ByRun, f.ByTurn, f.Policy
+	}
+}
+
+// capHole is the turn marks' hole for n turns left without their
+// marks, nil for none.
+func capHole(n int) *treeHole {
+	if n == 0 {
+		return nil
+	}
+	return &treeHole{
+		Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap), Count: n,
+		Reason: fmt.Sprintf("this page's turn marks (compacted, ended by, delegated) were not all read: %d %s may lack theirs, nothing was lost", n, map[bool]string{true: "turn", false: "turns"}[n == 1]),
+		Fix:    "open the session's timeline (sessions/{id}/timeline), or narrow the page by session",
 	}
 }
 
@@ -1913,8 +2008,8 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveSessions answers api/sessions (S4.2): public_id and agent
-// filters, awaiting / failed / lineage / since (obsdb.SessionQuery's
-// turn-state filters, U16), q (obsdb.SessionQuery.Q: every term in the title, the first
+// filters, awaiting / failed / compacted / status / lineage / since
+// (obsdb.SessionQuery's turn-state filters, U16), q (obsdb.SessionQuery.Q: every term in the title, the first
 // turn's prompt, the id, the public id or the agent), tag.<k>=<v>
 // (obsdb.SessionQuery.Meta: the sessions one of whose own turns carries
 // every pair — thread.WithRunMetadata's tags; U12.2, D6), before (RFC
@@ -1939,12 +2034,13 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 		query.Before = t
 		query.BeforeID = q.Get("before_id")
 	}
-	// The turn-state filters (U16, UX-B-28): awaiting / failed
-	// booleans, lineage child|fork, since (RFC 3339, on last-seen).
+	// The turn-state filters (U16, UX-B-28): awaiting / failed /
+	// compacted booleans, lineage child|fork, since (RFC 3339, on
+	// last-seen).
 	for _, f := range []struct {
 		key string
 		dst *bool
-	}{{"awaiting", &query.Awaiting}, {"failed", &query.Failed}} {
+	}{{"awaiting", &query.Awaiting}, {"failed", &query.Failed}, {"compacted", &query.Compacted}} {
 		if v := q.Get(f.key); v != "" {
 			b, err := strconv.ParseBool(v)
 			if err != nil {
@@ -1953,6 +2049,13 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 			}
 			*f.dst = b
 		}
+	}
+	switch st := obsdb.Status(q.Get("status")); st {
+	case "", obsdb.StatusRunning, obsdb.StatusSucceeded, obsdb.StatusFailed, obsdb.StatusInterrupted:
+		query.Status = st
+	default:
+		badRequest(w, r, "status must be running, succeeded, failed or interrupted (a session's newest turn; awaiting=1 is its parked)")
+		return
 	}
 	switch v := q.Get("lineage"); v {
 	case "", obsdb.LineageChild, obsdb.LineageFork:

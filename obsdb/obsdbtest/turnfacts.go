@@ -17,7 +17,10 @@ import (
 // stored weft.resumed_from), the newest turn's open park as Pending,
 // the fork lineage; and SessionQuery's Awaiting, Failed, Lineage and
 // Since filters on the same rule, on Sessions and on the scoped read
-// alike. Session (the one-session read) carries the same facts.
+// alike. Session (the one-session read) carries the same facts. A
+// cancel for another cause (thread.closed) is cancelled, counted apart
+// and no failure; a session past MaxOutcomes counts every turn and
+// strips the newest (U16-fix).
 func sessionTurnFacts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -71,23 +74,47 @@ func sessionTurnFacts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			// no failure.
 			{sid: "s_tf_child", pub: "pub_tfc", n: 1, status: 1, extra: map[string]any{"weft.session.parent": "s_tf"}},
 			{sid: "s_tf_child", pub: "pub_tfc", n: 2, status: 2, extra: failed(obsdb.BusyCancelCause)},
+			// Cancelled for another reason (thread.closed): counted apart,
+			// never a failure — the Failed filter skips it (U16-fix).
+			{sid: "s_tf_cancel", pub: "pub_tfx", n: 1, status: 2, extra: failed("thread.closed")},
 		} {
 			add(tr)
 		}
+		// A long session (U16-fix): the counts are every turn's, the strip
+		// and the open park the newest MaxOutcomes' — t1 failed, out of
+		// the strip and still counted; t60 parked.
+		const long = obsdb.MaxOutcomes + 20
+		for n := 1; n <= long; n++ {
+			tr := turn{sid: "s_tf_long", pub: "pub_tfl", n: int64(n), status: 1}
+			switch n {
+			case 1:
+				tr.status, tr.extra = 2, map[string]any{"error.type": "model_error"}
+			case long:
+				tr.extra = map[string]any{"weft.run.pending": int64(3)}
+			}
+			add(tr)
+		}
+		longStrip := make([]obsdb.TurnOutcome, obsdb.MaxOutcomes)
+		for i := range longStrip {
+			longStrip[i] = obsdb.OutcomeSucceeded
+		}
+		longStrip[obsdb.MaxOutcomes-1] = obsdb.OutcomeParked
 		if err := db.Write(ctx(), b); err != nil {
 			t.Fatal(err)
 		}
 		type facts struct {
-			pending, failed, ended, resumes int
-			outcomes                        []obsdb.TurnOutcome
-			fork                            string
+			pending, failed, ended, cancelled, resumes int
+			outcomes                                   []obsdb.TurnOutcome
+			fork                                       string
 		}
 		want := map[string]facts{
-			"s_tf": {pending: 1, failed: 2, ended: 1, resumes: 1, outcomes: []obsdb.TurnOutcome{
+			"s_tf": {pending: 1, failed: 1, ended: 1, cancelled: 1, resumes: 1, outcomes: []obsdb.TurnOutcome{
 				obsdb.OutcomeSucceeded, obsdb.OutcomeResumed, obsdb.OutcomeSucceeded, obsdb.OutcomeFailed,
 				obsdb.OutcomeEnded, obsdb.OutcomeCancelled, obsdb.OutcomeParked}},
-			"s_tf_fork":  {outcomes: []obsdb.TurnOutcome{obsdb.OutcomeSucceeded}, fork: "s_tf#e9"},
-			"s_tf_child": {ended: 1, outcomes: []obsdb.TurnOutcome{obsdb.OutcomeSucceeded, obsdb.OutcomeEnded}},
+			"s_tf_fork":   {outcomes: []obsdb.TurnOutcome{obsdb.OutcomeSucceeded}, fork: "s_tf#e9"},
+			"s_tf_child":  {ended: 1, outcomes: []obsdb.TurnOutcome{obsdb.OutcomeSucceeded, obsdb.OutcomeEnded}},
+			"s_tf_cancel": {cancelled: 1, outcomes: []obsdb.TurnOutcome{obsdb.OutcomeCancelled}},
+			"s_tf_long":   {pending: 3, failed: 1, outcomes: longStrip},
 		}
 		check := func(where string, r obsdb.SessionRow) {
 			t.Helper()
@@ -95,8 +122,8 @@ func sessionTurnFacts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			if !ok {
 				return
 			}
-			got := facts{r.Pending, r.FailedTurns, r.EndedTurns, r.Resumes, r.Outcomes, r.ForkedFrom}
-			if got.pending != w.pending || got.failed != w.failed || got.ended != w.ended || got.resumes != w.resumes ||
+			got := facts{r.Pending, r.FailedTurns, r.EndedTurns, r.CancelledTurns, r.Resumes, r.Outcomes, r.ForkedFrom}
+			if got.pending != w.pending || got.failed != w.failed || got.ended != w.ended || got.cancelled != w.cancelled || got.resumes != w.resumes ||
 				!slices.Equal(got.outcomes, w.outcomes) || got.fork != w.fork {
 				t.Errorf("%s %s: facts %+v; want %+v", where, r.ID, got, w)
 			}
@@ -150,20 +177,87 @@ func sessionTurnFacts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			q    obsdb.SessionQuery
 			want []string
 		}{
-			{"awaiting", obsdb.SessionQuery{Awaiting: true}, []string{"s_tf"}},
+			{"awaiting", obsdb.SessionQuery{Awaiting: true}, []string{"s_tf", "s_tf_long"}},
 			{"awaiting scoped", obsdb.SessionQuery{Awaiting: true, PublicID: "pub_tf"}, []string{"s_tf"}},
 			{"awaiting other scope", obsdb.SessionQuery{Awaiting: true, PublicID: "pub_tfc"}, nil},
-			{"failed", obsdb.SessionQuery{Failed: true}, []string{"s_tf"}},
+			{"failed", obsdb.SessionQuery{Failed: true}, []string{"s_tf", "s_tf_long"}},
 			{"child", obsdb.SessionQuery{Lineage: obsdb.LineageChild}, []string{"s_tf_child"}},
 			{"fork", obsdb.SessionQuery{Lineage: obsdb.LineageFork}, []string{"s_tf_fork"}},
 			{"unknown lineage", obsdb.SessionQuery{Lineage: "cousin"}, nil},
 			{"since", obsdb.SessionQuery{Since: time.Now().Add(time.Hour)}, nil},
-			{"since old", obsdb.SessionQuery{Since: old}, []string{"s_tf", "s_tf_child", "s_tf_fork"}},
+			{"since old", obsdb.SessionQuery{Since: old}, []string{"s_tf", "s_tf_cancel", "s_tf_child", "s_tf_fork", "s_tf_long"}},
+			{"compacted", obsdb.SessionQuery{Compacted: true}, nil},
+			// Status: the newest turn's derived status.
+			{"status succeeded", obsdb.SessionQuery{Status: obsdb.StatusSucceeded}, []string{"s_tf", "s_tf_fork", "s_tf_long"}},
+			{"status failed", obsdb.SessionQuery{Status: obsdb.StatusFailed}, []string{"s_tf_cancel", "s_tf_child"}},
+			{"status failed scoped", obsdb.SessionQuery{Status: obsdb.StatusFailed, PublicID: "pub_tfc"}, []string{"s_tf_child"}},
+			{"status running", obsdb.SessionQuery{Status: obsdb.StatusRunning}, nil},
+			{"status parked keeps none", obsdb.SessionQuery{Status: obsdb.StatusParked}, nil},
 			{"failed and fork", obsdb.SessionQuery{Failed: true, Lineage: obsdb.LineageFork}, nil},
 		} {
 			if got := ids(c.q); !slices.Equal(got, c.want) {
 				t.Errorf("%s: %v; want %v", c.name, got, c.want)
 			}
+		}
+		CheckTurnFactFilters(t, db)
+	}
+}
+
+// CheckTurnFactFilters pins the SQL against Go over whatever db holds
+// (U16-fix; every conformance fixture runs it, TestContract every
+// contract fixture): each listed session's turn facts as the list's
+// SQL counts them equal obsdb.SessionTurnFacts over the session's runs
+// in Go (Session's), and SessionQuery's Awaiting and Failed filters
+// keep exactly the sessions whose Go facts say Pending > 0 and
+// FailedTurns > 0.
+func CheckTurnFactFilters(t *testing.T, db obsdb.DB) {
+	t.Helper()
+	all, err := db.Sessions(ctx(), obsdb.SessionQuery{Limit: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var awaiting, failed []string
+	for _, r := range all.Sessions {
+		det, err := db.Session(ctx(), r.ID)
+		if err != nil {
+			t.Fatalf("Session(%s): %v", r.ID, err)
+		}
+		var g obsdb.SessionRow
+		obsdb.SessionTurnFacts(&g, det.Runs)
+		if g.Pending != r.Pending || g.FailedTurns != r.FailedTurns || g.EndedTurns != r.EndedTurns ||
+			g.CancelledTurns != r.CancelledTurns || g.Resumes != r.Resumes || g.ForkedFrom != r.ForkedFrom ||
+			!slices.Equal(g.Outcomes, r.Outcomes) {
+			t.Errorf("session %s: the list's facts %d/%d/%d/%d/%d %q %v, Go's over its runs %d/%d/%d/%d/%d %q %v", r.ID,
+				r.Pending, r.FailedTurns, r.EndedTurns, r.CancelledTurns, r.Resumes, r.ForkedFrom, r.Outcomes,
+				g.Pending, g.FailedTurns, g.EndedTurns, g.CancelledTurns, g.Resumes, g.ForkedFrom, g.Outcomes)
+		}
+		if g.Pending > 0 {
+			awaiting = append(awaiting, r.ID)
+		}
+		if g.FailedTurns > 0 {
+			failed = append(failed, r.ID)
+		}
+	}
+	for _, c := range []struct {
+		name string
+		q    obsdb.SessionQuery
+		want []string
+	}{
+		{"Awaiting", obsdb.SessionQuery{Awaiting: true, Limit: 500}, awaiting},
+		{"Failed", obsdb.SessionQuery{Failed: true, Limit: 500}, failed},
+	} {
+		p, err := db.Sessions(ctx(), c.q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, r := range p.Sessions {
+			got = append(got, r.ID)
+		}
+		slices.Sort(got)
+		want := slices.Sorted(slices.Values(c.want))
+		if !slices.Equal(got, want) {
+			t.Errorf("Sessions(%s) = %v; Go's facts say %v", c.name, got, want)
 		}
 	}
 }

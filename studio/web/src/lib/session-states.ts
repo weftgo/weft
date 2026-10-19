@@ -67,12 +67,19 @@ export function failedWords(n: number | undefined) {
 export function endedWords(n: number | undefined) {
   return n ? `${n}✗ ${END_WORDS.interrupted}` : ""
 }
+/** The other cancelled turns (thread.closed, studio.cancel, a
+ * deadline; U16-fix): apart again, neutral, the strip's ⊘. */
+export function cancelledWords(n: number | undefined) {
+  return n ? `${n}${OUTCOME.cancelled.glyph} ${STATUS.cancelled.word}` : ""
+}
 
 /** The hovers on the counts. */
 export const COUNT_TITLES = {
   failed: "turns whose loop returned an error",
   ended:
     "turns a newer message ended on purpose (thread's Interrupt or Rollback busy policy): not failures",
+  cancelled:
+    "turns whose context was cancelled for another reason (the session closed, a cancel from Studio, a deadline): not failures of the agent",
 }
 
 /** "3 exchanges · 5 turns" when resumes fold into exchanges, else
@@ -88,7 +95,7 @@ export function exchangesOfRow(row: Pick<SessionRow, "turns" | "resumes">) {
 /** The sessions list's turn-state filters (U16, UX-B-28): each one URL
  * key, a chip that toggles it. */
 export const SESSION_FILTERS: {
-  key: "awaiting" | "failed" | "child" | "fork"
+  key: "awaiting" | "failed" | "compacted" | "child" | "fork"
   word: string
   title: string
 }[] = [
@@ -101,7 +108,13 @@ export const SESSION_FILTERS: {
     key: "failed",
     word: "✗ has a failed turn",
     title:
-      "sessions with a turn whose loop returned an error (an interrupt by a newer message is not one)",
+      "sessions with a turn whose loop returned an error (an interrupt by a newer message, or a cancel, is not one)",
+  },
+  {
+    key: "compacted",
+    word: "⌗ compacted",
+    title:
+      "sessions thread compacted (a compaction marker in the session's state log)",
   },
   {
     key: "child",
@@ -114,3 +127,27 @@ export const SESSION_FILTERS: {
     title: "sessions a Fork made from another session",
   },
 ]
+
+/** The newest turn's status filter (U16-fix, /api/sessions?status=):
+ * the four derived statuses, each a chip; parked is "awaiting". */
+export const SESSION_STATUSES = (
+  ["succeeded", "failed", "running", "interrupted"] as const
+).map((key) => ({
+  key,
+  word: `${OUTCOME[key].glyph} ${STATUS[key].word}`,
+  title: `sessions whose newest turn is ${STATUS[key].word}`,
+  role: OUTCOME[key].role,
+}))
+
+/** The since chips (U16-fix, /api/sessions?since=): last seen within. */
+export const SESSION_SINCE: { key: string; word: string; ms: number }[] = [
+  { key: "1h", word: "last hour", ms: 3_600_000 },
+  { key: "24h", word: "last 24 h", ms: 86_400_000 },
+  { key: "7d", word: "last 7 days", ms: 7 * 86_400_000 },
+]
+
+/** sinceOf is a since chip's RFC 3339 bound now, undefined for none. */
+export function sinceOf(key: string | undefined, now = Date.now()) {
+  const c = SESSION_SINCE.find((s) => s.key === key)
+  return c ? new Date(now - c.ms).toISOString() : undefined
+}

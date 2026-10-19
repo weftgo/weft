@@ -13,7 +13,8 @@ import (
 // The sessions list's states (U16; UX-B-15, UX-B-16, UX-B-28): a row
 // carries its newest turn's open park (pending), its outcome strip and
 // its failed / ended counts (obsdb.SessionTurnFacts), and
-// /api/sessions filters by awaiting, failed, lineage and since — a
+// /api/sessions filters by awaiting, failed, compacted, lineage and
+// since — a
 // malformed value a 400 naming the parameter.
 func TestSessionStatesAndFilters(t *testing.T) {
 	const serverTok = "srv-token"
@@ -65,10 +66,19 @@ func TestSessionStatesAndFilters(t *testing.T) {
 	if got := list("/api/sessions?failed=true"); len(got) != 0 {
 		t.Errorf("failed=true = %+v; want none", got)
 	}
+	if got := list("/api/sessions?status=succeeded"); len(got) != 2 {
+		t.Errorf("status=succeeded = %+v; want both", got)
+	}
+	if got := list("/api/sessions?status=failed"); len(got) != 0 {
+		t.Errorf("status=failed = %+v; want none", got)
+	}
+	if got := list("/api/sessions?compacted=1"); len(got) != 0 {
+		t.Errorf("compacted=1 = %+v; want none", got)
+	}
 	if got := list("/api/sessions?lineage=fork"); len(got) != 0 {
 		t.Errorf("lineage=fork = %+v; want none", got)
 	}
-	for _, q := range []string{"awaiting=maybe", "failed=2", "lineage=cousin", "since=yesterday"} {
+	for _, q := range []string{"awaiting=maybe", "failed=2", "compacted=x", "status=parked", "status=nope", "lineage=cousin", "since=yesterday"} {
 		if code, out := b4Do(t, http.MethodGet, ts.URL+"/api/sessions?"+q, serverTok, ""); code != http.StatusBadRequest {
 			t.Errorf("?%s = %d %s; want 400", q, code, out)
 		}

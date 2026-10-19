@@ -8,7 +8,7 @@
 // and the links to the parking and resuming steps. Decision words are
 // lib/decisions.ts's (one vocabulary with the run page's parked and
 // resumed cards); plain TypeScript, no React.
-import { BUSY_CAUSE } from "./turn-chips"
+import { BUSY_CAUSE, ENDED_WORDS, OFF_PATH } from "./turn-chips"
 import type {
   DecidedCall,
   DecisionDoc,
@@ -862,8 +862,8 @@ export function toggleLane(
 
 /** How a busy policy ended a turn (UX-B-09): words, never a failure's. */
 export const END_WORDS = {
-  interrupted: "interrupted",
-  rolled_back: "rolled back",
+  interrupted: ENDED_WORDS.interrupt,
+  rolled_back: ENDED_WORDS.rollback,
   /** The run page's words before (or without) the timeline's mark. */
   byNewer: "interrupted by a newer message",
   /** The run header's error block's label on such a run: the error is
@@ -883,8 +883,8 @@ export const BRANCH_WORDS = {
   stayed: "branched to the entry the leaf was on · no line was left",
 }
 
-/** A turn off the session's current path. */
-export const OFF_PATH = "off path"
+/** A turn off the session's current path (lib/turn-chips.ts's). */
+export { OFF_PATH }
 
 /** The fork mark's words. */
 export const FORKED_INTO = "forked into"

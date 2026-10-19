@@ -461,8 +461,9 @@ export function costText(v: CostView): HTMLElement {
  * runs table) shows its own figure alone there — the same total. A row
  * without the delegated fields reads as runTotal does: own alone. Then
  * Studio's visible "cache not reported" mark (CacheHint) beside a known
- * figure priced without cache splits. */
-export function turnCost(r: RunRow): HTMLElement {
+ * figure priced without cache splits; then sum, the open turn's
+ * summarizer figure (lib/cost.ts summarizerView), apart. */
+export function turnCost(r: RunRow, sum?: CostView | null): HTMLElement {
   const own = costView(r)
   const n = el("span", "", [costText(own)], {
     "data-weft-turn-cost": "",
@@ -478,5 +479,7 @@ export function turnCost(r: RunRow): HTMLElement {
         "data-weft-cache-hint": "",
       })
     )
+  // The open turn's summarizer (U16): "+ summarizer $x", apart.
+  if (sum) n.append(" ", costText(sum))
   return n
 }

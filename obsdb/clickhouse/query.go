@@ -1555,8 +1555,26 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	// The turn-state filters (U16): obsdb.SessionTurnFacts' rule over
 	// the scoped, collapsed turns — the SQLite backend's conditions.
 	if q.Failed {
-		having = append(having, "countIf(Failed AND CancelCause != ?) > 0")
-		hargs = append(hargs, obsdb.BusyCancelCause)
+		having = append(having, "countIf("+failedTurnCH+") > 0")
+		hargs = append(hargs, obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled)
+	}
+	if q.Status != "" {
+		// The newest turn's derived status (sessionAggs' sNewest*,
+		// obsdb.DeriveStatus in SQL).
+		having = append(having, "multiIf(argMax(Failed, (Turn, Started)) = 1, 'failed',"+
+			" argMax(greatest(FinishedOK, RootEnded), (Turn, Started)) = 1, 'succeeded',"+
+			" toUnixTimestamp64Nano(argMax(LastSeen, (Turn, Started))) >= ?, 'running', 'interrupted') = ?")
+		hargs = append(hargs, time.Now().Add(-obsdb.InterruptedAfter).UnixNano(), string(q.Status))
+	}
+	if q.Compacted {
+		// A compaction marker in weft_session_events (0025), the public
+		// id's under the scope.
+		c := "SessionID IN (SELECT SessionId FROM weft_session_events WHERE Kind = 'compaction'"
+		if q.PublicID != "" {
+			c += " AND PublicId = ?"
+			hargs = append(hargs, q.PublicID)
+		}
+		having = append(having, c+")")
 	}
 	if q.Awaiting {
 		// The newest turn (by Turn, Started, RunId) an open park:
@@ -1663,12 +1681,20 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	return page, nil
 }
 
+// failedTurnCH is a collapsed turn obsdb.SessionTurnFacts counts as
+// FailedTurns — failed, neither a busy-policy end nor cancelled; its
+// parameters BusyCancelCause, ErrorTypeCancelled (the SQLite backend's
+// failedTurnSQL).
+const failedTurnCH = "Failed = 1 AND CancelCause != ? AND ErrorType != ?"
+
 // fillTurnFacts sets each session row's turn facts
 // (obsdb.SessionTurnFacts) from its own turns — sessionRuns' scope,
-// pub's turns when set — read as merged run rows (FINAL, narrowed by
-// primary key through idx_weft_session_id) in one query for the page,
-// with their ResumedBy; statuses on the page's clock (now). The SQLite
-// backend's rule.
+// pub's turns when set, the collapse narrowed by primary key through
+// idx_weft_session_id — in two narrow reads for the page: the counts in
+// SQL (countIf per session), and the newest obsdb.MaxOutcomes turns of
+// each (LIMIT n BY SessionID) with only the columns an outcome reads,
+// statuses on the page's clock (now), then their resumers
+// (fillResumedByOf). The SQLite backend's rule.
 func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub string, now time.Time) error {
 	if len(rows) == 0 {
 		return nil
@@ -1679,22 +1705,65 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 	}
 	in := " IN (" + placeholders(len(ids)) + ")"
 	args := append(append([]any{}, ids...), ids...)
-	cond := ""
+	cond := " AND SessionID" + in
 	if pub != "" {
-		cond = " AND PublicID = ?"
+		cond += " AND PublicID = ?"
 		args = append(args, pub)
 	}
-	turns, err := d.queryRunRows(ctx, now,
-		`SELECT `+runColumns+` FROM weft_runs FINAL
-		WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID`+in+`)
-			AND SessionID`+in+` AND SessionID != '' AND `+ownTurnCH+` AND Playground = 0`+cond, args...)
+	runs := sessionRuns(" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID"+in+")", cond)
+	type counts struct {
+		failed, ended, cancelled, resumes uint64
+		fork                              string
+	}
+	by := map[string]counts{}
+	rs, err := d.conn.Query(ctx, `SELECT SessionID, countIf(`+failedTurnCH+`),
+		countIf(Failed = 1 AND CancelCause = ?), countIf(Failed = 1 AND CancelCause != ? AND ErrorType = ?),
+		countIf(ResumedFrom != ''), max(ForkedSession)
+		FROM `+runs+` GROUP BY SessionID`,
+		append([]any{obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled, obsdb.BusyCancelCause,
+			obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled}, args...)...)
 	if err != nil {
+		return err
+	}
+	for rs.Next() {
+		var sid string
+		var c counts
+		if err := rs.Scan(&sid, &c.failed, &c.ended, &c.cancelled, &c.resumes, &c.fork); err != nil {
+			_ = rs.Close()
+			return err
+		}
+		by[sid] = c
+	}
+	if err := errors.Join(rs.Err(), rs.Close()); err != nil {
+		return err
+	}
+	rs, err = d.conn.Query(ctx, `SELECT SessionID, RunId, Turn, Started, LastSeen, Failed = 1, greatest(FinishedOK, RootEnded) = 1,
+		Pending, CancelCause, ErrorType FROM `+runs+`
+		ORDER BY SessionID, Turn DESC, Started DESC, RunId DESC LIMIT ? BY SessionID`, append(args, obsdb.MaxOutcomes)...)
+	if err != nil {
+		return err
+	}
+	var turns []obsdb.RunRow
+	for rs.Next() {
+		var t obsdb.RunRow
+		var turn, pending int32
+		var failed, ok bool
+		var lastSeen time.Time
+		if err := rs.Scan(&t.SessionID, &t.ID, &turn, &t.Started, &lastSeen, &failed, &ok, &pending, &t.CancelCause, &t.ErrorType); err != nil {
+			_ = rs.Close()
+			return err
+		}
+		t.Turn, t.Pending, t.Started = int(turn), int(pending), t.Started.UTC()
+		t.Status = obsdb.DeriveStatus(failed, ok, lastSeen, now)
+		turns = append(turns, t)
+	}
+	if err := errors.Join(rs.Err(), rs.Close()); err != nil {
 		return err
 	}
 	byID := make(map[string]*obsdb.RunRow, len(turns))
 	runIDs := make([]string, 0, len(turns))
 	for i := range turns {
-		if _, seen := byID[turns[i].ID]; !seen {
+		if turns[i].Pending > 0 { // only a park's resumer changes its outcome
 			byID[turns[i].ID] = &turns[i]
 			runIDs = append(runIDs, turns[i].ID)
 		}
@@ -1706,12 +1775,15 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 		}
 		runIDs = runIDs[n:]
 	}
-	by := map[string][]obsdb.RunRow{}
+	newest := map[string][]obsdb.RunRow{}
 	for _, t := range turns {
-		by[t.SessionID] = append(by[t.SessionID], t)
+		newest[t.SessionID] = append(newest[t.SessionID], t)
 	}
 	for i := range rows {
-		obsdb.SessionTurnFacts(&rows[i], by[rows[i].ID])
+		r := &rows[i]
+		obsdb.SessionTurnFacts(r, newest[r.ID])
+		c := by[r.ID]
+		r.FailedTurns, r.EndedTurns, r.CancelledTurns, r.Resumes, r.ForkedFrom = int(c.failed), int(c.ended), int(c.cancelled), int(c.resumes), c.fork
 	}
 	return nil
 }
@@ -1864,6 +1936,7 @@ func sessionRuns(narrow, cond string) string {
 				max(SessionParent) AS SessionParent,
 				max(JSONExtractString(Meta, 'weft.session.parent_call')) AS SessionParentCall,
 				max(Pending) AS Pending, max(CancelCause) AS CancelCause,
+				max(ErrorType) AS ErrorType, max(ResumedFrom) AS ResumedFrom,
 				max(JSONExtractString(Meta, '` + obsdb.SessionForkedFromKey + `')) AS ForkedSession
 			FROM weft_runs` + narrow + `
 			GROUP BY RunId)

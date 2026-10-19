@@ -40,6 +40,7 @@ import (
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/clickhouse"
+	"github.com/weftgo/weft/obsdb/obsdbtest"
 	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/thread"
@@ -116,6 +117,7 @@ type contractSession struct {
 	Pending     int                 `json:"pending,omitempty"`
 	FailedTurns int                 `json:"failed_turns,omitempty"`
 	EndedTurns  int                 `json:"ended_turns,omitempty"`
+	Cancelled   int                 `json:"cancelled_turns,omitempty"`
 	Resumes     int                 `json:"resumes,omitempty"`
 	Outcomes    []obsdb.TurnOutcome `json:"outcomes"`
 	ForkedFrom  string              `json:"forked_from,omitempty"`
@@ -333,6 +335,8 @@ func runContract(t *testing.T, backend string, open func(*testing.T) obsdb.DB) {
 			// session through obsdb.SessionEventReader (U12.2's index, the
 			// authority for them; U12.1-fix: never the fixture's input).
 			checkSessionEvents(t, backend, dir, db, want.ThreadRecords)
+			// The turn-state filters against Go's facts (U16-fix).
+			obsdbtest.CheckTurnFactFilters(t, db)
 		})
 	}
 	if n < 10 {
@@ -537,7 +541,7 @@ func observeSessions(t *testing.T, db obsdb.DB) []contractSession {
 		cs := contractSession{ID: s.ID, PublicID: s.PublicID, Agent: s.Agent, Turns: s.Turns,
 			Title: s.Title, FirstPrompt: s.FirstPrompt, ContentOff: s.ContentOff,
 			ParentSession: s.ParentSession, ParentCall: s.ParentCall, ParentRun: s.ParentRun,
-			Pending: s.Pending, FailedTurns: s.FailedTurns, EndedTurns: s.EndedTurns, Resumes: s.Resumes,
+			Pending: s.Pending, FailedTurns: s.FailedTurns, EndedTurns: s.EndedTurns, Cancelled: s.CancelledTurns, Resumes: s.Resumes,
 			Outcomes: s.Outcomes, ForkedFrom: s.ForkedFrom}
 		if u := s.SummarizerUsage; u != (core.Usage{}) {
 			cs.SummarizerUsage = &contractUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
@@ -552,7 +556,7 @@ func observeSessions(t *testing.T, db obsdb.DB) []contractSession {
 			t.Fatalf("Session(%s): %v", s.ID, err)
 		} else if d.SummarizerUsage != s.SummarizerUsage || !slices.Equal(d.SummarizerModels, s.SummarizerModels) {
 			t.Errorf("Session(%s).SummarizerUsage = %+v %+v, the list's %+v %+v", s.ID, d.SummarizerUsage, d.SummarizerModels, s.SummarizerUsage, s.SummarizerModels)
-		} else if d.Pending != s.Pending || d.FailedTurns != s.FailedTurns || d.EndedTurns != s.EndedTurns ||
+		} else if d.Pending != s.Pending || d.FailedTurns != s.FailedTurns || d.EndedTurns != s.EndedTurns || d.CancelledTurns != s.CancelledTurns ||
 			d.Resumes != s.Resumes || !slices.Equal(d.Outcomes, s.Outcomes) || d.ForkedFrom != s.ForkedFrom {
 			t.Errorf("Session(%s) turn facts = %d %d %d %d %v %q, the list's %d %d %d %d %v %q", s.ID,
 				d.Pending, d.FailedTurns, d.EndedTurns, d.Resumes, d.Outcomes, d.ForkedFrom,

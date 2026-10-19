@@ -658,14 +658,19 @@ const MaxGaps = 1000
 // sessions a session forked so, U15.2-fix) — every aggregate still over
 // all of each one's turns.
 //
-// Awaiting, Failed, Lineage and Since filter the groups (U16,
-// UX-B-28), each SessionTurnFacts' rule stated in SQL over the scoped
-// turns: Awaiting keeps the sessions whose newest turn is an open park
-// (SessionRow.Pending > 0), Failed those with a failed turn
-// (SessionRow.FailedTurns > 0: a turn thread's busy policy ended is no
-// failure), Lineage "child" the delegated sessions (ParentSession set)
-// and "fork" the forked ones (ForkedFrom set) — any other value keeps
-// none — and Since those last seen at or after it.
+// Awaiting, Failed, Compacted, Lineage and Since filter the groups
+// (U16, UX-B-28), each SessionTurnFacts' rule stated in SQL over the
+// scoped turns: Awaiting keeps the sessions whose newest turn is an
+// open park (SessionRow.Pending > 0), Failed those with a failed turn
+// (SessionRow.FailedTurns > 0: a turn thread's busy policy ended, or a
+// cancelled one, is no failure), Compacted those thread compacted (a
+// compaction marker in the session_events index, under PublicID that
+// public id's), Lineage "child" the delegated sessions (ParentSession
+// set) and "fork" the forked ones (ForkedFrom set) — any other value
+// keeps none — and Since those last seen at or after it. Status keeps
+// the sessions whose SessionRow.Status (the newest turn's derived
+// status) is it: one of the four derived statuses; a read-time word
+// (parked, cancelled) keeps none — Awaiting is the session's parked.
 type SessionQuery struct {
 	Agent, PublicID string
 	Q               string
@@ -674,6 +679,8 @@ type SessionQuery struct {
 	Meta            map[string]string
 	Awaiting        bool
 	Failed          bool
+	Compacted       bool
+	Status          Status    // "" any; running, succeeded, failed or interrupted
 	Lineage         string    // "", LineageChild or LineageFork
 	Since           time.Time // zero = any
 	Before          time.Time // cursor on LastSeen; zero = newest
@@ -739,17 +746,22 @@ type SessionRow struct {
 	// SessionTurnFacts over the same turns as every aggregate: Pending
 	// is the newest turn's pending calls when it is an open park
 	// (succeeded, pending calls, no resumer: the session awaits a
-	// decision), else 0; FailedTurns counts the failed turns and
-	// EndedTurns, apart, the turns thread's busy policy ended (Interrupt
-	// or Rollback: a cancel cause of BusyCancelCause, never a failure);
+	// decision), else 0; FailedTurns counts the failed turns that are
+	// neither ended nor cancelled; EndedTurns, apart, the turns thread's
+	// busy policy ended (Interrupt or Rollback: a cancel cause of
+	// BusyCancelCause, never a failure); CancelledTurns the other failed
+	// turns whose error type is ErrorTypeCancelled (a caller's cancel, a
+	// deadline, thread.closed, studio.cancel: no failure of the agent);
 	// Resumes the turns that resume a parked one (a stored ResumedFrom),
 	// so Turns - Resumes is the session's exchanges; Outcomes the newest
 	// MaxOutcomes turns' outcomes, oldest first (Turns - len(Outcomes)
 	// older ones are not in it); ForkedFrom the weft.session.forked_from
-	// (<origin>#<entry>) its turns carry, "" for a session no Fork made.
-	Pending, FailedTurns, EndedTurns, Resumes int
-	Outcomes                                  []TurnOutcome
-	ForkedFrom                                string
+	// (<origin>#<entry>) its turns carry (the greatest, should they
+	// differ), "" for a session no Fork made. A backend counts in SQL and
+	// reads only the newest MaxOutcomes turns for the strip and Pending.
+	Pending, FailedTurns, EndedTurns, CancelledTurns, Resumes int
+	Outcomes                                                  []TurnOutcome
+	ForkedFrom                                                string
 }
 
 // SessionQuery.Lineage's values.
@@ -806,7 +818,8 @@ func OutcomeOf(r RunRow) TurnOutcome {
 }
 
 // SessionTurnFacts sets row's turn facts (Pending, FailedTurns,
-// EndedTurns, Resumes, Outcomes, ForkedFrom) from its turns, given in
+// EndedTurns, CancelledTurns, Resumes, Outcomes, ForkedFrom) from its
+// turns, given in
 // any order: they are read by turn, then start, then id, the newest
 // last. Every backend and Studio's scoped session row read it; the
 // SessionQuery filters state the same rule in SQL.
@@ -821,22 +834,22 @@ func SessionTurnFacts(row *SessionRow, turns []RunRow) {
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
-	row.Pending, row.FailedTurns, row.EndedTurns, row.Resumes = 0, 0, 0, 0
+	row.Pending, row.FailedTurns, row.EndedTurns, row.CancelledTurns, row.Resumes = 0, 0, 0, 0, 0
 	row.Outcomes, row.ForkedFrom = nil, ""
 	for i, t := range sorted {
 		o := OutcomeOf(t)
 		switch {
 		case o == OutcomeEnded:
 			row.EndedTurns++
+		case o == OutcomeCancelled:
+			row.CancelledTurns++
 		case t.Status == StatusFailed:
 			row.FailedTurns++
 		}
 		if t.ResumedFrom != "" {
 			row.Resumes++
 		}
-		if row.ForkedFrom == "" {
-			row.ForkedFrom = t.Meta[SessionForkedFromKey]
-		}
+		row.ForkedFrom = max(row.ForkedFrom, t.Meta[SessionForkedFromKey])
 		if i == len(sorted)-1 && o == OutcomeParked {
 			row.Pending = t.Pending
 		}

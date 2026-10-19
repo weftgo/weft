@@ -34,6 +34,18 @@ func (d *DB) SessionEvents(ctx context.Context, q obsdb.SessionEventQuery) (_ ob
 			args = append(args, id)
 		}
 	}
+	if len(q.Kinds) > 0 {
+		// q.Kinds: obsdb.SessionEventKind's rule over the stored name
+		// (the writer stores the derived one, obsdb.SessionEventName).
+		in := `(?` + strings.Repeat(`, ?`, len(q.Kinds)-1) + `)`
+		where += ` AND ((kind = 'compaction' AND 'compaction' IN ` + in + `)
+			OR (kind <> 'compaction' AND (CASE WHEN substr(event_name, 1, 12) = 'weft.thread.' THEN substr(event_name, 13) ELSE event_name END) IN ` + in + `))`
+		for range 2 {
+			for _, k := range q.Kinds {
+				args = append(args, k)
+			}
+		}
+	}
 	if err := d.reads.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM session_events WHERE `+where, args...).Scan(&page.Total); err != nil {
 		return obsdb.SessionEventPage{}, err

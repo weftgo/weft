@@ -3178,7 +3178,7 @@ export class WeftDevtools extends HTMLElement {
         : ids[0]
     const items = el("div", "weft-rows", "", {
       role: "list",
-      "aria-label": "turns",
+      "aria-label": "turns, newest first",
     })
     const row = (r: RunRow) => this.turnRow(r, s.selected, tab, s.turns)
     const shown = new Set<string>(s.turns.map((r) => r.id))
@@ -3202,7 +3202,8 @@ export class WeftDevtools extends HTMLElement {
       items.append(
         el("div", "weft-expts", orphans.map(row), { "data-key": "x:" })
       )
-    list.append(items)
+    // The marks a page could not read (U16-fix): said, never dropped.
+    list.append(items, s.marksCapped ? holeLine(s.marksCapped) : "")
     // Paging (D4): the sentinel loads the next older page when the list
     // scrolls to it (watchOlder), or on a click; no cap.
     if (s.turnsCapped && this.model?.publicId) {
@@ -3285,13 +3286,18 @@ export class WeftDevtools extends HTMLElement {
     const t = this.last.turns
     const c = statusOf(r, t, !!this.last.session)
     // A newer message ended it (thread's busy policy, U16): neutral,
-    // "✗ by t7" — the next turn, which the newer message started.
+    // "✗ interrupted by t8" / "↶ rolled back by t9 · off path" — the
+    // interrupt record's turn and policy (the row's ended_*, U16-fix),
+    // else the next turn, which a newer message started.
     if (r.cancel_cause !== BUSY_CAUSE) return c
-    const by = nextTurn(r, t)
+    const by = r.ended_by || nextTurn(r, t)
     return {
       ...c,
       role: "resumed",
-      word: TURN_CHIP.ended(by ? turnTag(by, t) : "a newer message"),
+      word: TURN_CHIP.ended(
+        r.ended_kind,
+        by ? turnTag(by, t) : "a newer message"
+      ),
       hint: TURN_CHIP.endedTitle,
     }
   }
@@ -3432,16 +3438,18 @@ export class WeftDevtools extends HTMLElement {
       el("span", "", duration(r.started, r.finished) || "…"),
     ])
     // Its cost beside its tokens (A5.3), only where Studio prices usage.
-    if (this.model && hasCapability(this.model.state, "pricing")) {
-      row2.insertBefore(turnCost(r), row2.lastChild)
-      // The open turn's summarizer calls, apart (U16, UX-B-13): the
-      // run document serves them; never in the turn's own figure.
-      const open = this.last.turn
-      const sum = summarizerView(
-        open?.id === r.id ? open.doc?.summarizer : null
+    // The open turn's summarizer calls, apart (U16, UX-B-13): the run
+    // document serves them; never in the turn's own figure.
+    if (this.model && hasCapability(this.model.state, "pricing"))
+      row2.insertBefore(
+        turnCost(
+          r,
+          summarizerView(
+            this.last.turn?.id === r.id ? this.last.turn.doc?.summarizer : null
+          )
+        ),
+        row2.lastChild
       )
-      if (sum) row2.insertBefore(costText(sum), row2.lastChild)
-    }
     row.append(row1, row2)
     // Its accessible name in words (UX-F-32), not every field run
     // together: "turn 3, parked, <title>, 2 steps, 60 in 30 out, 3h ago".

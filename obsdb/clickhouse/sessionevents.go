@@ -30,6 +30,15 @@ func (d *DB) SessionEvents(ctx context.Context, q obsdb.SessionEventQuery) (_ ob
 		where += ` AND RunId IN (?)`
 		args = append(args, q.RunIDs)
 	}
+	if len(q.Kinds) > 0 {
+		// q.Kinds: obsdb.SessionEventKind's rule over the read-time name
+		// (obsdb.SessionEventName: a stored EventName, else the body's
+		// kind for a thread record).
+		where += ` AND if(Kind = 'compaction', 'compaction',
+			if(EventName != '', if(startsWith(EventName, 'weft.thread.'), substring(EventName, 13), EventName),
+				if(Kind = 'thread', JSONExtractString(Body, 'kind'), ''))) IN (?)`
+		args = append(args, q.Kinds)
+	}
 	// One row per (run, kind, BodyHash) — SQLite's key, whose position
 	// is the same identity (obsdb.DeriveRecord) — the earliest kept: a
 	// compaction marker re-sent at another time collapses as it does

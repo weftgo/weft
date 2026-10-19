@@ -28,23 +28,71 @@ func ExampleAttrTrue() {
 }
 
 // A session's state over time (U16): a busy-policy interrupt is ended,
-// never failed; a decided park resumed; the newest turn's open park is
-// the session's Pending — it awaits a decision.
+// and another cancel cancelled (U16-fix) — neither a failure; a decided
+// park resumed; the newest turn's open park is the session's Pending —
+// it awaits a decision.
 func ExampleSessionTurnFacts() {
 	turns := []obsdb.RunRow{
 		{ID: "s-t1", Turn: 1, Status: obsdb.StatusSucceeded, Pending: 1, ResumedBy: "s-t2"},
 		{ID: "s-t2", Turn: 2, Status: obsdb.StatusSucceeded, ResumedFrom: "s-t1"},
 		{ID: "s-t3", Turn: 3, Status: obsdb.StatusFailed, ErrorType: obsdb.ErrorTypeCancelled, CancelCause: obsdb.BusyCancelCause},
 		{ID: "s-t4", Turn: 4, Status: obsdb.StatusFailed, ErrorType: "model_error"},
-		{ID: "s-t5", Turn: 5, Status: obsdb.StatusSucceeded, Pending: 2},
+		{ID: "s-t5", Turn: 5, Status: obsdb.StatusFailed, ErrorType: obsdb.ErrorTypeCancelled, CancelCause: "thread.closed"},
+		{ID: "s-t6", Turn: 6, Status: obsdb.StatusSucceeded, Pending: 2},
 	}
 	var row obsdb.SessionRow
 	obsdb.SessionTurnFacts(&row, turns)
 	fmt.Println(row.Outcomes)
-	fmt.Println("pending", row.Pending, "failed", row.FailedTurns, "ended", row.EndedTurns, "resumes", row.Resumes)
+	fmt.Println("pending", row.Pending, "failed", row.FailedTurns, "ended", row.EndedTurns,
+		"cancelled", row.CancelledTurns, "resumes", row.Resumes)
 	// Output:
-	// [resumed succeeded ended failed parked]
-	// pending 2 failed 1 ended 1 resumes 1
+	// [resumed succeeded ended failed cancelled parked]
+	// pending 2 failed 1 ended 1 cancelled 1 resumes 1
+}
+
+// The sessions list's state filters (U16, U16-fix) and a session's
+// events of a few kinds: a session thread compacted, its newest turn
+// succeeded — SessionQuery's Compacted and Status keep it — and its
+// compaction marker read alone among its events (SessionEventQuery.Kinds,
+// what Studio's turn marks read).
+func ExampleSessionQuery_states() {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	at := time.Now().UTC().Add(-time.Minute)
+	ident := map[string]any{"weft.run.id": "s_ex-t1", "weft.session.id": "s_ex", "weft.public_id": "pub_ex", "weft.turn": int64(1)}
+	span := obsdb.Span{TraceID: "0102030405060708090a0b0c0d0e0f10", SpanID: "0a0b0c0d0e0f0102",
+		Name: "invoke_agent ex", Kind: 1, Start: at, End: at.Add(time.Second), StatusCode: 1, Service: "ex",
+		Attrs: map[string]any{"gen_ai.operation.name": "invoke_agent"}}
+	label := obsdb.Record{Time: at, EventName: "weft.thread.label", Body: `{"kind":"label","entry":"e1","name":"start"}`,
+		Attrs: map[string]any{"weft.record": obsdb.RecordThread}, Service: "ex", Severity: 9}
+	marker := obsdb.Record{Time: at.Add(time.Second), EventName: "weft.compaction", Body: `{"scope":"session","hash":"sha256:ex","replaced":4}`,
+		Attrs:   map[string]any{"weft.record": obsdb.RecordCompaction, "weft.compaction.scope": "session", "weft.compaction.hash": "sha256:ex"},
+		Service: "ex", Severity: 9}
+	for k, v := range ident {
+		span.Attrs[k], label.Attrs[k], marker.Attrs[k] = v, v, v
+	}
+	if err := db.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{span}, Records: []obsdb.Record{label, marker}}); err != nil {
+		log.Fatal(err)
+	}
+	page, err := db.Sessions(ctx, obsdb.SessionQuery{Compacted: true, Status: obsdb.StatusSucceeded})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, r := range page.Sessions {
+		fmt.Println(r.ID, r.Status)
+	}
+	evs, err := db.(obsdb.SessionEventReader).SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: "s_ex", Kinds: []string{obsdb.RecordCompaction}})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(len(evs.Events), evs.Total, obsdb.SessionEventKind(evs.Events[0]))
+	// Output:
+	// s_ex succeeded
+	// 1 1 compaction
 }
 
 func ExampleParseStatus() {

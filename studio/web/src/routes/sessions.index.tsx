@@ -10,8 +10,9 @@
 // open park as "⏸ awaiting a decision", the outcome strip, failed turns
 // and busy-policy ends counted apart (lib/session-states.ts), exchanges
 // beside turns, a fork's lineage — and the turn-state filter chips
-// (?awaiting=1, ?failed=1, ?lineage=child|fork; /api/sessions'). Every
-// view is in the URL (A3).
+// (?awaiting=1, ?failed=1, ?compacted=1, ?lineage=child|fork; U16-fix:
+// the newest turn's ?status= and a ?since= window, 1h|24h|7d —
+// /api/sessions'). Every view is in the URL (A3).
 import { useEffect, useState } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
@@ -43,7 +44,14 @@ import { lineageOfSession } from "@/lib/delegation"
 import { LineageLine } from "@/components/studio/lineage"
 import { ForkOfLine } from "@/components/studio/fork-of"
 import { SessionState, OutcomeStrip } from "@/components/studio/session-state"
-import { exchangesOfRow, SESSION_FILTERS } from "@/lib/session-states"
+import {
+  exchangesOfRow,
+  SESSION_FILTERS,
+  SESSION_SINCE,
+  SESSION_STATUSES,
+  sinceOf,
+} from "@/lib/session-states"
+import { statusClass } from "@/lib/status-class"
 import { forkOf } from "@/lib/timeline"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 
@@ -55,8 +63,13 @@ interface SessionsSearch {
   /** The turn-state filters (U16): /api/sessions' awaiting / failed. */
   awaiting?: boolean
   failed?: boolean
+  compacted?: boolean
   /** Delegated (child) or forked (fork) sessions only. */
   lineage?: "child" | "fork"
+  /** The newest turn's status (U16-fix). */
+  status?: (typeof SESSION_STATUSES)[number]["key"]
+  /** A last-seen window: a SESSION_SINCE key. */
+  since?: string
 }
 
 const flag = (v: unknown) =>
@@ -80,6 +93,9 @@ export const Route = createFileRoute("/sessions/")({
           : undefined,
     awaiting: flag(search.awaiting),
     failed: flag(search.failed),
+    compacted: flag(search.compacted),
+    status: SESSION_STATUSES.find((s) => s.key === search.status)?.key,
+    since: SESSION_SINCE.find((s) => s.key === search.since)?.key,
     lineage:
       search.lineage === "child" || search.lineage === "fork"
         ? search.lineage
@@ -131,7 +147,10 @@ function SessionsPage() {
     q: search.q,
     awaiting: search.awaiting,
     failed: search.failed,
+    compacted: search.compacted,
     lineage: search.lineage,
+    status: search.status,
+    since: search.since,
   }
   const filtered = Boolean(
     search.agent ||
@@ -139,16 +158,19 @@ function SessionsPage() {
     search.q ||
     search.awaiting ||
     search.failed ||
-    search.lineage
+    search.compacted ||
+    search.lineage ||
+    search.status ||
+    search.since
   )
-  // A chip's state and its toggle: awaiting / failed are flags, child /
-  // fork the one lineage value.
+  // A chip's state and its toggle: awaiting / failed / compacted are
+  // flags, child / fork the one lineage value.
   const on = (k: (typeof SESSION_FILTERS)[number]["key"]) =>
-    k === "awaiting" || k === "failed" ? !!search[k] : search.lineage === k
+    k === "child" || k === "fork" ? search.lineage === k : !!search[k]
   const toggle = (k: (typeof SESSION_FILTERS)[number]["key"]) =>
-    k === "awaiting" || k === "failed"
-      ? set({ [k]: search[k] ? undefined : true })
-      : set({ lineage: search.lineage === k ? undefined : k })
+    k === "child" || k === "fork"
+      ? set({ lineage: search.lineage === k ? undefined : k })
+      : set({ [k]: search[k] ? undefined : true })
   // Pages accumulate through the next_before cursor (S4.3): the first
   // page is the newest 50 threads, never the whole list.
   const q = useInfiniteQuery({
@@ -158,6 +180,8 @@ function SessionsPage() {
     queryFn: ({ pageParam }) =>
       fetchSessions({
         ...filters,
+        // The window's bound as of this read (a refetch moves it on).
+        since: sinceOf(filters.since),
         before: pageParam?.before,
         before_id: pageParam?.before_id,
       }),
@@ -219,6 +243,38 @@ function SessionsPage() {
             {f.word}
           </button>
         ))}
+        <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+        {SESSION_STATUSES.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            data-session-status={f.key}
+            aria-pressed={search.status === f.key}
+            title={f.title}
+            onClick={() =>
+              set({ status: search.status === f.key ? undefined : f.key })
+            }
+            className={`rounded-full border px-2 py-px font-mono text-[11px] ${search.status === f.key ? `bg-secondary ${statusClass(f.role).text}` : "text-muted-foreground hover:text-foreground"}`}
+          >
+            {f.word}
+          </button>
+        ))}
+        <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+        {SESSION_SINCE.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            data-session-since={f.key}
+            aria-pressed={search.since === f.key}
+            title={`sessions last seen in the ${f.word}`}
+            onClick={() =>
+              set({ since: search.since === f.key ? undefined : f.key })
+            }
+            className={`rounded-full border px-2 py-px font-mono text-[11px] ${search.since === f.key ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            {f.word}
+          </button>
+        ))}
       </div>
       {search.q ? (
         <div className="flex flex-wrap items-center gap-1.5">
@@ -261,7 +317,10 @@ function SessionsPage() {
                   q: undefined,
                   awaiting: undefined,
                   failed: undefined,
+                  compacted: undefined,
                   lineage: undefined,
+                  status: undefined,
+                  since: undefined,
                 })
               }
             >

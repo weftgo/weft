@@ -300,7 +300,10 @@ func TestApprovalsPartialDecisions(t *testing.T) {
 func TestApprovalsExpiry(t *testing.T) {
 	ctx := context.Background()
 	agent, _ := refundAgent(wefttest.ToolCalls(wefttest.Call{Name: "refund"}), wefttest.Say("expired noted"))
-	s, err := thread.Create(ctx, thread.Memory(), agent, thread.RequestExpiry(20*time.Millisecond))
+	// The session's clock moves only when the test moves it: the request
+	// cannot lapse before the test has read it, however loaded the host.
+	clock := newSentinelClock()
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.Clock(clock.Now), thread.RequestExpiry(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,11 +313,11 @@ func TestApprovalsExpiry(t *testing.T) {
 		t.Fatal("RequestExpiry gave the request no expiry")
 	}
 
-	// Wait until the request is strictly past its expiry — the
-	// request's own deadline, not a guessed sleep — then resume: the
+	// Move the clock strictly past the request's expiry — the request's
+	// own deadline, not a guessed sleep — then resume: the
 	// call is denied with the expiry reason, not the core's "no
 	// decision".
-	time.Sleep(time.Until(pend.Expiry) + 5*time.Millisecond)
+	clock.Advance(pend.Expiry.Sub(clock.Now()) + time.Millisecond) // strictly past it
 	rt, err := s.Resume(ctx)
 	if err != nil {
 		t.Fatal(err)

@@ -24,7 +24,10 @@ import (
 // every call does not flood the log. The run continues exactly as it
 // would with no provider: what failed was reporting, which decides
 // nothing. User code — tool handlers, middleware, PrepareStep, taps and
-// OnRunEnd observers — is not covered here; each keeps its own rule.
+// OnRunEnd observers, and the methods of the errors they return (Error,
+// ErrorType, Is, As, read before the contained span calls) — is not
+// covered here; each keeps its own rule. A span is ended even when an
+// attribute call on it panicked: End is contained on its own.
 
 // The provider kinds a run warns about, as bits of recorder.warned.
 const (
@@ -98,6 +101,15 @@ func (o *observer) startSpan(ctx context.Context, rec *recorder, name string, op
 		}
 	}()
 	return o.tracer.Start(ctx, name, opts...)
+}
+
+// spanRecording is span.IsRecording, contained: a panic reads as a
+// span that records nothing. The loop asks it before reading a user
+// error's facts (Error, ErrorType, Is, As), which run outside the
+// containment: a panic in them is the error's, kept as it always was.
+func (r *recorder) spanRecording(ctx context.Context, span trace.Span) (ok bool) {
+	defer r.containTraces(ctx)
+	return span.IsRecording()
 }
 
 // endSpan is span.End, contained.

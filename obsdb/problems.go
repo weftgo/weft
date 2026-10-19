@@ -46,9 +46,11 @@ type Problems struct {
 	// always 0 until the core reports weft.tool.args_repaired (U23.1).
 	Repaired int64
 	// TapPanics counts the observer panics the run contained — taps,
-	// OnMessages observers, a record the pipeline failed to build —
-	// from its invoke_agent span's weft.tap.panics (U32.1, UX-E-51).
-	// The run is unchanged; an observer the app relies on saw less.
+	// OnMessages observers, a record the pipeline failed to build, and
+	// every call into the run's TracerProvider or LoggerProvider that
+	// panicked (P9-core-panic) — from its invoke_agent span's
+	// weft.tap.panics (U32.1, UX-E-51). The run is unchanged; an
+	// observer the app relies on saw less.
 	TapPanics int64
 	// MetadataDropped counts the metadata pairs the core's limits
 	// dropped (64 keys, 128-byte keys, 1 KiB values), from the

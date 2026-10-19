@@ -120,7 +120,7 @@ describe("a clean run's header strip and list row (U4-fix)", () => {
     )
     const strip = [...statsLine(container).querySelectorAll("[data-strip]")]
     expect(strip.map((s) => s.textContent)).toEqual([
-      "⚠2 tap panics: 2 (observers, contained)",
+      "⚠2 tap panics: 2 (observers or providers, contained)",
     ])
   })
 })

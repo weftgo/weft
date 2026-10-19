@@ -340,60 +340,23 @@ func (s *stepReport) attempt(a AttemptInfo) {
 	}
 	timed := !a.Start.IsZero() && !a.End.Before(a.Start)
 	ctx := s.Context
-	func() {
+	// IsRecording, Start, the span calls and End are the provider's, each
+	// contained; End on its own, so a span whose attribute calls panicked
+	// is still ended (and exported). The attempt's error is the
+	// reporter's caller's: its methods run outside that containment, so a
+	// panic in them stays the report's own (contain, above) — counted,
+	// never named as the provider's.
+	recording := func() bool {
 		defer s.containTraces()
-		if !trace.SpanFromContext(ctx).IsRecording() {
-			return
-		}
-		start := []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindClient)}
-		if timed {
-			start = append(start, trace.WithTimestamp(a.Start))
-		}
-		_, span := s.obs.tracer.Start(ctx, "attempt", start...)
-		attrs := []attribute.KeyValue{
-			attrRunID.String(s.runID),
-			attrStepIndex.Int(s.step),
-			attrAttemptIndex.Int64(index),
-		}
-		if a.Provider != "" {
-			attrs = append(attrs, semconv.GenAIProviderNameKey.String(providerName(a.Provider)))
-		}
-		if a.Model != "" {
-			attrs = append(attrs, semconv.GenAIRequestModel(a.Model))
-		}
-		if a.RetryAfter > 0 {
-			attrs = append(attrs, attrAttemptRetryAfterMS.Int64(a.RetryAfter.Milliseconds()))
-		}
-		if a.Layer != "" {
-			attrs = append(attrs, attrAttemptLayer.String(a.Layer))
-		}
-		if a.Wait > 0 {
-			attrs = append(attrs, attrAttemptWaitMS.Int64(ceilMS(a.Wait)))
-		}
-		if a.HTTPStatus > 0 {
-			attrs = append(attrs, semconv.HTTPResponseStatusCode(a.HTTPStatus))
-		}
-		attrs = append(attrs, metadataAttrs(ctx)...)
-		span.SetAttributes(attrs...)
-		if a.Err != nil {
-			span.SetStatus(codes.Error, a.Err.Error())
-			span.SetAttributes(semconv.ErrorTypeKey.String(runErrorType(a.Err)))
-		} else {
-			// The attempt answered: the model it requested is the one
-			// that produced the response (the attempt knows no other
-			// name), the same value the chat span and the step_finish
-			// record carry as gen_ai.response.model.
-			span.SetStatus(codes.Ok, "")
-			if a.Model != "" {
-				span.SetAttributes(semconv.GenAIResponseModel(a.Model))
-			}
-		}
-		if timed {
-			span.End(trace.WithTimestamp(a.End))
-		} else {
-			span.End()
-		}
+		return trace.SpanFromContext(ctx).IsRecording()
 	}()
+	if recording {
+		var errMsg, errType string
+		if a.Err != nil {
+			errMsg, errType = a.Err.Error(), runErrorType(a.Err)
+		}
+		s.attemptSpan(a, index, timed, errMsg, errType)
+	}
 	if l := s.obs.logger(); l.Enabled(ctx, slog.LevelDebug) {
 		attrs := []slog.Attr{
 			slog.String(logRun, s.runID),
@@ -431,6 +394,75 @@ func (s *stepReport) attempt(a AttemptInfo) {
 	if index > 1 && s.request != nil {
 		s.requestAttempt(ctx, index, a)
 	}
+}
+
+// attemptSpan starts, fills and ends one attempt span, each phase
+// contained on its own (providerpanic.go): a panicking attribute call
+// drops the rest of the attributes, never the End. errMsg and errType
+// are the attempt error's, read by the caller outside the containment.
+func (s *stepReport) attemptSpan(a AttemptInfo, index int64, timed bool, errMsg, errType string) {
+	ctx := s.Context
+	var span trace.Span
+	func() {
+		defer s.containTraces()
+		start := []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindClient)}
+		if timed {
+			start = append(start, trace.WithTimestamp(a.Start))
+		}
+		_, span = s.obs.tracer.Start(ctx, "attempt", start...)
+	}()
+	if span == nil {
+		return
+	}
+	func() {
+		defer s.containTraces()
+		attrs := []attribute.KeyValue{
+			attrRunID.String(s.runID),
+			attrStepIndex.Int(s.step),
+			attrAttemptIndex.Int64(index),
+		}
+		if a.Provider != "" {
+			attrs = append(attrs, semconv.GenAIProviderNameKey.String(providerName(a.Provider)))
+		}
+		if a.Model != "" {
+			attrs = append(attrs, semconv.GenAIRequestModel(a.Model))
+		}
+		if a.RetryAfter > 0 {
+			attrs = append(attrs, attrAttemptRetryAfterMS.Int64(a.RetryAfter.Milliseconds()))
+		}
+		if a.Layer != "" {
+			attrs = append(attrs, attrAttemptLayer.String(a.Layer))
+		}
+		if a.Wait > 0 {
+			attrs = append(attrs, attrAttemptWaitMS.Int64(ceilMS(a.Wait)))
+		}
+		if a.HTTPStatus > 0 {
+			attrs = append(attrs, semconv.HTTPResponseStatusCode(a.HTTPStatus))
+		}
+		attrs = append(attrs, metadataAttrs(ctx)...)
+		span.SetAttributes(attrs...)
+		if a.Err != nil {
+			span.SetStatus(codes.Error, errMsg)
+			span.SetAttributes(semconv.ErrorTypeKey.String(errType))
+		} else {
+			// The attempt answered: the model it requested is the one
+			// that produced the response (the attempt knows no other
+			// name), the same value the chat span and the step_finish
+			// record carry as gen_ai.response.model.
+			span.SetStatus(codes.Ok, "")
+			if a.Model != "" {
+				span.SetAttributes(semconv.GenAIResponseModel(a.Model))
+			}
+		}
+	}()
+	func() {
+		defer s.containTraces()
+		if timed {
+			span.End(trace.WithTimestamp(a.End))
+		} else {
+			span.End()
+		}
+	}()
 }
 
 // requestAttempt emits a further attempt's request record under mu,

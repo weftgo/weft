@@ -173,7 +173,7 @@ export function problemBadges(r: ProblemRow, status?: string): ProblemBadge[] {
     add(
       "tap_panics",
       `⚠${r.tap_panics}`,
-      `tap panics: ${r.tap_panics} (observers, contained)`
+      `tap panics: ${r.tap_panics} (observers or providers, contained)`
     )
   if (n(r.log_error) > 0)
     add(

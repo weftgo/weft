@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"os/exec"
 	"reflect"
 	"regexp"
 	"runtime"
@@ -6287,4 +6288,179 @@ func TestProviderLatePanicsNeverChangeTheRun(t *testing.T) {
 	want := runUnderProviders(t, tracenoop.NewTracerProvider(), lognoop.NewLoggerProvider())
 	got := runUnderProviders(t, panicTP{mode: "late"}, panicLP{mode: "late"})
 	checkSameRun(t, want, got, true)
+}
+
+// attrPanicTP records every span (recProvider) but each span's
+// SetAttributes panics: Start, IsRecording, SetStatus and End work.
+type attrPanicTP struct {
+	traceembedded.TracerProvider
+	rec *recProvider
+}
+
+func (p attrPanicTP) Tracer(name string, opts ...trace.TracerOption) trace.Tracer {
+	return attrPanicTracer{t: p.rec.Tracer(name, opts...)}
+}
+
+type attrPanicTracer struct {
+	traceembedded.Tracer
+	t trace.Tracer
+}
+
+func (t attrPanicTracer) Start(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+	_, s := t.t.Start(ctx, name, opts...)
+	w := attrPanicSpan{recSpan: s.(*recSpan)}
+	return trace.ContextWithSpan(ctx, w), w
+}
+
+type attrPanicSpan struct{ *recSpan }
+
+func (attrPanicSpan) SetAttributes(...attribute.KeyValue) { panic("broken SetAttributes") }
+
+// A span whose attribute calls panic is still ended — exported, under an
+// SDK — for every span the loop opens: invoke_agent, chat,
+// execute_tool, the denied execute_tool span (weft.tool.denied) and the
+// reporter's attempt spans. End is contained on its own, never skipped
+// by the attribute block's panic (P9-core-panic-fix).
+func TestProviderAttributePanicsStillEndEverySpan(t *testing.T) {
+	rec := newRecProvider()
+	var logs bytes.Buffer
+	refund := core.Tool("refund", "Refund an order.", func(context.Context, struct{}) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{}`, ID: "c1"}),
+		wefttest.Fail(errors.New("503 overloaded")),
+		wefttest.Say("not refunded"),
+	), core.Name("support"), refund,
+		core.WrapModel(mw.Retry(mw.BaseDelay(0), mw.Classifier(func(error) bool { return true }))),
+		core.TracerProvider(attrPanicTP{rec: rec}),
+		core.Logger(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))))
+	res, err := agt.Generate(context.Background(), core.Prompt("refund order 7"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Pending) != 1 {
+		t.Fatalf("pending = %v, want the refund call parked", res.Pending)
+	}
+	res, err = agt.Generate(context.Background(), core.Messages(res.Messages...), core.Deny("c1", "customer withdrew"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text() != "not refunded" {
+		t.Errorf("text = %q", res.Text())
+	}
+	rec.mu.Lock()
+	spans := slices.Clone(rec.spans)
+	rec.mu.Unlock()
+	names := map[string]int{}
+	for _, s := range spans {
+		names[s.Name()]++
+		if ended, _, _, _ := s.state(); !ended {
+			t.Errorf("span %q never ended: its attribute block's panic skipped End", s.Name())
+		}
+	}
+	// Two runs; mw.Retry reports each attempt: the first run's one, the
+	// resume's failed attempt and its retry.
+	for name, n := range map[string]int{
+		"invoke_agent support": 2, "execute_tool refund": 2, "attempt": 3,
+	} {
+		if names[name] != n {
+			t.Errorf("%d %q spans, want %d; have %v", names[name], name, n, names)
+		}
+	}
+	if agt.TapPanics() == 0 {
+		t.Error("no contained panic counted")
+	}
+	if !strings.Contains(logs.String(), `"provider":"tracer_provider"`) {
+		t.Errorf("no Warn line names the tracer provider: %s", logs.String())
+	}
+}
+
+// panicMsgErr's Error panics; panicIsErr's Is does; panicTypeErr's
+// ErrorType does. They are the user's errors, not the provider's.
+type panicMsgErr struct{}
+
+func (panicMsgErr) Error() string { panic("panicMsgErr.Error") }
+
+type panicIsErr struct{}
+
+func (panicIsErr) Error() string { return "is" }
+func (panicIsErr) Is(error) bool { panic("panicIsErr.Is") }
+
+type panicTypeErr struct{}
+
+func (panicTypeErr) Error() string     { return "typed" }
+func (panicTypeErr) ErrorType() string { panic("panicTypeErr.ErrorType") }
+
+// An error whose own methods panic is the user's, read outside the
+// provider containment (P9-core-panic-fix): it behaves exactly as before
+// the containment (88833750), under a recording tracer — never counted
+// or named as a provider panic.
+func TestUserErrorPanicsAreNotProviderPanics(t *testing.T) {
+	run := func(t *testing.T, err error, opts ...core.Option) (panicked any, agt *core.Agent, warns string, runErr error) {
+		t.Helper()
+		var logs bytes.Buffer
+		agt = core.New(wefttest.Script(wefttest.Fail(err)), append([]core.Option{
+			core.Name("a"), core.TracerProvider(newRecProvider()),
+			core.Logger(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))),
+		}, opts...)...)
+		func() {
+			defer func() { panicked = recover() }()
+			_, runErr = agt.Generate(context.Background(), core.Prompt("x"))
+		}()
+		return panicked, agt, logs.String(), runErr
+	}
+	retry := core.WrapModel(mw.Retry(mw.BaseDelay(0), mw.Classifier(func(error) bool { return false })))
+
+	// A model error whose Error panics: the run fails (fmt names the
+	// panic in the RunError's text); the attempt span's read of it is the
+	// report's own contained panic — one, no Warn line.
+	t.Run("Error", func(t *testing.T) {
+		p, agt, warns, err := run(t, panicMsgErr{}, retry)
+		if p != nil {
+			t.Fatalf("Generate panicked: %v", p)
+		}
+		if err == nil || !strings.Contains(err.Error(), "PANIC=Error method: panicMsgErr.Error") {
+			t.Errorf("err = %v", err)
+		}
+		if n := agt.TapPanics(); n != 1 {
+			t.Errorf("TapPanics = %d, want 1 (the report's own)", n)
+		}
+		if warns != "" {
+			t.Errorf("a user error's panic named as a provider's: %s", warns)
+		}
+	})
+	// A model error whose Is panics: the panic reaches the caller, and no
+	// provider panic is counted on the way.
+	t.Run("Is", func(t *testing.T) {
+		p, agt, warns, _ := run(t, panicIsErr{})
+		if p != "panicIsErr.Is" {
+			t.Errorf("panic = %v, want panicIsErr.Is", p)
+		}
+		if n := agt.TapPanics(); n != 0 {
+			t.Errorf("TapPanics = %d, want 0", n)
+		}
+		if warns != "" {
+			t.Errorf("a user error's panic named as a provider's: %s", warns)
+		}
+	})
+	// A tool error whose ErrorType panics crashes the process, from the
+	// tool goroutine, as it always did: run in a child process.
+	t.Run("ErrorType", func(t *testing.T) {
+		if os.Getenv("WEFT_P9_TOOL_ERRORTYPE") == "1" {
+			bad := core.Tool("bad", "Fails.", func(context.Context, struct{}) (string, error) { return "", panicTypeErr{} })
+			agt := core.New(wefttest.Script(
+				wefttest.ToolCalls(wefttest.Call{Name: "bad", Args: `{}`}), wefttest.Say("done"),
+			), core.Name("a"), core.TracerProvider(newRecProvider()), bad)
+			_, _ = agt.Generate(context.Background(), core.Prompt("x"))
+			fmt.Println("survived")
+			return
+		}
+		cmd := exec.Command(os.Args[0], "-test.run=^TestUserErrorPanicsAreNotProviderPanics$/^ErrorType$")
+		cmd.Env = append(os.Environ(), "WEFT_P9_TOOL_ERRORTYPE=1")
+		out, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "panic: panicTypeErr.ErrorType") || strings.Contains(string(out), "survived") {
+			t.Errorf("want the process to crash on panicTypeErr.ErrorType; err %v, output:\n%s", err, out)
+		}
+	})
 }

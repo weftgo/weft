@@ -194,7 +194,7 @@ describe("U32.1's words", () => {
       {
         key: "tap_panics",
         glyph: "⚠2",
-        label: "tap panics: 2 (observers, contained)",
+        label: "tap panics: 2 (observers or providers, contained)",
       },
     ])
   })

@@ -623,7 +623,7 @@ no behaviour and no model-visible text (`TestToolRetryCountAndBudget`,
 | where | key | value |
 |---|---|---|
 | `execute_tool` span, `tool_finish` record | `weft.tool.retry`, `weft.tool.retry_budget` | a RETRY the loop counts: the tool's consecutive RETRY count with this result (a success of the tool resets it; one batch's calls in completion order) and the run's `MaxModelRetries`. The budget's run error names both (`tool "x" retried 3 times, past MaxModelRetries(2)`) |
-| `invoke_agent` span | `weft.tap.panics` | at end, when > 0: the observer panics this run contained — taps, `OnMessages` observers, a record or report the pipeline failed to build — the run's share of `Agent.TapPanics` (`OnRunEnd` observers run after the span ended) |
+| `invoke_agent` span | `weft.tap.panics` | at end, when > 0: the observer panics this run contained — taps, `OnMessages` observers, a record or report the pipeline failed to build, and (P9-core-panic) every call into its `TracerProvider` or `LoggerProvider` that panicked — the run's share of `Agent.TapPanics` (`OnRunEnd` observers run after the span ended) |
 | `prompt` record body | `segments` | `[{source, text}]`: `instructions`, then `tool:<name>` per advertised tool's `PromptSnippet`, joining to the composed text exactly; absent without a snippet; the hash stays over the text |
 
 The pipeline's content shaping redacts each segment as it redacts the

@@ -318,9 +318,10 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 	}
 	return ctx, func(res *RunResult, err error, end runEnd) {
 		dur := time.Since(start)
+		recording := rec.spanRecording(ctx, span)
 		func() {
 			defer rec.containTraces(ctx)
-			if !span.IsRecording() {
+			if !recording {
 				return
 			}
 			attrs := []attribute.KeyValue{
@@ -366,15 +367,18 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 		}
 		if err != nil {
 			// err is the *RunError fail built; its cause decides the
-			// type, the span records the failure itself.
-			func() {
-				defer rec.containTraces(ctx)
-				if span.IsRecording() {
-					span.SetStatus(codes.Error, err.Error())
+			// type, the span records the failure itself. The error's
+			// own methods run outside the provider containment: a panic
+			// in them is the error's, not the provider's.
+			if recording {
+				msg, typ := err.Error(), runErrorType(err)
+				func() {
+					defer rec.containTraces(ctx)
+					span.SetStatus(codes.Error, msg)
 					span.RecordError(err)
-					span.SetAttributes(semconv.ErrorTypeKey.String(runErrorType(err)))
-				}
-			}()
+					span.SetAttributes(semconv.ErrorTypeKey.String(typ))
+				}()
+			}
 			if debug {
 				// The line names the cause — the ctx error for a
 				// cancelled run — with the step; the full RunError text
@@ -395,12 +399,12 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 					slog.Duration(logDur, dur))
 			}
 		} else {
-			func() {
-				defer rec.containTraces(ctx)
-				if span.IsRecording() {
+			if recording {
+				func() {
+					defer rec.containTraces(ctx)
 					span.SetStatus(codes.Ok, "")
-				}
-			}()
+				}()
+			}
 			if debug {
 				attrs := []slog.Attr{
 					slog.String(logRun, runID),
@@ -465,10 +469,17 @@ func (o *observer) model(ctx context.Context, rec *recorder, runID string, step 
 		// finished is the loop's own flag: a ModelFinish arrived. It is
 		// not inferred from the reason — the loop accepts an empty one —
 		// so a stream that failed before finishing carries no usage and
-		// no finish reason; the error status is the whole story.
+		// no finish reason; the error status is the whole story. The
+		// error's own methods run before the provider containment (a
+		// panic in them is the error's, not the provider's).
+		recording := rec.spanRecording(ctx, span)
+		var errMsg, errType string
+		if recording && err != nil {
+			errMsg, errType = err.Error(), runErrorType(err)
+		}
 		func() {
 			defer rec.containTraces(ctx)
-			if !span.IsRecording() {
+			if !recording {
 				return
 			}
 			if finished {
@@ -491,9 +502,9 @@ func (o *observer) model(ctx context.Context, rec *recorder, runID string, step 
 				span.SetAttributes(attrTTFTMS.Int64(ceilMS(t.ttft)))
 			}
 			if err != nil {
-				span.SetStatus(codes.Error, err.Error())
+				span.SetStatus(codes.Error, errMsg)
 				span.RecordError(err)
-				span.SetAttributes(semconv.ErrorTypeKey.String(runErrorType(err)))
+				span.SetAttributes(semconv.ErrorTypeKey.String(errType))
 			} else {
 				span.SetStatus(codes.Ok, "")
 			}
@@ -626,25 +637,37 @@ func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, f
 			end = time.Now()
 		}
 		dur := end.Sub(start)
+		recording := rec.spanRecording(ctx, span)
+		// The error's facts are read before the provider containment:
+		// its methods (ErrorType, As, Is) are the user's, and a panic in
+		// them is the error's, not the provider's.
+		var errType, panicLayer, inputKind string
+		if recording && !pending && err != nil {
+			errType = toolErrorType(err)
+			var pe *toolPanicError
+			if errors.As(err, &pe) {
+				panicLayer = pe.layer
+			}
+			inputKind = inputErrorKind(err)
+		}
 		func() {
 			defer rec.containTraces(ctx)
-			if !span.IsRecording() {
+			if !recording {
 				return
 			}
 			switch {
 			case pending:
 				span.SetAttributes(attrToolPending.Bool(true), attrToolPendingSource.String(park))
 			case err != nil:
-				span.SetAttributes(semconv.ErrorTypeKey.String(toolErrorType(err)))
+				span.SetAttributes(semconv.ErrorTypeKey.String(errType))
 				if names := nestFromContext(ctx).pendingNames(); names != "" {
 					span.SetAttributes(attrSubagentPending.String(names))
 				}
-				var pe *toolPanicError
-				if errors.As(err, &pe) {
-					span.SetAttributes(attrPanicLayer.String(pe.layer))
+				if panicLayer != "" {
+					span.SetAttributes(attrPanicLayer.String(panicLayer))
 				}
-				if k := inputErrorKind(err); k != "" {
-					span.SetAttributes(attrToolInputError.String(k))
+				if inputKind != "" {
+					span.SetAttributes(attrToolInputError.String(inputKind))
 				}
 				if retry.n > 0 {
 					span.SetAttributes(attrToolRetry.Int(retry.n), attrToolRetryBudget.Int(retry.budget))
@@ -696,8 +719,14 @@ func (o *observer) deniedTool(ctx context.Context, rec *recorder, runID string, 
 	now := time.Now()
 	_, span := o.startSpan(ctx, rec, spanName(semconv.GenAIOperationNameExecuteTool, call.Name),
 		trace.WithSpanKind(trace.SpanKindInternal), trace.WithTimestamp(now))
-	defer rec.containTraces(ctx)
-	if span.IsRecording() {
+	// End is deferred first and contained on its own, so a span whose
+	// attribute calls panic is still ended (and exported).
+	defer rec.endSpan(ctx, span, trace.WithTimestamp(now))
+	if !rec.spanRecording(ctx, span) {
+		return
+	}
+	func() {
+		defer rec.containTraces(ctx)
 		attrs := []attribute.KeyValue{
 			semconv.GenAIOperationNameExecuteTool,
 			semconv.GenAIToolName(call.Name),
@@ -711,8 +740,7 @@ func (o *observer) deniedTool(ctx context.Context, rec *recorder, runID string, 
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 		span.SetStatus(codes.Error, "")
-	}
-	span.End(trace.WithTimestamp(now))
+	}()
 }
 
 // The denied span's kinds (deniedTool); its error.type is CodeDenied,
@@ -966,9 +994,11 @@ type recorder struct {
 	denied atomic.Int64
 	// runPanics counts this run's contained observer panics — taps,
 	// OnMessages observers, a record or a report the pipeline failed to
-	// build — beside the agent-wide TapPanics: the invoke_agent span's
-	// weft.tap.panics. OnRunEnd observers run after the span ended, so
-	// theirs reach TapPanics alone.
+	// build, and every call into the TracerProvider or LoggerProvider
+	// that panicked (providerpanic.go) — beside the agent-wide
+	// TapPanics: the invoke_agent span's weft.tap.panics. OnRunEnd
+	// observers run after the span ended, so theirs reach TapPanics
+	// alone.
 	runPanics atomic.Int64
 	// warned holds the provider kinds (providerTraces, providerLogs)
 	// whose contained panic this run has already named in its one Warn

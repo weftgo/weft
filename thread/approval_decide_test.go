@@ -72,13 +72,16 @@ func resultFor(s *thread.Session, callID string) string {
 func TestDecideOnExpiredRequestIsRefused(t *testing.T) {
 	ctx := context.Background()
 	agent, ran := refundAgent(wefttest.ToolCalls(wefttest.Call{Name: "refund"}), wefttest.Say("expired noted"))
-	s, err := thread.Create(ctx, thread.Memory(), agent, thread.RequestExpiry(20*time.Millisecond))
+	// The session's clock moves only when the test moves it: the request
+	// cannot lapse before the test has read it, however loaded the host.
+	clock := newSentinelClock()
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.Clock(clock.Now), thread.RequestExpiry(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	parked, call := parkTurn(t, s, ctx)
 	pend := s.Pending()[0]
-	time.Sleep(time.Until(pend.Expiry) + 5*time.Millisecond)
+	clock.Advance(pend.Expiry.Sub(clock.Now()) + time.Millisecond) // strictly past it
 
 	rt, err := s.Decide(ctx, thread.Approve(call.ID))
 	if !errors.Is(err, thread.ErrExpired) {
@@ -121,12 +124,15 @@ func TestSendOverExpiredBoundaryResumes(t *testing.T) {
 		wefttest.Say("expired noted"),
 		wefttest.Say("follow-up answered"),
 	)
-	s, err := thread.Create(ctx, thread.Memory(), agent, thread.RequestExpiry(20*time.Millisecond))
+	// The session's clock moves only when the test moves it: the request
+	// cannot lapse before the test has read it, however loaded the host.
+	clock := newSentinelClock()
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.Clock(clock.Now), thread.RequestExpiry(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, call := parkTurn(t, s, ctx)
-	time.Sleep(time.Until(s.Pending()[0].Expiry) + 5*time.Millisecond)
+	clock.Advance(s.Pending()[0].Expiry.Sub(clock.Now()) + time.Millisecond) // strictly past it
 
 	follow, err := s.Send(ctx, core.User("anything else?"))
 	if err != nil {

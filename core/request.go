@@ -523,14 +523,21 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 	// The memo compares tool pointers. Any PrepareStep deep-clones the
 	// tools every step (loop.go), so under one the catalog is re-hashed
 	// at every recorded step: the hash is unchanged, only the cost is
-	// paid again.
+	// paid again. The memo keeps its own copy of the slice it hashed:
+	// req.Tools is the step's dispatch snapshot (the model is handed a
+	// clone of it, loop.go's modelRequest), but a PrepareStep may hand
+	// back a slice it keeps and later rewrites in place, and a memo
+	// sharing that backing array would compare equal to its rewrite
+	// and keep a stale catalog hash. (0.18.0 kept the model's slice:
+	// a model reassigning an element re-hashed the next step, or kept
+	// a stale hash.)
 	if !r.catalogHashed || !slices.Equal(req.Tools, r.lastTools) {
 		h, err := catalogHash(req.Tools)
 		if err != nil {
 			r.debug(mctx, step, "tools", err)
 			return nil
 		}
-		r.lastTools, r.lastCatalog, r.catalogHashed = req.Tools, h, true
+		r.lastTools, r.lastCatalog, r.catalogHashed = slices.Clone(req.Tools), h, true
 	}
 	catalog := r.lastCatalog
 

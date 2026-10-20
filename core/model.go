@@ -153,7 +153,13 @@ type RequestParams struct {
 // Messages and Tools slices and of each message's Content slice, so
 // appending to them or reassigning their elements — a message, a part,
 // a tool — cannot reach the run's transcript, what the step
-// dispatches, or the agent. The values inside remain shared — the
+// dispatches, or the agent. The model's request is its own copy of
+// the step's: the loop dispatches from (and records) a tool slice the
+// model is never handed, with or without a PrepareStep chain, and
+// Params' values are copied too, so a write through a knob's pointer
+// or into Stop reaches neither the agent's or the run option's
+// Params, the caller's variables behind them, nor a later step or
+// attempt record. The values inside remain shared — the
 // bytes behind a part (a tool call's Args, a file's Data), and ToolDef
 // fields frozen at construction — so implementations must still not
 // modify them, and must clone anything they retain beyond the call.

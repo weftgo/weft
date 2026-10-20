@@ -81,9 +81,12 @@ func UsageLimit(max Usage) Option { return core.UsageLimit(max) }
 // a ToolDef it adds can. PromptSnippets are composed after it, from the
 // tools it returns, so removing a tool removes its snippet without the
 // function having to know snippets exist. The request is a copy the
-// function may mutate freely: message parts, argument bytes, and tool
-// definitions are cloned before the chain runs, so in-place writes
-// reach neither the transcript nor the agent's frozen registry. The
+// function may mutate freely: message parts, argument bytes, tool
+// definitions, and the values behind Params' pointers and its Stop
+// slice are cloned before the chain runs, so in-place writes reach
+// neither the transcript, the agent's frozen registry, nor the
+// agent's (or a run option's) Params — every step starts from the
+// values as set. The
 // transcript in RunResult is never affected; only the request is. It
 // runs before the model seam, so WrapModel middleware sees the
 // prepared request. Several PrepareStep options run in order, each
@@ -1018,7 +1021,13 @@ type RequestParams = core.RequestParams
 // Messages and Tools slices and of each message's Content slice, so
 // appending to them or reassigning their elements — a message, a part,
 // a tool — cannot reach the run's transcript, what the step
-// dispatches, or the agent. The values inside remain shared — the
+// dispatches, or the agent. The model's request is its own copy of
+// the step's: the loop dispatches from (and records) a tool slice the
+// model is never handed, with or without a PrepareStep chain, and
+// Params' values are copied too, so a write through a knob's pointer
+// or into Stop reaches neither the agent's or the run option's
+// Params, the caller's variables behind them, nor a later step or
+// attempt record. The values inside remain shared — the
 // bytes behind a part (a tool call's Args, a file's Data), and ToolDef
 // fields frozen at construction — so implementations must still not
 // modify them, and must clone anything they retain beyond the call.
@@ -1160,7 +1169,10 @@ func OutputOf[Out any](res *RunResult) (Out, error) { return core.OutputOf[Out](
 // not yet present stay zero, partials only grow (a later partial never
 // holds fewer fields or array elements than an earlier one: a value
 // cut mid-token, an open array's element still being written, is
-// dropped back to where it began, never further), a garbage mid-stream
+// dropped back to where it began, never further; a string only grows
+// by appending — a dangling escape, a rune cut mid-sequence or a high
+// surrogate awaiting its pair is held back until it completes, never
+// shown as a backslash or U+FFFD first), a garbage mid-stream
 // prefix keeps the last good partial, and errors surface only at
 // Result, which follows
 // the OutputOf rule (the last submit_output call with a non-error

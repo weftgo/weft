@@ -160,9 +160,12 @@ func (o prepareStepOption) apply(a *Agent) {
 // a ToolDef it adds can. PromptSnippets are composed after it, from the
 // tools it returns, so removing a tool removes its snippet without the
 // function having to know snippets exist. The request is a copy the
-// function may mutate freely: message parts, argument bytes, and tool
-// definitions are cloned before the chain runs, so in-place writes
-// reach neither the transcript nor the agent's frozen registry. The
+// function may mutate freely: message parts, argument bytes, tool
+// definitions, and the values behind Params' pointers and its Stop
+// slice are cloned before the chain runs, so in-place writes reach
+// neither the transcript, the agent's frozen registry, nor the
+// agent's (or a run option's) Params — every step starts from the
+// values as set. The
 // transcript in RunResult is never affected; only the request is. It
 // runs before the model seam, so WrapModel middleware sees the
 // prepared request. Several PrepareStep options run in order, each

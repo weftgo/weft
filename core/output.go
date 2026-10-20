@@ -166,7 +166,10 @@ func OutputOf[Out any](res *RunResult) (Out, error) {
 // not yet present stay zero, partials only grow (a later partial never
 // holds fewer fields or array elements than an earlier one: a value
 // cut mid-token, an open array's element still being written, is
-// dropped back to where it began, never further), a garbage mid-stream
+// dropped back to where it began, never further; a string only grows
+// by appending — a dangling escape, a rune cut mid-sequence or a high
+// surrogate awaiting its pair is held back until it completes, never
+// shown as a backslash or U+FFFD first), a garbage mid-stream
 // prefix keeps the last good partial, and errors surface only at
 // Result, which follows
 // the OutputOf rule (the last submit_output call with a non-error

@@ -453,10 +453,12 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		}
 		emit(StepStart{RunID: cfg.id, Index: step})
 
+		// req is the loop's own request for this step: what it records
+		// and dispatches against. The model is handed its own copy at
+		// the seam (modelRequest, below).
 		req := ModelRequest{
-			System:   cfg.effectiveSystem(a.system),
-			Messages: requestMessages(res.Messages), // adapters cannot reach the run's transcript
-			Tools:    slices.Clone(tools),           // nor the agent's tool list
+			System: cfg.effectiveSystem(a.system),
+			Tools:  tools,
 			// A run-level Thinking option overrides the agent's default
 			// for this run alone (the thinkingOption applies to both);
 			// so do the dual Instructions/MaxSteps/Parallelism.
@@ -464,28 +466,38 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			Thinking:        cfg.effectiveThinking(a.thinking),
 			// The same dual-option rule for a forced tool choice.
 			ToolChoice: cfg.effectiveToolChoice(a.toolChoice),
-			// And for per-request sampling knobs.
+			// And for per-request sampling knobs: the agent's (or the
+			// run option's) own values, never written through — the
+			// chain and the model each get copies (cloneParams).
 			Params: cfg.effectiveParams(a.params),
 		}
+		// The chain's result is compared (prepared[], below) against
+		// these values: before keeps the step's own Params pointers,
+		// which neither the chain nor the model can write through.
+		before := req
 		// PrepareStep functions are arbitrary user code, and the request
 		// they see promises they may mutate it freely (ADR 0006
-		// amendment): messages and tool definitions are deep-copied at
-		// that boundary, so nothing a function writes in place — a
-		// dropped part, re-formed argument bytes, a rewritten
-		// description — reaches the run's transcript or the agent's
-		// frozen registry. The model seam keeps the lighter slice
-		// copies (requestMessages): adapters hold the read-only request
-		// contract for the payload bytes inside parts.
+		// amendment): messages, tool definitions and the sampling
+		// knobs' values are deep-copied at that boundary, so nothing a
+		// function writes in place — a dropped part, re-formed argument
+		// bytes, a rewritten description, *req.Params.Temperature —
+		// reaches the run's transcript, the agent's frozen registry or
+		// the agent's (or the caller's) Params. The model seam keeps
+		// the lighter slice copies (requestMessages, modelRequest):
+		// adapters hold the read-only request contract for the payload
+		// bytes inside parts.
 		if a.prepare != nil {
 			req.Messages = cloneMessages(res.Messages)
-			req.Tools = cloneTools(req.Tools)
+			req.Tools = cloneTools(tools)
+			req.Params = cloneParams(req.Params)
+		} else {
+			req.Messages = requestMessages(res.Messages) // adapters cannot reach the run's transcript
 		}
 		// The one loop knob: PrepareStep rewrites the request before the
 		// model seam, on the raw instructions; what its chain returns is
 		// what the step both advertises and dispatches against, so the
 		// one-snapshot-per-step invariant holds by construction (ADR
 		// 0006 amendment).
-		before := req
 		for _, fn := range a.prepare {
 			var err error
 			req, err = fn(ctx, step, req)
@@ -501,16 +513,15 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// untouched.
 		inputs := stepInputs{model: model, before: before, tools: tools, prepared: a.prepare != nil}
 		if a.prepare != nil {
-			// The chain's tools are the step's snapshot; the model is
-			// handed a copy of the slice, so a model or middleware that
-			// reassigns an element (ModelRequest is the model's copy)
-			// never changes what this step dispatches. Without a chain
-			// tools is already private: req.Tools was cloned from it.
+			// The chain's tools are the step's snapshot (without a
+			// chain, the fetched one is). Either way the model is handed
+			// a copy of the slice (modelRequest), so a model or
+			// middleware that reassigns an element never changes what
+			// this step dispatches or what the recorder remembers.
 			tools = req.Tools
 			if err := validateSnapshot(tools); err != nil {
 				return fail(step, err)
 			}
-			req.Tools = slices.Clone(tools)
 		}
 		// A forced choice runs against the same snapshot the step
 		// advertises and dispatches over — validated after the
@@ -564,6 +575,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// first TextDelta/ToolArgsDelta, one at the end, kept on the
 		// step's reporter (already allocated, so timing costs no
 		// allocation) — and nothing the loop decides on.
+		mreq := modelRequest(req)
 		consume := func() (err error) {
 			rep.start = time.Now()
 			defer func() {
@@ -571,7 +583,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 					err = fmt.Errorf("%w: model stream panicked: %v", ErrModelContract, p)
 				}
 			}()
-			for mev, serr := range model.Stream(mctx, req) {
+			for mev, serr := range model.Stream(mctx, mreq) {
 				if serr != nil {
 					return fmt.Errorf("model stream: %w", serr)
 				}
@@ -902,6 +914,53 @@ func snapshotPending(pending []ToolCallPart) []ToolCallPart {
 		out[i] = c
 	}
 	return out
+}
+
+// modelRequest is the copy of the step's request the model seam is
+// handed (ModelRequest's godoc): its own Tools slice and its own
+// Params values, so a model or middleware that reassigns a tool, or
+// writes through a sampling knob's pointer, reaches neither what the
+// step dispatches, what the request recorder remembers and re-emits
+// for a retried attempt, nor the agent's or the caller's Params.
+// Messages are already the model's own (requestMessages, or the
+// PrepareStep chain's result). One allocation for the slice, at most
+// two more when knobs are set.
+func modelRequest(req ModelRequest) ModelRequest {
+	req.Tools = slices.Clone(req.Tools)
+	req.Params = cloneParams(req.Params)
+	return req
+}
+
+// cloneParams copies p's pointed-to values and its Stop slice, so a
+// write through the copy's pointers never reaches p's: the pointer
+// knobs share one fresh box (one allocation, none when all are nil)
+// and Stop keeps its nil-ness. RequestParams holds no other reference.
+func cloneParams(p RequestParams) RequestParams {
+	if p.Temperature != nil || p.TopP != nil || p.MaxTokens != nil || p.Seed != nil {
+		box := new(struct {
+			temperature, topP float64
+			maxTokens         int
+			seed              int64
+		})
+		if p.Temperature != nil {
+			box.temperature = *p.Temperature
+			p.Temperature = &box.temperature
+		}
+		if p.TopP != nil {
+			box.topP = *p.TopP
+			p.TopP = &box.topP
+		}
+		if p.MaxTokens != nil {
+			box.maxTokens = *p.MaxTokens
+			p.MaxTokens = &box.maxTokens
+		}
+		if p.Seed != nil {
+			box.seed = *p.Seed
+			p.Seed = &box.seed
+		}
+	}
+	p.Stop = slices.Clone(p.Stop)
+	return p
 }
 
 // requestMessages is the model seam's copy of the transcript: a fresh

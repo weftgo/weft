@@ -2,6 +2,8 @@ package core
 
 import (
 	"encoding/json"
+	"math/rand/v2"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -30,7 +32,19 @@ func TestClosedPrefix(t *testing.T) {
 		{`[1,2,`, `[1,2]`},
 		{`[1,2`, `[1,2]`},
 		{`{"a":"x\\"`, `{"a":"x\\"}`}, // dangling escape closed before the quote
-		{`{"a":1}}`, `{"a":1}`},       // garbage after the close: keep the valid prefix
+		// A string's tail that a later delta would take back is held
+		// back instead (0.18.1: each flickered — a backslash, then the
+		// escape it began; U+FFFD, then the rune).
+		{`{"a":"x\`, `{"a":"x"}`},       // a lone backslash: its escape has not arrived
+		{`{"a":"x\\\`, `{"a":"x\\"}`},   // an odd run: the last one dangles
+		{`{"a":"x\\`, `{"a":"x\\"}`},    // an even run: one whole escaped backslash
+		{"{\"a\":\"x\xc3", `{"a":"x"}`}, // a rune cut mid-sequence
+		{"{\"a\":\"x\xf0\x9f\x8e", `{"a":"x"}`},
+		{`{"a":"x\ud83d`, `{"a":"x"}`}, // a high surrogate waits for its pair
+		{`{"a":"x\ud83d\`, `{"a":"x"}`},
+		{`{"a":"x\ud83d\ude`, `{"a":"x"}`},
+		{`{"a":"x😀`, `{"a":"x😀"}`},
+		{`{"a":1}}`, `{"a":1}`}, // garbage after the close: keep the valid prefix
 		{`not json`, ``},
 		{`12`, ``}, // scalars never carry tool args
 	}
@@ -46,8 +60,9 @@ func TestClosedPrefix(t *testing.T) {
 // truncation never decodes to more populated fields than the closed
 // prefix of the whole string — the decoder's filling-form promise
 // (TODO §2a.6) — and, from one truncation to the next, never loses a
-// field or an array element the shorter one had: the decoder's
-// partials are monotonic (0.18.1), whatever the chunking.
+// field or an array element the shorter one had, never changes a
+// scalar's type, and grows a string only by prefix (grownFrom): the
+// decoder's partials are monotonic (0.18.1), whatever the chunking.
 func FuzzPartialJSON(f *testing.F) {
 	for _, seed := range []string{
 		`{"name":"Ada","count":4}`,
@@ -57,6 +72,12 @@ func FuzzPartialJSON(f *testing.F) {
 		`{"unicode":"héllo","emoji":"🎮"}`,
 		`{"destination":"Lisbon","nights":3,"legs":[{"from":"AMS","to":"LIS","flight":"KL1691"},{"from":"LIS","to":"AMS","flight":"KL1692"}]}`,
 		`{"l":[true,false,null,-1.5e+3,"é"],"n":[[1],[{"k":[]}]]}`,
+		// Strings whose cuts end in a dangling escape, a cut rune or
+		// an unpaired high surrogate (0.18.1).
+		`{"a":"x\ny\\z\"wé😀","b":[true,false,null],"c":-1.5e+3}`,
+		`{"s":"\\\\\\","t":"a\\"}`,
+		`{"pair":"😀 é","k🎮":1}`,
+		`{"r":"é😀🎮","l":["ü","\/"]}`,
 	} {
 		f.Add(seed)
 	}
@@ -186,8 +207,10 @@ func subsetOf(part, whole any) bool {
 
 // grownFrom reports whether next keeps everything prev had: every key
 // of an object (recursively grown), every element of an array (the
-// array no shorter, each element grown). Scalars may change — a string
-// or number still being written grows, a dangling key's null fills.
+// array no shorter, each element grown) and every scalar's type: a
+// string grows only by prefix, a bool never changes, a number stays a
+// number (its value may grow, 1 → 1e5), a dangling key's null fills
+// with anything (0.18.1: strings were not held to a prefix).
 // (contract_test.go's twin holds the public decoder to the same rule.)
 func grownFrom(prev, next any) bool {
 	switch p := prev.(type) {
@@ -214,7 +237,97 @@ func grownFrom(prev, next any) bool {
 			}
 		}
 		return true
+	case string:
+		// A string only grows by appending: never a byte that a
+		// later delta takes back (a dangling escape, a cut rune).
+		n, ok := next.(string)
+		return ok && strings.HasPrefix(n, p)
+	case bool:
+		return next == p
+	case float64:
+		// A number still being written may change value (1 → 1e5),
+		// never type.
+		_, ok := next.(float64)
+		return ok
 	default:
-		return true
+		return true // null: a dangling key fills with any value
 	}
+}
+
+// Every truncation of a generated document closes to a partial grown
+// from the previous one by grownFrom's strict rule — strings only by
+// prefix — whatever its escapes, multi-byte runes and nesting
+// (0.18.1: a lone trailing backslash closed as an escaped one, a cut
+// rune as U+FFFD, a lone high surrogate as U+FFFD, each taken back by
+// the next byte). FuzzPartialJSON holds the same rule over arbitrary
+// documents; this is its deterministic, always-run sweep.
+func TestClosedPrefixStringsGrowByPrefix(t *testing.T) {
+	r := rand.New(rand.NewPCG(7, 9))
+	n := 20000
+	if testing.Short() {
+		n = 2000
+	}
+	for range n {
+		doc := `{"root":` + genPartialDoc(r, 0) + "}"
+		if !json.Valid([]byte(doc)) {
+			t.Fatalf("generator wrote invalid JSON %q", doc)
+		}
+		var prev any
+		for i := 0; i <= len(doc); i++ {
+			part := closedPrefix(doc[:i])
+			if part == "" {
+				continue
+			}
+			var v any
+			if err := json.Unmarshal([]byte(part), &v); err != nil {
+				t.Fatalf("prefix %q of %q closes to undecodable %q", doc[:i], doc, part)
+			}
+			if prev != nil && !grownFrom(prev, v) {
+				t.Fatalf("prefix %q of %q took back what an earlier one had:\n%#v\nthen\n%#v", doc[:i], doc, prev, v)
+			}
+			prev = v
+		}
+	}
+}
+
+// genPartialDoc writes a random JSON value, whitespace and all, its
+// strings built from escapes, multi-byte runes and surrogate pairs.
+func genPartialDoc(r *rand.Rand, depth int) string {
+	k := r.IntN(8)
+	if depth > 5 {
+		k = r.IntN(4)
+	}
+	ws := func() string { return []string{"", "", "", " ", "\n  "}[r.IntN(5)] }
+	switch k {
+	case 0:
+		return []string{"true", "false", "null"}[r.IntN(3)]
+	case 1:
+		return []string{"-1", "0", "12.5", "-3e+2", "1E-7", "123456", "-0.0e0"}[r.IntN(7)]
+	case 2, 3:
+		return genPartialString(r)
+	case 4, 5:
+		var parts []string
+		for range r.IntN(4) {
+			parts = append(parts, ws()+genPartialDoc(r, depth+1)+ws())
+		}
+		return "[" + strings.Join(parts, ",") + "]"
+	default:
+		var parts []string
+		for i := range r.IntN(4) {
+			key := `"k` + strconv.Itoa(i) + genPartialString(r)[1:]
+			parts = append(parts, ws()+key+ws()+":"+ws()+genPartialDoc(r, depth+1)+ws())
+		}
+		return "{" + strings.Join(parts, ",") + "}"
+	}
+}
+
+func genPartialString(r *rand.Rand) string {
+	pieces := []string{"a", "bc", `\n`, `\\`, `\"`, `é`, `😀`, "é", "😀", "🎮", `\/`, ",", ":", "{", "]"}
+	var b strings.Builder
+	b.WriteByte('"')
+	for range r.IntN(5) {
+		b.WriteString(pieces[r.IntN(len(pieces))])
+	}
+	b.WriteByte('"')
+	return b.String()
 }

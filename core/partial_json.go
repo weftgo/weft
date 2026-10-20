@@ -2,7 +2,9 @@ package core
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/weftgo/weft/core/internal/jsonclose"
 )
@@ -22,6 +24,10 @@ import (
 //     the delimiter before it, where a dangling key closes as null —
 //     closing the token would fabricate one the model has not sent;
 //   - a string cut inside a \u escape: the escape is dropped;
+//   - a string whose tail the next bytes would take back — a lone
+//     backslash, a rune cut mid-sequence, a high surrogate before its
+//     pair: the tail is held back first (holdStringTail), so a string
+//     only grows by appending;
 //   - anything else (a key cut mid-string, a key with no colon yet):
 //     the innermost member is dropped, back to the last comma or open
 //     bracket at any depth — the top-level opener excepted: a first
@@ -36,6 +42,7 @@ func closedPrefix(s string) string {
 	if s == "" || s[0] != '{' && s[0] != '[' {
 		return ""
 	}
+	s = holdStringTail(s)
 	if out, ok := jsonclose.Close(s); ok {
 		return out
 	}
@@ -100,6 +107,66 @@ func closedPrefix(s string) string {
 	return out
 }
 
+// holdStringTail drops, from the end of an open string, what the next
+// bytes would take back: a dangling escape (a lone backslash closes as
+// an escaped one, "x\\", then the escape arrives, "x\n"), an
+// incomplete UTF-8 sequence (decoded as U+FFFD until its rune
+// completes) and a \uD800–\uDBFF escape still waiting for its low
+// surrogate (U+FFFD until the pair completes). Held back, a streamed
+// string only grows by appending. Cheap on the common path: the
+// structure is scanned only when the tail could be one of those.
+// jsonclose itself keeps closing such tails (mw.RepairJSON wants a
+// whole document, not a partial one).
+func holdStringTail(s string) string {
+	for i := 0; i < 3; i++ { // an escape, its surrogate, a cut rune: at most three cuts
+		n := len(s)
+		cut := n - incompleteRune(s)
+		if cut == n && strings.LastIndexByte(s[max(0, n-6):], '\\') < 0 {
+			return s
+		}
+		sc := scanTail(s)
+		if !sc.inStr || sc.end < n {
+			return s
+		}
+		switch {
+		case sc.esc >= 0:
+			cut = sc.esc
+		case cut < n: // the cut rune goes
+		case sc.last >= 0 && sc.last == n-6 && isHighSurrogate(s[n-4:]):
+			cut = sc.last
+		default:
+			return s
+		}
+		s = s[:cut]
+	}
+	return s
+}
+
+// incompleteRune returns the length of the incomplete UTF-8 sequence
+// that ends s, 0 when s ends on a rune boundary.
+func incompleteRune(s string) int {
+	for k := 1; k <= utf8.UTFMax-1 && k <= len(s); k++ {
+		c := s[len(s)-k]
+		if c < utf8.RuneSelf {
+			return 0
+		}
+		if utf8.RuneStart(c) {
+			if utf8.FullRuneInString(s[len(s)-k:]) {
+				return 0
+			}
+			return k
+		}
+	}
+	return 0
+}
+
+// isHighSurrogate reports whether hex, four hex digits, names a high
+// surrogate (U+D800–U+DBFF).
+func isHighSurrogate(hex string) bool {
+	v, err := strconv.ParseUint(hex, 16, 16)
+	return err == nil && v >= 0xD800 && v <= 0xDBFF
+}
+
 // closeTrimmed closes p with its trailing whitespace dropped.
 func closeTrimmed(p string) (string, bool) {
 	return jsonclose.Close(strings.TrimRight(p, " \t\r\n"))
@@ -114,6 +181,7 @@ type tailScan struct {
 	end    int   // just past the top-level value when it closed, else len(s)
 	inStr  bool  // s[:end] ends inside a string
 	esc    int   // inside a string: where a trailing escape began, else -1
+	last   int   // inside a string: where its latest escape began, else -1
 	tok    int   // outside a string: where a trailing bare token began, else -1
 	delims []int // commas and open brackets outside strings, in order
 }
@@ -122,7 +190,7 @@ type tailScan struct {
 // (when it did), what its tail is cut in — a string's escape, a bare
 // token — and where every member delimiter sits.
 func scanTail(s string) tailScan {
-	sc := tailScan{end: len(s), esc: -1, tok: -1}
+	sc := tailScan{end: len(s), esc: -1, last: -1, tok: -1}
 	depth := 0
 	for i := 0; i < len(s); i++ {
 		c := s[i]
@@ -134,7 +202,7 @@ func scanTail(s string) tailScan {
 					sc.esc = -1
 				}
 			case c == '\\':
-				sc.esc = i
+				sc.esc, sc.last = i, i
 			case c == '"':
 				sc.inStr = false
 			}
@@ -142,7 +210,7 @@ func scanTail(s string) tailScan {
 		}
 		switch {
 		case c == '"':
-			sc.inStr, sc.tok = true, -1
+			sc.inStr, sc.tok, sc.last = true, -1, -1
 		case c == '{' || c == '[':
 			depth++
 			sc.delims = append(sc.delims, i)

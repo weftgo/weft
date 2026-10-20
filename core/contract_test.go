@@ -7092,8 +7092,10 @@ func TestModelRequestMutationCannotReachTheRun(t *testing.T) {
 
 // grownFrom reports whether next keeps everything prev had: every key
 // of an object (recursively grown), every element of an array (the
-// array no shorter, each element grown). Scalars may change — a string
-// or number still being written grows, a dangling key's null fills.
+// array no shorter, each element grown) and every scalar's type: a
+// string grows only by prefix, a bool never changes, a number stays a
+// number (its value may grow, 1 → 1e5), a dangling key's null fills
+// with anything (0.18.1: strings were not held to a prefix).
 func grownFrom(prev, next any) bool {
 	switch p := prev.(type) {
 	case map[string]any:
@@ -7119,8 +7121,20 @@ func grownFrom(prev, next any) bool {
 			}
 		}
 		return true
+	case string:
+		// A string only grows by appending: never a byte that a
+		// later delta takes back (a dangling escape, a cut rune).
+		n, ok := next.(string)
+		return ok && strings.HasPrefix(n, p)
+	case bool:
+		return next == p
+	case float64:
+		// A number still being written may change value (1 → 1e5),
+		// never type.
+		_, ok := next.(float64)
+		return ok
 	default:
-		return true
+		return true // null: a dangling key fills with any value
 	}
 }
 
@@ -7137,6 +7151,10 @@ func TestOutputDecoderPartialsNeverShrink(t *testing.T) {
 		`{"items":[1,2,true,false,null,-12.5e+3,"x\"y\u00e9"],"ok":true,"n":{"deep":[[1,2],[3,{"k":null}]]}}`,
 		`{"tags":["a","b","c"],"score":0.25,"nested":{"list":[{"id":1,"done":false},{"id":22,"done":true}]}}`,
 		`{"emoji":"🎮 héllo","esc":"\\\n\t","arr":[[],{},[{}]],"last":1e10}`,
+		// 0.18.1: a string's partial only grows by prefix — no
+		// backslash shown before its escape, no U+FFFD before its rune
+		// or its surrogate pair.
+		`{"path":"C:\\dir\\file \"q\"","pair":"\ud83d\ude00 \u00e9","runes":"日本語😀","ok":false}`,
 	}
 	check := func(t *testing.T, doc string, chunks []string) {
 		t.Helper()
@@ -7180,6 +7198,298 @@ func TestOutputDecoderPartialsNeverShrink(t *testing.T) {
 				i += n
 			}
 			check(t, doc, chunks)
+		}
+	}
+}
+
+// paramsFixture is a RequestParams with every knob set, from variables
+// the test keeps.
+type paramsFixture struct {
+	temp, topP float64
+	maxTokens  int
+	seed       int64
+	stop       []string
+}
+
+func newParamsFixture() *paramsFixture {
+	return &paramsFixture{temp: 0.2, topP: 0.3, maxTokens: 100, seed: 7, stop: []string{"END"}}
+}
+
+func (f *paramsFixture) params() core.RequestParams {
+	return core.RequestParams{Temperature: &f.temp, TopP: &f.topP, MaxTokens: &f.maxTokens, Seed: &f.seed, Stop: f.stop}
+}
+
+// paramsIntact reports whether p carries the fixture's original values.
+func paramsIntact(p core.RequestParams) bool {
+	return p.Temperature != nil && *p.Temperature == 0.2 && p.TopP != nil && *p.TopP == 0.3 &&
+		p.MaxTokens != nil && *p.MaxTokens == 100 && p.Seed != nil && *p.Seed == 7 &&
+		slices.Equal(p.Stop, []string{"END"})
+}
+
+// writeThroughParams writes through every reference p holds.
+func writeThroughParams(p core.RequestParams) {
+	if p.Temperature != nil {
+		*p.Temperature = 0.9
+	}
+	if p.TopP != nil {
+		*p.TopP = 0.99
+	}
+	if p.MaxTokens != nil {
+		*p.MaxTokens = 1
+	}
+	if p.Seed != nil {
+		*p.Seed = 99
+	}
+	if len(p.Stop) > 0 {
+		p.Stop[0] = "MUTATED"
+	}
+}
+
+// paramsWriter is a WrapModel middleware that checks the request's
+// Params with want, then writes through every pointer.
+func paramsWriter(t *testing.T, want func(core.RequestParams) bool) core.ModelMiddleware {
+	return func(next core.Model) core.Model {
+		return modelFunc(func(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+			if !want(req.Params) {
+				t.Errorf("the model was handed %s", fmtParams(req.Params))
+			}
+			writeThroughParams(req.Params)
+			return next.Stream(ctx, req)
+		})
+	}
+}
+
+type modelFunc func(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error]
+
+func (f modelFunc) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return f(ctx, req)
+}
+
+func fmtParams(p core.RequestParams) string {
+	deref := func(v any) string {
+		switch v := v.(type) {
+		case *float64:
+			if v != nil {
+				return fmt.Sprint(*v)
+			}
+		case *int:
+			if v != nil {
+				return fmt.Sprint(*v)
+			}
+		case *int64:
+			if v != nil {
+				return fmt.Sprint(*v)
+			}
+		}
+		return "nil"
+	}
+	return fmt.Sprintf("{temperature %s top_p %s max_tokens %s seed %s stop %q}",
+		deref(p.Temperature), deref(p.TopP), deref(p.MaxTokens), deref(p.Seed), p.Stop)
+}
+
+// RequestParams' knobs are pointers and a slice, and the request is "a
+// copy the function may mutate freely" (PrepareStep's godoc) and the
+// model's own copy (ModelRequest's): neither a PrepareStep nor a
+// WrapModel middleware writing through req.Params reaches the agent's
+// Params, a run option's, or the caller's variables behind them — every
+// later step and run sees the values as set — and the request record's
+// prepared[] names params when the chain wrote through them. 0.18.0
+// handed both seams the agent's own pointers: a PrepareStep setting
+// *req.Params.Temperature = 0.9 changed the agent's default for every
+// later step and run (and the caller's variable), prepared[] missed it
+// (before and after shared the pointer), and a retried attempt's
+// request record carried what the model wrote.
+func TestParamsNeverWrittenThrough(t *testing.T) {
+	t.Run("prepare_step", func(t *testing.T) {
+		agentP, runP := newParamsFixture(), newParamsFixture()
+		lp := newRecLogProvider()
+		var steps atomic.Int32
+		agt := core.New(alternatingModel{}, allocEcho(),
+			core.Params(agentP.params()),
+			core.LoggerProvider(lp),
+			core.PrepareStep(func(_ context.Context, step int, req core.ModelRequest) (core.ModelRequest, error) {
+				steps.Add(1)
+				if !paramsIntact(req.Params) {
+					t.Errorf("step %d: PrepareStep was handed %s", step, fmtParams(req.Params))
+				}
+				writeThroughParams(req.Params)
+				return req, nil
+			}),
+			core.WrapModel(paramsWriter(t, func(p core.RequestParams) bool {
+				// The model is handed what PrepareStep wrote.
+				return p.Temperature != nil && *p.Temperature == 0.9 && slices.Equal(p.Stop, []string{"MUTATED"})
+			})))
+		for i := range 3 {
+			opts := []core.RunOption{core.Prompt("hi")}
+			if i == 2 {
+				opts = append(opts, core.Params(runP.params()))
+			}
+			if _, err := agt.Generate(context.Background(), opts...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if steps.Load() != 6 {
+			t.Fatalf("PrepareStep ran %d times, want 6", steps.Load())
+		}
+		for name, f := range map[string]*paramsFixture{"agent": agentP, "run option": runP} {
+			if !paramsIntact(f.params()) {
+				t.Errorf("the %s's variables were written through: %s", name, fmtParams(f.params()))
+			}
+		}
+		reqs := lp.ofKind(t, "request")
+		if len(reqs) != 6 {
+			t.Fatalf("request records = %d, want 6", len(reqs))
+		}
+		for i, r := range reqs {
+			var b struct {
+				Prepared []string `json:"prepared"`
+				Params   struct {
+					Temperature *float64 `json:"temperature"`
+					Stop        []string `json:"stop"`
+				} `json:"params"`
+			}
+			if err := json.Unmarshal([]byte(r.body), &b); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(b.Prepared, "params") {
+				t.Errorf("request %d prepared = %q, want params named", i, b.Prepared)
+			}
+			if b.Params.Temperature == nil || *b.Params.Temperature != 0.9 || !slices.Equal(b.Params.Stop, []string{"MUTATED"}) {
+				t.Errorf("request %d params = %+v, want what PrepareStep wrote", i, b.Params)
+			}
+		}
+	})
+	t.Run("wrap_model", func(t *testing.T) {
+		agentP := newParamsFixture()
+		lp := newRecLogProvider()
+		// Each step's first attempt fails; mw.Retry, inside the writer,
+		// re-sends it, so a second request record is emitted after the
+		// writer wrote.
+		agt := core.New(wefttest.Script(
+			wefttest.Fail(core.ErrStreamIdle), wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "echo", Args: `{"msg":"x"}`}),
+			wefttest.Fail(core.ErrStreamIdle), wefttest.Say("done"),
+			wefttest.Fail(core.ErrStreamIdle), wefttest.Say("again"),
+		), allocEcho(), core.Params(agentP.params()), core.LoggerProvider(lp),
+			core.WrapModel(paramsWriter(t, paramsIntact), mw.Retry(mw.BaseDelay(0))))
+		for range 2 {
+			if _, err := agt.Generate(context.Background(), core.Prompt("hi")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !paramsIntact(agentP.params()) {
+			t.Errorf("the agent's variables were written through: %s", fmtParams(agentP.params()))
+		}
+		reqs := lp.ofKind(t, "request")
+		if len(reqs) != 6 {
+			t.Fatalf("request records = %d, want 6 (3 steps × 2 attempts)", len(reqs))
+		}
+		for i, r := range reqs {
+			b := decodeRequest(t, r)
+			p := core.RequestParams{Temperature: b.Params.Temperature, TopP: b.Params.TopP, MaxTokens: b.Params.MaxTokens, Seed: b.Params.Seed, Stop: b.Params.Stop}
+			if !paramsIntact(p) {
+				t.Errorf("request record %d (step %d attempt %d) params = %s, want the agent's", i, b.Step, b.Attempt, fmtParams(p))
+			}
+		}
+	})
+	t.Run("concurrent", func(t *testing.T) {
+		// Concurrent runs of one agent, both seams writing through:
+		// -race finds no shared write, and every run sees the values.
+		agentP := newParamsFixture()
+		agt := core.New(alternatingModel{}, allocEcho(),
+			core.Params(agentP.params()),
+			core.PrepareStep(func(_ context.Context, step int, req core.ModelRequest) (core.ModelRequest, error) {
+				if !paramsIntact(req.Params) {
+					t.Errorf("step %d: PrepareStep was handed %s", step, fmtParams(req.Params))
+				}
+				writeThroughParams(req.Params)
+				return req, nil
+			}),
+			core.WrapModel(paramsWriter(t, func(p core.RequestParams) bool {
+				return p.Temperature != nil && *p.Temperature == 0.9 && slices.Equal(p.Stop, []string{"MUTATED"})
+			})))
+		plain := core.New(alternatingModel{}, allocEcho(), core.Params(agentP.params()),
+			core.WrapModel(paramsWriter(t, paramsIntact)))
+		var wg sync.WaitGroup
+		for i := range 16 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				a := agt
+				if i%2 == 1 {
+					a = plain
+				}
+				for range 4 {
+					if _, err := a.Generate(context.Background(), core.Prompt("hi")); err != nil {
+						t.Error(err)
+						return
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		if !paramsIntact(agentP.params()) {
+			t.Errorf("the agent's variables were written through: %s", fmtParams(agentP.params()))
+		}
+	})
+}
+
+// RequestParams holds exactly the references cloneParams copies (two
+// float pointers, an int and an int64 pointer, a string slice): a knob
+// added to it must be added to the loop's copy too, or a write through
+// it would reach the agent's values again.
+func TestRequestParamsFieldsAreCopied(t *testing.T) {
+	var got []string
+	rt := reflect.TypeFor[core.RequestParams]()
+	for i := range rt.NumField() {
+		got = append(got, rt.Field(i).Name+" "+rt.Field(i).Type.String())
+	}
+	want := []string{"Temperature *float64", "TopP *float64", "MaxTokens *int", "Stop []string", "Seed *int64"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("RequestParams fields = %q, want %q: extend loop.go's cloneParams (and this list)", got, want)
+	}
+}
+
+// The request recorder's catalog memo is its own: a model that
+// reassigns an element of its request's Tools slice changes neither
+// what the step dispatches nor the catalog hash a later step records.
+// 0.18.0 kept the model's slice as the memo, so a model swapping in the
+// next step's tool made the memo equal that step's catalog: the step
+// recorded the previous catalog's hash, and its own tools record was
+// never written.
+func TestRequestRecorderCatalogMemoIsItsOwn(t *testing.T) {
+	lp := newRecLogProvider()
+	echo, extra := reqEcho("echo"), reqEcho("extra")
+	var fetches atomic.Int64
+	src := core.ToolSource(func() []*core.ToolDef {
+		if fetches.Add(1) == 1 {
+			return []*core.ToolDef{echo}
+		}
+		return []*core.ToolDef{extra}
+	})
+	var calls atomic.Int64
+	swap := func(next core.Model) core.Model {
+		return modelFunc(func(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+			if calls.Add(1) == 1 && len(req.Tools) == 1 {
+				req.Tools[0] = extra
+			}
+			return next.Stream(ctx, req)
+		})
+	}
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "echo", Args: `{"msg":"x"}`}),
+		wefttest.Say("done"),
+	), src, core.LoggerProvider(lp), core.WrapModel(swap))
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	tools := lp.ofKind(t, "tools")
+	reqs := lp.ofKind(t, "request")
+	if len(tools) != 2 || len(reqs) != 2 {
+		t.Fatalf("tools records = %d, request records = %d, want 2 and 2", len(tools), len(reqs))
+	}
+	for i, r := range reqs {
+		if got, want := decodeRequest(t, r).Tools.CatalogHash, tools[i].attr("weft.catalog.hash"); got != want {
+			t.Errorf("request %d catalog hash = %q, want its own catalog's %q", i, got, want)
 		}
 	}
 }

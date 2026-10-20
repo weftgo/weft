@@ -647,7 +647,7 @@ export function ParkedCalls({
           {`${SUBAGENT_CALL} `}
           <Link
             {...runLink(doc.parent_run_id)}
-            className={THREAD_LINK}
+            className={`${THREAD_LINK} [overflow-wrap:anywhere]`}
             data-parent-turn={doc.parent_run_id}
           >
             {doc.parent_run_id}
@@ -674,7 +674,7 @@ export function ParkedCalls({
               {` ${POOL_CHILD_TURN} `}
               <Link
                 {...runLink(doc.parent_run_id)}
-                className={THREAD_LINK}
+                className={`${THREAD_LINK} [overflow-wrap:anywhere]`}
                 data-parent-turn={doc.parent_run_id}
               >
                 {doc.parent_run_id}

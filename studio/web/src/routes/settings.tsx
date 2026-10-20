@@ -1038,7 +1038,7 @@ function ContentFacts({ meta }: { meta: Meta }) {
             latest run{" "}
             <Link
               {...runLink(l.run_id)}
-              className="font-mono text-thread-ink hover:underline"
+              className="font-mono [overflow-wrap:anywhere] text-thread-ink hover:underline"
             >
               {l.run_id}
             </Link>

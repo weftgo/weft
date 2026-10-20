@@ -88,12 +88,26 @@ export const WHO_HOLE = {
 export const WHO_UNRECORDED = {
   reason:
     "who decided is not recorded yet: no stored turn resumed this run, and the decision names no who or key",
-  fix: "resume the run with weft.approval.actor set, or record with content on",
+  fix: "resume the run with weft.approval.actor set",
 }
+
+/** Who decided, on a decision mark a stored turn did resume (tN) but
+ * nothing names a decider for: the resume carries no
+ * weft.approval.actor, the record no who or key. */
+export const whoUnrecordedResumed = (turn: string) => ({
+  reason: `who decided is not recorded: the resuming turn ${turn} carries no weft.approval.actor and the decision names no who or key`,
+  fix: "decide with a who, or resume with weft.approval.actor set",
+})
+
+/** whoUnrecorded is the not_recorded who hole's words: the resumed
+ * kind when a stored turn (its tag given) resumed the run, else
+ * WHO_UNRECORDED's "not recorded yet". */
+export const whoUnrecorded = (resumedBy?: string) =>
+  resumedBy ? whoUnrecordedResumed(resumedBy) : WHO_UNRECORDED
 
 /** The hole a decision mark's who reads as when nothing names its
  * decider: hidden to a reader that may not read content, else
- * not_recorded (WHO_UNRECORDED) while no resume's actor is stored;
+ * not_recorded (whoUnrecorded: not yet, or resumed with no actor);
  * undefined when one is named (a resume's several deciders, actor_of
  * "resume", name the resume's, not a hole), when no person decided (a
  * grant, an approver, an expiry, an interrupt: via says what), or when the

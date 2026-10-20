@@ -19,7 +19,7 @@ import {
   usesWord,
 } from "@/lib/approvals-view"
 import type { DecisionRow, GrantRow } from "@/lib/approvals-view"
-import { WHO_HOLE, WHO_UNRECORDED } from "@/lib/decisions"
+import { WHO_HOLE } from "@/lib/decisions"
 import { absoluteTime } from "@/lib/format"
 import { runLink, sessionViewLink } from "@/lib/links"
 import { turnTag } from "@/lib/status"
@@ -178,7 +178,7 @@ function DecisionTr({
           <HoleBadge hole="hidden" reason={WHO_HOLE.reason} />
         ) : r.whoUnrecorded ? (
           <>
-            <HoleBadge hole="not_recorded" {...WHO_UNRECORDED} />
+            <HoleBadge hole="not_recorded" {...r.whoUnrecorded} />
             {r.who ? ` ${r.who}` : null}
           </>
         ) : (
@@ -233,7 +233,7 @@ function GrantTr({
       <td className="px-2 py-1 break-all">
         <Link
           {...sessionViewLink(sessionID, { mark: g.key })}
-          className={THREAD_LINK}
+          className={`${THREAD_LINK} [overflow-wrap:anywhere]`}
           title="open the mark on the timeline"
         >
           {g.id}

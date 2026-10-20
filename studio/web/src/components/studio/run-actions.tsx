@@ -209,7 +209,7 @@ export function DeleteRun({
           <div className="space-y-1 text-xs">
             <p>{w.children}</p>
             {doc.children.length > 0 ? (
-              <ul className="space-y-0.5 font-mono text-[11px] text-muted-foreground">
+              <ul className="space-y-0.5 font-mono text-[11px] [overflow-wrap:anywhere] text-muted-foreground">
                 {doc.children.map((c) => (
                   <li key={c.id} data-delete-child={c.id}>
                     {c.agent ? `${c.agent} · ` : ""}

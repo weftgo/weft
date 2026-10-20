@@ -8,6 +8,7 @@ import {
   act,
   cleanup,
   configure,
+  fireEvent,
   screen,
   waitFor,
 } from "@testing-library/react"
@@ -16,11 +17,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { RunRow, RunsPage } from "@/lib/api"
 import { SubagentBlock } from "@/components/studio/subagent-block"
+import {
+  RequestSection,
+  useRunRequests,
+} from "@/components/studio/step-request"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
   FakeStudio,
   golden,
   pagedEvents,
+  pagedRequests,
   transcriptOf,
 } from "@/test/fake-studio"
 import { renderWithRouter } from "@/test/render"
@@ -136,5 +142,97 @@ describe("SubagentBlock", () => {
         word
       )
     )
+  })
+
+  // P9-pre-web-fix4 F2: the child's inline request pane draws the same
+  // step numbers as the parent's; its tab ids must not repeat them, and
+  // each tab and tabpanel must name its partner inside its own run.
+  it("a parent's request pane and its inline child's have unique ids, each aria reference resolving inside its own run", async () => {
+    const done: RunRow = {
+      ...child,
+      status: "succeeded",
+      finished: rOK.finished,
+    }
+    const events = [
+      {
+        type: "run_start",
+        id: child.id,
+        model: child.model,
+        agent: "research",
+      },
+      { type: "step_start", run_id: child.id, index: 0 },
+      {
+        type: "step_finish",
+        run_id: child.id,
+        index: 0,
+        reason: "stop",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      {
+        type: "run_finish",
+        run_id: child.id,
+        usage: { input_tokens: 1, output_tokens: 1 },
+        steps: 1,
+      },
+    ].map((event, pos) => ({ pos, time: rOK.started, event }))
+    const reqs = () =>
+      pagedRequests(golden<Parameters<typeof pagedRequests>[0]>("requests-ok"))
+    new FakeStudio()
+      .on("GET meta", {
+        ...golden<Record<string, unknown>>("meta"),
+        capabilities: ["requests"],
+      })
+      .on(`GET runs/${child.id}`, { ...done, children: [] })
+      .on(`GET runs/${child.id}/events`, pagedEvents(events))
+      .on(`GET runs/${child.id}/transcript`, transcriptOf([]))
+      .on(`GET runs/${child.id}/requests`, reqs())
+      .on("GET runs/p/requests", reqs())
+      .install()
+    function Parent() {
+      const req = useRunRequests("p", { enabled: true, running: false })
+      return (
+        <div data-run="p">
+          {req ? <RequestSection req={req} step={0} open runId="p" /> : null}
+          <div data-run={child.id}>
+            <SubagentBlock child={done} defaultOpen />
+          </div>
+        </div>
+      )
+    }
+    const { container } = await renderWithRouter(<Parent />)
+    const childReq = () =>
+      container.querySelector<HTMLElement>('[data-child-request="0"]')
+    await waitFor(() =>
+      expect(childReq()?.querySelector("[aria-expanded]")).toBeTruthy()
+    )
+    fireEvent.click(childReq()!.querySelector("[aria-expanded]")!)
+    await waitFor(() =>
+      expect(container.querySelectorAll('[role="tab"]').length).toBe(4)
+    )
+    const ids = Array.from(container.querySelectorAll("[id]")).map((e) => e.id)
+    expect(ids.length).toBeGreaterThanOrEqual(6)
+    expect(new Set(ids).size).toBe(ids.length)
+    // The run an element is drawn in: its nearest data-run.
+    const runOf = (e: Element) =>
+      e.closest("[data-run]")?.getAttribute("data-run")
+    const refs = container.querySelectorAll(
+      "[aria-labelledby], [aria-controls]"
+    )
+    expect(refs.length).toBeGreaterThanOrEqual(6)
+    for (const e of Array.from(refs)) {
+      for (const attr of ["aria-labelledby", "aria-controls"]) {
+        const v = e.getAttribute(attr)
+        if (!v) continue
+        for (const id of v.split(/\s+/)) {
+          const to = document.getElementById(id)
+          // A tab's aria-controls names the panel only while it is drawn.
+          if (!to && attr === "aria-controls") continue
+          expect(to, `${attr}=${id}`).toBeTruthy()
+          expect(runOf(to!)).toBe(runOf(e))
+        }
+      }
+    }
+    const labelled = container.querySelectorAll('[role="tabpanel"]')
+    expect(labelled).toHaveLength(2)
   })
 })

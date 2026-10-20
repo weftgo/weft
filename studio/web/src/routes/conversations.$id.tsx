@@ -222,7 +222,7 @@ function ConversationPage() {
               <span key={t.id} className="flex items-center gap-1.5">
                 <Link
                   {...sessionLink(t.id)}
-                  className={`font-mono ${THREAD_LINK}`}
+                  className={`font-mono [overflow-wrap:anywhere] ${THREAD_LINK}`}
                   title={CONVERSATION.sessionTitle}
                 >
                   {t.id}
@@ -276,7 +276,10 @@ function ConversationPage() {
           <ul className="flex flex-wrap gap-x-3 gap-y-1">
             {orphans.map((r) => (
               <li key={r.id}>
-                <Link {...runLink(r.id)} className={`font-mono ${THREAD_LINK}`}>
+                <Link
+                  {...runLink(r.id)}
+                  className={`font-mono [overflow-wrap:anywhere] ${THREAD_LINK}`}
+                >
                   {r.id}
                 </Link>
               </li>

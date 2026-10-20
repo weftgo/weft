@@ -611,7 +611,7 @@ function GenAIConversation({ spans }: { spans: TimedSpan[] }) {
               {runID ? (
                 <Link
                   {...runLink(runID)}
-                  className="text-thread-ink hover:underline"
+                  className="[overflow-wrap:anywhere] text-thread-ink hover:underline"
                 >
                   {runID}
                 </Link>

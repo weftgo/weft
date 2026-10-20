@@ -7,7 +7,12 @@ import { describe, expect, it } from "vitest"
 
 import type { SessionMark, TimelineTurn } from "./api"
 import { summarizerView } from "./cost"
-import { markWhoHole } from "./decisions"
+import {
+  WHO_UNRECORDED,
+  markWhoHole,
+  whoUnrecorded,
+  whoUnrecordedResumed,
+} from "./decisions"
 import {
   busyEndSpans,
   compactionStarts,
@@ -289,7 +294,8 @@ describe("markDetail", () => {
       { call_id: "c1", outcome: "approve" },
       { lane: "approvals" }
     )
-    expect(who(bare)).toMatchObject({ v: "", unrecorded: true })
+    expect(who(bare)).toMatchObject({ v: "", unrecorded: WHO_UNRECORDED })
+    expect(who(bare)?.unrecorded?.reason).toContain("not recorded yet")
     expect(markWhoHole(decisionOf(bare).c, decisionOf(bare).d)).toBe(
       "not_recorded"
     )
@@ -308,6 +314,36 @@ describe("markDetail", () => {
     )
     expect(who(read)?.v).toBe("bob")
     expect(markWhoHole(decisionOf(read).c, decisionOf(read).d)).toBe(undefined)
+  })
+  it("says a decider a stored resume without an actor left unnamed is not recorded, naming the resume (P9-pre-web-fix4 F1)", () => {
+    // t1 parked, t2 resumed it (stored, no weft.approval.actor); the
+    // decision names no who or key.
+    const resumed = [
+      turn(1, { pending: 1, stopped_by: "parked", resumed_by: `${S}-t2` }),
+      turn(2, { resumed_from: `${S}-t1` }),
+    ]
+    const m = mark(
+      "approval.decision",
+      1,
+      { call_id: "c1", outcome: "approve", via: "user" },
+      { lane: "approvals", content_mark: "full", content: {} }
+    )
+    const row = markDetail(m, resumed).rows.find((r) => r.k === "who")
+    expect(row?.unrecorded).toEqual(whoUnrecordedResumed("t2"))
+    expect(row?.unrecorded?.reason).toBe(
+      "who decided is not recorded: the resuming turn t2 carries no weft.approval.actor and the decision names no who or key"
+    )
+    expect(row?.unrecorded?.fix).toBe(
+      "decide with a who, or resume with weft.approval.actor set"
+    )
+    expect(row?.unrecorded?.fix).not.toContain("content on")
+    // A read token: who is content — hidden, whichever turn resumed.
+    const hid = { ...m, content: undefined, content_hidden: true }
+    expect(
+      markDetail(hid, resumed).rows.find((r) => r.k === "who")
+    ).toMatchObject({ v: "", hidden: true })
+    expect(whoUnrecorded()).toBe(WHO_UNRECORDED)
+    expect(whoUnrecorded("t2")).toEqual(whoUnrecordedResumed("t2"))
   })
   it("links an interrupt's interrupting turn and names the run it is filed under", () => {
     const { rows, links } = markDetail(marks[5], turns)

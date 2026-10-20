@@ -2508,7 +2508,9 @@ function Matrix({
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-          <code className="text-faint">{experimentID}</code>
+          <code className="[overflow-wrap:anywhere] text-faint">
+            {experimentID}
+          </code>
           {mayRun ? (
             <Button
               size="sm"
@@ -2771,7 +2773,9 @@ function Drafts({
             className={`flex flex-wrap items-center gap-2 px-3 py-1.5${d.id === current ? "bg-secondary" : ""}`}
             data-draft={d.id}
           >
-            <span className="font-mono text-faint">{d.id}</span>
+            <span className="font-mono [overflow-wrap:anywhere] text-faint">
+              {d.id}
+            </span>
             <span className="min-w-0 truncate">{d.label || "—"}</span>
             {d.saved ? (
               <span className="text-faint">{relativeTime(d.saved)}</span>
@@ -2841,7 +2845,7 @@ function History({ selected }: { selected?: string }) {
           >
             <Link
               {...experimentLink(e.id)}
-              className="font-mono text-faint hover:underline"
+              className="font-mono [overflow-wrap:anywhere] text-faint hover:underline"
             >
               {e.id}
             </Link>

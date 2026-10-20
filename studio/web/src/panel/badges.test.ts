@@ -430,6 +430,8 @@ describe("no panel-only badge strings", () => {
       "decisionsNote — the decisions note (U13.2-fix): calls derived from the resume's spans, not the hole",
     "decisions:who decided is not recorded yet":
       "WHO_UNRECORDED — the session timeline's drawer and approvals view (P9-pre-web-fix3 F1), drawn through HoleBadge; the panel draws no state-log mark",
+    "decisions:who decided is not recorded: the resuming turn":
+      "whoUnrecordedResumed — the same two Studio views when a stored resume names no actor (P9-pre-web-fix4 F1), drawn through HoleBadge; the panel draws no state-log mark",
     "compaction:started on a compacted context":
       "STARTED_COMPACTED — the run page's card on the turn after a session compaction (U15.2) and the panel's turn (U16), not the hole",
     "turn-chips:thread.interrupted":

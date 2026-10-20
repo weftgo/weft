@@ -233,10 +233,16 @@ const namesHoldTheirText = () => {
     const label = n.getAttribute("aria-label")!.replace(/\s+/g, " ")
     expect(label).toContain(text)
     const hint = n.getAttribute("aria-description")
-    if (hint)
+    if (hint) {
       expect(
         n.parentElement!.querySelector(":scope > title")?.textContent
       ).toBe(hint)
+      // The wrapper is no named group (P9-pre-web-fix4 F5): the hint is
+      // read once, as the button's description; the <title> stays the
+      // pointer's tooltip.
+      expect(n.parentElement!.hasAttribute("data-graph-tip")).toBe(true)
+      expect(n.parentElement!.getAttribute("role")).toBe("none")
+    }
   }
 }
 const nodes = () =>

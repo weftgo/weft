@@ -739,7 +739,8 @@ function ResultField({
         <span className="block text-faint">
           step {f.step} ·{" "}
           <span className="font-mono">{callLabel(f.name, f.args)}</span> ·{" "}
-          <span className="font-mono">{f.callID}</span> →
+          <span className="font-mono [overflow-wrap:anywhere]">{f.callID}</span>{" "}
+          →
         </span>
         <RecordedLine text={recorded} />
         <textarea

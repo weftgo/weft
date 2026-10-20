@@ -720,7 +720,7 @@ function ReplayForm({
         >
           {VERB_TITLES[draft.verb]}
         </h2>
-        <p className="font-mono text-xs text-muted-foreground">
+        <p className="font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground">
           {runID}
           {wantAgent ? ` · ${wantAgent}` : ""}
           {runtime && !target.mismatch
@@ -1007,7 +1007,9 @@ function ReplayOutcome({
         <span className="eyebrow">command</span>
         <span className="font-mono">{label}</span>
         {e.runID ? (
-          <span className="font-mono text-faint">{e.runID}</span>
+          <span className="font-mono [overflow-wrap:anywhere] text-faint">
+            {e.runID}
+          </span>
         ) : null}
       </div>
       {e.state === "rejected" || e.state === "lost" ? (

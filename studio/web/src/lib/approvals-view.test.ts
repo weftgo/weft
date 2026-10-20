@@ -14,6 +14,7 @@ import {
   rowOutcome,
   usesWord,
 } from "./approvals-view"
+import { WHO_UNRECORDED, whoUnrecordedResumed } from "./decisions"
 
 const S = "s_t"
 const turn = (n: number, over: Partial<TimelineTurn> = {}): TimelineTurn => ({
@@ -191,6 +192,40 @@ describe("decisionRows", () => {
       ["p1", false],
       ["w1", false],
     ])
+    expect(rows[0].whoUnrecorded).toBe(WHO_UNRECORDED)
+  })
+
+  it("a user's decision a stored resume without an actor followed names that resume, not 'yet'; a read token's is hidden (P9-pre-web-fix4 F1)", () => {
+    const turns = [
+      turn(1, { pending: 1, stopped_by: "parked", resumed_by: `${S}-t2` }),
+      turn(2, { resumed_from: `${S}-t1` }),
+    ]
+    const rows = decisionRows(
+      [
+        mark(
+          "approval.decision",
+          1,
+          { call_id: "u1", outcome: "approve", via: "user" },
+          {}
+        ),
+        {
+          ...mark("approval.decision", 1, {
+            call_id: "h1",
+            outcome: "approve",
+            via: "user",
+          }),
+          content_hidden: true,
+        },
+      ],
+      turns
+    )
+    expect(rows[0].resumed).toBe(`${S}-t2`)
+    expect(rows[0].whoUnrecorded).toEqual(whoUnrecordedResumed("t2"))
+    expect(rows[0].whoUnrecorded?.reason).toContain(
+      "the resuming turn t2 carries no weft.approval.actor"
+    )
+    expect(rows[1].whoHidden).toBe(true)
+    expect(rows[1].whoUnrecorded).toBe(undefined)
   })
 })
 

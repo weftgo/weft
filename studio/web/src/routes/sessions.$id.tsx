@@ -351,7 +351,7 @@ function SessionPage() {
         {s.public_id ? (
           <Link
             {...conversationLink(s.public_id)}
-            className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-faint hover:text-foreground"
+            className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] [overflow-wrap:anywhere] text-faint hover:text-foreground"
             title="the public id (the browser-safe handle): its conversation — every run carrying it, experiments nested"
             data-conversation-link={s.public_id}
           >

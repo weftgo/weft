@@ -172,7 +172,7 @@ function ExperimentList() {
                     <TableCell>
                       <Link
                         {...experimentLink(e.id)}
-                        className="font-mono text-xs hover:underline"
+                        className="font-mono text-xs [overflow-wrap:anywhere] hover:underline"
                       >
                         {e.id}
                       </Link>

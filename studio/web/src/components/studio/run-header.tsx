@@ -934,7 +934,7 @@ export function RunHeader({
         {doc.public_id ? (
           <Link
             {...runsLink({ public_id: doc.public_id })}
-            className="font-mono hover:text-foreground hover:underline"
+            className="font-mono [overflow-wrap:anywhere] hover:text-foreground hover:underline"
             title="the public id (the browser-safe handle) — list its runs"
             data-meta-chip="public_id"
           >

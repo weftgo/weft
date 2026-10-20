@@ -166,7 +166,13 @@ function EventRow({
         </span>
       </div>
       {open ? (
-        <pre className="codewin-inline mx-2 mb-2 overflow-auto rounded-md px-3 py-2 font-mono text-[12px] leading-relaxed">
+        // Focusable: a long line scrolls it, and a keyboard must reach
+        // that scroll (axe scrollable-region-focusable, P9-pre-web-fix4).
+        <pre
+          tabIndex={0}
+          aria-label={`event ${pos} JSON`}
+          className="codewin-inline mx-2 mb-2 overflow-auto rounded-md px-3 py-2 font-mono text-[12px] leading-relaxed"
+        >
           <code>
             <JsonText text={text} />
           </code>

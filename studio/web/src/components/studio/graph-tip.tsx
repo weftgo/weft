@@ -4,7 +4,10 @@
 // aria-description, the pointer's native tooltip is a <title> on a
 // wrapper around the button (the browser shows an ancestor's title),
 // and keyboard focus shows the same words in GraphHint, a line under
-// the graph.
+// the graph. The wrapper is role=none (P9-pre-web-fix4 F5): Chromium
+// otherwise maps a <g> with a <title> to a group named by it, and the
+// hint is read twice — once as the group's name, once as the button's
+// description.
 import type { ReactNode } from "react"
 
 /** The wrapper whose <title> is the pointer's tooltip over its node. */
@@ -17,7 +20,7 @@ export function GraphTip({
 }) {
   if (!hint) return <>{children}</>
   return (
-    <g data-graph-tip>
+    <g role="none" data-graph-tip>
       <title>{hint}</title>
       {children}
     </g>

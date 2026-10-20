@@ -11,11 +11,23 @@
 // the session log, not evidence (ADR 0021 §5). Studio only: the panel
 // hands off to this view.
 import type { DecidedCall, SessionMark, TimelineTurn } from "./api"
-import { decisionDetail, decider, markWhoHole, outcomeOf } from "./decisions"
+import {
+  decisionDetail,
+  decider,
+  markWhoHole,
+  outcomeOf,
+  whoUnrecorded,
+} from "./decisions"
 import type { OUTCOME } from "./decisions"
 import { absoluteTime, plural } from "./format"
-import { AWAITING } from "./status"
-import { decisionOf, markKeys, resumeOfTurn, toolsByCall } from "./timeline"
+import { AWAITING, turnTag } from "./status"
+import {
+  asStatusRow,
+  decisionOf,
+  markKeys,
+  resumeOfTurn,
+  toolsByCall,
+} from "./timeline"
 
 const str = (v: unknown) => (typeof v === "string" ? v : "")
 const num = (v: unknown) => (typeof v === "number" ? v : 0)
@@ -64,9 +76,10 @@ export interface DecisionRow {
   who: string
   /** Who is content the identity may not read. */
   whoHidden: boolean
-  /** Nothing names the decider yet (lib/decisions.ts's WHO_UNRECORDED:
-   * no stored turn resumed the run, no who or key recorded). */
-  whoUnrecorded?: boolean
+  /** Nothing names the decider (lib/decisions.ts's whoUnrecorded: no
+   * stored turn resumed the run yet, or its resume names no actor; no
+   * who or key recorded), the badge's words. */
+  whoUnrecorded?: { reason: string; fix: string }
   grant: string
   at: string
   /** The turn that parked the call (the run the decision is filed
@@ -115,6 +128,7 @@ export function decisionRows(
     decided.add(`${run}|${call}`)
     const { c, d } = decisionOf(m, tools.get(call))
     const who = decider(c, d)
+    const resumer = resumeOfTurn(run || null, turns)?.run_id
     const detail = decisionDetail(c, d, () => "")
       .split(" · ")
       .filter((p) => p && !p.startsWith("grant "))
@@ -128,14 +142,15 @@ export function decisionRows(
       who: [who, detail].filter(Boolean).join(" · "),
       whoHidden: !who && !!c.who_hidden,
       whoUnrecorded:
-        markWhoHole(c, d, m.content_mark === "stripped") === "not_recorded" ||
-        undefined,
+        markWhoHole(c, d, m.content_mark === "stripped") === "not_recorded"
+          ? whoUnrecorded(resumer && turnTag(resumer, turns.map(asStatusRow)))
+          : undefined,
       grant: [str(m.fields.grant_id), str(m.fields.grant_scope)]
         .filter(Boolean)
         .join(" · "),
       at: c.at || m.at,
       parked: run || undefined,
-      resumed: resumeOfTurn(run || null, turns)?.run_id,
+      resumed: resumer,
       always: !!m.fields.always,
       refused: refused.get(call) ?? [],
     })

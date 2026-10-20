@@ -487,7 +487,7 @@ export function ToolCallRow({
             kind={child ? childKind(child) : undefined}
           />
           <span
-            className="ml-auto font-mono text-[10px] text-muted-foreground"
+            className="ml-auto font-mono text-[10px] [overflow-wrap:anywhere] text-muted-foreground"
             title="the call id (call_id on the wire)"
           >
             {call.callId}

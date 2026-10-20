@@ -385,7 +385,10 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
     <section className="space-y-3 p-4" aria-labelledby="experiment-title">
       <header className="space-y-1">
         <div className="flex flex-wrap items-baseline gap-2">
-          <h1 id="experiment-title" className="font-mono text-sm font-medium">
+          <h1
+            id="experiment-title"
+            className="font-mono text-sm font-medium [overflow-wrap:anywhere]"
+          >
             {exp.id}
           </h1>
           {exp.name && exp.name !== exp.id ? (
@@ -640,7 +643,10 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
             {placed.loose.map((r) => (
               <li key={r.id} className="flex items-center gap-2">
                 <RunStatus run={r} />
-                <Link {...runLink(r.id)} className="font-mono hover:underline">
+                <Link
+                  {...runLink(r.id)}
+                  className="font-mono [overflow-wrap:anywhere] hover:underline"
+                >
                   {r.id}
                 </Link>
                 <span className="text-faint">{commandOf(r) ?? ""}</span>

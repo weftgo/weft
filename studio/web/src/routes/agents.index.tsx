@@ -157,7 +157,11 @@ function SourceList({ sources }: { sources: ManifestSource[] }) {
             {shortHash(s.manifest_hash)}
           </span>
           <StateLabel source={s} />
-          {s.runtime_id && <span className="text-faint">{s.runtime_id}</span>}
+          {s.runtime_id && (
+            <span className="[overflow-wrap:anywhere] text-faint">
+              {s.runtime_id}
+            </span>
+          )}
           {s.registered_at && (
             <span className="text-faint">registered {s.registered_at}</span>
           )}

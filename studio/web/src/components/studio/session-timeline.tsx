@@ -20,7 +20,7 @@ import type {
 } from "@/lib/api"
 import { sessionTree } from "@/lib/session-tree"
 import { summarizerView } from "@/lib/cost"
-import { WHO_HOLE, WHO_UNRECORDED } from "@/lib/decisions"
+import { WHO_HOLE } from "@/lib/decisions"
 import { absoluteTime, duration, stepCount, tokens } from "@/lib/format"
 import { runLink, sessionLink } from "@/lib/links"
 import { statusOf, turnTag } from "@/lib/status"
@@ -830,7 +830,7 @@ function MarkDrawer({
               {r.hidden ? (
                 <HoleBadge hole="hidden" reason={WHO_HOLE.reason} />
               ) : r.unrecorded ? (
-                <HoleBadge hole="not_recorded" {...WHO_UNRECORDED} />
+                <HoleBadge hole="not_recorded" {...r.unrecorded} />
               ) : (
                 r.v
               )}

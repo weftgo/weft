@@ -22,7 +22,7 @@
 // is the pane's second tab, Wire (step-wire.tsx): the same rows' raw.
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 
 import { isHoleRef, manifestQuery, requestsQuery } from "@/lib/api"
 import type {
@@ -239,7 +239,7 @@ export function DiffBlock({ diff }: { diff: BoundedDiff }) {
       too large to diff ({diff.tooLarge.before} → {diff.tooLarge.after} lines)
     </span>
   ) : (
-    <pre className="max-w-full overflow-x-auto rounded-md border px-2 py-1.5 font-mono text-[12px] whitespace-pre-wrap">
+    <pre className="max-w-full overflow-x-auto rounded-md border px-2 py-1.5 font-mono text-[12px] [overflow-wrap:anywhere] whitespace-pre-wrap">
       {diff.rows.map((r, i) => (
         <div
           key={i}
@@ -319,7 +319,7 @@ function PromptView({
               <span className="font-mono text-[10px] text-faint">
                 {segmentLabel(seg.source)}
               </span>
-              <pre className="overflow-x-auto font-mono text-[12px] whitespace-pre-wrap">
+              <pre className="overflow-x-auto font-mono text-[12px] [overflow-wrap:anywhere] whitespace-pre-wrap">
                 {seg.text}
               </pre>
             </div>
@@ -328,7 +328,7 @@ function PromptView({
       ) : (
         <pre
           data-prompt
-          className="max-w-full overflow-x-auto rounded-md border bg-secondary/40 px-2 py-1.5 font-mono text-[12px] whitespace-pre-wrap"
+          className="max-w-full overflow-x-auto rounded-md border bg-secondary/40 px-2 py-1.5 font-mono text-[12px] [overflow-wrap:anywhere] whitespace-pre-wrap"
         >
           {long && !all
             ? lines.slice(0, PROMPT_LINES).join("\n") + "\n…"
@@ -869,6 +869,7 @@ export function RequestSection({
    * The card answers true once only. */
   takeFocus?: () => boolean
 }) {
+  const uid = useId()
   const [ownOpen, setOwnOpen] = useState(false)
   const open = openProp ?? ownOpen
   const setOpen = (f: (x: boolean) => boolean) => {
@@ -987,7 +988,9 @@ export function RequestSection({
         ) : null}
       </>
     )
-    const tabId = (t: StepPane) => `step-${step}-pane-${t}`
+    // useId's prefix: a subagent block's inline child request draws
+    // the same step numbers inside the parent's run (P9-pre-web-fix4 F2).
+    const tabId = (t: StepPane) => `${uid}step-${step}-pane-${t}`
     const tabs = (
       <div
         className="flex w-fit rounded-md border p-0.5"

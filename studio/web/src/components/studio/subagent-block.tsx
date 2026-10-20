@@ -222,7 +222,10 @@ export function SubagentBlock({
               : "—"}
         </span>
         <HoleBadges holes={holes} />
-        <span className="font-mono text-[11px] text-muted-foreground">
+        <span
+          className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere] text-muted-foreground"
+          data-child-id
+        >
           {child.id}
         </span>
         {/* A10: replay from here replays the CHILD as its own run (its

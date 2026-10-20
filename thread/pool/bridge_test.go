@@ -878,8 +878,42 @@ func TestCloseCoversEverything(t *testing.T) {
 		}
 	})
 	t.Run("bare call canceled by its caller", func(t *testing.T) {
-		// The caller's own cancellation is not the pool's: the core's
-		// words stand.
+		// The caller canceling its own run is not the pool's doing: the
+		// run fails with the caller's cancellation, and no result reads
+		// the pool's code.
+		p := pool.New(1)
+		defer func() { _ = p.Close(ctx) }()
+		started, release := make(chan struct{}), make(chan struct{})
+		defer close(release)
+		child := core.New(blocking{release: release, text: "late", onStart: func() { close(started) }})
+		parent := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "ask", ID: "c-ask", Args: `{"prompt":"go"}`}),
+			wefttest.Say("noted"),
+		), p.MustWrap("ask", "", child))
+		cctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		errc := make(chan error, 1)
+		go func() {
+			_, err := parent.Generate(cctx, core.Prompt("go"))
+			errc <- err
+		}()
+		<-started
+		cancel()
+		var err error
+		within(t, 10*time.Second, "the canceled Generate", func() { err = <-errc })
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("the canceled bare Generate = %v, want context.Canceled", err)
+		}
+		var re *core.RunError
+		if errors.As(err, &re) && re.Result != nil {
+			if got := lastToolResult(re.Result.Messages); strings.Contains(got, "SUBAGENT_CANCELED") {
+				t.Errorf("a caller-canceled bare call reads %q, the pool's code", got)
+			}
+		}
+	})
+	t.Run("bare call's tool timeout", func(t *testing.T) {
+		// The call's own deadline is not the pool's: the core's words
+		// stand.
 		p := pool.New(1)
 		defer func() { _ = p.Close(ctx) }()
 		started, release := make(chan struct{}), make(chan struct{})

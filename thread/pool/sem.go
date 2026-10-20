@@ -172,6 +172,50 @@ func (s *slot) regain() error {
 	return nil
 }
 
+// lend hands s's slot straight to the run that owns to, when that run
+// is waiting slotless on its delegations: a nested resolution's
+// hand-off (ADR 0022 §7). The grandchild's work is over, and the
+// resume its answer is about to start is the waiting run's work, so
+// the slot passes between them without going back to the queue —
+// nothing can take it in between, and the resumed run never works
+// without one. It reports whether the slot moved; when it did not
+// (s holds none, to holds one already, or to's run is not waiting or
+// is over) s keeps its slot and its finish releases it. Lock order: s,
+// then to.
+func (s *slot) lend(to *slot) bool {
+	if s == nil || to == nil || s == to {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.held {
+		return false
+	}
+	to.mu.Lock()
+	defer to.mu.Unlock()
+	if to.held || to.done || to.waiting == 0 {
+		return false
+	}
+	to.held, s.held = true, false
+	return true
+}
+
+// unlend gives back a slot lend moved to s when the resume it was
+// lent for did not start: while s's run still waits (the slot unused),
+// it goes back to the queue. A run that has stopped waiting is using
+// it, and keeps it.
+func (s *slot) unlend() {
+	s.mu.Lock()
+	give := s.held && s.waiting > 0
+	if give {
+		s.held = false
+	}
+	s.mu.Unlock()
+	if give {
+		s.f.release()
+	}
+}
+
 // finish ends the run's hold: the slot goes back, and a delegation
 // still returning — a handler its tool's timeout abandoned — takes
 // nothing on the run's behalf any more.

@@ -22,13 +22,25 @@ import (
 //     pending request the parent holds no mirror for is mirrored —
 //     the crash window between a child's park and its mirror — and
 //     the receipt records parked. The child resumes when its requests
-//     are decided, as if nothing had happened.
+//     are decided, as if nothing had happened. That includes a child
+//     whose resume was under way when the process died: its decisions
+//     are recorded and its boundary was never closed by a finished
+//     run (the session's rule — a resume that started and did not
+//     finish leaves the boundary resumable), so the pump at the end
+//     of Recover resumes it again, and an approved call whose result
+//     was not recorded runs again. Nothing on file tells a call that
+//     never started from one cut off half-way; a tool that must not
+//     run twice has to be idempotent itself (the playground's
+//     side-effect classes, core.Replay, do not gate a session resume).
+//     The same holds at any depth: a grandchild whose approved call was
+//     running resumes through its parent's recovered delegation.
 //   - the child finished its run: the receipt settles from the child's
 //     own ledger — done with its final text, failed, capped or
 //     canceled with its recorded cause — with the child's usage.
-//   - the child never finished a run — queued, or mid-run when the
-//     process died: the receipt settles failed, saying so. The run is
-//     not started again: what it had done, it had done.
+//   - the child never finished its first run — queued, or mid-run
+//     when the process died with no approval boundary on file: the
+//     receipt settles failed, saying so. That run is not started
+//     again: what it had done, it had done.
 //   - the child session is gone: the receipt settles failed.
 //
 // A sync delegation's call still parked in the parent is resolved

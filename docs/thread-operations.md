@@ -385,7 +385,16 @@ not the numbers themselves.
   `p.Recover(ctx, parent)`. It reattaches children parked at an
   approval (mirroring any request the crash left unmirrored), settles
   children that finished from their own files, and settles `failed`
-  those that never finished a run — it never re-runs a child. A child
+  those that never finished their first run — that run is not started
+  again. A child that was resuming when the process died is still at
+  its decided boundary (a resume that started and did not finish
+  leaves it resumable, as in any session), so `Recover` resumes it
+  again: **an approved call whose result was not recorded runs
+  again**, at any depth of a chain. Nothing on file tells a call that
+  never started from one cut off half-way, and `weft.Replay`'s
+  side-effect classes are the playground's, not a session resume's:
+  a tool that must not run twice has to be idempotent itself (key it
+  by the call id, `weft.CallFromContext`). A child
   whose agent the pool does not hold is reported (`pool.ErrNoAgent`)
   and left for a later call. Limits: a finished child's answer is read
   back as its last assistant text (a structured `Output` answer is not
@@ -413,7 +422,14 @@ not the numbers themselves.
   process and after a restart that wraps all three under their names
   again (before 0.18.1 the middle delegation settled failed with "the
   child's resume did not survive a restart"). That failure is now only
-  a restart's whose grandchild has no agent to resume it.
+  a restart's whose grandchild has no agent to resume it. A grandchild
+  that asks a second approval parks the chain again — the middle child
+  parks and the new request is offered on the lead (same namespaced
+  call id, a new run id; the earlier decision does not carry over) —
+  and each decision there takes the chain one park further. `Cancel`
+  or `Close` of a middle child whose resume waits on its grandchild
+  ends the grandchild first and waits for it (at most 30 s), so both
+  ledgers end settled.
 - **Do not let the parent's decision chain approve a delegating
   call.** A grant or a live `Approver` that matches a pool wrap's tool
   re-runs the delegation when it parks (see `Pool.Decide`'s godoc for

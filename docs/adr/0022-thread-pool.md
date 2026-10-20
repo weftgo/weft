@@ -210,7 +210,12 @@ calls and tool calls. A run that is only waiting holds no slot:
 - a child whose **sync delegation is running a child of its own hands
   its slot back for the wait** and re-acquires one, through the same
   queue, before it works again. The grandchild takes its slot from
-  the queue like any child.
+  the queue like any child. When the child is resumed through the
+  grandchild — a nested park decided on the top parent (§7), the
+  child's resume started by the grandchild's answer — the grandchild's
+  slot passes straight to the child's resume (0.18.1): it never goes
+  back to the queue in between, so the resume's first model call
+  never runs beside the next delegation to take it.
 
 Under fan-out — one step delegating several times (`Parallelism`) — a
 run holds no slot while *at least one* of its sync delegations is

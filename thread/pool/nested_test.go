@@ -18,13 +18,18 @@ import (
 // refund tool behind RequireApproval, whose handler records the
 // Approved flag it ran under.
 func gatedChild(turns ...wefttest.Turn) (*core.Agent, *flags) {
+	return gatedOver(wefttest.Script(turns...))
+}
+
+// gatedOver is gatedChild over a model of the test's own.
+func gatedOver(m core.Model) (*core.Agent, *flags) {
 	ran := &flags{}
 	tool := core.Tool("refund", "", func(ctx context.Context, in struct{ OrderID string }) (string, error) {
 		call, _ := core.CallFromContext(ctx)
 		ran.add(call.Approved)
 		return "refunded " + in.OrderID, nil
 	}, core.RequireApproval())
-	return core.New(wefttest.Script(turns...), tool), ran
+	return core.New(m, tool), ran
 }
 
 type flags struct {

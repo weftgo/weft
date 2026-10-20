@@ -17,7 +17,11 @@
 // wait and queues for one again before it works again, and a child
 // parked at an approval holds none. That hand-off is what makes
 // fan-out times depth safe on any max, 1 included; the depth of a
-// delegation chain has its own limit (MaxDepth).
+// delegation chain has its own limit (MaxDepth). A child resumed
+// through a grandchild (a nested park decided on the top parent) takes
+// the grandchild's slot straight over when the grandchild's answer
+// starts its resume: the slot never goes back to the queue in
+// between, so the resume never works beside the next delegation.
 //
 // Admission is first in, first out, in the order work queued: Submit
 // queues before it returns, a wrapped tool queues when it is called,
@@ -140,7 +144,9 @@ const DefaultMaxDepth = 8
 // while its run works and none while it waits: not while a sync
 // delegation of its own runs a child (the slot is handed back for
 // the wait and re-acquired, through the same queue, before the run's
-// next model call), and not while it is parked at an approval.
+// next model call; a resume a grandchild's answer starts takes over
+// the grandchild's slot instead), and not while it is parked at an
+// approval.
 // Admission is FIFO in queueing order. A session's fan-out is already
 // bounded by its agent's Parallelism, so the pool adds no per-session
 // quota; a delegation chain's depth is bounded separately (MaxDepth).
@@ -880,6 +886,16 @@ func (p *Pool) run(ctx context.Context, d *delegate, r runHandle, start func(con
 	}
 	sl := &slot{f: p.sem, ctx: ctx, held: true}
 	defer sl.finish()
+	p.mu.Lock()
+	d.sl = sl
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		if d.sl == sl {
+			d.sl = nil
+		}
+		p.mu.Unlock()
+	}()
 	info := d.info
 	info.slot = sl
 	runCtx := withRun(ctx, info)
@@ -901,7 +917,7 @@ func (p *Pool) run(ctx context.Context, d *delegate, r runHandle, start func(con
 
 	if r.nest != nil {
 		p.mu.Lock()
-		r.nest.ctx = runCtx
+		r.nest.ctx, r.nest.slot = runCtx, sl
 		p.mu.Unlock()
 	}
 	turn, err := start(runCtx)
@@ -995,6 +1011,15 @@ func (d *delegate) begin(cancel context.CancelFunc, t *ticket) runHandle {
 // has already taken the delegate over — the delegate is left at rest,
 // parked or settled, with nothing to cancel; then Wait wakes.
 func (p *Pool) rest(d *delegate, r runHandle) {
+	if r.nest != nil {
+		// Closed before the context is canceled: a grandchild resolving
+		// from here on records under its own context — this run follows
+		// no resume any more, and a canceled context would lose the
+		// resolution.
+		r.nest.mu.Lock()
+		r.nest.closed = true
+		r.nest.mu.Unlock()
+	}
 	r.cancel()
 	p.mu.Lock()
 	if d.idle == r.idle {

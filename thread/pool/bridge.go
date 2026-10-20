@@ -35,6 +35,14 @@ type delegate struct {
 	// only (ADR 0022 §8) — a steer into an idle session would run as
 	// its first turn, the task's own prompt queueing behind its steer.
 	phase int
+	// sent records that the run in flight has its turn: set once the
+	// run's start returned one, reset when a run begins. The running
+	// mark comes before the start (a Forward must never read a stale
+	// queued phase), so between the two the phase reads running with
+	// no turn in the child's session; Forward serves only a running
+	// phase whose turn is sent — a steer in that window would be the
+	// session's first turn, the task's prompt queued behind it.
+	sent bool
 	// cancel cancels the run in flight; nil at rest.
 	cancel context.CancelFunc
 	// canceled records that Cancel or Close asked for the run's end.
@@ -1075,6 +1083,9 @@ func (p *Pool) pump(ctx context.Context, parent *thread.Session) error {
 		if errors.Is(err, errSettled) {
 			continue // it finished since the ledger read above (a racing pump armed it)
 		}
+		if errors.Is(err, errForeign) {
+			continue // another pool's child: that pool's watch pumps it
+		}
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -1287,6 +1298,9 @@ func (p *Pool) delegateFor(ctx context.Context, parent *thread.Session, rc Recei
 		if p.settledWhileResolving(rc.Child, look) {
 			return nil, errSettled
 		}
+		if errors.Is(err, ErrNoAgent) && p.foreign(parent, rc.Child, name) {
+			return nil, errForeign
+		}
 		return nil, err
 	}
 	child, err := thread.Open(ctx, parent.Storage(), rc.Child, agent, thread.InheritApprovals(parent))
@@ -1433,9 +1447,52 @@ func (p *Pool) agentForSession(ctx context.Context, parent *thread.Session, chil
 		return a, name, nil
 	}
 	if name != "" {
-		return nil, "", fmt.Errorf("%w: %s (made by wrap %q — Wrap it again under that name, or Register the session)", ErrNoAgent, childID, name)
+		return nil, name, fmt.Errorf("%w: %s (made by wrap %q — Wrap it again under that name, or Register the session)", ErrNoAgent, childID, name)
 	}
 	return nil, "", fmt.Errorf("%w: %s (a Submit child — Register the session)", ErrNoAgent, childID)
+}
+
+// errForeign is delegateFor's answer for a child another pool holds:
+// this pool has no delegate, registration or wrap for it, and a pool
+// watching the same parent has one. Its callers skip the receipt — it
+// is that pool's to resume — with no error and no log.
+var errForeign = errors.New("thread/pool: another pool's child")
+
+// foreign reports whether childID, a child of parent made under the
+// wrap name (empty for a Submit child), is another pool's: this pool
+// cannot resume it, and a pool watching the same parent can. Several
+// pools may delegate from one parent; each one's pump walks every
+// receipt of the parent's ledger, and a decision recorded there pumps
+// them all. No lock is held across pools: each is asked under its own.
+func (p *Pool) foreign(parent *thread.Session, childID, name string) bool {
+	if p.canResume(childID, name) {
+		return false
+	}
+	for _, o := range parent.MirrorWatchers() {
+		if q, ok := o.(*Pool); ok && q != p && q.canResume(childID, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// canResume reports whether the pool, open, holds what resumes
+// childID: a live delegate, a registration, or the wrap it was made
+// under.
+func (p *Pool) canResume(childID, name string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return false
+	}
+	if _, ok := p.byChild[childID]; ok {
+		return true
+	}
+	if _, ok := p.sessionAgents[childID]; ok {
+		return true
+	}
+	_, ok := p.nameAgents[name]
+	return ok && name != ""
 }
 
 // resolveWrapper completes a sync delegation's parked parent call: a
@@ -1606,7 +1663,13 @@ func (p *Pool) cancelParked(ctx context.Context, d *delegate) error {
 // the state it is in — accepted (queued for a slot: a steer now would
 // run as the session's first turn, the task's prompt behind it),
 // parked (its fate is the decision), or settled; an id the ledger
-// does not hold fails with ErrUnknownReceipt.
+// does not hold fails with ErrUnknownReceipt. Forward needs the run's
+// turn in flight, not only its running receipt: a run that holds its
+// slot and reads running but has not yet sent its turn into the child
+// session — the first turn's prompt, or a resume — refuses as the
+// state it is leaving (accepted before the first turn, parked before
+// a resume); the refusal changes nothing and a retry a moment later
+// steers the run.
 func (p *Pool) Forward(ctx context.Context, parent *thread.Session, receiptID string, msg core.Message) (*thread.Turn, error) {
 	if parent == nil {
 		return nil, fmt.Errorf("thread/pool: Forward with no parent session")
@@ -1614,7 +1677,18 @@ func (p *Pool) Forward(ctx context.Context, parent *thread.Session, receiptID st
 	p.mu.Lock()
 	d, ok := p.delegates[receiptID]
 	ok = ok && d.parent.ID() == parent.ID() // a receipt is its own session's
-	running := ok && d.phase == phaseRunning
+	running := ok && d.phase == phaseRunning && d.sent
+	if ok && d.phase == phaseRunning && !d.sent {
+		// The run is starting: its turn is not in the child's session
+		// yet. Refused as the state it is leaving — accepted before the
+		// first turn, parked before a resume's — retryable at once.
+		state := Accepted
+		if d.parks > 0 {
+			state = Parked
+		}
+		p.mu.Unlock()
+		return nil, &StateError{Receipt: receiptID, State: state}
+	}
 	var sctx context.Context
 	if running {
 		// The steer's context, which a deferred steer's follow-up turn

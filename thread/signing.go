@@ -412,15 +412,19 @@ func (s *Session) RequiresSigned() bool {
 // request entry — this occurrence of the call, not its call id — and
 // is single-use: DecideSigned records the nonce, and a replay of the
 // same signature fails with ErrReplay, across restarts, because
-// recorded nonces are entries. Request writes nothing; it may be
-// called any number of times, each call minting another valid
-// challenge for the same request.
+// recorded nonces are entries. Request writes nothing for a live
+// request; it may be called any number of times, each call minting
+// another valid challenge for the same request.
 //
 // It fails with ErrNotPending when callID is not pending, with
 // ErrDelegated when it is a call delegating to a pool child (which
 // takes no decision), with ErrExpired when the request is past its
 // expiry (no decision could be accepted for it), and when the session
-// has no keyring with an active key.
+// has no keyring with an active key. A lapsed request is swept as
+// every other path sweeps it (ADR 0021 §5) before ErrExpired returns:
+// denied with the expiry's stated reason, so Pending stops offering it
+// and the boundary resumes when that completes it (AutoResume) — under
+// RequireSigned no unsigned Decide comes to sweep it.
 func (s *Session) Request(callID string) (Request, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -438,6 +442,7 @@ func (s *Session) Request(callID string) (Request, error) {
 			continue
 		}
 		if !r.Expiry.IsZero() && now.After(r.Expiry) {
+			s.sweepLapsedLocked()
 			return Request{}, fmt.Errorf("%w: call %q: %s", ErrExpired, callID, expiryDetail(r.Expiry))
 		}
 		nonce, err := mintNonce(ring.keys[ring.active], r)
@@ -448,6 +453,40 @@ func (s *Session) Request(callID string) (Request, error) {
 		return r, nil
 	}
 	return Request{}, fmt.Errorf("%w: call %q", ErrNotPending, callID)
+}
+
+// sweepLapsedLocked is the expiry sweep Request runs when it finds the
+// request lapsed (ADR 0021 §5): the lapse is recorded as on every other
+// path — the expiry audit and the deny, a mirrored request's reaching
+// its child through the pool — so Pending stops offering a request no
+// challenge can be minted for, and when the denials complete the
+// boundary AutoResume arms its resume. Request has no context and no
+// error to hand back but ErrExpired: the sweep runs under the
+// boundary's persistence window, and a failure is logged, the request
+// left for the next path that looks. A session whose Close was called
+// takes no write here. Callers hold s.mu.
+func (s *Session) sweepLapsedLocked() {
+	if s.admitLocked() != nil {
+		return
+	}
+	ctx := s.await.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = context.WithoutCancel(ctx)
+	expired, err := s.resolveExpiredLocked(ctx)
+	if err != nil {
+		s.agent.Logger().Warn("thread: expired requests not denied",
+			"session", s.header.ID, "err", err)
+		return
+	}
+	if len(expired) == 0 {
+		return
+	}
+	if _, err := s.armSettledLocked(ctx); err != nil {
+		s.agent.Logger().Error("thread: auto-resume arm failed",
+			"session", s.header.ID, "err", err)
+	}
 }
 
 // maxSignedRefusals bounds the StepSigned audit entries recorded per

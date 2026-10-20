@@ -158,7 +158,18 @@ const DefaultMaxDepth = 8
 // A Pool is safe for concurrent use. The zero value is not usable;
 // New constructs. One Pool should own a storage's delegations at a
 // time: Recover treats an unsettled receipt no child of this pool
-// runs for as left behind by a process that is gone.
+// runs for as left behind by a process that is gone. The exception is
+// several pools of one process delegating from one parent session:
+// each pool watches the parent, so a decision recorded there pumps
+// them all, and a pool skips — no error, no log, in its pumps (Decide,
+// DecideSigned, the watch) and in Recover — every receipt whose child
+// another pool watching that parent holds: a live delegation, a
+// Register, or the wrap the child was made under. A pool watches a
+// parent from its first delegation, Decide, DecideSigned or Recover on
+// it; after a restart, Recover every pool — an earlier Recover reports
+// a parked child of a pool not yet watching with ErrNoAgent, and
+// leaves it for that pool's Recover. Cancel and Forward a receipt through
+// the pool that made it.
 type Pool struct {
 	max      int
 	maxDepth int
@@ -215,6 +226,11 @@ type Pool struct {
 	// boundary is closed; a non-nil error stands in for that close
 	// failing.
 	testHookCanceling func(*delegate) error
+	// testHookStarting, when set (by this package's tests only), runs
+	// in run between the running mark and the start of the child's
+	// turn — the window a Forward used to become the child session's
+	// first turn in.
+	testHookStarting func(*delegate)
 }
 
 // An Option configures a Pool at New.
@@ -976,6 +992,9 @@ func (p *Pool) run(ctx context.Context, d *delegate, r runHandle, start func(con
 	// read a stale queued phase and refuse a running child. The mark
 	// happens-before start returns, so before anything the run does.
 	p.setPhase(d, phaseRunning)
+	if p.testHookStarting != nil {
+		p.testHookStarting(d)
+	}
 
 	turn, err := start(runCtx)
 	if err == nil && turn == nil && r.resume && p.nestedBoundary(d) {
@@ -987,6 +1006,11 @@ func (p *Pool) run(ctx context.Context, d *delegate, r runHandle, start func(con
 	for {
 		res = nil
 		if err == nil && turn != nil {
+			p.mu.Lock()
+			if d.idle == r.idle { // the delegate is still this run's
+				d.sent = true // a Forward steers this turn from here on
+			}
+			p.mu.Unlock()
 			res, err = turn.Wait()
 			// A boundary the child's own decision chain settled — a grant,
 			// an Approver — resumes by itself, linked before Wait returns:
@@ -1092,7 +1116,7 @@ type runHandle struct {
 func (d *delegate) begin(cancel context.CancelFunc, t *ticket) runHandle {
 	r := runHandle{ticket: t, cancel: cancel, idle: make(chan struct{}),
 		nest: &nestWait{wake: make(chan struct{}, 1)}}
-	d.cancel, d.idle, d.canceled, d.nest = cancel, r.idle, false, r.nest
+	d.cancel, d.idle, d.canceled, d.nest, d.sent = cancel, r.idle, false, r.nest, false
 	return r
 }
 

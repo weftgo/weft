@@ -115,6 +115,11 @@ func (p *Pool) recoverOne(ctx context.Context, parent *thread.Session, rc Receip
 		return fmt.Errorf("thread/pool: child session %s: %w", rc.Child, err)
 	}
 	name := h.Meta[metaAgent]
+	if p.foreign(parent, rc.Child, name) {
+		// Another pool watching the parent holds this child — it may be
+		// working it now: its Recover recovers it, never this pool's.
+		return nil
+	}
 	state, stop, usage, parked := classify(entries)
 	if parked {
 		return p.reattach(ctx, parent, rc)
@@ -170,8 +175,8 @@ func (p *Pool) reattach(ctx context.Context, parent *thread.Session, rc Receipt)
 		}
 	}
 	d, err := p.delegateFor(ctx, parent, rc, wrapper)
-	if errors.Is(err, errSettled) {
-		return nil // settled since the caller read the ledger: nothing to reattach
+	if errors.Is(err, errSettled) || errors.Is(err, errForeign) {
+		return nil // settled since the caller read the ledger, or another pool's: nothing to reattach
 	}
 	if err != nil {
 		return err

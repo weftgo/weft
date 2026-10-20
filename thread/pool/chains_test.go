@@ -2,6 +2,7 @@ package pool_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"math/rand"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -172,7 +174,10 @@ var chainsModeNames = [...]string{"close", "cancel", "restart", "decide"}
 // park once or twice, one or two chains on a pool of one or two, zero
 // to two Submit children of each lead beside them, a request expiry of
 // 3–42 ms on one iteration in six (inherited down every chain), a
-// Forward to a running receipt now and then — are driven to their end
+// Forward to a running receipt now and then, and on one iteration in
+// three a Forward into a run's start window (between its running mark
+// and its turn, where it must be refused as accepted or parked) — are
+// driven to their end
 // by deciding whatever the leads offer (a quarter denied). In some
 // iterations something ends or interrupts them half-way: the pool's
 // Close racing a Decide; a Cancel of a random lead receipt racing a
@@ -187,7 +192,7 @@ var chainsModeNames = [...]string{"close", "cancel", "restart", "decide"}
 // holds two receipts for one delegating call (a delegation never runs
 // twice); and no goroutine is left behind. The last line logs how many
 // iterations ran in each mode, and with expiry, Submit children and
-// Forward.
+// Forward (at a start, too).
 //
 // Knobs: POOL_CHAINS_ITERS the iteration count (default 30, 10 under
 // -short); POOL_CHAINS_SEED the seed (the log names the one used; the
@@ -220,10 +225,11 @@ func TestNestedRandomChains(t *testing.T) {
 	}
 	var modes [len(chainsModeNames)]int
 	var withExpiry, withAsync, withForward, passed int
+	var atStart atomic.Int64 // Forwards into a start window, every one refused
 	defer func() {
-		t.Logf("modes: close %d, cancel %d, restart %d, decide %d; expiry %d, async %d, forward %d; %d of %d iterations passed",
+		t.Logf("modes: close %d, cancel %d, restart %d, decide %d; expiry %d, async %d, forward %d (%d at a start); %d of %d iterations passed",
 			modes[chainsClose], modes[chainsCancel], modes[chainsRestart], modes[chainsDecide],
-			withExpiry, withAsync, withForward, passed, iters)
+			withExpiry, withAsync, withForward, atStart.Load(), passed, iters)
 	}()
 	for it := range iters {
 		ctx := context.Background()
@@ -233,6 +239,26 @@ func TestNestedRandomChains(t *testing.T) {
 		p := pool.New(max)
 		g := &gauge{limit: max}
 		st := thread.Memory()
+		// A Forward into a run's start window: the running mark is down,
+		// the child's turn not yet sent. It must be refused — a steer
+		// there would be the child session's first turn (or land on the
+		// boundary a resume is leaving), the delegation hung behind it.
+		var forwardAtStart func(p *pool.Pool, parent *thread.Session, receipt string)
+		if os.Getenv("POOL_CHAINS_NOFORWARD") == "" && rint(3) == 0 {
+			forwardAtStart = func(p *pool.Pool, parent *thread.Session, receipt string) {
+				if rint(3) != 0 {
+					return
+				}
+				turn, err := p.Forward(ctx, parent, receipt, core.User("hurry"))
+				var se *pool.StateError
+				if turn != nil || !errors.As(err, &se) || (se.State != pool.Accepted && se.State != pool.Parked) {
+					t.Errorf("iter %d: Forward in %s's start window: turn %v, err %v; want a refusal reading accepted or parked",
+						it, receipt, turn != nil, err)
+				}
+				atStart.Add(1)
+			}
+			pool.OnStarting(p, forwardAtStart)
+		}
 		expiry := time.Duration(0)
 		switch os.Getenv("POOL_CHAINS_EXPIRY") {
 		case "1":
@@ -410,6 +436,9 @@ func TestNestedRandomChains(t *testing.T) {
 					})
 					p2 := pool.New(max)
 					g2 := &gauge{limit: max}
+					if forwardAtStart != nil {
+						pool.OnStarting(p2, forwardAtStart)
+					}
 					for cj := range chains {
 						cc := &chains[cj]
 						within(t, 40*time.Second, "lead Close", func() { _ = cc.s.Close(ctx) })

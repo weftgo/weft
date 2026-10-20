@@ -358,6 +358,22 @@ func (s *Session) WatchMirrors(owner any, fn func(log *slog.Logger)) {
 	s.mirrorWatch[owner] = fn
 }
 
+// MirrorWatchers returns the owners holding a WatchMirrors
+// notification on this session, in no order: the pools delegating
+// from it (or handed it by Decide, DecideSigned or Recover). A pool
+// asks it to tell another pool's child from one it cannot resume —
+// several pools may delegate from one parent, and each one's pump
+// walks every receipt the parent's ledger holds.
+func (s *Session) MirrorWatchers() []any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]any, 0, len(s.mirrorWatch))
+	for owner := range s.mirrorWatch {
+		out = append(out, owner)
+	}
+	return out
+}
+
 // mirrorsDecidedLocked calls the installed notifications: a decision
 // for a mirrored child request has just been recorded. Callers hold
 // s.mu.

@@ -220,15 +220,30 @@ func TestSignedDecisionCannotChooseItsExpiry(t *testing.T) {
 	t.Run("an honest signature on a lapsed request is ErrExpired", func(t *testing.T) {
 		s, call, r, _ := park(t, 20*time.Millisecond)
 		time.Sleep(time.Until(r.Expiry) + 5*time.Millisecond)
-		if _, err := s.Request(call.ID); !errors.Is(err, thread.ErrExpired) {
-			t.Fatalf("Request on a lapsed request: %v, want ErrExpired", err)
-		}
 		honest := thread.SignDecision(secret, r, thread.Approve(call.ID))
 		if _, err := s.DecideSigned(ctx, honest); !errors.Is(err, thread.ErrExpired) {
 			t.Fatalf("got %v, want ErrExpired", err)
 		}
 		if got := signedRefusals(s); len(got) != 1 || got[0].Detail != "expired" {
 			t.Fatalf("the refusal's audit: %+v", got)
+		}
+	})
+
+	t.Run("Request on a lapsed request sweeps it", func(t *testing.T) {
+		s, call, r, _ := park(t, 20*time.Millisecond)
+		time.Sleep(time.Until(r.Expiry) + 5*time.Millisecond)
+		if _, err := s.Request(call.ID); !errors.Is(err, thread.ErrExpired) {
+			t.Fatalf("Request on a lapsed request: %v, want ErrExpired", err)
+		}
+		// The lapse is recorded there, as on every path: a signature
+		// minted before it finds nothing pending.
+		counts := countApprovalEntries(s)
+		if counts["audit:expiry:denied"] != 1 || counts["decision:"+call.ID+":deny:expiry"] != 1 {
+			t.Fatalf("Request did not deny the lapsed request: %v", counts)
+		}
+		honest := thread.SignDecision(secret, r, thread.Approve(call.ID))
+		if _, err := s.DecideSigned(ctx, honest); !errors.Is(err, thread.ErrNotPending) {
+			t.Fatalf("a signature after Request's sweep: got %v, want ErrNotPending", err)
 		}
 	})
 }

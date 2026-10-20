@@ -385,7 +385,17 @@ not the numbers themselves.
   unsettled receipt that no child of *this* pool is running as left by
   a dead process. With two live pools over the same sessions, a
   `Recover` or `Cancel` through one settles the other's running work
-  as failed.
+  as failed. The exception is several pools of one process delegating
+  from one parent session (each its own bound): every pool watching
+  the parent is pumped by each decision recorded there, and a pool
+  skips the receipts whose child another pool watching that parent
+  holds — a live delegation, a `Register`, or the wrap it was made
+  under — with no error and no log, in its pumps and its `Recover`.
+  After a restart a pool watches the parent from its first `Recover`
+  or `Decide` on it: call every pool's `Recover`; the first one
+  reports a parked child of a pool not yet attached with `ErrNoAgent`
+  and leaves it for its own pool's. Cancel and Forward a receipt
+  through the pool that made it.
 - **After a restart**, for each parent session the new process takes
   over: wrap or register the agents first, then
   `p.Recover(ctx, parent)`. It reattaches children parked at an
@@ -516,7 +526,9 @@ not the numbers themselves.
   lifetime, read against the session's clock. Nothing fires on a
   timer: an expired request is denied, with the stated reason, the
   next time the session is touched — `Decide`, `Resume`, `Send`, the
-  runner, or the pool's pump. An idle session holds its lapsed request
+  runner, the pool's pump, or `s.Request` for the lapsed call (it
+  still answers `ErrExpired`, and under `RequireSigned` it is how a
+  signer's client sweeps it). An idle session holds its lapsed request
   until then.
 - **Quorum.** A signed approval counts as its key; an unsigned one as
   whatever `Who` the caller wrote. A quorum that must hold against the

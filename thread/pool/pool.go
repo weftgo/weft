@@ -488,8 +488,10 @@ func (p *Pool) Wait(ctx context.Context, parent *thread.Session, receiptID strin
 // is canceled — async ones on their pool-owned contexts, sync ones
 // through their registered cancels, their parents' models reading
 // SUBAGENT_CANCELED — wrapped calls running outside any session are
-// canceled too, and Close waits for all of them to settle their
-// receipts and end, every child's session closed before the process
+// canceled too, their callers' models reading SUBAGENT_CANCELED as
+// well (the pool ended the child, not the call's own context), and
+// Close waits for all of them to settle their receipts and end, every
+// child's session closed before the process
 // gives up the storage (DeerFlow's gateway drain). A child parked at
 // an approval is not canceled: its session is closed, its receipt
 // stays parked, and a later pool resumes it (Recover, Decide).
@@ -897,7 +899,17 @@ func (p *Pool) run(ctx context.Context, d *delegate, r runHandle, start func(con
 	// happens-before start returns, so before anything the run does.
 	p.setPhase(d, phaseRunning)
 
+	if r.nest != nil {
+		p.mu.Lock()
+		r.nest.ctx = runCtx
+		p.mu.Unlock()
+	}
 	turn, err := start(runCtx)
+	if err == nil && turn == nil && r.nest != nil && len(d.child.Pending()) == 0 {
+		// Nothing to resume here: the decision went on down to a
+		// grandchild, whose resolution resumes this child.
+		turn, err = p.awaitNested(runCtx, d, r.nest, sl)
+	}
 	var res *core.RunResult
 	if err == nil && turn != nil {
 		res, err = turn.Wait()
@@ -968,6 +980,7 @@ type runHandle struct {
 	ticket *ticket
 	cancel context.CancelFunc
 	idle   chan struct{}
+	nest   *nestWait // a resume's nested-resolution hold; nil on a first run
 }
 
 // begin installs a new run's handle on the delegate. Callers hold
@@ -986,6 +999,9 @@ func (p *Pool) rest(d *delegate, r runHandle) {
 	p.mu.Lock()
 	if d.idle == r.idle {
 		d.idle, d.cancel = nil, nil
+	}
+	if r.nest != nil && d.nest == r.nest {
+		d.nest = nil
 	}
 	p.mu.Unlock()
 	close(r.idle)
@@ -1111,6 +1127,9 @@ func (p *Pool) retire(d *delegate) {
 	}
 	delete(p.sessionAgents, d.child.ID())
 	p.markRetired(d.child.ID())
+	if n := p.upstreamNestLocked(d); n != nil {
+		n.signal() // a resume waiting on its child's delegations re-reads them
+	}
 	if d.concluded != nil { // retire is idempotent
 		close(d.concluded)
 		d.concluded = nil

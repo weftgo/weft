@@ -406,7 +406,14 @@ not the numbers themselves.
   session, expiries, and an interrupting `Send` that denies nested
   requests reach the children when the pump next runs:
   `p.Decide(ctx, parent)` with no decisions is the pump alone and is
-  always safe to call.
+  always safe to call. A grandchild's park (lead → child → grandchild,
+  each a sync wrap) surfaces on the lead and one decision there
+  resumes the chain: the grandchild runs, its answer resumes the
+  middle child, whose answer is the lead's tool result — in one
+  process and after a restart that wraps all three under their names
+  again (before 0.18.1 the middle delegation settled failed with "the
+  child's resume did not survive a restart"). That failure is now only
+  a restart's whose grandchild has no agent to resume it.
 - **Do not let the parent's decision chain approve a delegating
   call.** A grant or a live `Approver` that matches a pool wrap's tool
   re-runs the delegation when it parks (see `Pool.Decide`'s godoc for

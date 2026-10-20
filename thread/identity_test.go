@@ -696,6 +696,72 @@ func TestResumeTurnLinksTheParkedRun(t *testing.T) {
 	}
 }
 
+// A call Session.Resume carries undecided is the core's no_decision on
+// the resume's weft.resume.calls — beside a decided sibling, and with
+// no decided call at all — never a synthesized deny; the model reads
+// rule 12's "DENIED: no decision" either way.
+func TestResumeUndecidedCallReadsNoDecision(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		deny  bool // deny rf1 before the Resume
+		calls string
+	}{
+		{"beside a deny", true, "rf1=denied,rf2=no_decision"},
+		{"no decision at all", false, "rf1=no_decision,rf2=no_decision"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tp := &idTracerProvider{}
+			ctx := context.Background()
+			agent := linkedRefundAgent(tp,
+				wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "rf1", Args: `{}`},
+					wefttest.Call{Name: "refund", ID: "rf2", Args: `{}`}),
+				wefttest.Say("done"),
+			)
+			s, err := thread.Create(ctx, thread.Memory(), agent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t1, err := s.Send(ctx, core.User("refund both"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res, err := t1.Wait(); err != nil || len(res.Pending) != 2 {
+				t.Fatalf("parked turn: %v, %v", res, err)
+			}
+			if tc.deny {
+				if _, err := s.Decide(ctx, thread.Deny("rf1", "out of policy")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t2, err := s.Resume(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := t2.Wait()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range res.Messages {
+				for _, part := range m.Content {
+					if tr, ok := part.(core.ToolResultPart); ok && tr.CallID == "rf2" && tr.Content != "DENIED: no decision" {
+						t.Errorf("rf2's result = %q, want rule 12's text", tr.Content)
+					}
+				}
+			}
+			invokes := tp.named("invoke_agent")
+			if len(invokes) != 2 {
+				t.Fatalf("invoke_agent spans = %d, want 2", len(invokes))
+			}
+			if got := invokes[1].attr("weft.resume.calls"); got != tc.calls {
+				t.Errorf("weft.resume.calls = %q, want %q", got, tc.calls)
+			}
+			if got := invokes[1].attr("weft.resumed_from"); got != t1.RunID() {
+				t.Errorf("weft.resumed_from = %q, want the parked run", got)
+			}
+		})
+	}
+}
+
 // linkedRefundAgent is a RequireApproval refund agent over script whose
 // spans land in tp.
 func linkedRefundAgent(tp *idTracerProvider, steps ...wefttest.Turn) *core.Agent {

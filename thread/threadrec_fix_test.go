@@ -23,6 +23,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/internal/provenance"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -439,6 +440,56 @@ func TestResumedCallsNameTheirApproval(t *testing.T) {
 		if got[call] != w {
 			t.Errorf("%s's execute_tool span: approved_by/grant %v, want %v", call, got[call], w)
 		}
+	}
+	rp.shutdown(t)
+}
+
+// A decision recorded through Decide on another layer's behalf
+// (internal/provenance — weft/runtime's playground on a fork) resumes
+// its approved call reported as that layer's class; the class is the
+// arming call's alone: the next boundary of the same session, decided
+// by a plain Decide, reads user again though its parked turn ran
+// under the first resume's context.
+func TestDecideOnBehalfNamesTheApproval(t *testing.T) {
+	rp := newRecPipe(t)
+	run := core.Tool("run_command", "Run a shell command.", func(_ context.Context, in struct {
+		Command string `json:"command"`
+	}) (string, error) {
+		return "ran " + in.Command, nil
+	}, core.RequireApproval())
+	agt := rp.agent("sre", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "run_command", ID: "c1", Args: `{"command":"ls"}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "run_command", ID: "c2", Args: `{"command":"df -h"}`}),
+		wefttest.Say("done."),
+	), run)
+	ctx := context.Background()
+	s, err := thread.Create(ctx, thread.Memory(), agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recSendWait(t, s, "check the disk")
+	recWaitIdle(t, s)
+	if _, err := s.Decide(provenance.With(ctx, "runtime"), thread.Approve("c1")); err != nil {
+		t.Fatal(err)
+	}
+	recWaitIdle(t, s)
+	recDecide(t, s, thread.Approve("c2"))
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := rp.p.ForceFlush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	rp.on.mu.Lock()
+	for _, x := range rp.on.spans {
+		if strings.HasPrefix(x.Name(), "execute_tool") && spanAttr(x, "weft.tool.approved").AsBool() {
+			got[spanAttr(x, "gen_ai.tool.call.id").AsString()] = spanAttr(x, "weft.tool.approved_by").AsString()
+		}
+	}
+	rp.on.mu.Unlock()
+	if want := map[string]string{"c1": "runtime", "c2": "user"}; got["c1"] != want["c1"] || got["c2"] != want["c2"] {
+		t.Errorf("approved_by = %v, want %v", got, want)
 	}
 	rp.shutdown(t)
 }

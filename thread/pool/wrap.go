@@ -268,6 +268,7 @@ func (p *Pool) bare(ctx context.Context, call core.ToolCallPart, next core.ToolC
 	p.wg.Add(1)
 	id := p.nextCall
 	p.nextCall++
+	caller := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	p.calls[id] = cancel
 	p.mu.Unlock()
@@ -288,10 +289,29 @@ func (p *Pool) bare(ctx context.Context, call core.ToolCallPart, next core.ToolC
 	sl := &slot{f: p.sem, ctx: ctx, held: true}
 	res, err := next(withRun(ctx, runInfo{depth: above.depth, chain: above.chain, slot: sl}), call)
 	sl.finish()
+	if err != nil && p.closedThis(ctx, caller) {
+		// Close canceled the child, not the call's own context: the
+		// model reads the pool's SUBAGENT_CANCELED, as on the session
+		// path — Wrap's contract — not the core's context failure.
+		err = &core.ToolError{Code: CodeSubagentCanceled,
+			Message: fmt.Sprintf(canceledMessage, call.Name), Err: err}
+	}
 	if rerr := above.slot.regain(); rerr != nil && err == nil {
 		return "", rerr
 	}
 	return res, err
+}
+
+// closedThis reports whether a bare call's context ended because the
+// pool closed: its own context is done, the caller's is not, and the
+// pool is closed — Close is the one other canceler of a bare call.
+func (p *Pool) closedThis(ctx, caller context.Context) bool {
+	if ctx.Err() == nil || caller.Err() != nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.closed
 }
 
 // runInfo is what a pool child's run context carries for the

@@ -1850,6 +1850,24 @@ func TestPlaygroundForkParkedDecision(t *testing.T) {
 	if n := refunds.Load(); n != 1 {
 		t.Errorf("refund handler runs = %d, want 1 (approved)", n)
 	}
+	// A playground approval names its provenance in both thread modes:
+	// the fork's resumed call's execute_tool span reads
+	// weft.tool.approved_by "runtime", as the ephemeral path's does
+	// (record contract §3) — not the fork session's Decide door's
+	// "user" (0.18.0).
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		_, spans := e.api(t, http.MethodGet, "/api/runs/"+resumed+"/spans", "")
+		if strings.Contains(spans, `"weft.tool.approved_by":"runtime"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the fork's resumed call's span names no approved_by runtime:\n%s", spans)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	// The fork holds the whole exchange: the result is its entry.
 	s, err := thread.Open(context.Background(), e.store, fork, e.agent)
 	if err != nil {

@@ -1703,27 +1703,38 @@ func decisionActors(d ApprovalDecisionEntry, ds []ApprovalDecisionEntry, quorum 
 // danglingDecisionsLocked maps the boundary's calls to the core
 // options the resume run carries (ADR 0007's mapping, exact):
 // approved calls run with Call.Approved set, denied ones show their
-// reason, resolved ones their content. Undecided calls get nothing
-// when denyUndecided is false; with it true (the resume run's own
-// mode) each becomes core.Deny(id, "no decision") — the same text the
-// core's resolvePending writes, synthesized because the core only
-// writes it when some decision exists: a resume carrying none would
-// otherwise repair the dangling calls as interrupted, losing the
-// boundary instead of denying it. Callers hold s.mu.
-func (s *Session) danglingDecisionsLocked(denyUndecided bool) []core.RunOption {
+// reason, resolved ones their content. Undecided calls get no option
+// of their own: the core denies a pending call it was given no
+// decision for with rule 12's "DENIED: no decision", and records it as
+// such — weft.resume.calls and the call's execute_tool span say
+// no_decision, never denied (a synthesized core.Deny would have said
+// denied, and Studio's decided block with it). The core resolves the
+// pending calls only when the run carries some decision, though: a
+// resume carrying none would repair the dangling calls as interrupted,
+// losing the boundary instead of denying it. So with denyUndecided
+// (the resume run's own mode) and no decided call at all, the options
+// carry undecidedMarker alone — a Deny for a call id no call carries,
+// which the core ignores (ADR 0007: unknown ids are) beyond turning
+// the resume on.
+//
+// onBehalf, when not empty, is the approval class the layer that
+// decided through this session's own door named for its approvals
+// (internal/provenance: weft/runtime's "runtime"): an approval the
+// door would report as user's reports as onBehalf instead — reporting
+// only. Callers hold s.mu.
+func (s *Session) danglingDecisionsLocked(denyUndecided bool, onBehalf string) []core.RunOption {
 	dangling := s.danglingCallsLocked()
 	if len(dangling) == 0 {
 		return nil
 	}
 	walk := s.approvalWalkLocked()
 	var opts []core.RunOption
+	undecided := false
 	for _, c := range dangling {
 		_, ds := walk.occurrence(c.ID)
 		d, ok := effectiveDecision(ds, s.cfg.quorum)
 		if !ok {
-			if denyUndecided {
-				opts = append(opts, core.Deny(c.ID, "no decision"))
-			}
+			undecided = true
 			continue
 		}
 		switch d.Outcome {
@@ -1731,6 +1742,9 @@ func (s *Session) danglingDecisionsLocked(denyUndecided bool) []core.RunOption {
 			// The resumed call's execute_tool span names who or what
 			// approved it (UX-B-14): reporting only, the resume is Approve's.
 			by, grant := s.approvalSourceLocked(d)
+			if by == approvedByUser && onBehalf != "" {
+				by = onBehalf
+			}
 			opts = append(opts, core.ApproveBy(c.ID, by, grant))
 		case OutcomeDeny:
 			opts = append(opts, core.Deny(c.ID, d.Reason))
@@ -1740,8 +1754,19 @@ func (s *Session) danglingDecisionsLocked(denyUndecided bool) []core.RunOption {
 			opts = append(opts, core.ResolveError(c.ID, d.Content))
 		}
 	}
+	if denyUndecided && undecided && len(opts) == 0 {
+		opts = append(opts, core.Deny(undecidedMarker, "no decision"))
+	}
 	return opts
 }
+
+// undecidedMarker is the call id of the decision a resume with no
+// decided call carries to turn the core's resume on
+// (danglingDecisionsLocked): empty, which no tool call carries — a
+// model's call with an empty id fails its run (ErrModelContract) — so
+// the core's Deny of an unknown id ignores it, and every pending call
+// is the core's no_decision.
+const undecidedMarker = ""
 
 // The classes core.ApproveBy names on an approved call's execute_tool
 // span (weft.tool.approved_by; record contract §3).

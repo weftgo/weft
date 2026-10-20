@@ -64,6 +64,101 @@ type delegate struct {
 	// a replay read at an earlier park would decide the re-parked
 	// run's calls of the same id.
 	parks uint64
+	// nest is the resume run in flight's hold for a nested resolution:
+	// set for the life of every resumed run (arm), nil otherwise. A
+	// child that is itself a parent — its boundary the sync delegation
+	// of a grandchild — resumes through that grandchild: the replay
+	// reaches the grandchild, and the child's own resume is the one its
+	// delegating call's resolution starts (resolveWrapper), under this
+	// run's context, handed over here.
+	nest *nestWait
+}
+
+// A nestWait is a resumed run's side of a nested resolution: the
+// run's context the grandchild resolves the child's delegating call
+// under (so the child's resume is this run's work — its slot, its
+// cancellation), the resume turn that resolution started, and a wake
+// for the run waiting on it. turn is guarded by the pool's mutex.
+type nestWait struct {
+	ctx  context.Context
+	turn *thread.Turn
+	wake chan struct{} // buffered 1: a resolution landed, or a grandchild retired
+}
+
+// signal wakes the run waiting on n, without blocking.
+func (n *nestWait) signal() {
+	select {
+	case n.wake <- struct{}{}:
+	default:
+	}
+}
+
+// upstreamNestLocked returns the nested-resolution hold of the run
+// that resumes d's parent session, when d's parent is itself a child
+// of this pool being resumed; nil otherwise. Callers hold p.mu.
+func (p *Pool) upstreamNestLocked(d *delegate) *nestWait {
+	up, ok := p.byChild[d.parent.ID()]
+	if !ok || up.child != d.parent {
+		return nil
+	}
+	return up.nest
+}
+
+// delegatingLocked reports whether a sync delegation made from d's
+// child session is still a delegate of this pool — a grandchild whose
+// resolution is what resumes d's child. Callers hold p.mu.
+func (p *Pool) delegatingLocked(d *delegate) bool {
+	for _, e := range p.delegates {
+		if e.parent == d.child && e.wrapper != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// awaitNested is a resumed run whose replay started nothing: the
+// child's boundary is open only on its own sync delegations — the
+// decision went on down to a grandchild (ADR 0022 §7, a nested park
+// decided on the top parent) — so the child's resume is the one the
+// grandchild's resolution starts. The run waits for it, holding no
+// slot, and returns it to be followed like any resume. A grandchild
+// in a restarted process has no bridge yet: the child session is
+// pumped first, which rebuilds and arms it. When no delegation of the
+// child's is left and none handed a resume over, the boundary is
+// whatever the replay finds now — nil when there is nothing to
+// resume (concludeStale's case, a resume that did not survive).
+func (p *Pool) awaitNested(ctx context.Context, d *delegate, n *nestWait, sl *slot) (*thread.Turn, error) {
+	p.attach(d.child)
+	if err := p.pump(ctx, d.child); err != nil {
+		d.agent.Logger().Warn("thread/pool: a nested child's delegations not pumped",
+			"child", d.child.ID(), "receipt", d.receipt, "err", err)
+	}
+	yielded := false
+	defer func() {
+		if yielded {
+			_ = sl.regain() // a canceled run holds nothing; its error is the run's
+		}
+	}()
+	for {
+		p.mu.Lock()
+		t, live := n.turn, p.delegatingLocked(d)
+		p.mu.Unlock()
+		if t != nil {
+			return t, nil
+		}
+		if !live {
+			return d.child.ReplayDecisions(ctx)
+		}
+		if !yielded {
+			yielded = true
+			sl.yield()
+		}
+		select {
+		case <-n.wake:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }
 
 const (
@@ -376,7 +471,14 @@ func (p *Pool) Register(sessionID string, agent *core.Agent) error {
 // ends, the delegation completes: the receipt settles, and a sync
 // delegation's parked call resolves with the child's answer, which
 // resumes the parent. A child that parks again mirrors its new
-// requests and waits for the next Decide.
+// requests and waits for the next Decide. A child that is itself
+// parked on a sync delegation of its own — a grandchild's request
+// mirrored up through it — resumes through that grandchild: the
+// replay reaches the grandchild, whose answer resolves the child's
+// delegating call, and the child's resume that starts is this
+// delegation's run, followed to its end like any other. One decision
+// on the top parent resumes the whole chain, after a restart too
+// (the child's own delegations are pumped from the ledger).
 //
 // The delegating call a child is parked under is never decided: it
 // is not in Pending, and a decision naming it fails with
@@ -563,6 +665,11 @@ func (p *Pool) arm(d *delegate, gen uint64, replay []thread.ApprovalDecisionEntr
 	// delegated it has parked and returned, its context with it.
 	ctx, cancel := context.WithCancel(p.ctx)
 	r := d.begin(cancel, nil)
+	// The hold is in place before the replay: the replay is what
+	// reaches a grandchild, which may resolve the child's delegating
+	// call before the replay returns.
+	r.nest = &nestWait{wake: make(chan struct{}, 1)}
+	d.nest = r.nest
 	p.wg.Add(1)
 	p.mu.Unlock()
 	go func() {
@@ -845,8 +952,31 @@ func (p *Pool) agentForSession(ctx context.Context, parent *thread.Session, chil
 // behind — is reported and left: the receipt already holds the
 // outcome. Any other failure leaves the call parked; Recover resolves
 // it from the ledger.
+//
+// When the parent session is itself a child of this pool whose resume
+// is waiting on this resolution (awaitNested), the resolution is
+// recorded under that run's context — the parent's resume is that
+// run's work — and the resume it starts is handed to it.
 func (p *Pool) resolveWrapper(ctx context.Context, d *delegate, content string, isErr bool) {
-	_, err := d.parent.ResolveDelegation(ctx, d.wrapper, d.child.ID(), content, isErr)
+	p.mu.Lock()
+	n := p.upstreamNestLocked(d)
+	var rctx context.Context
+	if n != nil {
+		rctx = n.ctx
+	}
+	p.mu.Unlock()
+	if rctx == nil {
+		rctx = ctx
+	}
+	turn, err := d.parent.ResolveDelegation(rctx, d.wrapper, d.child.ID(), content, isErr)
+	if n != nil && turn != nil && err == nil {
+		p.mu.Lock()
+		if n.turn == nil {
+			n.turn = turn
+		}
+		p.mu.Unlock()
+		n.signal()
+	}
 	switch {
 	case err == nil:
 	case errors.Is(err, thread.ErrNotPending):

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/internal/provenance"
 	"github.com/weftgo/weft/thread/internal/carry"
 )
 
@@ -1011,7 +1012,10 @@ func (s *Session) runResume(item workItem) {
 			return
 		}
 		opts = append([]core.RunOption(nil), s.await.opts...)
-		ctx = s.resumeCtxLocked(ctx)
+		// The approval class a layer deciding on someone's behalf named
+		// is the arming call's alone (internal/provenance): one the
+		// parked turn's context carried from an earlier resume is shadowed.
+		ctx = provenance.With(s.resumeCtxLocked(ctx), provenance.From(ctx))
 	})
 	if startErr != nil {
 		s.land(item, nil, startErr)
@@ -1067,7 +1071,11 @@ func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpt
 		var decisions []core.RunOption
 		var parkedRun, actor string
 		s.locked(func() {
-			decisions = s.danglingDecisionsLocked(t.resume)
+			var by string
+			if t.resume {
+				by = provenance.From(ctx)
+			}
+			decisions = s.danglingDecisionsLocked(t.resume, by)
 			// The turn the recorded decisions ride links its boundary.
 			// Defensive: today only resume turns carry decisions (ADR
 			// 0021 §1 — boundaryLocked keeps every plain Send queued

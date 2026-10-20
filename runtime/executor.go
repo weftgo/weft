@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/internal/provenance"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -1264,9 +1265,14 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, parkedRunID, runID, co
 			td.Who, td.Via = d.Actor, "playground"
 			ds = append(ds, td)
 		}
-		turn, err := pr.sess.Decide(ctx, ds...)
+		// The fork's approvals name the playground as their provenance,
+		// as the ephemeral path's core.ApproveBy does: the resumed call's
+		// execute_tool span reads weft.tool.approved_by "runtime", not
+		// the session door's "user" (record contract §3).
+		dctx := provenance.With(ctx, approvedByRuntime)
+		turn, err := pr.sess.Decide(dctx, ds...)
 		if err == nil && turn == nil {
-			turn, err = pr.sess.Resume(ctx) // a session opened with AutoResume(false)
+			turn, err = pr.sess.Resume(dctx) // a session opened with AutoResume(false)
 		}
 		if err != nil {
 			slog.Warn("weft/runtime: fork resume failed", "session", pr.sess.ID(), "err", err)

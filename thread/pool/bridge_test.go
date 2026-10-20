@@ -869,8 +869,58 @@ func TestCloseCoversEverything(t *testing.T) {
 			}
 		})
 		res := <-done
-		if res == nil || !strings.Contains(lastToolResult(res.Messages), "context canceled") {
-			t.Errorf("the in-flight bare call was not canceled by Close: %+v", res)
+		// The pool canceled the child: SUBAGENT_CANCELED, as on the
+		// session path (Wrap's and Close's godoc) — 0.18.0 gave the
+		// core's SUBAGENT_FAILED "… failed at step 1: context canceled".
+		want := `SUBAGENT_CANCELED: agent "ask" was canceled before it finished`
+		if res == nil || lastToolResult(res.Messages) != want {
+			t.Errorf("the in-flight bare call Close canceled reads %q, want %q", lastToolResult(res.Messages), want)
+		}
+	})
+	t.Run("bare call canceled by its caller", func(t *testing.T) {
+		// The caller's own cancellation is not the pool's: the core's
+		// words stand.
+		p := pool.New(1)
+		defer func() { _ = p.Close(ctx) }()
+		started, release := make(chan struct{}), make(chan struct{})
+		defer close(release)
+		child := core.New(blocking{release: release, text: "late", onStart: func() { close(started) }})
+		parent := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "ask", ID: "c-ask", Args: `{"prompt":"go"}`}),
+			wefttest.Say("noted"),
+		), p.MustWrap("ask", "", child, pool.ToolOptions(core.Timeout(50*time.Millisecond))))
+		var res *core.RunResult
+		within(t, 10*time.Second, "the bare Generate", func() { res, _ = parent.Generate(ctx, core.Prompt("go")) })
+		<-started
+		if got := lastToolResult(res.Messages); strings.Contains(got, "SUBAGENT_CANCELED") {
+			t.Errorf("a timed-out bare call reads %q, the pool's code", got)
+		}
+	})
+	t.Run("session call in flight", func(t *testing.T) {
+		p := pool.New(1)
+		started, release := make(chan struct{}), make(chan struct{})
+		defer close(release)
+		child := core.New(blocking{release: release, text: "late", onStart: func() { close(started) }})
+		s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "ask", ID: "c-ask", Args: `{"prompt":"go"}`}),
+			wefttest.Say("noted"),
+		), p.MustWrap("ask", "", child)))
+		turn, err := s.Send(ctx, core.User("go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-started
+		within(t, 10*time.Second, "Close", func() {
+			if err := p.Close(ctx); err != nil {
+				t.Errorf("Close: %v", err)
+			}
+		})
+		if _, err := turn.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		want := `SUBAGENT_CANCELED: agent "ask" was canceled before it finished`
+		if got := toolResultsOf(s.Context()); len(got) != 1 || got[0] != want {
+			t.Errorf("the session's delegating call reads %q, want %q", got, want)
 		}
 	})
 	t.Run("parked child", func(t *testing.T) {

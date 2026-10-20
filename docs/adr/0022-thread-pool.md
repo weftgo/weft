@@ -404,7 +404,7 @@ test:
 | `SUBAGENT_FAILED: agent "<name>" failed at step <n>: <cause>` | the child's run failed (the core's text, held equal by `TestFailureTextMatchesCore`) | `TestWrapSyncFails`, `TestModelVisibleTexts` |
 | `SUBAGENT_FAILED: agent "<name>" failed: <cause>` | a failure outside a child run, or recovered from the ledger (no step is recorded) | `TestModelVisibleTexts` |
 | `SUBAGENT_FAILED: agent "<name>" parked at an approval the pool could not surface: <cause>` | the mirror could not be written | `TestMirrorFailureFailsDelegation` |
-| `SUBAGENT_CANCELED: agent "<name>" was canceled before it finished` | `Cancel` or `Close` ended the child — not the parent's own cancellation, which stays a run error | `TestCancelRunningSyncChild`, `TestCancelParked` |
+| `SUBAGENT_CANCELED: agent "<name>" was canceled before it finished` | `Cancel` or `Close` ended the child — not the parent's own cancellation, which stays a run error; a bare wrapped call (outside any session) `Close` canceled reads it too (0.18.1: it read the core's `SUBAGENT_FAILED … context canceled`) | `TestCancelRunningSyncChild`, `TestCancelParked`, `TestCloseCoversEverything` |
 | `DENIED: the delegation was canceled while awaiting approval` | what a canceled, parked child's model would read if its session were resumed | `TestCancelParked` |
 | `thread/pool: decode "<name>" arguments: <json error>` | arguments that are not `{"prompt": …}` | `TestModelVisibleTexts` |
 | `thread/pool: pool is closed` | a wrapped call on a closed pool | `TestCloseCoversEverything` |

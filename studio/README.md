@@ -1451,7 +1451,11 @@ source run's recorded turns at zero tokens; scripted + an
 instructions/model override is refused — the §5.5 prompt trap), thread
 `fork` (a new session with lineage the panel can keep chatting in),
 `POST /api/runs/{id}/approvals` (a parked run's continue/skip/resolve
-— ADR 0007's own verbs), `POST /api/playground/fixtures` (the run's
+— ADR 0007's own verbs; a `call_id` the run's `run_finish` does not
+list as pending is 400 before any command is queued — "call … is not
+pending on run … (pending: …)", or "run … is not parked" when it
+finished with none: the core denies every call it is not handed a
+decision for, so a stale id would silently deny the one meant), `POST /api/playground/fixtures` (the run's
 records as wefttest replay fixtures; refused to a read-scoped panel token, 403 with badge `hidden`; 409 with its badge when there is nothing to fixture), and `GET/POST /api/experiments`
 with `GET /api/experiments/{id}` (the saved groups, PQ4). The
 debugger's rungs 3–4 act on runtime-started runs only (D7, PQ7):

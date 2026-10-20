@@ -61,28 +61,17 @@ export function badgeTitle(reason: string, fix?: string): string {
   return fix ? `${reason} — fix: ${fix}` : reason
 }
 
-/** badge renders one hole as the panel draws it everywhere: the
- * span, the label, the reason and fix as its title. */
-export function badge(hole: string, note: BadgeNote = {}): HTMLElement {
-  const w = holeWords({ hole, ...note })
-  const b = el(
-    "span",
-    `weft-badge ${w.tone === "loss" ? "weft-warn-badge" : "weft-tag"}`,
-    // A hidden hole's count follows the label (HoleBadge's note).
-    (note.label ?? w.label) + (w.note ? ` · ${w.note}` : ""),
-    {
-      title: badgeTitle(w.reason, w.fix),
-      "data-hole": hole,
-    }
-  )
-  // The title is a pointer's alone: the words ride in the accessible
-  // text too, visually hidden (a keyboard or screen-reader user reads
-  // them with the label) — the run page's HoleBadge carries the same
-  // inline words. A reader that also reads title may say them twice:
-  // accepted, over a description browse mode may never read.
-  // badgeLabel reads the label back.
-  b.append(el("span", "weft-sr", ` — ${badgeTitle(w.reason, w.fix)}`))
-  return b
+/** The not_recorded line a session lookup says (C4.1's cause): the
+ * response's reason and fix first (api.go sends them), the cause's
+ * words else. */
+export function noPublicIdWords(reason?: string, fix?: string): string {
+  const w = holeWords({
+    hole: "not_recorded",
+    cause: "no_public_id",
+    reason,
+    fix,
+  })
+  return `${w.label}: ${w.reason} · fix: ${w.fix}`
 }
 
 /** badgeLabel is a badge's visible words (its first text). */
@@ -99,19 +88,6 @@ export function holeBadges(holes: HoleMark[]): HTMLElement | null {
   return box
 }
 
-/** holeLine is a hole said in full (the turn's notes): the badge, then
- * its reason and fix as words. */
-export function holeLine(m: HoleMark): HTMLElement {
-  const w = holeWords(m)
-  // The words are visible beside it: the badge needs no hidden copy.
-  const b = badge(m.hole, m)
-  b.lastChild?.remove()
-  return el("div", `weft-note${w.tone === "loss" ? " weft-warn" : ""}`, [
-    b,
-    ` — ${w.reason}${w.fix ? ` · fix: ${w.fix}` : ""}`,
-  ])
-}
-
 /** requestLabel is a request hole's badge text: the table's label,
  * prefixed where it does not name the request; not_recorded names the
  * version that kept no record (the run page's words). */
@@ -123,25 +99,6 @@ export function requestLabel(hole: string, cause?: string): string {
       ? REQUEST_NOT_RECORDED_LABEL
       : holeWords({ hole }).label
   return label.startsWith("request") ? label : `request: ${label}`
-}
-
-/** requestHole draws a request pane's hole (a step's request line,
- * the Request tab): the badge, then the reason and fix as words. */
-export function requestHole(hole: string, note: BadgeNote = {}): HTMLElement[] {
-  const w = holeWords({ hole, ...note })
-  const b = badge(hole, {
-    ...note,
-    label: note.label ?? requestLabel(hole, note.cause),
-  })
-  b.lastChild?.remove() // said visibly below
-  return [
-    b,
-    el(
-      "div",
-      "weft-reason",
-      [w.reason, w.fix && `fix: ${w.fix}`].filter(Boolean).join(" — ")
-    ),
-  ]
 }
 
 /** requestCapped is the badge for a step past the request pages the
@@ -167,17 +124,23 @@ export function cutBadge(cut: Truncation): HTMLElement {
   return badge("max_tokens", { reason: UNRUN_CALL_REASON, fix: "" })
 }
 
-/** The not_recorded line a session lookup says (C4.1's cause): the
- * response's reason and fix first (api.go sends them), the cause's
- * words else. */
-export function noPublicIdWords(reason?: string, fix?: string): string {
-  const w = holeWords({
-    hole: "not_recorded",
-    cause: "no_public_id",
-    reason,
-    fix,
+/** requestHole draws a request pane's hole (a step's request line,
+ * the Request tab): the badge, then the reason and fix as words. */
+export function requestHole(hole: string, note: BadgeNote = {}): HTMLElement[] {
+  const w = holeWords({ hole, ...note })
+  const b = badge(hole, {
+    ...note,
+    label: note.label ?? requestLabel(hole, note.cause),
   })
-  return `${w.label}: ${w.reason} · fix: ${w.fix}`
+  b.lastChild?.remove() // said visibly below
+  return [
+    b,
+    el(
+      "div",
+      "weft-reason",
+      [w.reason, w.fix && `fix: ${w.fix}`].filter(Boolean).join(" — ")
+    ),
+  ]
 }
 
 /** The words for a content-off mark: "none" is the core's own (the
@@ -256,6 +219,30 @@ export function capLine(
         fromMeta?.note || "the record marks this run's content stored in full",
     }
   return null
+}
+
+/** badge renders one hole as the panel draws it everywhere: the
+ * span, the label, the reason and fix as its title. */
+export function badge(hole: string, note: BadgeNote = {}): HTMLElement {
+  const w = holeWords({ hole, ...note })
+  const b = el(
+    "span",
+    `weft-badge ${w.tone === "loss" ? "weft-warn-badge" : "weft-tag"}`,
+    // A hidden hole's count follows the label (HoleBadge's note).
+    (note.label ?? w.label) + (w.note ? ` · ${w.note}` : ""),
+    {
+      title: badgeTitle(w.reason, w.fix),
+      "data-hole": hole,
+    }
+  )
+  // The title is a pointer's alone: the words ride in the accessible
+  // text too, visually hidden (a keyboard or screen-reader user reads
+  // them with the label) — the run page's HoleBadge carries the same
+  // inline words. A reader that also reads title may say them twice:
+  // accepted, over a description browse mode may never read.
+  // badgeLabel reads the label back.
+  b.append(el("span", "weft-sr", ` — ${badgeTitle(w.reason, w.fix)}`))
+  return b
 }
 
 export { SCRIPTED_MODEL }
@@ -362,6 +349,19 @@ export function refusedVerb(
   )
 }
 
+/** holeLine is a hole said in full (the turn's notes): the badge, then
+ * its reason and fix as words. */
+export function holeLine(m: HoleMark): HTMLElement {
+  const w = holeWords(m)
+  // The words are visible beside it: the badge needs no hidden copy.
+  const b = badge(m.hole, m)
+  b.lastChild?.remove()
+  return el("div", `weft-note${w.tone === "loss" ? " weft-warn" : ""}`, [
+    b,
+    ` — ${w.reason}${w.fix ? ` · fix: ${w.fix}` : ""}`,
+  ])
+}
+
 /** catalogReadError is the ack preview's hole when the step's catalog
  * could not be read (plan F1, the run page's catalogOfStep words): the
  * verdicts are the runtime's registration's, derived. */
@@ -369,6 +369,13 @@ export function catalogReadError(error: string): HoleMark {
   return {
     hole: "derived",
     reason: `the step's catalog could not be read (${error}): the list is the runtime's registration`,
+  }
+}
+
+export function promptReadError(error: string): HoleMark {
+  return {
+    hole: "derived",
+    reason: `the step's prompt could not be read (${error}): the registered prompt is pre-filled`,
   }
 }
 
@@ -420,12 +427,6 @@ export function promptNotRecorded(): HoleMark {
     hole: "not_recorded",
     reason:
       "the step carries no request record: the system prompt it was called with is unknown",
-  }
-}
-export function promptReadError(error: string): HoleMark {
-  return {
-    hole: "derived",
-    reason: `the step's prompt could not be read (${error}): the registered prompt is pre-filled`,
   }
 }
 

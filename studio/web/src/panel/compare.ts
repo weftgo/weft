@@ -8,7 +8,6 @@
 // badges. Vanilla, at panel width.
 import { compareLink, href, runPage } from "../lib/links"
 import type { DiffDoc, SideView } from "../lib/stepdiff"
-import { badge, holeBadges, holeLine } from "./badges"
 import { el, NEW_TAB } from "./render"
 import {
   CELL_REASONS,
@@ -21,6 +20,7 @@ import {
   stepDiffView,
   summaryWords,
 } from "../lib/stepdiff"
+import { badge, holeBadges, holeLine } from "./badges"
 
 /** sideMarks is one side's marks and holes, labelled a or b. */
 function sideMarks(which: string, side: SideView): HTMLElement | null {

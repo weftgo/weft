@@ -60,466 +60,6 @@ export class PanelApiError extends Error {
   }
 }
 
-/** get one JSON document. Errors are PanelApiError; the caller
- * decides what silence looks like (the panel never throws into the
- * host page's console). */
-export async function panelGet<T>(
-  ep: PanelEndpoint,
-  path: string,
-  signal?: AbortSignal
-): Promise<T> {
-  const headers: Record<string, string> = { Accept: "application/json" }
-  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
-  const res = await fetch(apiUrl(ep, path), { headers, signal })
-  if (!res.ok) throw await failure(res)
-  return (await res.json()) as T
-}
-
-/** failure reads a non-2xx answer as a PanelApiError: the server's
- * code and message (S4.2's error shape) and the body as sent, else the
- * status line. */
-async function failure(res: Response): Promise<PanelApiError> {
-  let code = "network"
-  let message = `${res.status} ${res.statusText}`
-  let parsed: unknown
-  try {
-    const body = (await res.json()) as {
-      error?: { code?: string; message?: string }
-    }
-    parsed = body
-    if (body.error) {
-      code = body.error.code ?? code
-      message = body.error.message ?? message
-    }
-  } catch {
-    // not JSON: the status line says enough
-  }
-  return new PanelApiError(res.status, code, message, parsed)
-}
-
-/** PUT /api/agents/{name}/proposal (plan F6): keep as prompt's
- * proposal, the dev token's only (every panel token is 403). */
-export function putProposal(
-  ep: PanelEndpoint,
-  agent: string,
-  instructions: string
-): Promise<unknown> {
-  return panelPut(ep, `agents/${encodeURIComponent(agent)}/proposal`, {
-    instructions,
-  })
-}
-
-// ── Reads the panel uses (S4.2 shapes) ────────────────────────────
-
-export function fetchMeta(
-  ep: PanelEndpoint,
-  signal?: AbortSignal
-): Promise<Meta> {
-  return panelGet<Meta>(ep, "meta", signal)
-}
-
-/** GET /api/panel-handoff?to= (plan G3, capability "handoff"): a
- * playground panel token's Studio page, as {location} — the minted
- * read token rides its fragment. Accept: application/json, as every
- * read here: a fetch cannot read a redirect's Location. */
-export function fetchHandoff(
-  ep: PanelEndpoint,
-  to: string
-): Promise<{ location: string }> {
-  return panelGet(ep, `panel-handoff?to=${encodeURIComponent(to)}`)
-}
-
-/** GET /api/diff?a=&b= (capability "diff", plan E3): the step-aligned
- * compare lib/stepdiff.ts reads, as Studio fetches it. */
-export function fetchDiff(
-  ep: PanelEndpoint,
-  a: string,
-  b: string,
-  signal?: AbortSignal
-): Promise<DiffDoc> {
-  return panelGet<DiffDoc>(ep, diffPath(a, b), signal)
-}
-
-export function fetchRuns(
-  ep: PanelEndpoint,
-  params: Record<string, string>,
-  signal?: AbortSignal
-): Promise<RunsPage> {
-  const qs = new URLSearchParams(params).toString()
-  return panelGet<RunsPage>(ep, `runs${qs ? `?${qs}` : ""}`, signal)
-}
-
-export function fetchRun(
-  ep: PanelEndpoint,
-  id: string,
-  signal?: AbortSignal
-): Promise<RunDoc> {
-  return panelGet<RunDoc>(ep, `runs/${encodeURIComponent(id)}`, signal)
-}
-
-export function fetchEvents(
-  ep: PanelEndpoint,
-  id: string,
-  after: number,
-  signal?: AbortSignal
-): Promise<EventsPage> {
-  return panelGet<EventsPage>(
-    ep,
-    `runs/${encodeURIComponent(id)}/events?after=${after}&limit=500`,
-    signal
-  )
-}
-
-export function fetchTranscript(
-  ep: PanelEndpoint,
-  id: string,
-  signal?: AbortSignal
-): Promise<Transcript> {
-  // asTranscript also normalises: a messages body is stored verbatim
-  // (studio/api.go's rawOrNull embeds any JSON, or a JSON string for a
-  // non-JSON body), and the panel renders inside someone else's page.
-  return panelGet<RawTranscript>(
-    ep,
-    `runs/${encodeURIComponent(id)}/transcript`,
-    signal
-  ).then(asTranscript)
-}
-
-/** The request record pages the panel reads for one run: the turn is
- * bounded by MaxSteps, and so is this walk — past it the view says
- * truncated, never a gap. */
-export const MAX_REQUEST_PAGES = 10
-export const REQUEST_PAGE = 1000
-
-/** fetchRequests reads a run's request record (GET runs/{id}/requests,
- * the Studio UI's route): every page, prompts and catalogs inline. A
- * 403 is the hidden hole (a read-scoped token), answered as the badge
- * — the caller renders it, nothing is thrown or logged. */
-export async function fetchRequests(
-  ep: PanelEndpoint,
-  id: string,
-  signal?: AbortSignal
-): Promise<Holed & { requests: RequestRow[]; truncated?: boolean }> {
-  const rows: RequestRow[] = []
-  let from = 0
-  for (let i = 0; i < MAX_REQUEST_PAGES; i++) {
-    let page: RequestsPage
-    try {
-      page = await panelGet<RequestsPage>(
-        ep,
-        `runs/${encodeURIComponent(id)}/requests?limit=${REQUEST_PAGE}${from ? `&from=${from}` : ""}`,
-        signal
-      )
-    } catch (err) {
-      // Only the route's own hidden refusal is a hole; any other 403
-      // (a token scoped to another conversation) is an error.
-      const body =
-        err instanceof PanelApiError && err.status === 403
-          ? (err.body as Holed | null | undefined)
-          : null
-      if (body?.badge === "hidden")
-        return {
-          requests: [],
-          badge: "hidden",
-          reason: body.reason,
-          fix: body.fix,
-        }
-      throw err
-    }
-    rows.push(...page.requests)
-    if (page.badge)
-      return {
-        requests: rows,
-        badge: page.badge,
-        reason: page.reason,
-        fix: page.fix,
-      }
-    if (page.next_from === undefined || page.next_from <= from)
-      return { requests: rows }
-    from = page.next_from
-  }
-  return { requests: rows, truncated: true }
-}
-
-/** fetchStrippedNote reads the tools route's stripped badge (its
- * reason and fix) — what the run page reads for a stripped row (the
- * requests route badges the row, the tools route words it). Undefined
- * when the route says nothing more. */
-export async function fetchStrippedNote(
-  ep: PanelEndpoint,
-  id: string
-): Promise<Holed | undefined> {
-  const doc = await panelGet<Holed>(
-    ep,
-    `runs/${encodeURIComponent(id)}/tools`
-  ).catch(() => null)
-  return doc?.badge === "stripped"
-    ? { badge: doc.badge, reason: doc.reason, fix: doc.fix }
-    : undefined
-}
-
-export function fetchSpans(
-  ep: PanelEndpoint,
-  id: string,
-  signal?: AbortSignal
-): Promise<SpansDoc> {
-  return panelGet<SpansDoc>(ep, `runs/${encodeURIComponent(id)}/spans`, signal)
-}
-
-export function fetchSessions(
-  ep: PanelEndpoint,
-  params: Record<string, string>,
-  signal?: AbortSignal
-): Promise<SessionsPage> {
-  const qs = new URLSearchParams(params).toString()
-  return panelGet<SessionsPage>(ep, `sessions${qs ? `?${qs}` : ""}`, signal)
-}
-
-export function fetchSession(
-  ep: PanelEndpoint,
-  id: string,
-  signal?: AbortSignal
-): Promise<SessionDoc> {
-  return panelGet<SessionDoc>(ep, `sessions/${encodeURIComponent(id)}`, signal)
-}
-
-/** GET /api/sessions/{id}/public_id (plan C4.1): the public id a
- * thread session's turns carry — public_id "" with badge
- * "not_recorded" when it was created without one. The dev token's and
- * setup A's alone: every panel token is refused (403, badge hidden);
- * an unknown session is a 404. Errors are PanelApiError. */
-export function fetchSessionPublicId(
-  ep: PanelEndpoint,
-  id: string,
-  signal?: AbortSignal
-): Promise<{ session_id: string; public_id: string; badge?: string }> {
-  return panelGet(ep, `sessions/${encodeURIComponent(id)}/public_id`, signal)
-}
-
-export function fetchPublic(
-  ep: PanelEndpoint,
-  publicId: string,
-  signal?: AbortSignal
-): Promise<PublicResolution> {
-  return panelGet<PublicResolution>(
-    ep,
-    `public/${encodeURIComponent(publicId)}`,
-    signal
-  )
-}
-
-// ── The playground's verbs (WEFT-PLAYGROUND §10.4, P1–P5) ────────
-
-/** GET /api/runtimes: the connected runtimes with, per agent, the
- * alternate models and every tool with its side-effect class (the ⚠
- * the drawer draws) and allow flag. */
-export interface ToolView {
-  name: string
-  side_effects: string
-  allow: boolean
-}
-export interface AgentView {
-  name: string
-  models: string[]
-  /** The app holds a runtime.ModelResolver (plan F3): any model name
-   * may be proposed; the runtime decides before its ack. */
-  resolver?: boolean
-  /** The run defaults the option lab greys (absent: an old runtime). */
-  defaults?: AgentDefaults
-  tools: ToolView[]
-  /** The agent's registered system prompt (the drawer pre-fills from
-   * the code's own words, not a guess from the trace). */
-  instructions?: string
-}
-export interface RuntimeView {
-  id: string
-  host: string
-  pid: number
-  service: string
-  env: string
-  connected_since: string
-  last_seen: string
-  /** Holds its command stream now (absent on an older Studio: read as
-   * connected); sessions: it registered runtime.Sessions (plan F4). */
-  connected?: boolean
-  sessions?: boolean
-  agents: AgentView[]
-  /** The runtime's stored breakpoint set (§8.3): what PUT
-   * …/breakpoints last delivered. Empty, never null. */
-  breakpoints?: string[]
-}
-
-export function fetchRuntimes(
-  ep: PanelEndpoint,
-  signal?: AbortSignal
-): Promise<{ runtimes: RuntimeView[] }> {
-  return panelGet<{ runtimes: RuntimeView[] }>(ep, "runtimes", signal)
-}
-
-/** POST /api/playground/runs → 202 { command_id, state }. */
-export function postPlaygroundRun(
-  ep: PanelEndpoint,
-  body: Record<string, unknown>
-): Promise<{ command_id: string; state: string }> {
-  return panelPost(ep, "playground/runs", body)
-}
-
-/** POST /api/playground/preview (plan F2): the run body in, the first
- * request the replay would send out (lib/preview.ts). */
-export function postPreview(
-  ep: PanelEndpoint,
-  body: Record<string, unknown>
-): Promise<PreviewDoc> {
-  return panelPost(ep, PREVIEW_PATH, body)
-}
-
-/** GET /api/playground/commands/{id} — §10.5's lifecycle row. */
-export interface CommandStatus {
-  command_id: string
-  state: "queued" | "accepted" | "rejected" | "finished" | "lost"
-  run_id: string
-  /** The finished run's own outcome (the runtime's finished ack);
-   * absent until the command is finished. A held approval decision
-   * finishes succeeded under the still-parked run's id. */
-  status?: "succeeded" | "failed"
-  error: string | null
-  created: string
-  updated: string
-}
-
-export function fetchCommand(
-  ep: PanelEndpoint,
-  id: string
-): Promise<CommandStatus> {
-  return panelGet<CommandStatus>(
-    ep,
-    `playground/commands/${encodeURIComponent(id)}`
-  )
-}
-
-/** POST /api/runs/{id}/approvals — the parked experiment's continue /
- * skip / resolve (WEFT-DEVTOOLS §8.2), on the runtime-started run. */
-export function postApproval(
-  ep: PanelEndpoint,
-  runID: string,
-  body: {
-    call_id: string
-    decision: "approve" | "deny" | "resolve"
-    reason?: string
-    content?: string
-  }
-): Promise<{ command_id: string; state: string }> {
-  return panelPost(ep, `runs/${encodeURIComponent(runID)}/approvals`, body)
-}
-
-/** PUT /api/runtimes/{id}/breakpoints — the rung-3 verb (§8.3): the
- * tools every run the runtime starts parks on from then on. */
-export function putBreakpoints(
-  ep: PanelEndpoint,
-  runtimeID: string,
-  tools: string[]
-): Promise<{ tools?: string[] } | null> {
-  return panelPut(ep, `runtimes/${encodeURIComponent(runtimeID)}/breakpoints`, {
-    tools,
-  })
-}
-
-/** POST /api/runs/{id}/steer — the rung-4 verb (§8.4): one user
- * message delivered into a runtime-started run mid-flight; on an app
- * turn (plan F4.3) a 202 with the command to poll. */
-export function postSteer(
-  ep: PanelEndpoint,
-  runID: string,
-  message: string
-): Promise<{ steered?: boolean; command_id?: string }> {
-  return panelPost(ep, `runs/${encodeURIComponent(runID)}/steer`, { message })
-}
-
-/** put one JSON document and decode the answer. */
-async function panelPut<T>(
-  ep: PanelEndpoint,
-  path: string,
-  body: unknown
-): Promise<T> {
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  }
-  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
-  const res = await fetch(apiUrl(ep, path), {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw await failure(res)
-  return (await res.json()) as T
-}
-
-/** post one JSON document and decode the answer (the panel's write
- * verbs are few; errors are PanelApiError like the reads). */
-export async function panelPost<T>(
-  ep: PanelEndpoint,
-  path: string,
-  body: unknown
-): Promise<T> {
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  }
-  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
-  const res = await fetch(apiUrl(ep, path), {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw await failure(res)
-  return (await res.json()) as T
-}
-
-// ── The live stream, endpoint-addressed (S4.5) ─────────────────────
-
-export interface PanelLiveOptions {
-  selector: LiveSelector
-  /** Default event,run; the turn tail asks for deltas too. */
-  kinds?: string[]
-  onRecord?: (rec: LiveRecord) => void
-  onRun?: (run: LiveRun) => void
-  /** The stream is open. again is true when it had dropped first (the
-   * browser reconnected on its own): run frames sent meanwhile are
-   * gone, so the caller refetches what it lists. */
-  onOpen?: (again: boolean) => void
-  /** The stream ended and will not come back by itself: "overflow" is
-   * the server's own frame (S4.5: refetch and reconnect), "closed" a
-   * stream that failed for good or stayed down a whole round — the
-   * caller decides whether to knock again, and how often; "expired"
-   * a panel token's stream that ended at the token's expiry — the
-   * caller does not knock (the token would be refused), it shows no
-   * live; a new token is a new data-token, a new connection. */
-  onOverflow?: (why: "overflow" | "closed" | "expired") => void
-  /** The grant was refused for good (403: this token may not read the
-   * stream, e.g. a panel token asking for an agent's): asking again
-   * gets the same answer. Without it a 403 is "closed" like any other
-   * refusal. */
-  onRefused?: () => void
-}
-
-export interface PanelLiveHandle {
-  close: () => void
-}
-
-/** How long a dropped stream may stay down before the panel stops
- * letting the browser retry it (one round of silence). */
-export const LIVE_SILENCE_MS = 10_000
-
-/** A stream's dedup window: the newest keys it forwarded — the same
- * bound studio/live.go's liveDedupSize puts on the server side. The
- * duplicates it exists for (a transport retry, the backfill beside the
- * live frames) arrive close to the original, and a tail left open on a
- * long generation must not grow by one key per delta: an evicted key
- * costs a repeated frame at worst, which the model's own fold by
- * position absorbs (S4.5). */
-export const LIVE_DEDUP_SIZE = 1 << 16
-
 /**
  * openPanelLive is live.ts's openLive over the panel's endpoint and
  * token: same frames, same dedup on (run, kind, pos) — a transport
@@ -715,4 +255,464 @@ export function openPanelLive(
   }
   connect()
   return { close: stop }
+}
+
+/** failure reads a non-2xx answer as a PanelApiError: the server's
+ * code and message (S4.2's error shape) and the body as sent, else the
+ * status line. */
+async function failure(res: Response): Promise<PanelApiError> {
+  let code = "network"
+  let message = `${res.status} ${res.statusText}`
+  let parsed: unknown
+  try {
+    const body = (await res.json()) as {
+      error?: { code?: string; message?: string }
+    }
+    parsed = body
+    if (body.error) {
+      code = body.error.code ?? code
+      message = body.error.message ?? message
+    }
+  } catch {
+    // not JSON: the status line says enough
+  }
+  return new PanelApiError(res.status, code, message, parsed)
+}
+
+// ── Reads the panel uses (S4.2 shapes) ────────────────────────────
+
+export function fetchMeta(
+  ep: PanelEndpoint,
+  signal?: AbortSignal
+): Promise<Meta> {
+  return panelGet<Meta>(ep, "meta", signal)
+}
+
+/** GET /api/panel-handoff?to= (plan G3, capability "handoff"): a
+ * playground panel token's Studio page, as {location} — the minted
+ * read token rides its fragment. Accept: application/json, as every
+ * read here: a fetch cannot read a redirect's Location. */
+export function fetchHandoff(
+  ep: PanelEndpoint,
+  to: string
+): Promise<{ location: string }> {
+  return panelGet(ep, `panel-handoff?to=${encodeURIComponent(to)}`)
+}
+
+export function fetchRun(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<RunDoc> {
+  return panelGet<RunDoc>(ep, `runs/${encodeURIComponent(id)}`, signal)
+}
+
+export function fetchEvents(
+  ep: PanelEndpoint,
+  id: string,
+  after: number,
+  signal?: AbortSignal
+): Promise<EventsPage> {
+  return panelGet<EventsPage>(
+    ep,
+    `runs/${encodeURIComponent(id)}/events?after=${after}&limit=500`,
+    signal
+  )
+}
+
+export function fetchTranscript(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<Transcript> {
+  // asTranscript also normalises: a messages body is stored verbatim
+  // (studio/api.go's rawOrNull embeds any JSON, or a JSON string for a
+  // non-JSON body), and the panel renders inside someone else's page.
+  return panelGet<RawTranscript>(
+    ep,
+    `runs/${encodeURIComponent(id)}/transcript`,
+    signal
+  ).then(asTranscript)
+}
+
+/** The request record pages the panel reads for one run: the turn is
+ * bounded by MaxSteps, and so is this walk — past it the view says
+ * truncated, never a gap. */
+export const MAX_REQUEST_PAGES = 10
+export const REQUEST_PAGE = 1000
+
+/** PUT /api/agents/{name}/proposal (plan F6): keep as prompt's
+ * proposal, the dev token's only (every panel token is 403). */
+export function putProposal(
+  ep: PanelEndpoint,
+  agent: string,
+  instructions: string
+): Promise<unknown> {
+  return panelPut(ep, `agents/${encodeURIComponent(agent)}/proposal`, {
+    instructions,
+  })
+}
+
+/** fetchRequests reads a run's request record (GET runs/{id}/requests,
+ * the Studio UI's route): every page, prompts and catalogs inline. A
+ * 403 is the hidden hole (a read-scoped token), answered as the badge
+ * — the caller renders it, nothing is thrown or logged. */
+export async function fetchRequests(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<Holed & { requests: RequestRow[]; truncated?: boolean }> {
+  const rows: RequestRow[] = []
+  let from = 0
+  for (let i = 0; i < MAX_REQUEST_PAGES; i++) {
+    let page: RequestsPage
+    try {
+      page = await panelGet<RequestsPage>(
+        ep,
+        `runs/${encodeURIComponent(id)}/requests?limit=${REQUEST_PAGE}${from ? `&from=${from}` : ""}`,
+        signal
+      )
+    } catch (err) {
+      // Only the route's own hidden refusal is a hole; any other 403
+      // (a token scoped to another conversation) is an error.
+      const body =
+        err instanceof PanelApiError && err.status === 403
+          ? (err.body as Holed | null | undefined)
+          : null
+      if (body?.badge === "hidden")
+        return {
+          requests: [],
+          badge: "hidden",
+          reason: body.reason,
+          fix: body.fix,
+        }
+      throw err
+    }
+    rows.push(...page.requests)
+    if (page.badge)
+      return {
+        requests: rows,
+        badge: page.badge,
+        reason: page.reason,
+        fix: page.fix,
+      }
+    if (page.next_from === undefined || page.next_from <= from)
+      return { requests: rows }
+    from = page.next_from
+  }
+  return { requests: rows, truncated: true }
+}
+
+/** fetchStrippedNote reads the tools route's stripped badge (its
+ * reason and fix) — what the run page reads for a stripped row (the
+ * requests route badges the row, the tools route words it). Undefined
+ * when the route says nothing more. */
+export async function fetchStrippedNote(
+  ep: PanelEndpoint,
+  id: string
+): Promise<Holed | undefined> {
+  const doc = await panelGet<Holed>(
+    ep,
+    `runs/${encodeURIComponent(id)}/tools`
+  ).catch(() => null)
+  return doc?.badge === "stripped"
+    ? { badge: doc.badge, reason: doc.reason, fix: doc.fix }
+    : undefined
+}
+
+export function fetchRuns(
+  ep: PanelEndpoint,
+  params: Record<string, string>,
+  signal?: AbortSignal
+): Promise<RunsPage> {
+  const qs = new URLSearchParams(params).toString()
+  return panelGet<RunsPage>(ep, `runs${qs ? `?${qs}` : ""}`, signal)
+}
+
+export function fetchSpans(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<SpansDoc> {
+  return panelGet<SpansDoc>(ep, `runs/${encodeURIComponent(id)}/spans`, signal)
+}
+
+export function fetchSessions(
+  ep: PanelEndpoint,
+  params: Record<string, string>,
+  signal?: AbortSignal
+): Promise<SessionsPage> {
+  const qs = new URLSearchParams(params).toString()
+  return panelGet<SessionsPage>(ep, `sessions${qs ? `?${qs}` : ""}`, signal)
+}
+
+export function fetchSession(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<SessionDoc> {
+  return panelGet<SessionDoc>(ep, `sessions/${encodeURIComponent(id)}`, signal)
+}
+
+/** GET /api/sessions/{id}/public_id (plan C4.1): the public id a
+ * thread session's turns carry — public_id "" with badge
+ * "not_recorded" when it was created without one. The dev token's and
+ * setup A's alone: every panel token is refused (403, badge hidden);
+ * an unknown session is a 404. Errors are PanelApiError. */
+export function fetchSessionPublicId(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<{ session_id: string; public_id: string; badge?: string }> {
+  return panelGet(ep, `sessions/${encodeURIComponent(id)}/public_id`, signal)
+}
+
+export function fetchPublic(
+  ep: PanelEndpoint,
+  publicId: string,
+  signal?: AbortSignal
+): Promise<PublicResolution> {
+  return panelGet<PublicResolution>(
+    ep,
+    `public/${encodeURIComponent(publicId)}`,
+    signal
+  )
+}
+
+// ── The playground's verbs (WEFT-PLAYGROUND §10.4, P1–P5) ────────
+
+/** GET /api/runtimes: the connected runtimes with, per agent, the
+ * alternate models and every tool with its side-effect class (the ⚠
+ * the drawer draws) and allow flag. */
+export interface ToolView {
+  name: string
+  side_effects: string
+  allow: boolean
+}
+export interface AgentView {
+  name: string
+  models: string[]
+  /** The app holds a runtime.ModelResolver (plan F3): any model name
+   * may be proposed; the runtime decides before its ack. */
+  resolver?: boolean
+  /** The run defaults the option lab greys (absent: an old runtime). */
+  defaults?: AgentDefaults
+  tools: ToolView[]
+  /** The agent's registered system prompt (the drawer pre-fills from
+   * the code's own words, not a guess from the trace). */
+  instructions?: string
+}
+export interface RuntimeView {
+  id: string
+  host: string
+  pid: number
+  service: string
+  env: string
+  connected_since: string
+  last_seen: string
+  /** Holds its command stream now (absent on an older Studio: read as
+   * connected); sessions: it registered runtime.Sessions (plan F4). */
+  connected?: boolean
+  sessions?: boolean
+  agents: AgentView[]
+  /** The runtime's stored breakpoint set (§8.3): what PUT
+   * …/breakpoints last delivered. Empty, never null. */
+  breakpoints?: string[]
+}
+
+export function fetchRuntimes(
+  ep: PanelEndpoint,
+  signal?: AbortSignal
+): Promise<{ runtimes: RuntimeView[] }> {
+  return panelGet<{ runtimes: RuntimeView[] }>(ep, "runtimes", signal)
+}
+
+/** POST /api/playground/runs → 202 { command_id, state }. */
+export function postPlaygroundRun(
+  ep: PanelEndpoint,
+  body: Record<string, unknown>
+): Promise<{ command_id: string; state: string }> {
+  return panelPost(ep, "playground/runs", body)
+}
+
+/** POST /api/playground/preview (plan F2): the run body in, the first
+ * request the replay would send out (lib/preview.ts). */
+export function postPreview(
+  ep: PanelEndpoint,
+  body: Record<string, unknown>
+): Promise<PreviewDoc> {
+  return panelPost(ep, PREVIEW_PATH, body)
+}
+
+/** GET /api/playground/commands/{id} — §10.5's lifecycle row. */
+export interface CommandStatus {
+  command_id: string
+  state: "queued" | "accepted" | "rejected" | "finished" | "lost"
+  run_id: string
+  /** The finished run's own outcome (the runtime's finished ack);
+   * absent until the command is finished. A held approval decision
+   * finishes succeeded under the still-parked run's id. */
+  status?: "succeeded" | "failed"
+  error: string | null
+  created: string
+  updated: string
+}
+
+export function fetchCommand(
+  ep: PanelEndpoint,
+  id: string
+): Promise<CommandStatus> {
+  return panelGet<CommandStatus>(
+    ep,
+    `playground/commands/${encodeURIComponent(id)}`
+  )
+}
+
+/** POST /api/runs/{id}/approvals — the parked experiment's continue /
+ * skip / resolve (WEFT-DEVTOOLS §8.2), on the runtime-started run. */
+export function postApproval(
+  ep: PanelEndpoint,
+  runID: string,
+  body: {
+    call_id: string
+    decision: "approve" | "deny" | "resolve"
+    reason?: string
+    content?: string
+  }
+): Promise<{ command_id: string; state: string }> {
+  return panelPost(ep, `runs/${encodeURIComponent(runID)}/approvals`, body)
+}
+
+/** PUT /api/runtimes/{id}/breakpoints — the rung-3 verb (§8.3): the
+ * tools every run the runtime starts parks on from then on. */
+export function putBreakpoints(
+  ep: PanelEndpoint,
+  runtimeID: string,
+  tools: string[]
+): Promise<{ tools?: string[] } | null> {
+  return panelPut(ep, `runtimes/${encodeURIComponent(runtimeID)}/breakpoints`, {
+    tools,
+  })
+}
+
+/** POST /api/runs/{id}/steer — the rung-4 verb (§8.4): one user
+ * message delivered into a runtime-started run mid-flight; on an app
+ * turn (plan F4.3) a 202 with the command to poll. */
+export function postSteer(
+  ep: PanelEndpoint,
+  runID: string,
+  message: string
+): Promise<{ steered?: boolean; command_id?: string }> {
+  return panelPost(ep, `runs/${encodeURIComponent(runID)}/steer`, { message })
+}
+
+/** post one JSON document and decode the answer (the panel's write
+ * verbs are few; errors are PanelApiError like the reads). */
+export async function panelPost<T>(
+  ep: PanelEndpoint,
+  path: string,
+  body: unknown
+): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  }
+  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
+  const res = await fetch(apiUrl(ep, path), {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await failure(res)
+  return (await res.json()) as T
+}
+
+/** put one JSON document and decode the answer. */
+async function panelPut<T>(
+  ep: PanelEndpoint,
+  path: string,
+  body: unknown
+): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  }
+  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
+  const res = await fetch(apiUrl(ep, path), {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await failure(res)
+  return (await res.json()) as T
+}
+
+// ── The live stream, endpoint-addressed (S4.5) ─────────────────────
+
+export interface PanelLiveOptions {
+  selector: LiveSelector
+  /** Default event,run; the turn tail asks for deltas too. */
+  kinds?: string[]
+  onRecord?: (rec: LiveRecord) => void
+  onRun?: (run: LiveRun) => void
+  /** The stream is open. again is true when it had dropped first (the
+   * browser reconnected on its own): run frames sent meanwhile are
+   * gone, so the caller refetches what it lists. */
+  onOpen?: (again: boolean) => void
+  /** The stream ended and will not come back by itself: "overflow" is
+   * the server's own frame (S4.5: refetch and reconnect), "closed" a
+   * stream that failed for good or stayed down a whole round — the
+   * caller decides whether to knock again, and how often; "expired"
+   * a panel token's stream that ended at the token's expiry — the
+   * caller does not knock (the token would be refused), it shows no
+   * live; a new token is a new data-token, a new connection. */
+  onOverflow?: (why: "overflow" | "closed" | "expired") => void
+  /** The grant was refused for good (403: this token may not read the
+   * stream, e.g. a panel token asking for an agent's): asking again
+   * gets the same answer. Without it a 403 is "closed" like any other
+   * refusal. */
+  onRefused?: () => void
+}
+
+export interface PanelLiveHandle {
+  close: () => void
+}
+
+/** How long a dropped stream may stay down before the panel stops
+ * letting the browser retry it (one round of silence). */
+export const LIVE_SILENCE_MS = 10_000
+
+/** A stream's dedup window: the newest keys it forwarded — the same
+ * bound studio/live.go's liveDedupSize puts on the server side. The
+ * duplicates it exists for (a transport retry, the backfill beside the
+ * live frames) arrive close to the original, and a tail left open on a
+ * long generation must not grow by one key per delta: an evicted key
+ * costs a repeated frame at worst, which the model's own fold by
+ * position absorbs (S4.5). */
+export const LIVE_DEDUP_SIZE = 1 << 16
+
+/** GET /api/diff?a=&b= (capability "diff", plan E3): the step-aligned
+ * compare lib/stepdiff.ts reads, as Studio fetches it. */
+export function fetchDiff(
+  ep: PanelEndpoint,
+  a: string,
+  b: string,
+  signal?: AbortSignal
+): Promise<DiffDoc> {
+  return panelGet<DiffDoc>(ep, diffPath(a, b), signal)
+}
+
+/** get one JSON document. Errors are PanelApiError; the caller
+ * decides what silence looks like (the panel never throws into the
+ * host page's console). */
+export async function panelGet<T>(
+  ep: PanelEndpoint,
+  path: string,
+  signal?: AbortSignal
+): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" }
+  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
+  const res = await fetch(apiUrl(ep, path), { headers, signal })
+  if (!res.ok) throw await failure(res)
+  return (await res.json()) as T
 }

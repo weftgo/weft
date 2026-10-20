@@ -291,32 +291,27 @@ function scriptDir(script: HTMLScriptElement | null): string {
   }
 }
 
+/** weftScope reads window.__WEFT__: its scope (the serialised form, or
+ * a Scope object), else its publicId — the page's object, as the page
+ * wrote it. The empty scope when there is none or it cannot be read
+ * (a getter of the page's that throws is not the panel's to surface). */
+export function weftScope(): Scope {
+  try {
+    const w = (
+      window as { __WEFT__?: { scope?: unknown; publicId?: unknown } | null }
+    ).__WEFT__
+    const sc = w?.scope
+    if (typeof sc === "string") return parseScope(sc)
+    const form = scopeOption(sc)
+    if (form !== undefined) return parseScope(form)
+  } catch {
+    // fall through to the public id
+  }
+  return { publicId: weftPublicId() }
+}
+
 /** A rung: the raw value it sets for a field, or null when it sets none. */
 type Rung = (f: Field) => string | null
-
-function optionsRung(opts: MountOptions | null | undefined): Rung {
-  return (f) => {
-    if (!opts) return null
-    const v = {
-      endpoint: opts.endpoint,
-      scope: scopeOption(opts.scope),
-      "public-id": opts.publicId,
-      token: opts.token,
-      detect: opts.detect,
-      position: opts.position,
-      open: opts.open,
-      auto: opts.auto,
-      // Not a mount option: the npm entry adds no global (its exports
-      // are the API).
-      global: undefined,
-      mode: undefined,
-      push: undefined,
-      "z-index": undefined,
-      theme: opts.theme,
-    }[f]
-    return v === undefined ? null : String(v)
-  }
-}
 
 /** scopeOption is mount's scope option in its string form (a Scope
  * object serialised; anything else is unset). */
@@ -350,6 +345,36 @@ const attrRung =
   (n: Element | null | undefined): Rung =>
   (f) =>
     n?.getAttribute(`data-${f}`) ?? null
+
+/** discoverEndpoint is rung 5: GET <script directory>/panel-config.json
+ * (B3's document: {endpoint, version, capabilities}, never a token) and
+ * its endpoint when it is an http(s) URL on the same origin as the
+ * document was fetched from — the file may move the endpoint's path,
+ * never its origin, so a token from a higher rung cannot be sent
+ * somewhere the page did not name. "" on anything else (a 404, not
+ * JSON, no answer): the caller falls through to rung 6. No token and
+ * no credentials go with the request. */
+export async function discoverEndpoint(
+  configURL: string,
+  signal?: AbortSignal
+): Promise<string> {
+  if (signal?.aborted) return ""
+  try {
+    const res = await fetch(configURL, {
+      headers: { Accept: "application/json" },
+      credentials: "omit",
+      signal,
+    })
+    if (!res.ok) return ""
+    const doc = (await res.json()) as { endpoint?: unknown } | null
+    if (!doc || typeof doc.endpoint !== "string" || !doc.endpoint) return ""
+    const ep = normalize(doc.endpoint, configURL)
+    if (!ep || new URL(ep).origin !== new URL(configURL).origin) return ""
+    return ep
+  } catch {
+    return ""
+  }
+}
 
 /** readConfig resolves every field through the ladder; el is the
  * <weft-devtools> element (its attributes are rung 2, its mount
@@ -435,33 +460,27 @@ export function readConfig(
   }
 }
 
-/** discoverEndpoint is rung 5: GET <script directory>/panel-config.json
- * (B3's document: {endpoint, version, capabilities}, never a token) and
- * its endpoint when it is an http(s) URL on the same origin as the
- * document was fetched from — the file may move the endpoint's path,
- * never its origin, so a token from a higher rung cannot be sent
- * somewhere the page did not name. "" on anything else (a 404, not
- * JSON, no answer): the caller falls through to rung 6. No token and
- * no credentials go with the request. */
-export async function discoverEndpoint(
-  configURL: string,
-  signal?: AbortSignal
-): Promise<string> {
-  if (signal?.aborted) return ""
-  try {
-    const res = await fetch(configURL, {
-      headers: { Accept: "application/json" },
-      credentials: "omit",
-      signal,
-    })
-    if (!res.ok) return ""
-    const doc = (await res.json()) as { endpoint?: unknown } | null
-    if (!doc || typeof doc.endpoint !== "string" || !doc.endpoint) return ""
-    const ep = normalize(doc.endpoint, configURL)
-    if (!ep || new URL(ep).origin !== new URL(configURL).origin) return ""
-    return ep
-  } catch {
-    return ""
+function optionsRung(opts: MountOptions | null | undefined): Rung {
+  return (f) => {
+    if (!opts) return null
+    const v = {
+      endpoint: opts.endpoint,
+      scope: scopeOption(opts.scope),
+      "public-id": opts.publicId,
+      token: opts.token,
+      detect: opts.detect,
+      position: opts.position,
+      open: opts.open,
+      auto: opts.auto,
+      // Not a mount option: the npm entry adds no global (its exports
+      // are the API).
+      global: undefined,
+      mode: undefined,
+      push: undefined,
+      "z-index": undefined,
+      theme: opts.theme,
+    }[f]
+    return v === undefined ? null : String(v)
   }
 }
 
@@ -476,25 +495,6 @@ export function weftPublicId(): string {
   } catch {
     return ""
   }
-}
-
-/** weftScope reads window.__WEFT__: its scope (the serialised form, or
- * a Scope object), else its publicId — the page's object, as the page
- * wrote it. The empty scope when there is none or it cannot be read
- * (a getter of the page's that throws is not the panel's to surface). */
-export function weftScope(): Scope {
-  try {
-    const w = (
-      window as { __WEFT__?: { scope?: unknown; publicId?: unknown } | null }
-    ).__WEFT__
-    const sc = w?.scope
-    if (typeof sc === "string") return parseScope(sc)
-    const form = scopeOption(sc)
-    if (form !== undefined) return parseScope(form)
-  } catch {
-    // fall through to the public id
-  }
-  return { publicId: weftPublicId() }
 }
 
 /** pageURL is where the rung switches read the page's URL (default
@@ -521,29 +521,6 @@ function urlParam(part: string): string | null {
     } catch {
       return v
     }
-  }
-  return null
-}
-
-/** urlScope is detection rung 4 (plan C3.4): the host page's
- * ?weft_scope= (read first), else its #weft_scope= — the serialised
- * Scope (lib/scope.ts), URL-decoded once, as Studio's dev links write
- * it. null when neither names a public id (or names one still holding
- * ";" or "=": encoded twice). Reads the page's URL, never
- * writes it; never throws. page defaults to pageURL.href(). */
-export function urlScope(page: string = pageURL.href()): Scope | null {
-  try {
-    const u = new URL(page)
-    for (const part of [u.search, u.hash]) {
-      const v = urlParam(part)
-      if (v === null) continue
-      const sc = parseScope(v)
-      // A ";" or "=" left in the public id is a value encoded twice
-      // (pub_x%253Bflow…): no conversation has that id.
-      if (sc.publicId && !/[;=]/.test(sc.publicId)) return sc
-    }
-  } catch {
-    // not a URL: no scope
   }
   return null
 }
@@ -611,4 +588,27 @@ export function debugForced(): boolean {
     // about:blank and friends: not forced
   }
   return false
+}
+
+/** urlScope is detection rung 4 (plan C3.4): the host page's
+ * ?weft_scope= (read first), else its #weft_scope= — the serialised
+ * Scope (lib/scope.ts), URL-decoded once, as Studio's dev links write
+ * it. null when neither names a public id (or names one still holding
+ * ";" or "=": encoded twice). Reads the page's URL, never
+ * writes it; never throws. page defaults to pageURL.href(). */
+export function urlScope(page: string = pageURL.href()): Scope | null {
+  try {
+    const u = new URL(page)
+    for (const part of [u.search, u.hash]) {
+      const v = urlParam(part)
+      if (v === null) continue
+      const sc = parseScope(v)
+      // A ";" or "=" left in the public id is a value encoded twice
+      // (pub_x%253Bflow…): no conversation has that id.
+      if (sc.publicId && !/[;=]/.test(sc.publicId)) return sc
+    }
+  } catch {
+    // not a URL: no scope
+  }
+  return null
 }

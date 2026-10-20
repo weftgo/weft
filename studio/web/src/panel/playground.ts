@@ -240,26 +240,6 @@ export function experimentLabel(
   return `${turn}·x${forkedCount + 1}`
 }
 
-/** draftProblem names what the wire cannot carry, before anything is
- * posted. tools_enabled: [] reads as "no override" on the server, so
- * a draft with every tool off would run with every tool on — the
- * opposite of what the drawer shows. */
-export function draftProblem(draft: ExperimentDraft): string | null {
-  // Studio's buildRunBody refuses the same (lib/experiment-body.ts).
-  if (
-    draft.thread === "fork" &&
-    !(draft.runId && draft.input.trim() && draft.step === 0)
-  )
-    return FORK_NEEDS
-  const names = Object.keys(draft.tools)
-  if (names.length && !names.some((n) => draft.tools[n]))
-    return "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)"
-  return (
-    editsProblem(draft.thread, draft.step, draft.edits) ||
-    (labOf(draft).problems[0]?.message ?? null)
-  )
-}
-
 /** labOf is the drawer's option lab through Studio's labOverrides: the
  * same fields, the same refusals (plan F3). */
 export function labOf(draft: ExperimentDraft) {
@@ -331,4 +311,24 @@ export function pickRuntime(
   if (!live.length) return runtimes[0] ?? null
   const seen = (r: RuntimeView) => Date.parse(r.last_seen) || 0
   return live.reduce((best, r) => (seen(r) > seen(best) ? r : best))
+}
+
+/** draftProblem names what the wire cannot carry, before anything is
+ * posted. tools_enabled: [] reads as "no override" on the server, so
+ * a draft with every tool off would run with every tool on — the
+ * opposite of what the drawer shows. */
+export function draftProblem(draft: ExperimentDraft): string | null {
+  // Studio's buildRunBody refuses the same (lib/experiment-body.ts).
+  if (
+    draft.thread === "fork" &&
+    !(draft.runId && draft.input.trim() && draft.step === 0)
+  )
+    return FORK_NEEDS
+  const names = Object.keys(draft.tools)
+  if (names.length && !names.some((n) => draft.tools[n]))
+    return "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)"
+  return (
+    editsProblem(draft.thread, draft.step, draft.edits) ||
+    (labOf(draft).problems[0]?.message ?? null)
+  )
 }

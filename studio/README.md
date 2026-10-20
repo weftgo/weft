@@ -1061,8 +1061,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 268,996 B raw / 90,778 B gzip
-(88.7 KiB, the bundle of the ledger's row "P9-pre-web-fix2"; 7,526 B — 7.3 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 268,990 B raw / 89,792 B gzip
+(87.7 KiB, the bundle of the ledger's row "P9-trim3"; 8,512 B — 8.3 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1075,7 +1075,9 @@ its own member names too: oxc's mangleProps over the names
 private members, the internal classes' and internal types' members,
 checked with the TypeScript checker on every build — while the host
 API, the npm entry's calls and every wire, DOM and storage name stay
-verbatim) — and with no
+verbatim; since P9-trim2 its modules' import order, and since P9-trim3
+its classes' method order and its hoisted functions' order, are
+arranged for gzip's window, as the source's comments say) — and with no
 sourcemap, so it is unreadable in a
 host page's devtools: that is the accepted cost of the headroom. To
 read the panel, read its source, `studio/web/src/panel`; a sourcemap

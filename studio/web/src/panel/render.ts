@@ -1,4 +1,42 @@
-// DOM construction for the panel: tiny helpers over the standard
+function morph(o: Node, n: Node): void {
+  if (o.nodeType !== 1) {
+    if (o.nodeValue !== n.nodeValue) o.nodeValue = n.nodeValue
+    return
+  }
+  const a = o as HTMLInputElement
+  const b = n as HTMLInputElement
+  for (const at of Array.from(a.attributes))
+    if (!b.hasAttribute(at.name)) a.removeAttribute(at.name)
+  for (const at of Array.from(b.attributes))
+    if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value)
+  const hn = (b as Live)._on
+  const ho = (a as Live)._on
+  if (ho) for (const k in ho) if (!hn?.[k]) ho[k] = undefined
+  if (hn)
+    for (const k in hn)
+      on(a, k.replace("!", ""), hn[k] as Handler, k.endsWith("!"))
+  patch(a, Array.from(b.childNodes))
+  // What the user typed lives on the property: written only when the
+  // build says otherwise, so a kept field keeps its caret.
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.value !== b.value)
+    a.value = b.value
+  if (a.tagName === "INPUT" && a.checked !== b.checked) a.checked = b.checked
+}
+
+/** option appends one <option> to sel and returns it: its words, its
+ * attributes in the order given (value among them), and — when given —
+ * its selectedness, set before it joins the list. */
+export function option(
+  sel: HTMLElement,
+  text: string,
+  attrs: Record<string, string>,
+  selected?: boolean
+): HTMLOptionElement {
+  const o = el("option", "", text, attrs) as HTMLOptionElement
+  if (selected !== undefined) o.selected = selected
+  sel.append(o)
+  return o
+} // DOM construction for the panel: tiny helpers over the standard
 // APIs — no framework, no virtual DOM (the Dv0 decision, §11 Q1); a
 // keyed patch (D3) instead of a rebuild.
 // Shadow DOM keeps the host page's CSS out (§5.4); every element
@@ -18,21 +56,6 @@ export function el(
     for (const c of textOrChildren) n.append(c)
   if (attrs) for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v)
   return n
-}
-
-/** option appends one <option> to sel and returns it: its words, its
- * attributes in the order given (value among them), and — when given —
- * its selectedness, set before it joins the list. */
-export function option(
-  sel: HTMLElement,
-  text: string,
-  attrs: Record<string, string>,
-  selected?: boolean
-): HTMLOptionElement {
-  const o = el("option", "", text, attrs) as HTMLOptionElement
-  if (selected !== undefined) o.selected = selected
-  sel.append(o)
-  return o
 }
 
 /** NEW_TAB is a link's attributes for a new tab (Studio, a hand-off),
@@ -123,31 +146,6 @@ export function patch(parent: Node, next: Node[]): void {
     else parent.insertBefore(t, ref)
     if (o) morph(o, n)
   }
-}
-
-function morph(o: Node, n: Node): void {
-  if (o.nodeType !== 1) {
-    if (o.nodeValue !== n.nodeValue) o.nodeValue = n.nodeValue
-    return
-  }
-  const a = o as HTMLInputElement
-  const b = n as HTMLInputElement
-  for (const at of Array.from(a.attributes))
-    if (!b.hasAttribute(at.name)) a.removeAttribute(at.name)
-  for (const at of Array.from(b.attributes))
-    if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value)
-  const hn = (b as Live)._on
-  const ho = (a as Live)._on
-  if (ho) for (const k in ho) if (!hn?.[k]) ho[k] = undefined
-  if (hn)
-    for (const k in hn)
-      on(a, k.replace("!", ""), hn[k] as Handler, k.endsWith("!"))
-  patch(a, Array.from(b.childNodes))
-  // What the user typed lives on the property: written only when the
-  // build says otherwise, so a kept field keeps its caret.
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.value !== b.value)
-    a.value = b.value
-  if (a.tagName === "INPUT" && a.checked !== b.checked) a.checked = b.checked
 }
 
 /** clear removes a node's children in one go. */

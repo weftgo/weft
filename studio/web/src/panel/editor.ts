@@ -19,6 +19,54 @@ import type { PreviewDoc } from "../lib/preview"
 import { badge } from "./badges"
 import { el, on } from "./render"
 
+/** marksBlock is a replayed run's weft.edits read back (Studio's
+ * EditsMark): none on a child run, which inherits its parent's. */
+export function marksBlock(
+  row:
+    | (NonNullable<Parameters<typeof editMarks>[0]> & { forked_from?: string })
+    | null
+    | undefined,
+  batches?: TranscriptBatch[]
+): HTMLElement | null {
+  const { marks, more } = editMarks(row)
+  if (!marks.length && !more) return null
+  // The replay's from_step (forked_from's "#N"): where its kept prefix ends.
+  const at = /#(\d+)$/.exec(row?.forked_from ?? "")?.[1]
+  const from = at === undefined ? undefined : Number(at)
+  const box = el(
+    "div",
+    "weft-note",
+    [
+      el(
+        "div",
+        "weft-name",
+        `kept prefix edited${row?.forked_from ? ` · from ${row.forked_from}` : ""}`
+      ),
+    ],
+    { "data-weft-edits-mark": "" }
+  )
+  for (const m of marks)
+    box.append(
+      el(
+        "div",
+        "weft-res",
+        [
+          el("span", "weft-badge weft-err", MARK_CHIPS[m.what]),
+          ` ${markLine(m)} `,
+          markedPart(batches, m, from),
+        ],
+        {
+          "data-weft-edit-mark": m.what,
+        }
+      )
+    )
+  if (more)
+    box.append(
+      el("div", "weft-reason", `+${more} more (the mark is capped at 1024 B)`)
+    )
+  return box
+}
+
 /** The preview as the panel holds it: the answer, or the refusal
  * (refused: the command's 400, which holds Run). */
 export interface PanelPreview {
@@ -31,6 +79,33 @@ export interface PanelPreview {
 
 const line = (cls: string, text: string, attrs: Record<string, string>) =>
   el("div", cls, text, attrs)
+
+/** editList is the drawer's list of the command's edits by kind, each
+ * droppable (Studio's EditList). */
+export function editList(
+  edits: ReplayEdit[],
+  drop: (e: ReplayEdit) => void
+): HTMLElement | null {
+  if (!edits.length) return null
+  const list = el("ul", "weft-verdicts", "", {
+    "aria-label": "transcript edits",
+    "data-key": "edits",
+  })
+  for (const e of edits) {
+    const b = el("button", "weft-btn", "drop", {
+      type: "button",
+      "aria-label": `drop ${editLine(e)}`,
+    })
+    on(b, "click", () => drop(e))
+    list.append(
+      el("li", "", [el("span", "weft-reason", editLine(e)), b], {
+        "data-weft-edit-kind": kindOf(e),
+        "data-key": editKey(e),
+      })
+    )
+  }
+  return list
+}
 
 /** previewBlock draws the preview (Studio's PreviewPane, row for row). */
 export function previewBlock(p: PanelPreview, fromStep: number): HTMLElement {
@@ -110,81 +185,6 @@ export function previewBlock(p: PanelPreview, fromStep: number): HTMLElement {
   if (v.unchecked)
     box.append(
       line("weft-reason", v.unchecked, { "data-weft-preview-unchecked": "" })
-    )
-  return box
-}
-
-/** editList is the drawer's list of the command's edits by kind, each
- * droppable (Studio's EditList). */
-export function editList(
-  edits: ReplayEdit[],
-  drop: (e: ReplayEdit) => void
-): HTMLElement | null {
-  if (!edits.length) return null
-  const list = el("ul", "weft-verdicts", "", {
-    "aria-label": "transcript edits",
-    "data-key": "edits",
-  })
-  for (const e of edits) {
-    const b = el("button", "weft-btn", "drop", {
-      type: "button",
-      "aria-label": `drop ${editLine(e)}`,
-    })
-    on(b, "click", () => drop(e))
-    list.append(
-      el("li", "", [el("span", "weft-reason", editLine(e)), b], {
-        "data-weft-edit-kind": kindOf(e),
-        "data-key": editKey(e),
-      })
-    )
-  }
-  return list
-}
-
-/** marksBlock is a replayed run's weft.edits read back (Studio's
- * EditsMark): none on a child run, which inherits its parent's. */
-export function marksBlock(
-  row:
-    | (NonNullable<Parameters<typeof editMarks>[0]> & { forked_from?: string })
-    | null
-    | undefined,
-  batches?: TranscriptBatch[]
-): HTMLElement | null {
-  const { marks, more } = editMarks(row)
-  if (!marks.length && !more) return null
-  // The replay's from_step (forked_from's "#N"): where its kept prefix ends.
-  const at = /#(\d+)$/.exec(row?.forked_from ?? "")?.[1]
-  const from = at === undefined ? undefined : Number(at)
-  const box = el(
-    "div",
-    "weft-note",
-    [
-      el(
-        "div",
-        "weft-name",
-        `kept prefix edited${row?.forked_from ? ` · from ${row.forked_from}` : ""}`
-      ),
-    ],
-    { "data-weft-edits-mark": "" }
-  )
-  for (const m of marks)
-    box.append(
-      el(
-        "div",
-        "weft-res",
-        [
-          el("span", "weft-badge weft-err", MARK_CHIPS[m.what]),
-          ` ${markLine(m)} `,
-          markedPart(batches, m, from),
-        ],
-        {
-          "data-weft-edit-mark": m.what,
-        }
-      )
-    )
-  if (more)
-    box.append(
-      el("div", "weft-reason", `+${more} more (the mark is capped at 1024 B)`)
     )
   return box
 }

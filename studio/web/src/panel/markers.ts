@@ -22,6 +22,19 @@
 import { parseScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 
+/** scanMarkers lists root's markers in document order: an empty or
+ * unparsable value (no public id) is ignored, the panel's own elements
+ * and anything on or inside a data-weft-untrusted element are skipped. */
+export function scanMarkers(root: Document = document): Marker[] {
+  const out: Marker[] = []
+  for (const element of Array.from(root.querySelectorAll(`[${MARKER_ATTR}]`))) {
+    if (element.closest(PANEL) || untrusted(element)) continue
+    const scope = parseScope(element.getAttribute(MARKER_ATTR) ?? "")
+    if (scope.publicId) out.push({ scope, element })
+  }
+  return out
+}
+
 /** The marker attribute (the helpers' data-weft-scope). */
 export const MARKER_ATTR = "data-weft-scope"
 
@@ -95,19 +108,6 @@ function touchesMarkers(r: MutationRecord): boolean {
       return true
   // (An untrusted mark set or lifted is an attribute record: above.)
   return false
-}
-
-/** scanMarkers lists root's markers in document order: an empty or
- * unparsable value (no public id) is ignored, the panel's own elements
- * and anything on or inside a data-weft-untrusted element are skipped. */
-export function scanMarkers(root: Document = document): Marker[] {
-  const out: Marker[] = []
-  for (const element of Array.from(root.querySelectorAll(`[${MARKER_ATTR}]`))) {
-    if (element.closest(PANEL) || untrusted(element)) continue
-    const scope = parseScope(element.getAttribute(MARKER_ATTR) ?? "")
-    if (scope.publicId) out.push({ scope, element })
-  }
-  return out
 }
 
 /** installMarkerRung scans root's markers now and after DOM changes,

@@ -53,21 +53,6 @@ export interface TreeState {
   saidTimer?: ReturnType<typeof setTimeout>
 }
 
-/** stopTree clears a tree's pending timers (the filter's debounce, the
- * "copied" line's clearing): the element calls it on disconnect, so
- * nothing redraws a detached panel. A pending query is applied as the
- * box holds it, for the next draw. */
-export function stopTree(st: TreeState): void {
-  if (st.timer !== undefined && st.applied !== st.q) {
-    st.applied = st.q
-    st.open.clear()
-  }
-  clearTimeout(st.timer)
-  clearTimeout(st.saidTimer)
-  st.timer = st.saidTimer = undefined
-  if (st.said === "copied") st.said = ""
-}
-
 /** The filter's debounce: a keystroke walks a 10 MB document once. */
 export const FILTER_MS = 100
 
@@ -153,82 +138,6 @@ export function search(
     if (isBox(v)) each(v, (ck, c) => stack.push([at(p, ck), ck, c]))
   }
   return { hits, via, n }
-}
-
-/** utf8 counts a string's UTF-8 bytes from one index on — a loop over
- * char codes, no allocation (a surrogate pair is 4 bytes). */
-export function utf8(s: string, from = 0): number {
-  let n = 0
-  for (let i = from; i < s.length; i++) {
-    const c = s.charCodeAt(i)
-    if (c < 0x80) n += 1
-    else if (c < 0x800) n += 2
-    else if (
-      (c & 0xfc00) === 0xd800 &&
-      (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00
-    ) {
-      n += 4
-      i++
-    } else n += 3
-  }
-  return n
-}
-
-/** cut is where a capped string's head ends: STR_CAP, one unit back
- * when that would split a surrogate pair. */
-const cut = (s: string) =>
-  (s.charCodeAt(STR_CAP - 1) & 0xfc00) === 0xd800 ? STR_CAP - 1 : STR_CAP
-
-/** preview is a collapsed container's one line. */
-const preview = (v: Box) =>
-  Array.isArray(v) ? `[…] ${v.length} items` : `{…} ${size(v)} keys`
-
-export interface TreeCtx {
-  /** Redraw the panel (a toggle, the filter, a copy's outcome). */
-  redraw: () => void
-  /** The shadow root the tree is drawn into (the copy fallback selects in it). */
-  root: () => ParentNode | null
-}
-
-/** copy puts text on the clipboard, guarded: no clipboard (or a
- * refusal) shows it in a box, selected, to copy by hand. Never throws. */
-export function copy(st: TreeState, text: string, cx: TreeCtx) {
-  const done = (ok: boolean) => {
-    st.said = ok ? "copied" : "the clipboard refused: select and copy below"
-    st.box = ok ? "" : text
-    // "copied" goes after 2 s (or with the next action).
-    clearTimeout(st.saidTimer)
-    if (ok)
-      st.saidTimer = setTimeout(() => {
-        if (st.said !== "copied") return
-        st.said = ""
-        cx.redraw()
-      }, 2_000)
-    cx.redraw()
-    if (!ok)
-      try {
-        const ta = cx
-          .root()
-          ?.querySelector<HTMLTextAreaElement>(".weft-copybox")
-        ta?.focus()
-        ta?.select()
-      } catch {
-        // nothing to select
-      }
-  }
-  try {
-    // Absent outside a secure context, whatever the DOM types say.
-    const c = (navigator as { clipboard?: Clipboard }).clipboard
-    const p = c ? c.writeText(text) : null
-    if (p)
-      p.then(
-        () => done(true),
-        () => done(false)
-      )
-    else done(false)
-  } catch {
-    done(false)
-  }
 }
 
 /** treeView draws the Raw tab: the toolbar (filter, count, copy all,
@@ -437,4 +346,95 @@ export function treeView(
   })
   out.append(list)
   return out
+}
+
+/** utf8 counts a string's UTF-8 bytes from one index on — a loop over
+ * char codes, no allocation (a surrogate pair is 4 bytes). */
+export function utf8(s: string, from = 0): number {
+  let n = 0
+  for (let i = from; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 0x80) n += 1
+    else if (c < 0x800) n += 2
+    else if (
+      (c & 0xfc00) === 0xd800 &&
+      (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00
+    ) {
+      n += 4
+      i++
+    } else n += 3
+  }
+  return n
+}
+
+/** cut is where a capped string's head ends: STR_CAP, one unit back
+ * when that would split a surrogate pair. */
+const cut = (s: string) =>
+  (s.charCodeAt(STR_CAP - 1) & 0xfc00) === 0xd800 ? STR_CAP - 1 : STR_CAP
+
+/** preview is a collapsed container's one line. */
+const preview = (v: Box) =>
+  Array.isArray(v) ? `[…] ${v.length} items` : `{…} ${size(v)} keys`
+
+/** stopTree clears a tree's pending timers (the filter's debounce, the
+ * "copied" line's clearing): the element calls it on disconnect, so
+ * nothing redraws a detached panel. A pending query is applied as the
+ * box holds it, for the next draw. */
+export function stopTree(st: TreeState): void {
+  if (st.timer !== undefined && st.applied !== st.q) {
+    st.applied = st.q
+    st.open.clear()
+  }
+  clearTimeout(st.timer)
+  clearTimeout(st.saidTimer)
+  st.timer = st.saidTimer = undefined
+  if (st.said === "copied") st.said = ""
+}
+
+export interface TreeCtx {
+  /** Redraw the panel (a toggle, the filter, a copy's outcome). */
+  redraw: () => void
+  /** The shadow root the tree is drawn into (the copy fallback selects in it). */
+  root: () => ParentNode | null
+}
+
+/** copy puts text on the clipboard, guarded: no clipboard (or a
+ * refusal) shows it in a box, selected, to copy by hand. Never throws. */
+export function copy(st: TreeState, text: string, cx: TreeCtx) {
+  const done = (ok: boolean) => {
+    st.said = ok ? "copied" : "the clipboard refused: select and copy below"
+    st.box = ok ? "" : text
+    // "copied" goes after 2 s (or with the next action).
+    clearTimeout(st.saidTimer)
+    if (ok)
+      st.saidTimer = setTimeout(() => {
+        if (st.said !== "copied") return
+        st.said = ""
+        cx.redraw()
+      }, 2_000)
+    cx.redraw()
+    if (!ok)
+      try {
+        const ta = cx
+          .root()
+          ?.querySelector<HTMLTextAreaElement>(".weft-copybox")
+        ta?.focus()
+        ta?.select()
+      } catch {
+        // nothing to select
+      }
+  }
+  try {
+    // Absent outside a secure context, whatever the DOM types say.
+    const c = (navigator as { clipboard?: Clipboard }).clipboard
+    const p = c ? c.writeText(text) : null
+    if (p)
+      p.then(
+        () => done(true),
+        () => done(false)
+      )
+    else done(false)
+  } catch {
+    done(false)
+  }
 }

@@ -57,37 +57,6 @@ const clamp = (v: number, lo: number, hi: number) =>
 const vw = () => window.innerWidth || 1024
 const vh = () => window.innerHeight || 768
 
-/** initialLayout is what the data-* attributes say (data-position,
- * data-open, data-mode), before storage. */
-export function initialLayout(
-  position: PanelPlacement,
-  open: boolean,
-  mode: string
-): Layout {
-  const dock = position.endsWith("-dock")
-  const w = 520
-  const h = 560
-  const l: Layout = {
-    // An explicit data-mode float|dock wins over what the position implies.
-    mode:
-      mode === "float" ? "float" : dock || mode === "dock" ? "dock" : "float",
-    side: dock ? (position.slice(0, -5) as Side) : "right",
-    open: mode === "pill" ? false : mode === "float" || mode === "dock" || open,
-    hidden: mode === "hidden",
-    x: position === "bottom-left" ? GAP : vw() - w - GAP,
-    y: vh() - h - GAP,
-    w,
-    h,
-    d: 460,
-    run: "",
-    theme: "",
-    raw: false,
-    tab: "story",
-    debug: false,
-  }
-  return l
-}
-
 /** storage is localStorage, or null where reading it throws. */
 function storage(): Storage | null {
   try {
@@ -133,6 +102,37 @@ export function readStore(): Partial<Layout> {
   } catch {
     return {}
   }
+}
+
+/** initialLayout is what the data-* attributes say (data-position,
+ * data-open, data-mode), before storage. */
+export function initialLayout(
+  position: PanelPlacement,
+  open: boolean,
+  mode: string
+): Layout {
+  const dock = position.endsWith("-dock")
+  const w = 520
+  const h = 560
+  const l: Layout = {
+    // An explicit data-mode float|dock wins over what the position implies.
+    mode:
+      mode === "float" ? "float" : dock || mode === "dock" ? "dock" : "float",
+    side: dock ? (position.slice(0, -5) as Side) : "right",
+    open: mode === "pill" ? false : mode === "float" || mode === "dock" || open,
+    hidden: mode === "hidden",
+    x: position === "bottom-left" ? GAP : vw() - w - GAP,
+    y: vh() - h - GAP,
+    w,
+    h,
+    d: 460,
+    run: "",
+    theme: "",
+    raw: false,
+    tab: "story",
+    debug: false,
+  }
+  return l
 }
 
 /** The fields that place the panel: stored only once the user placed

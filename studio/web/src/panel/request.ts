@@ -133,73 +133,11 @@ const mono = (text: string, cls = "weft-res") => el("span", cls, text)
 const chip = (mark: string, text: string) =>
   el("span", "weft-badge weft-info", text, { "data-weft-mark": mark })
 
-/** picker is a row of pressed/unpressed buttons (the steps, a step's
- * attempts). */
-function picker(
-  label: string,
-  items: number[],
-  cur: number,
-  pick: (n: number) => void,
-  words = (n: number) => `${label} ${n}`
-): HTMLElement {
-  const box = el("div", "weft-holes weft-rq-pick", "", {
-    role: "group",
-    "aria-label": label,
-    "data-key": label,
-  })
-  for (const n of items) {
-    const b = el(
-      "button",
-      `weft-btn${n === cur ? " weft-active" : ""}`,
-      words(n),
-      {
-        type: "button",
-        "aria-pressed": String(n === cur),
-        [`data-weft-rq-${label}`]: String(n),
-      }
-    )
-    on(b, "click", () => pick(n))
-    box.append(b)
-  }
-  return box
-}
-
 /** The composition checks, by their inputs (sha256 is async): a
  * pending one draws no chip and redraws when it answers. Bounded: past
  * COMPOSED_MAX the oldest goes (a Map iterates in insertion order). */
 export const composedCache = new Map<string, boolean | null | "pending">()
 export const COMPOSED_MAX = 64
-function remember(key: string, v: boolean | null | "pending") {
-  composedCache.set(key, v)
-  if (composedCache.size > COMPOSED_MAX)
-    composedCache.delete(composedCache.keys().next().value!)
-}
-
-function composed(
-  r: RequestRow,
-  insHash: string,
-  snippets: string[] | undefined,
-  redraw: () => void
-): boolean | undefined {
-  const key = [
-    r.system_hash,
-    insHash,
-    r.body.tools.names.join(","),
-    snippets?.join("\u0000") ?? "\u0001",
-  ].join("|")
-  const got = composedCache.get(key)
-  if (got === "pending") return undefined
-  if (got !== undefined) return got ?? undefined
-  remember(key, "pending")
-  composedFromInstructions(r, insHash, snippets).then(
-    (v) => {
-      remember(key, v ?? null)
-      redraw()
-    },
-    () => remember(key, null)
-  )
-  return undefined
-}
 
 /** What the hashes say about one step's prompt (step-request.tsx's
  * usePromptFacts, without the hooks). */
@@ -212,9 +150,158 @@ interface Facts {
   noManifest: boolean
 }
 
-function cut(r: RequestRow | undefined): boolean {
-  const p = r?.prompt
-  return !!p && !isHoleRef(p) && p.truncated_bytes > 0
+/** The diffs drawn, by row: a redraw diffs nothing again. */
+const diffMemo = new WeakMap<RequestRow, { base: string; diff: BoundedDiff }>()
+
+function diffView(
+  r: RequestRow,
+  base: PromptBaseline,
+  text: string
+): HTMLElement {
+  const box = el(
+    "div",
+    "weft-diff",
+    [el("div", "weft-diff-h", baselineCaption(base))],
+    { "data-weft-prompt-diff": base.kind }
+  )
+  if (cut(r) || base.truncated) {
+    // A cut tail would read as lines a PrepareStep removed.
+    box.append(hole("truncated", { label: REQUEST_DIFF_CUT_LABEL }))
+    return box
+  }
+  let m = diffMemo.get(r)
+  if (!m || m.base !== base.text)
+    diffMemo.set(
+      r,
+      (m = { base: base.text, diff: diffLinesBounded(base.text, text) })
+    )
+  const diff = m.diff
+  if ("tooLarge" in diff) {
+    box.append(
+      el(
+        "div",
+        "weft-reason",
+        `too large to diff (${diff.tooLarge.before} → ${diff.tooLarge.after} lines)`,
+        { "data-weft-diff-too-large": "" }
+      )
+    )
+    return box
+  }
+  for (const d of diff.rows)
+    box.append(
+      el(
+        "div",
+        `weft-diff-row weft-diff-${d.kind}`,
+        `${DIFF_MARK[d.kind]}${d.text}`,
+        { "data-weft-diff": d.kind }
+      )
+    )
+  return box
+}
+
+const DIFF_MARK = { add: "+ ", del: "− ", same: "  " }
+
+/** A toggle the user opened, kept in the element's open keys. */
+function toggle(
+  d: RequestTabDeps,
+  key: string,
+  label: (open: boolean) => string
+): [HTMLElement, boolean] {
+  const open = d.keys.has(key)
+  const b = el("button", "weft-btn weft-rq-more", label(open), {
+    type: "button",
+    "aria-expanded": String(open),
+  })
+  on(b, "click", () => {
+    if (d.keys.has(key)) d.keys.delete(key)
+    else d.keys.add(key)
+    d.redraw()
+  })
+  return [b, open]
+}
+
+function messagesView(d: RequestTabDeps, r: RequestRow, step: number): Node[] {
+  const comps = compactionsOf(d.t.doc)
+  let memo = sentMemo.get(r)
+  // running: a running run's batch not yet landed is no_transcript, not
+  // gap — the run page's reading (messagesSent's fifth argument).
+  if (
+    !memo ||
+    memo.tr !== d.t.transcript ||
+    memo.comps !== d.t.doc ||
+    memo.running !== d.running
+  )
+    sentMemo.set(
+      r,
+      (memo = {
+        tr: d.t.transcript,
+        comps: d.t.doc,
+        running: d.running,
+        m: messagesSent(r, d.t.transcript, comps, undefined, d.running),
+      })
+    )
+  const m = memo.m
+  const n = plural(m.count, "message")
+  const out: Node[] = [
+    el(
+      "div",
+      "weft-res",
+      m.bytes !== undefined ? `${n} · ${bytes(m.bytes)}` : n,
+      { "data-weft-messages-line": "" }
+    ),
+  ]
+  // compacted: the request saw a compaction view (the marker above);
+  // gap: the transcript does not hold what the record counts; no index:
+  // capture was off (stripped), or the view could not be recorded.
+  if (m.hole === "no_transcript")
+    out.push(el("div", "weft-reason", "bytes when the transcript is read"))
+  else if (m.hole)
+    out.push(
+      m.hole === "compacted" ||
+        (m.hole === "no_index" && r.content === "stripped")
+        ? hole(m.hole === "compacted" ? m.hole : "stripped")
+        : hole("gap", {
+            reason:
+              m.hole === "gap"
+                ? REQUEST_MESSAGES_GAP_REASON
+                : REQUEST_NO_INDEX_REASON,
+          })
+    )
+  if (m.last.length) {
+    const list = el("div", "", "", {
+      "data-weft-messages-last": "",
+    })
+    for (const msg of m.last)
+      list.append(el("div", "weft-res", messageLine(msg)))
+    out.push(list)
+  }
+  if (m.before.length) {
+    const key = `${d.t.id}\u0000rq-earlier\u0000${step}`
+    const [b, open] = toggle(
+      d,
+      key,
+      (o) =>
+        `${o ? "▾" : "▸"} ${plural(m.before.length, "earlier message")} (raw)`
+    )
+    out.push(b)
+    if (open)
+      out.push(
+        el(
+          "div",
+          "",
+          [
+            treeView(
+              m.before,
+              d.tree(`earlier\u0000${step}`),
+              `step${step}-messages`,
+              d.cx
+            ),
+          ],
+          { "data-weft-messages-earlier": "" }
+        )
+      )
+  }
+  return out
 }
 
 function factsOf(
@@ -291,76 +378,6 @@ function factsOf(
           }
         : undefined,
   }
-}
-
-/** The diffs drawn, by row: a redraw diffs nothing again. */
-const diffMemo = new WeakMap<RequestRow, { base: string; diff: BoundedDiff }>()
-
-function diffView(
-  r: RequestRow,
-  base: PromptBaseline,
-  text: string
-): HTMLElement {
-  const box = el(
-    "div",
-    "weft-diff",
-    [el("div", "weft-diff-h", baselineCaption(base))],
-    { "data-weft-prompt-diff": base.kind }
-  )
-  if (cut(r) || base.truncated) {
-    // A cut tail would read as lines a PrepareStep removed.
-    box.append(hole("truncated", { label: REQUEST_DIFF_CUT_LABEL }))
-    return box
-  }
-  let m = diffMemo.get(r)
-  if (!m || m.base !== base.text)
-    diffMemo.set(
-      r,
-      (m = { base: base.text, diff: diffLinesBounded(base.text, text) })
-    )
-  const diff = m.diff
-  if ("tooLarge" in diff) {
-    box.append(
-      el(
-        "div",
-        "weft-reason",
-        `too large to diff (${diff.tooLarge.before} → ${diff.tooLarge.after} lines)`,
-        { "data-weft-diff-too-large": "" }
-      )
-    )
-    return box
-  }
-  for (const d of diff.rows)
-    box.append(
-      el(
-        "div",
-        `weft-diff-row weft-diff-${d.kind}`,
-        `${DIFF_MARK[d.kind]}${d.text}`,
-        { "data-weft-diff": d.kind }
-      )
-    )
-  return box
-}
-
-const DIFF_MARK = { add: "+ ", del: "− ", same: "  " }
-
-/** A toggle the user opened, kept in the element's open keys. */
-function toggle(
-  d: RequestTabDeps,
-  key: string,
-  label: (open: boolean) => string
-): [HTMLElement, boolean] {
-  const open = d.keys.has(key)
-  const b = el("button", "weft-btn weft-rq-more", label(open), {
-    type: "button",
-    "aria-expanded": String(open),
-  })
-  on(b, "click", () => {
-    if (d.keys.has(key)) d.keys.delete(key)
-    else d.keys.add(key)
-    d.redraw()
-  })
-  return [b, open]
 }
 
 function promptView(
@@ -474,6 +491,32 @@ function catalogView(
   return out
 }
 
+function composed(
+  r: RequestRow,
+  insHash: string,
+  snippets: string[] | undefined,
+  redraw: () => void
+): boolean | undefined {
+  const key = [
+    r.system_hash,
+    insHash,
+    r.body.tools.names.join(","),
+    snippets?.join("\u0000") ?? "\u0001",
+  ].join("|")
+  const got = composedCache.get(key)
+  if (got === "pending") return undefined
+  if (got !== undefined) return got ?? undefined
+  remember(key, "pending")
+  composedFromInstructions(r, insHash, snippets).then(
+    (v) => {
+      remember(key, v ?? null)
+      redraw()
+    },
+    () => remember(key, null)
+  )
+  return undefined
+}
+
 /** messagesSent per row and the records it read: a redraw resolves
  * nothing again, and the earlier messages' tree keeps its root. */
 const sentMemo = new WeakMap<
@@ -481,96 +524,54 @@ const sentMemo = new WeakMap<
   { tr: unknown; comps: unknown; running: boolean; m: MessagesSent }
 >()
 
-function messagesView(d: RequestTabDeps, r: RequestRow, step: number): Node[] {
-  const comps = compactionsOf(d.t.doc)
-  let memo = sentMemo.get(r)
-  // running: a running run's batch not yet landed is no_transcript, not
-  // gap — the run page's reading (messagesSent's fifth argument).
-  if (
-    !memo ||
-    memo.tr !== d.t.transcript ||
-    memo.comps !== d.t.doc ||
-    memo.running !== d.running
-  )
-    sentMemo.set(
-      r,
-      (memo = {
-        tr: d.t.transcript,
-        comps: d.t.doc,
-        running: d.running,
-        m: messagesSent(r, d.t.transcript, comps, undefined, d.running),
-      })
-    )
-  const m = memo.m
-  const n = plural(m.count, "message")
-  const out: Node[] = [
-    el(
-      "div",
-      "weft-res",
-      m.bytes !== undefined ? `${n} · ${bytes(m.bytes)}` : n,
-      { "data-weft-messages-line": "" }
-    ),
-  ]
-  // compacted: the request saw a compaction view (the marker above);
-  // gap: the transcript does not hold what the record counts; no index:
-  // capture was off (stripped), or the view could not be recorded.
-  if (m.hole === "no_transcript")
-    out.push(el("div", "weft-reason", "bytes when the transcript is read"))
-  else if (m.hole)
-    out.push(
-      m.hole === "compacted" ||
-        (m.hole === "no_index" && r.content === "stripped")
-        ? hole(m.hole === "compacted" ? m.hole : "stripped")
-        : hole("gap", {
-            reason:
-              m.hole === "gap"
-                ? REQUEST_MESSAGES_GAP_REASON
-                : REQUEST_NO_INDEX_REASON,
-          })
-    )
-  if (m.last.length) {
-    const list = el("div", "", "", {
-      "data-weft-messages-last": "",
-    })
-    for (const msg of m.last)
-      list.append(el("div", "weft-res", messageLine(msg)))
-    out.push(list)
-  }
-  if (m.before.length) {
-    const key = `${d.t.id}\u0000rq-earlier\u0000${step}`
-    const [b, open] = toggle(
-      d,
-      key,
-      (o) =>
-        `${o ? "▾" : "▸"} ${plural(m.before.length, "earlier message")} (raw)`
-    )
-    out.push(b)
-    if (open)
-      out.push(
-        el(
-          "div",
-          "",
-          [
-            treeView(
-              m.before,
-              d.tree(`earlier\u0000${step}`),
-              `step${step}-messages`,
-              d.cx
-            ),
-          ],
-          { "data-weft-messages-earlier": "" }
-        )
-      )
-  }
-  return out
-}
-
 /** stepsOf: every step the turn ran or the record names, in order —
  * the tab's picker, and what J/K walk while it is open. */
 export function stepsOf(t: TurnView, req: PanelRequests | null): number[] {
   const s = new Set<number>(t.folded.steps.map((x) => x.index))
   for (const k of req?.steps.keys() ?? []) s.add(k)
   return [...s].sort((a, b) => a - b)
+}
+
+function cut(r: RequestRow | undefined): boolean {
+  const p = r?.prompt
+  return !!p && !isHoleRef(p) && p.truncated_bytes > 0
+}
+
+function remember(key: string, v: boolean | null | "pending") {
+  composedCache.set(key, v)
+  if (composedCache.size > COMPOSED_MAX)
+    composedCache.delete(composedCache.keys().next().value!)
+}
+
+/** picker is a row of pressed/unpressed buttons (the steps, a step's
+ * attempts). */
+function picker(
+  label: string,
+  items: number[],
+  cur: number,
+  pick: (n: number) => void,
+  words = (n: number) => `${label} ${n}`
+): HTMLElement {
+  const box = el("div", "weft-holes weft-rq-pick", "", {
+    role: "group",
+    "aria-label": label,
+    "data-key": label,
+  })
+  for (const n of items) {
+    const b = el(
+      "button",
+      `weft-btn${n === cur ? " weft-active" : ""}`,
+      words(n),
+      {
+        type: "button",
+        "aria-pressed": String(n === cur),
+        [`data-weft-rq-${label}`]: String(n),
+      }
+    )
+    on(b, "click", () => pick(n))
+    box.append(b)
+  }
+  return box
 }
 
 /** renderRequestTab is the Request tab's panel content. */

@@ -34,6 +34,26 @@
   in the repo), (d) `make studio-check` (`STUDIO_CHECK=0` skips it) with the panel ledger,
   and the k-clauses. One PASS / FAIL / RECORDED line per clause in `$RUN/gate8.txt`
   (screenshots in `$RUN/shots`); exit 1 when a clause FAILs.
+- `gate9.sh` + `gate9.js` — the phase 9 gate (the conversation, end to end). Run it with
+  `ARENA=<weft-arena checkout> RUN=<scratch dir> PLAYWRIGHT_DIR=<playwright install> scripts/ux-gate/gate9.sh`
+  (`REPO` defaults to this script's own tree; `PREV_TAG` to v0.17.0, the phase's range): a fresh
+  `weft studio` on `$RUN/studio.db` (127.0.0.1:7341, token `gate9tok`); the arena built against
+  `$REPO` through a scratch `$RUN/arena.work` (`go 1.26.0`, `use $ARENA $REPO $REPO/core` — an arena
+  built against an older weft emits no thread records; the arena is never edited) and seeded
+  `--offline` under `strace -e connect` (the known stale check `studio16.search-stopped-by` is
+  RECORDED); a content-off thread session exported twice by a demo it writes and builds under
+  `$RUN/cdemo` (never in the repo: the agent's `weft.Content(false)`, then the destination's
+  `otel.NoContent()`); then gate9.js — (a) acme-support's timeline (thread.support-approvals: four
+  parks, their decisions and actors, the grant, the resumes), (b) the denial's drawer and its
+  t1 step 1 / t2 links, followed, (c) the pool child session from its parent, (d) the panel
+  scoped to acme-support's public id (minted per seed) — its `parked → tN` chips and its
+  `timeline ⤢` hand-off in a signed-in browser, (e) content-off on the API (every session and
+  turn route) and the page, (f) ADR 0021's "index, not evidence" sentence, (g)–(i) U34's loop
+  graph on rw.flaky-infra, rw.budget-guards' poller and rw.tool-storm, (j) the panel's loop line
+  against it, (p) the polish batch (the orchestrator's) — then (s) `make studio-check` and the
+  panel ledger (the phase 9 floor: headroom ≥ 6,820 B with the last row P9-pre-web-fix6,
+  UX-B-41's accepted exception) and k1–k7. One PASS / FAIL / RECORDED line per clause in
+  `$RUN/gate9.txt` (screenshots in `$RUN/shots`); exit 1 when a clause FAILs.
 - `h9.js` — item H9's done line in a real browser: the runs list (toolbar folded, "with
   subagents" nested), `/compare` (its picker, two picks) and a subagent parent's run page fit
   1440 and 360 px with no sideways page scroll, and `/live` during an offline run draws the

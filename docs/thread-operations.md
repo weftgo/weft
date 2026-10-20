@@ -426,10 +426,23 @@ not the numbers themselves.
   that asks a second approval parks the chain again — the middle child
   parks and the new request is offered on the lead (same namespaced
   call id, a new run id; the earlier decision does not carry over) —
-  and each decision there takes the chain one park further. `Cancel`
-  or `Close` of a middle child whose resume waits on its grandchild
-  ends the grandchild first and waits for it (at most 30 s), so both
-  ledgers end settled.
+  and each decision there takes the chain one park further — once the
+  middle child's other grandchildren are parked too: while a sibling
+  still runs its approved call the middle waits on, and parks when it
+  ends. `Cancel` of a middle child — waiting on its grandchildren, or
+  parked on one — and `Close` of a waiting one end the grandchildren
+  first (a parked one is canceled at its boundary and never resumed;
+  `Close` leaves a parked one parked) and wait for them, so both
+  ledgers end settled. The wait is bounded at 30 s: a grandchild whose
+  run has not ended by then — a tool handler that ignores its context
+  and has no `Timeout` — is settled `canceled` by the pool in the
+  middle's ledger ("its run did not end within 30s of its parent's
+  end"), one WARN names it, and its run is abandoned; `Close` still
+  waits for that run, and its eventual end writes nothing. Give such
+  tools a `Timeout`. A middle child's async children (`Submit`, an
+  `Async` wrap) are not ended with it. A `Cancel` of a running child
+  that reaches an approval first settles it `canceled` at that
+  boundary instead of parking it.
 - **Do not let the parent's decision chain approve a delegating
   call.** A grant or a live `Approver` that matches a pool wrap's tool
   re-runs the delegation when it parks (see `Pool.Decide`'s godoc for

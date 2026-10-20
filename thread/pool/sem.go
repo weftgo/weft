@@ -200,6 +200,46 @@ func (s *slot) lend(to *slot) bool {
 	return true
 }
 
+// holds reports whether s's run holds its slot now; a nil slot holds
+// none.
+func (s *slot) holds() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.held
+}
+
+// waitsSlotless reports whether s's run is waiting on its delegations
+// with no slot — the run a nested resolution's resume belongs to,
+// which must hold one before that resume works.
+func (s *slot) waitsSlotless() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.held && !s.done && s.waiting > 0
+}
+
+// adopt hands s a slot the caller was granted from the queue on s's
+// behalf — a nested resolution whose grandchild holds no slot to lend
+// (canceled while queued, parked, panicked). It reports whether s
+// took it: only while s's run still waits slotless; otherwise the
+// slot goes back to the queue at once.
+func (s *slot) adopt() bool {
+	s.mu.Lock()
+	if s.held || s.done || s.waiting == 0 {
+		s.mu.Unlock()
+		s.f.release()
+		return false
+	}
+	s.held = true
+	s.mu.Unlock()
+	return true
+}
+
 // unlend gives back a slot lend moved to s when the resume it was
 // lent for did not start: while s's run still waits (the slot unused),
 // it goes back to the queue. A run that has stopped waiting is using

@@ -215,7 +215,10 @@ calls and tool calls. A run that is only waiting holds no slot:
   child's resume started by the grandchild's answer — the grandchild's
   slot passes straight to the child's resume (0.18.1): it never goes
   back to the queue in between, so the resume's first model call
-  never runs beside the next delegation to take it.
+  never runs beside the next delegation to take it A grandchild
+  that holds no slot when it ends (canceled while it queued, canceled
+  at its boundary) queues for one on the child's behalf before its
+  answer starts the resume (0.18.1).
 
 Under fan-out — one step delegating several times (`Parallelism`) — a
 run holds no slot while *at least one* of its sync delegations is
@@ -360,6 +363,24 @@ pending).
   receipt settles `canceled`, its mirrors are denied on the parent,
   and a sync delegation's parked call resolves with
   `SUBAGENT_CANCELED`.
+- **A child ends its own sync delegations before its session closes**
+  (0.18.1). A child that is itself a parent — parked on a grandchild's
+  request, or resumed and waiting on its grandchildren — and is
+  canceled (or, waiting, closed) cancels each sync grandchild first
+  (a parked one at its boundary) and waits for it, so it settles in
+  the child's ledger; from then on no grandchild of it is armed again
+  or resolves its delegating call in it. The wait is bounded (30 s);
+  past it the pool settles the grandchild `canceled` itself, its stop
+  naming the bound, and abandons its run, whose end records nothing.
+  Async grandchildren follow D4 and are not ended. A grandchild that
+  parks again while a sibling still works does not park the child: it
+  parks once every delegation it has left is parked.
+- A `Cancel` of a running child that reaches its boundary first is
+  not lost: the child settles `canceled` there (the boundary closed as
+  for a parked child); and a canceled resume's resolution waits for
+  the parent's turn to park the delegating call (§E), on the pool's
+  context, rather than landing ahead of it and leaving the call parked
+  for good (0.18.1).
 - The pool closes a child's session when its delegation settles, and
   the parked ones at `Close`; a parked child keeps one session value
   for its resume. `Close` covers the bare path too (refused after,

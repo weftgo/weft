@@ -21,7 +21,10 @@
 // through a grandchild (a nested park decided on the top parent) takes
 // the grandchild's slot straight over when the grandchild's answer
 // starts its resume: the slot never goes back to the queue in
-// between, so the resume never works beside the next delegation.
+// between, so the resume never works beside the next delegation. A
+// grandchild that ends holding no slot — canceled while it queued,
+// canceled at its boundary — queues for one on the child's behalf
+// before its answer starts the child's resume.
 //
 // Admission is first in, first out, in the order work queued: Submit
 // queues before it returns, a wrapped tool queues when it is called,
@@ -64,6 +67,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
@@ -177,6 +181,9 @@ type Pool struct {
 	// lookup that read the ledger before the settlement never answers
 	// with its registers after.
 	resolving map[string]*lookupMark
+	// nestedEnd bounds endNested's wait (nestedEndWait; tests shorten
+	// it).
+	nestedEnd time.Duration
 	// calls holds the cancels of wrapped calls running outside any
 	// session (the bare path), so Close reaches them too.
 	calls    map[uint64]context.CancelFunc
@@ -258,6 +265,7 @@ func New(max int, opts ...Option) *Pool {
 		resolving:     map[string]*lookupMark{},
 		nameAgents:    map[string]*core.Agent{},
 		calls:         map[uint64]context.CancelFunc{},
+		nestedEnd:     nestedEndWait,
 	}
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	for _, o := range opts {
@@ -372,7 +380,12 @@ func (p *Pool) Submit(ctx context.Context, parent *thread.Session, agent *core.A
 //     records the canceled turn, the receipt settles canceled on the
 //     run's goroutine — Cancel does not wait for it; Wait does — and
 //     a sync delegation's parent model reads SUBAGENT_CANCELED as the
-//     call's result.
+//     call's result. A run that reaches an approval boundary before
+//     its cancellation stops it does not park: its boundary is closed
+//     as a parked child's is (below) and it settles canceled. A
+//     resumed sync child canceled before the parent's turn has parked
+//     the delegating call still resolves that call: the resolution
+//     waits for the call to park.
 //   - parked at an approval: the child's pending requests are denied
 //     in the child session (so its parked calls can never run on a
 //     later approval), its run is not resumed, the receipt settles
@@ -382,6 +395,19 @@ func (p *Pool) Submit(ctx context.Context, parent *thread.Session, agent *core.A
 //   - unsettled in the ledger with no child of this pool running for
 //     it — a previous process's: it is recovered first (see Recover)
 //     and then canceled if recovery left it parked.
+//
+// A child that is itself a parent — its own sync delegations parked
+// at their boundaries, or running while it waits on them — ends them
+// first, in either case: each is canceled (a parked one at its
+// boundary, never resumed) and settles canceled in the child's ledger
+// before the child's session closes; none of them is resumed or
+// resolves its delegating call in the ending child. The child waits
+// for them at most 30 s. A grandchild whose run has not ended by then
+// (a handler that ignores its context, with no Timeout) is settled
+// canceled by the pool itself, in the child's ledger, its stop naming
+// the bound, and its run is abandoned: it is still counted by Close's
+// drain, and its own end records nothing more. Async children the
+// child submitted are not ended with it (D4).
 //
 // A settled receipt fails with a *StateError (ErrNotRunning under
 // errors.Is) carrying its state — also for a Cancel arriving while
@@ -500,7 +526,10 @@ func (p *Pool) Wait(ctx context.Context, parent *thread.Session, receiptID strin
 // child's session closed before the process
 // gives up the storage (DeerFlow's gateway drain). A child parked at
 // an approval is not canceled: its session is closed, its receipt
-// stays parked, and a later pool resumes it (Recover, Decide).
+// stays parked, and a later pool resumes it (Recover, Decide). A
+// canceled child that is itself a parent waits for its own sync
+// delegations to rest before its session closes, under Cancel's
+// 30 s bound and with its outcome past it.
 //
 // ctx bounds the wait; its error returns with the drain still
 // progressing. A second Close returns nil — the drain is already done
@@ -946,7 +975,7 @@ func (p *Pool) run(ctx context.Context, d *delegate, r runHandle, start func(con
 		return p.concludeStale(ledger, d)
 	case err == nil && (turn == nil || (res != nil && len(res.Pending) > 0)):
 		if perr := p.park(ledger, d); perr != nil {
-			return outcome{err: perr}
+			return outcome{err: perr, canceled: errors.Is(perr, errCanceledAtPark)}
 		}
 		return outcome{parked: true}
 	case err == nil:
@@ -1052,14 +1081,16 @@ func (p *Pool) setPhase(d *delegate, phase int) {
 // the slot is still held, or abandoning it when the run was canceled
 // — and then the delegation is concluded.
 func (p *Pool) concludeRun(runCtx, ledger context.Context, d *delegate, state State, stop, text string, isErr bool) {
+	p.endNested(d) // its own sync delegations settle in its session before it closes
 	p.closeChild(runCtx, d)
 	p.conclude(ledger, d, state, stop, text, isErr)
 }
 
-// conclude settles a delegation and completes what hangs on it: the
-// receipt records the final state with its cause, the child session is
-// closed, and — when a sync delegation's call is parked in the parent
-// — that call resolves with text, the model-visible outcome (ADR 0022
+// conclude settles a delegation and completes what hangs on it: its
+// own sync delegations still live are ended first and settle in its
+// session (endNested), the receipt records the final state with its
+// cause, the child session is closed, and — when a sync delegation's
+// call is parked in the parent — that call resolves with text, the model-visible outcome (ADR 0022
 // §7): the child's answer, or the failure as a resolve_error. The
 // parent's own resume then fires through the ordinary boundary
 // machinery, armed (and linked as the parked turn's Next) inside the
@@ -1068,6 +1099,7 @@ func (p *Pool) concludeRun(runCtx, ledger context.Context, d *delegate, state St
 // all, which promises the resume armed when it returns for a sync
 // delegation — finds the delegation concluded, not merely settled.
 func (p *Pool) conclude(ctx context.Context, d *delegate, state State, stop, text string, isErr bool) {
+	p.endNested(d)
 	if !p.settle(ctx, d, state, stop) {
 		return
 	}
@@ -1085,9 +1117,18 @@ func (p *Pool) conclude(ctx context.Context, d *delegate, state State, stop, tex
 		p.testHookConcluding(d)
 	}
 	p.mu.Lock()
-	resolve := d.resolve
+	resolve, ending := d.resolve, p.parentEndingLocked(d)
 	p.mu.Unlock()
 	if resolve {
+		if !ending {
+			// A resume canceled before the parent's turn had parked the
+			// delegating call (awaitWrapper gave up with its context)
+			// must not resolve ahead of the park — the parent would then
+			// park the call for good. Wait for the turn to land, on the
+			// pool's context: the cancel ended this run, not the
+			// resolution it owes.
+			p.awaitWrapper(p.ctx, d)
+		}
 		p.resolveWrapper(ctx, d, text, isErr)
 	}
 }

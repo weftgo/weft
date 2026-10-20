@@ -76,6 +76,11 @@ type delegate struct {
 	// sl is the slot of the run in flight; nil at rest. A resolution
 	// lends it to the parent's resume (resolveWrapper).
 	sl *slot
+	// ending records that the delegation has begun to end its own
+	// sync delegations (endNested): from then on none of them is armed
+	// again, and none resolves its delegating call in this child — the
+	// child's session is about to close, and a resume would run in it.
+	ending bool
 }
 
 // A nestWait is a resumed run's side of a nested resolution: the
@@ -119,12 +124,41 @@ func (p *Pool) upstreamNestLocked(d *delegate) *nestWait {
 	return up.nest
 }
 
+// parentEndingLocked reports whether d is a sync delegation whose
+// parent session is itself a child of this pool that is ending — a
+// Cancel settling it, its run ending its delegations (endNested), or
+// already settled: d is not armed again, and its end resolves nothing
+// in that parent. Callers hold p.mu.
+func (p *Pool) parentEndingLocked(d *delegate) bool {
+	if d.wrapper == "" {
+		return false // an async child follows D4: its parent's end is not its own
+	}
+	up, ok := p.byChild[d.parent.ID()]
+	if !ok || up.child != d.parent {
+		return false
+	}
+	return up.ending || up.phase == phaseSettling || up.phase == phaseSettled
+}
+
 // delegatingLocked reports whether a sync delegation made from d's
 // child session is still a delegate of this pool — a grandchild whose
 // resolution is what resumes d's child. Callers hold p.mu.
 func (p *Pool) delegatingLocked(d *delegate) bool {
 	for _, e := range p.delegates {
 		if e.parent == d.child && e.wrapper != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// workingLocked reports whether a sync delegation made from d's child
+// session is queued, running or settling — anything but parked at its
+// boundary: the child's own boundary is not final while one is, for
+// that one's end resolves a delegating call of it. Callers hold p.mu.
+func (p *Pool) workingLocked(d *delegate) bool {
+	for _, e := range p.delegates {
+		if e.parent == d.child && e.wrapper != "" && e.phase != phaseParked {
 			return true
 		}
 	}
@@ -140,13 +174,15 @@ func (p *Pool) delegatingLocked(d *delegate) bool {
 // be followed like any resume. A grandchild in a restarted process has
 // no bridge yet: the child session is pumped first, which rebuilds and
 // arms it. A grandchild that parks again mirrors its new requests into
-// the child, and the wait ends with nothing to follow: the child's
-// boundary is open on them now, and the run parks the child, which
-// mirrors them on up to its own parent. When no delegation of the
-// child's is left and none handed a resume over, the boundary is
-// whatever the replay finds now — nil when there is nothing to resume
-// (concludeStale's case, a resume that did not survive). A canceled
-// run ends its delegations first and waits for them to rest
+// the child, and once no other sync delegation of the child's is
+// queued, running or settling — every one left parked — the wait ends
+// with nothing to follow: the child's boundary is open on them now,
+// and the run parks the child, which mirrors them on up to its own
+// parent. When no delegation of the child's is left and none handed a
+// resume over, the boundary is whatever the replay finds now — nil
+// when there is nothing to resume (concludeStale's case, a resume that
+// did not survive). A canceled run returns its context's error; its
+// conclusion ends its delegations first and waits for them to rest
 // (endNested), as a sync call's turn waits for its child.
 func (p *Pool) awaitNested(ctx context.Context, d *delegate, n *nestWait, sl *slot) (*thread.Turn, error) {
 	p.attach(d.child)
@@ -164,14 +200,19 @@ func (p *Pool) awaitNested(ctx context.Context, d *delegate, n *nestWait, sl *sl
 	defer regain()
 	for {
 		p.mu.Lock()
-		t, live := n.turn, p.delegatingLocked(d)
+		t, live, working := n.turn, p.delegatingLocked(d), p.workingLocked(d)
 		p.mu.Unlock()
 		if t != nil {
 			return t, nil // the resolution lent the slot: regain finds it held
 		}
-		if len(d.child.Pending()) > 0 {
-			// A grandchild parked again: the run parks the child, which
-			// works no more — the slot is not taken back for it.
+		if len(d.child.Pending()) > 0 && !working {
+			// A grandchild parked again, and every other one is parked
+			// too (or over): the run parks the child, which works no
+			// more — the slot is not taken back for it. While a sibling
+			// grandchild still works, the child waits on: parking it
+			// then would leave that sibling running under a parked
+			// child, its end resolving a call a Cancel or Close of the
+			// child has closed the session of.
 			yielded = false
 			return nil, nil
 		}
@@ -186,55 +227,165 @@ func (p *Pool) awaitNested(ctx context.Context, d *delegate, n *nestWait, sl *sl
 		select {
 		case <-n.wake:
 		case <-ctx.Done():
-			p.endNested(d)
-			return nil, ctx.Err()
+			return nil, ctx.Err() // the run's conclusion ends the delegations (endNested)
 		}
 	}
 }
 
-// nestedEndWait bounds how long a canceled resume waits for its own
-// delegations to rest (endNested): their runs are canceled, and a
+// nestedEndWait bounds how long an ending child waits for its own
+// sync delegations to rest (endNested): their runs are canceled, and a
 // handler that ignores its context is abandoned by its tool's timeout,
-// so this is the backstop for one with none.
+// so this is the backstop for one with none. Pool.nestedEnd holds it
+// (tests shorten it).
 const nestedEndWait = 30 * time.Second
 
-// endNested ends the delegations made from d's child session when the
-// run resuming that child is canceled — Cancel of the child's own
-// receipt, the pool's Close — and waits for each to rest, so every
-// grandchild settles in the child's ledger before the child concludes
-// and its session closes: a canceled grandchild settles canceled, and
-// one parked at an approval is canceled at its boundary (Close leaves
-// a parked one parked, as everywhere). The wait is bounded by
-// nestedEndWait; what has not rested by then is logged and left, its
-// settlement Recover's to make.
+// endNested ends the sync delegations made from d's child session when
+// that child's delegation ends while they live — its resume canceled
+// (Cancel of the child's own receipt, the pool's Close), Cancel of the
+// child parked at its boundary, any conclusion that would close the
+// child's session — and waits for each to rest, so every grandchild
+// settles in the child's ledger before the child concludes and its
+// session closes: a running or queued grandchild is canceled and
+// settles canceled, and one parked at an approval is canceled at its
+// boundary (Close leaves a parked one parked, as everywhere). From the
+// moment it starts no grandchild of d is armed again and none resolves
+// its delegating call in d's child (parentEndingLocked): the child is
+// ending, and a resume would run in the session being closed. Async
+// children (Submit, an Async wrap) are not touched: they follow D4.
+//
+// The wait is bounded by nestedEndWait. A grandchild whose run has not
+// ended by then — a handler ignoring its context, with no Timeout — is
+// settled canceled by the pool itself, in the child's ledger, while
+// that session is still open, its stop naming the bound; its run is
+// abandoned, still counted by Close's drain, and its own end, when it
+// comes, records nothing more (a settlement is once per receipt).
 func (p *Pool) endNested(d *delegate) {
 	p.mu.Lock()
+	d.ending = true
 	closing := p.closed
-	var ids []string
-	for id, e := range p.delegates {
-		if e.parent == d.child {
-			ids = append(ids, id)
+	bound := p.nestedEnd
+	var live []*delegate
+	for _, e := range p.delegates {
+		if e.parent == d.child && e.wrapper != "" {
+			live = append(live, e)
 		}
 	}
 	p.mu.Unlock()
-	if len(ids) == 0 {
+	if len(live) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), nestedEndWait)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), bound)
 	defer cancel()
 	if !closing { // Close canceled the running ones already
-		for _, id := range ids {
-			if err := p.Cancel(ctx, d.child, id); err != nil && !errors.Is(err, ErrNotRunning) {
-				d.agent.Logger().Warn("thread/pool: a canceled child's delegation not canceled",
-					"child", d.child.ID(), "receipt", id, "err", err)
+		for _, e := range live {
+			if err := p.cancelLive(ctx, e); err != nil {
+				d.agent.Logger().Warn("thread/pool: an ending child's delegation not canceled",
+					"child", d.child.ID(), "receipt", e.receipt, "err", err)
 			}
 		}
 	}
-	for _, id := range ids {
-		if _, err := p.Wait(ctx, d.child, id); err != nil {
-			d.agent.Logger().Warn("thread/pool: a canceled child's delegation did not rest; Recover settles it",
-				"child", d.child.ID(), "receipt", id, "err", err)
+	for _, e := range live {
+		for {
+			if err := p.waitLive(ctx, e); err != nil {
+				p.abandon(d, e, bound)
+				break
+			}
+			// A grandchild whose canceled run reached its boundary first
+			// settles canceled there (park); one that rests parked anyway
+			// — a cancel landing between two of its runs — is canceled
+			// again, at its boundary. Close leaves it parked.
+			p.mu.Lock()
+			again := !closing && p.delegates[e.receipt] == e && e.phase == phaseParked
+			p.mu.Unlock()
+			if !again {
+				break
+			}
+			if err := p.cancelLive(ctx, e); err != nil {
+				d.agent.Logger().Warn("thread/pool: an ending child's delegation not canceled",
+					"child", d.child.ID(), "receipt", e.receipt, "err", err)
+				break
+			}
 		}
+	}
+}
+
+// cancelLive is Cancel for a delegate the pool holds, by its value:
+// a queued or running one is canceled, a parked one canceled at its
+// boundary, one already settling waited for. A delegate retired
+// meanwhile is done.
+func (p *Pool) cancelLive(ctx context.Context, e *delegate) error {
+	for {
+		p.mu.Lock()
+		if p.delegates[e.receipt] != e {
+			p.mu.Unlock()
+			return nil
+		}
+		switch e.phase {
+		case phaseQueued, phaseRunning:
+			e.canceled = true
+			c := e.cancel
+			p.mu.Unlock()
+			if c != nil {
+				c()
+			}
+			return nil
+		case phaseParked:
+			e.phase = phaseSettling
+			e.concluded = make(chan struct{})
+			p.mu.Unlock()
+			return p.cancelParked(ctx, e)
+		}
+		idle := e.restOrConclusion()
+		p.mu.Unlock()
+		if idle == nil {
+			return nil
+		}
+		select {
+		case <-idle:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// waitLive waits until a delegate the pool holds is retired or at
+// rest parked (Close's case), or ctx ends.
+func (p *Pool) waitLive(ctx context.Context, e *delegate) error {
+	for {
+		p.mu.Lock()
+		var idle chan struct{}
+		if p.delegates[e.receipt] == e {
+			idle = e.restOrConclusion()
+		}
+		p.mu.Unlock()
+		if idle == nil {
+			return nil
+		}
+		select {
+		case <-idle:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// abandon settles a grandchild that did not rest within endNested's
+// bound: canceled, by the pool, in its parent's ledger while that
+// session is still open; its mirrors there are denied. The run stays
+// in flight, abandoned: its own end records nothing more, and its
+// delegating call resolves nothing (its parent is ending).
+func (p *Pool) abandon(d, e *delegate, bound time.Duration) {
+	ledger := context.WithoutCancel(p.ctx)
+	stop := fmt.Sprintf("canceled: its run did not end within %v of its parent's end; the pool settled it and abandoned the run", bound)
+	if !p.settle(ledger, e, Canceled, stop) {
+		return // it settled on its own meanwhile
+	}
+	defer p.retire(e)
+	d.agent.Logger().Warn("thread/pool: an ending child's delegation did not rest; settled canceled, its run abandoned",
+		"child", d.child.ID(), "receipt", e.receipt, "bound", bound)
+	if err := e.parent.DenyMirrored(ledger, e.child.ID(), endedReason(Canceled)); err != nil {
+		d.agent.Logger().Error("thread/pool: an abandoned delegation's requests still read pending; Recover denies them",
+			"receipt", e.receipt, "child", e.child.ID(), "err", err)
 	}
 }
 
@@ -292,6 +443,11 @@ func (d *delegate) unmirroredText(err error) string {
 		Message: fmt.Sprintf(unmirroredMessage, d.label(), err)}).Error()
 }
 
+// errCanceledAtPark is park's answer for a run Cancel had asked to end
+// that came to its approval boundary: the delegation settled canceled
+// there instead of parking.
+var errCanceledAtPark = fmt.Errorf("thread/pool: canceled at its approval boundary: %w", context.Canceled)
+
 // unmirroredError is a park the pool could not record on the parent:
 // the delegation fails with it instead of parking unseen.
 type unmirroredError struct{ err error }
@@ -341,6 +497,12 @@ func mirrorRequests(reqs []thread.Request, child, wrapper string) []thread.Appro
 // that reads running. The delegation fails instead — settled failed
 // with the cause, the sync call a tool error — and the error returns.
 // The child's boundary stays in its own file, undecided.
+//
+// A run Cancel asked to end (not Close) that reached its boundary
+// before its cancellation stopped it does not park: its boundary is
+// closed as Cancel closes a parked child's, the delegation settles
+// canceled, and park returns errCanceledAtPark. Close's cancellation
+// leaves it parked, as Close leaves every parked child.
 func (p *Pool) park(ctx context.Context, d *delegate) error {
 	if err := p.mirror(ctx, d); err != nil {
 		um := &unmirroredError{err}
@@ -359,9 +521,34 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 		p.testHookParking(d)
 	}
 	p.mu.Lock()
-	d.phase = phaseParked
 	d.parks++
 	gen := d.parks
+	if d.canceled && !p.closed {
+		// Cancel asked for the run's end and the run came to its
+		// boundary instead (its context was canceled too late to stop
+		// it): the cancel stands — the boundary is closed at once, as
+		// Cancel of a parked child closes it, and the delegation
+		// settles canceled. A first run's delegating call has not
+		// parked: it returns SUBAGENT_CANCELED, and nothing resolves.
+		d.phase = phaseSettling
+		d.concluded = make(chan struct{})
+		p.mu.Unlock()
+		if err := p.cancelParked(ctx, d); err != nil {
+			// The boundary could not be closed: the child rests parked
+			// and decidable (cancelParked put it back), its delegating
+			// call parked under it.
+			p.mu.Lock()
+			if d.wrapper != "" {
+				d.resolve = true
+			}
+			p.mu.Unlock()
+			d.agent.Logger().Error("thread/pool: a canceled child parked; its boundary could not be closed",
+				"receipt", d.receipt, "child", d.child.ID(), "err", err)
+			return nil
+		}
+		return errCanceledAtPark
+	}
+	d.phase = phaseParked
 	if d.wrapper != "" {
 		d.resolve = true
 	}
@@ -564,14 +751,17 @@ func (p *Pool) Register(sessionID string, agent *core.Agent) error {
 // on the top parent resumes the whole chain, after a restart too
 // (the child's own delegations are pumped from the ledger). A
 // grandchild that parks again while the child waits on it mirrors its
-// new request into the child, and the child parks in turn, mirroring
-// it on up: every park of a chain, at any depth, is offered on the top
-// parent and decided there. The new request keeps the namespaced call
+// new request into the child, and once every other delegation of the
+// child's is parked too — none still running its approved call — the
+// child parks in turn, mirroring it on up: every park of a chain, at
+// any depth, is offered on the top parent and decided there. The new request keeps the namespaced call
 // id (call ids repeat across a child's runs) and names the new
 // occurrence by its run; it supersedes the earlier one, and a decision
 // recorded for the earlier one does not decide it. A Cancel or Close
-// of the child while it waits ends the grandchild first and waits for
-// it to rest, so it settles in the child's ledger.
+// of the child while it waits — or a Cancel of it parked on the
+// grandchild — ends the grandchild first and waits for it to rest, so
+// it settles in the child's ledger (the bound and its outcome are
+// Cancel's).
 //
 // The delegating call a child is parked under is never decided: it
 // is not in Pending, and a decision naming it fails with
@@ -745,11 +935,13 @@ func (p *Pool) pump(ctx context.Context, parent *thread.Session) error {
 // caller read the child's boundary at, its replay built from that
 // read (a parked phase and d.parks read together, then Pending). A
 // child that is not parked — already armed by a racing pump, being
-// canceled — a child parked again since that read, and a closed pool
-// arm nothing; the later park reads its own boundary and arms it.
+// canceled — a child parked again since that read, a sync child whose
+// parent child is ending (endNested cancels it at its boundary) and a
+// closed pool arm nothing; the later park reads its own boundary and
+// arms it.
 func (p *Pool) arm(d *delegate, gen uint64, replay []thread.ApprovalDecisionEntry) {
 	p.mu.Lock()
-	if p.closed || d.phase != phaseParked || d.parks != gen {
+	if p.closed || d.phase != phaseParked || d.parks != gen || p.parentEndingLocked(d) {
 		p.mu.Unlock()
 		return
 	}
@@ -1044,41 +1236,76 @@ func (p *Pool) agentForSession(ctx context.Context, parent *thread.Session, chil
 // before parking it, an interrupting Send denied it, a Branch left it
 // behind — is reported and left: the receipt already holds the
 // outcome. Any other failure leaves the call parked; Recover resolves
-// it from the ledger.
+// it from the ledger. A parent that is itself a child of this pool
+// and is ending — canceled, settling — takes no resolution: it is
+// ending its delegations (endNested), and a resolution would resume
+// the very session that is being closed.
 //
 // When the parent session is itself a child of this pool whose resume
 // is waiting on this resolution (awaitNested), the resolution is
 // recorded under that run's context — the parent's resume is that
-// run's work — and the resume it starts is handed to it, with this
-// run's slot: the resume works from its first model call under the
-// slot the grandchild's finished work frees, never beside it (the
-// pool's bound holds through the hand-off). A resolution that starts
-// no resume — another delegation of the parent's still open — gives
-// the slot back. When that run was canceled the resolution is not
-// recorded: the parent is ending, and its delegating call ends with it.
+// run's work — and the resume it starts is handed to it, with a slot:
+// this run's, lent straight over, or — when this run holds none (it
+// was canceled while queued, it panicked, it was parked) — one queued
+// for on the waiting run's behalf before the resolution is recorded.
+// The resume works from its first model call under a slot, never
+// beside the bound (the pool's bound holds through the hand-off). A
+// resolution that starts no resume — another delegation of the
+// parent's still open — gives the slot back. When that run was
+// canceled the resolution is not recorded: the parent is ending, and
+// its delegating call ends with it.
 func (p *Pool) resolveWrapper(ctx context.Context, d *delegate, content string, isErr bool) {
 	p.mu.Lock()
+	ending := p.parentEndingLocked(d)
 	n := p.upstreamNestLocked(d)
 	mine := d.sl
+	var rctx context.Context
+	var to *slot
+	if n != nil {
+		rctx, to = n.ctx, n.slot
+	}
 	p.mu.Unlock()
+	if ending {
+		d.agent.Logger().Debug("thread/pool: delegating call left open: its parent is ending",
+			"wrapper", d.wrapper, "child", d.child.ID(), "receipt", d.receipt)
+		return
+	}
 	if n == nil {
 		_, err := d.parent.ResolveDelegation(ctx, d.wrapper, d.child.ID(), content, isErr)
 		d.reportResolution(err)
 		return
 	}
+	// No slot of this run's to lend, and the run the resume belongs to
+	// waits without one: queue for one on that run's behalf — outside
+	// the hold, so a sibling grandchild resolving meanwhile never waits
+	// on the hold while it holds the slot this queue waits for.
+	spare := false
+	if rctx != nil && !mine.holds() && to.waitsSlotless() {
+		spare = p.sem.enqueue().wait(rctx) == nil
+	}
 	n.mu.Lock()
 	p.mu.Lock()
-	rctx, to := n.ctx, n.slot
+	rctx, to = n.ctx, n.slot
 	p.mu.Unlock()
 	if n.closed || rctx == nil {
 		// The run is over (or not started): the parent's next resume is
 		// not its to follow.
 		n.mu.Unlock()
+		if spare {
+			p.sem.release()
+		}
 		_, err := d.parent.ResolveDelegation(ctx, d.wrapper, d.child.ID(), content, isErr)
 		d.reportResolution(err)
 		return
 	}
 	lent := mine.lend(to)
+	if spare {
+		if lent {
+			p.sem.release() // this run's own slot went over after all
+		} else {
+			lent = to.adopt() // back to the queue when to no longer waits slotless
+		}
+	}
 	turn, err := d.parent.ResolveDelegation(rctx, d.wrapper, d.child.ID(), content, isErr)
 	if turn != nil && err == nil {
 		p.mu.Lock()

@@ -212,7 +212,7 @@ func TestRunTreeAndChildRunsUseTheirIndexes(t *testing.T) {
 	// U9.1-fix: the tree is found from the rows — the id rule's on the
 	// primary key, their children on idx_parent_run — and its spans read
 	// by run id on idx_weft_run_id, never the whole trace.
-	if p := explain(treeIDRows(runsCut{on: true, afterNs: 1}), treeIDArgs("tr_p")...); !strings.Contains(p, "Keys:\nRunId") || strings.Contains(p, "Condition: true") {
+	if p := explain(treeIDRows(), treeIDArgs("tr_p")...); !strings.Contains(p, "Keys:\nRunId") || strings.Contains(p, "Condition: true") {
 		t.Errorf("the id rule's rows are not read on weft_runs' primary key:\n%s", p)
 	}
 	if p := explain(treeChildIDs(treeIDCondition), treeIDArgs("tr_p")...); !strings.Contains(p, "idx_parent_run") {

@@ -2711,9 +2711,11 @@ kind after it. Holes: `truncated` with `cause:
 "response_cap"` past each cap (`count` the turns or marks left out);
 a plain `truncated` when a read fails after the first byte (the status
 was sent: the lines before it are whole); the timeline's
-`not_recorded` / `stripped` / `hidden`, whether the turns ran to the
-end or stopped at a cap or a failed read (a panel token's `hidden`
-count is the scope read's, made before the first byte); `not_recorded`
+`not_recorded` / `stripped` / `hidden` when the turns ran to the end
+(`stripped` counted over the marks written), and when they stopped at
+a cap or a failed read — no mark read — its `hidden` and
+`not_recorded` alone, the scope read's (a panel token's `hidden`
+count, made before the first byte); `not_recorded`
 naming `obsdb.SessionEventReader` when the database cannot read the
 state log. The turns' children are read in one `ChildRuns` read for all
 turns (a TreeReader's), each turn's events, transcript, compactions,

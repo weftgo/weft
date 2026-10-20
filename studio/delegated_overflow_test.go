@@ -224,11 +224,81 @@ func delegatedHuge(t *testing.T, n int, maxReads int64) {
 	if len(out) != n {
 		t.Fatalf("%d sessions priced, want every one of %d", len(out), n)
 	}
+	// P9-pre-go-fix4: the budget's reason names the pages the budget
+	// read — 20 per batch and 20 more — never "more than 20".
+	wantBudget := fmt.Sprintf("(%d pages of 500 read)", sessionCostReads(n))
 	for _, id := range ids {
 		c, ok := out[id]
 		if !ok || c.known || c.badge != costUnknown || c.reason == "" {
 			t.Errorf("session %s: %+v; want unknown with a reason", id, c)
 		}
+		if strings.Contains(c.reason, "pages of 500") && !strings.Contains(c.reason, wantBudget) {
+			t.Errorf("session %s: reason %q, want the budget's figure %q", id, c.reason, wantBudget)
+		}
+	}
+}
+
+// shrinkingRuns answers a session's runs as a store that held 1,500
+// runs when the first page was read and lost 500 of the runs that page
+// returned before the second (a concurrent delete): pages of 500 under
+// a cursor, the first counting 1,500, every later one 1,000 — so after
+// two pages the runs read (1,000) reach the fresh count while a third
+// page of 500 is still unread.
+type shrinkingRuns struct {
+	obsdb.DB
+	n *atomic.Int64
+}
+
+func (s shrinkingRuns) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) {
+	s.n.Add(1)
+	sid := q.SessionID
+	if len(q.SessionIDs) > 0 {
+		sid = q.SessionIDs[0]
+	}
+	page := 0
+	if !q.Before.IsZero() {
+		_, _ = fmt.Sscanf(q.BeforeID, "p%d", &page)
+	}
+	out := obsdb.RunPage{Total: 1000}
+	if page == 0 {
+		out.Total = 1500
+	}
+	if page >= 3 {
+		return out, nil
+	}
+	at := time.Now().Add(-time.Duration(page+1) * time.Hour)
+	for i := range 500 {
+		out.Runs = append(out.Runs, obsdb.RunRow{ID: fmt.Sprintf("%s-p%d-%d", sid, page, i), SessionID: sid, Started: at, LastSeen: at})
+	}
+	cursor := fmt.Sprintf("p%d", page+1)
+	out.NextBefore, out.NextBeforeID = &at, cursor
+	return out, nil
+}
+
+// TestSessionCostSurvivesADeleteBetweenPages (P9-pre-go-fix4): the walk
+// ends on the cursor or an empty page, never on a count that fell
+// between pages: sessionCost reads all three pages (1,500 runs, then
+// the empty fourth) and sessionCosts' batch reads them too, where a
+// "read ≥ Total" end would have stopped after two and priced the
+// session as known without its last 500 runs. The count only decides
+// at the bound (exactly 10,000 runs known: TestDelegatedReadsPerLevel).
+func TestSessionCostSurvivesADeleteBetweenPages(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/shrink.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	var reads atomic.Int64
+	srv := New(DB(shrinkingRuns{DB: db, n: &reads}))
+	t.Cleanup(func() { _ = srv.Close() })
+	_, _, runs := srv.sessionCost(context.Background(), "s_shrink", "")
+	if len(runs) != 1500 || reads.Load() != 4 {
+		t.Errorf("sessionCost read %d runs in %d reads; want 1,500 in 4 (three pages, then the empty one)", len(runs), reads.Load())
+	}
+	reads.Store(0)
+	out := srv.sessionCosts(context.Background(), []string{"s_shrink"}, "")
+	if _, ok := out["s_shrink"]; !ok || reads.Load() != 4 {
+		t.Errorf("sessionCosts: %v in %d reads; want an answer after 4 reads", out, reads.Load())
 	}
 }
 

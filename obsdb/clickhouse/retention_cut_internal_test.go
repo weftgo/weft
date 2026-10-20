@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -25,13 +27,13 @@ func TestRunsTTLFailedReadIsHeld(t *testing.T) {
 	var reads atomic.Int64
 	fail := true
 	d := &DB{}
-	d.retention.read = func(context.Context) (string, error) {
+	d.retention.hooks = &retentionHooks{read: func(context.Context) (time.Time, string, error) {
 		reads.Add(1)
 		if fail {
-			return "", errors.New("system.tables: boom")
+			return time.Time{}, "", errors.New("system.tables: boom")
 		}
-		return "MergeTree ORDER BY RunId TTL LastSeen + toIntervalSecond(3600) SETTINGS index_granularity = 8192", nil
-	}
+		return time.Time{}, "MergeTree ORDER BY RunId TTL LastSeen + toIntervalSecond(3600) SETTINGS index_granularity = 8192", nil
+	}}
 	ctx := context.Background()
 	for range 5 {
 		if c := d.runsCut(ctx); c.on || c.where() != "" {
@@ -48,7 +50,7 @@ func TestRunsTTLFailedReadIsHeld(t *testing.T) {
 	fail = false
 	d.retention.at = time.Now().Add(-retentionEvery - time.Second)
 	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
-	d.retention.now = func() time.Time { return at }
+	d.retention.hooks.now = func() time.Time { return at }
 	c := d.runsCut(ctx)
 	if reads.Load() != 2 || !c.on || c.afterNs != at.Add(-time.Hour).UnixNano() {
 		t.Errorf("after a minute: %d reads, cut %+v; want 2 and the boundary now − 1h", reads.Load(), c)
@@ -61,6 +63,117 @@ func TestRunsTTLFailedReadIsHeld(t *testing.T) {
 	d.retention.at = time.Now().Add(-retentionEvery - time.Second)
 	if c := d.runsCut(ctx); !c.on {
 		t.Error("a failed read after a good one dropped the window it knew")
+	}
+}
+
+// TestRunsTTLCancelledReadHoldsNothing (P9-pre-go-fix4): a read that
+// failed because its caller's context ended is not the table's failure
+// — it answers the last window known and stamps nothing, so the next
+// caller, on a live context, reads again at once rather than a minute
+// later. Before any good read that answer is no cut; after one, the
+// window it knew.
+func TestRunsTTLCancelledReadHoldsNothing(t *testing.T) {
+	const engine = "MergeTree ORDER BY RunId TTL LastSeen + toIntervalSecond(3600)"
+	var reads atomic.Int64
+	d := &DB{}
+	d.retention.hooks = &retentionHooks{read: func(ctx context.Context) (time.Time, string, error) {
+		reads.Add(1)
+		if err := ctx.Err(); err != nil {
+			return time.Time{}, "", err
+		}
+		return time.Time{}, engine, nil
+	}}
+	for _, mk := range []func() (context.Context, context.CancelFunc){
+		func() (context.Context, context.CancelFunc) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx, func() {}
+		},
+		func() (context.Context, context.CancelFunc) {
+			return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		},
+	} {
+		ctx, cancel := mk()
+		if c := d.runsCut(ctx); c.on {
+			t.Errorf("a cancelled first read cut %+v, want no cut (no window known)", c)
+		}
+		cancel()
+		if !d.retention.at.IsZero() {
+			t.Fatalf("a cancelled read stamped the cache at %v", d.retention.at)
+		}
+	}
+	if c := d.runsCut(context.Background()); !c.on || reads.Load() != 3 {
+		t.Fatalf("the next live call: cut %+v after %d reads; want a cut, read at once (3)", c, reads.Load())
+	}
+	// With a window known, a cancelled re-read keeps it and holds nothing.
+	d.retention.at = time.Now().Add(-retentionEvery - time.Second)
+	stale := d.retention.at
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if c := d.runsCut(ctx); !c.on {
+		t.Error("a cancelled re-read dropped the window it knew")
+	}
+	if !d.retention.at.Equal(stale) {
+		t.Error("a cancelled re-read restamped the cache")
+	}
+}
+
+// TestRunsCutFollowsTheServerClock (P9-pre-go-fix4): the cutoff is host
+// now + (server − host) − window, the offset taken with the window's
+// read — so a host clock an hour ahead of the server's cuts where the
+// server's TTL merges do, not an hour later.
+func TestRunsCutFollowsTheServerClock(t *testing.T) {
+	d := &DB{}
+	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	d.retention.hooks = &retentionHooks{
+		read: func(context.Context) (time.Time, string, error) {
+			// The server is an hour behind the host's real clock.
+			return time.Now().Add(-time.Hour), "TTL LastSeen + toIntervalSecond(86400)", nil
+		},
+		now: func() time.Time { return at },
+	}
+	c := d.runsCut(context.Background())
+	want := at.Add(-time.Hour - 24*time.Hour)
+	if diff := time.Duration(c.afterNs - want.UnixNano()); !c.on || diff < -time.Second || diff > time.Second {
+		t.Errorf("cut %+v = %v, want ≈ %v (host now − 1h offset − 1 day)", c, time.Unix(0, c.afterNs).UTC(), want)
+	}
+}
+
+// TestRunsTTLBeyondDateTimeCutsNothing (P9-pre-go-fix4): a window past
+// maxRunsTTL (about 100 years — LastSeen plus it is past DateTime's
+// ceiling) cuts nothing, rather than overflow time.Duration into a
+// boundary in the future that would cut every run. 100 years exactly is
+// honoured.
+func TestRunsTTLBeyondDateTimeCutsNothing(t *testing.T) {
+	for _, tc := range []struct {
+		secs string
+		on   bool
+	}{
+		{"3153600000", true}, // 100 years of 365 days
+		{strconv.Itoa(maxRunsTTL), true},
+		{strconv.Itoa(maxRunsTTL + 1), false},
+		{"9300000000", false},           // past Duration's 9.2e9 s
+		{"99999999999999999999", false}, // past int64
+	} {
+		d := &DB{}
+		d.retention.hooks = &retentionHooks{read: func(context.Context) (time.Time, string, error) {
+			return time.Time{}, "TTL LastSeen + toIntervalSecond(" + tc.secs + ")", nil
+		}}
+		c := d.runsCut(context.Background())
+		if c.on != tc.on {
+			t.Errorf("window %s s: cut %+v, want on=%v", tc.secs, c, tc.on)
+		}
+		if c.on && c.afterNs >= time.Now().UnixNano() {
+			t.Errorf("window %s s: boundary %d is not in the past", tc.secs, c.afterNs)
+		}
+	}
+}
+
+// TestDBIsComparable (P9-pre-go-fix4): the retention seams sit behind a
+// pointer, so clickhouse.DB stays a comparable type (apidiff's line).
+func TestDBIsComparable(t *testing.T) {
+	if !reflect.TypeOf((*DB)(nil)).Elem().Comparable() {
+		t.Fatal("clickhouse.DB is not comparable")
 	}
 }
 
@@ -79,12 +192,12 @@ func TestRunsCutOncePerCall(t *testing.T) {
 	var reads atomic.Int64
 	// Read 1 at the real now (the run kept), read 2 a window and a day
 	// on (cut), and so on alternating.
-	db.retention.now = func() time.Time {
+	db.retention.hooks = &retentionHooks{now: func() time.Time {
 		if reads.Add(1)%2 == 1 {
 			return time.Now()
 		}
 		return time.Now().Add(DefaultMetaTTL + 24*time.Hour)
-	}
+	}}
 	page, err := db.Sessions(ctx, obsdb.SessionQuery{})
 	if err != nil {
 		t.Fatal(err)
@@ -177,9 +290,9 @@ func TestRunTreeCutAgreesWithChildren(t *testing.T) {
 		}
 	}
 	check("inside the window", 2)
-	db.retention.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	db.retention.hooks = &retentionHooks{now: func() time.Time { return time.Now().Add(48 * time.Hour) }}
 	check("the child past it, the parent not", 0)
-	db.retention.now = nil
+	db.retention.hooks = nil
 	check("the clock back", 2)
 }
 

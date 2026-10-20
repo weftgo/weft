@@ -2,6 +2,7 @@ package obsdb_test
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"testing"
 
@@ -230,4 +231,36 @@ func ExampleTreeMembers() {
 	// d/0/c1 (parent "d", id rule "d")
 	// d/0/c1/1/c2 (parent "d/0/c1", id rule "d/0/c1")
 	// nested_turn (parent "d/0/c1", id rule "")
+}
+
+// TestTreeMembersStopAtACutRun (P9-pre-go-fix4): a run a backend found
+// but cut (mapped to obsdb.TreeCutParent) is no member, and neither is
+// any descendant of it — one whose row names it, and one of core's id
+// shape under it whose row names no parent, which the id rule would
+// otherwise re-attach to the root above the cut run. A deeper id-shaped
+// run under a stored-parent descendant stays out too. With the child
+// kept (no sentinel: SQLite's read, which cuts nothing) all of them are
+// members, the id-only one under the child.
+func TestTreeMembersStopAtACutRun(t *testing.T) {
+	const root, child = "tr_e", "tr_e/1/call_a"
+	byRow, byID, deeper := child+"/0/call_b", child+"/0/call_c", child+"/0/call_b/2/call_d"
+	sibling := root + "/2/call_z"
+	parents := map[string]string{
+		root: "", child: obsdb.TreeCutParent,
+		byRow: child, byID: "", deeper: "", sibling: "",
+	}
+	got := obsdb.TreeMembers(root, parents)
+	want := map[string]string{root: "", sibling: root}
+	if !maps.Equal(got, want) {
+		t.Errorf("members with the child cut = %v, want %v", got, want)
+	}
+	if ids := obsdb.TreeReadIDs(obsdb.TreeQuery{RunID: root}, parents, nil); !slices.Equal(ids, []string{root, sibling}) {
+		t.Errorf("TreeReadIDs = %v, want the root and its kept sibling", ids)
+	}
+	parents[child] = root
+	got = obsdb.TreeMembers(root, parents)
+	want = map[string]string{root: "", child: root, byRow: child, byID: child, deeper: byRow, sibling: root}
+	if !maps.Equal(got, want) {
+		t.Errorf("members with the child kept = %v, want %v", got, want)
+	}
 }

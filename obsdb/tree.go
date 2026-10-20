@@ -141,6 +141,16 @@ type TreeRun struct {
 	Status                    Status
 }
 
+// TreeCutParent is the parent a backend maps a run to in the parents
+// it hands TreeMembers (and TreeReadIDs, CutRunTree, CapTree) when its
+// read found the run but may not show it — a run past the backend's
+// retention cut. No run has it, so the run is no member and neither is
+// a run whose stored parent it is; and the id rule stops at it, so an
+// id-shaped descendant with no stored parent stays out with it rather
+// than joining the nearest member above (TreeMembers). A NUL byte
+// leads it: no run id holds one.
+const TreeCutParent = "\x00cut"
+
 // TreeSpan is one span of a run tree (TreeReader.RunTreeSpans): the
 // span, the run it belongs to — its weft.run.id, or the derived run
 // (§9 of docs/record-contract.md) whose subtree holds it — and that
@@ -216,10 +226,16 @@ func TreeChildID(parent, id string) bool {
 // "j/1/0/c" to j — whichever superset of rows a backend read. The
 // answer maps every member, runID included, to its parent; a parent
 // chain that loops (never written by the core) ends where it repeats.
+// A run mapped to TreeCutParent is found but cut: never a member, and
+// the id rule stops at it — a descendant whose nearest run is a cut one
+// stays out, never re-attached to a member above it.
 func TreeMembers(runID string, parents map[string]string) map[string]string {
 	known := func(id string) bool { _, ok := parents[id]; return ok || id == runID }
 	in := map[string]string{runID: parents[runID]}
 	member := func(id string) bool { _, ok := in[id]; return ok }
+	// memberOrCut is the last pass's rule: the nearest member above an
+	// id, unless a cut run sits nearer.
+	memberOrCut := func(id string) bool { return member(id) || (id != runID && parents[id] == TreeCutParent) }
 	// The id rule's candidates, shortest first: a parent's id is a
 	// prefix of its child's, so it is placed before them.
 	var rule []string
@@ -262,12 +278,13 @@ func TreeMembers(runID string, parents map[string]string) map[string]string {
 			continue
 		}
 		// What still waits has a non-member nearest run: its parent is
-		// the nearest member above it instead.
+		// the nearest member above it instead — unless a cut run is
+		// nearer, which holds it out.
 		for _, id := range rule {
 			if member(id) {
 				continue
 			}
-			if p, ok := TreeIDRule(runID, id, member); ok {
+			if p, ok := TreeIDRule(runID, id, memberOrCut); ok && member(p) {
 				in[id], grew = p, true
 			}
 		}

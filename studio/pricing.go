@@ -1034,8 +1034,16 @@ func (s *Server) sessionCost(ctx context.Context, id, publicID string) (cost, *c
 	f := false
 	q := obsdb.RunQuery{SessionID: id, PublicID: publicID, ParentRunID: "*", Playground: &f, Limit: 500}
 	runs := []obsdb.RunRow{} // non-nil: a whole walk, even of no run
+	total := 0
 	for pages := 0; ; pages++ {
 		if pages == sessionCostPages {
+			// The bound: whole only when the last count says every run
+			// was read (a set of exactly 10,000 runs is whole, never
+			// "more"). Only here: below it a count that fell between
+			// pages (a concurrent delete) would end the walk early.
+			if len(runs) >= total {
+				break
+			}
 			return tooManyRuns(), c, nil
 		}
 		page, err := s.db.Runs(ctx, q)
@@ -1046,10 +1054,10 @@ func (s *Server) sessionCost(ctx context.Context, id, publicID string) (cost, *c
 		if pages == 0 && page.Total > sessionCostPages*500 {
 			return tooManyRuns(), c, nil // the count says so: no 19 reads more
 		}
+		total = page.Total
 		runs = append(runs, page.Runs...)
-		// The last page: no cursor, an empty page, or the whole count
-		// read (a set of exactly 10,000 runs is whole, never "more").
-		if page.NextBefore == nil || len(page.Runs) == 0 || len(runs) >= page.Total {
+		// The last page: no cursor, or an empty page.
+		if page.NextBefore == nil || len(page.Runs) == 0 {
 			break
 		}
 		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
@@ -1079,14 +1087,19 @@ const sessionCostBatch = 50
 // priced are unknown with costReadBudget's.
 func (s *Server) sessionCosts(ctx context.Context, ids []string, publicID string) map[string]cost {
 	out := make(map[string]cost, len(ids))
-	budget := sessionCostReads(len(ids))
+	n := sessionCostReads(len(ids))
+	budget := &readBudget{left: n, total: n}
 	for len(ids) > 0 {
 		n := min(sessionCostBatch, len(ids))
-		s.priceSessionBatch(ctx, ids[:n], publicID, out, &budget)
+		s.priceSessionBatch(ctx, ids[:n], publicID, out, budget)
 		ids = ids[n:]
 	}
 	return out
 }
+
+// readBudget is sessionCosts' read budget: the Runs pages left to read,
+// of total.
+type readBudget struct{ left, total int }
 
 // sessionCostReads is sessionCosts' read budget for n sessions:
 // sessionCostPages Runs pages per batch of sessionCostBatch, and one
@@ -1095,33 +1108,40 @@ func sessionCostReads(n int) int {
 	return sessionCostPages * ((n+sessionCostBatch-1)/sessionCostBatch + 1)
 }
 
-// costReadBudget is the cost of a session sessionCosts' read budget
-// left unpriced.
-func costReadBudget() cost {
-	return cost{badge: costUnknown, reason: fmt.Sprintf("the delegated sessions hold too many runs to price at read time (more than %d pages of 500 read)", sessionCostPages)}
+// costReadBudget is the cost of a session sessionCosts' read budget —
+// reads Runs pages of 500, sessionCostReads' figure — left unpriced.
+func costReadBudget(reads int) cost {
+	return cost{badge: costUnknown, reason: fmt.Sprintf("the delegated sessions hold too many runs to price at read time (%d pages of 500 read)", reads)}
 }
 
 // priceSessionBatch prices one batch of sessionCosts into out, halving
 // it when its runs pass sessionCost's bound, each read taken from
 // budget; with the budget spent the batch's sessions are unknown.
-func (s *Server) priceSessionBatch(ctx context.Context, ids []string, publicID string, out map[string]cost, budget *int) {
+func (s *Server) priceSessionBatch(ctx context.Context, ids []string, publicID string, out map[string]cost, budget *readBudget) {
 	f := false
 	q := obsdb.RunQuery{SessionIDs: ids, PublicID: publicID, ParentRunID: "*", Playground: &f, Limit: 500}
 	bySession := make(map[string][]obsdb.RunRow, len(ids))
-	read := 0
+	read, total := 0, 0
 	for pages := 0; ; pages++ {
-		if *budget <= 0 {
-			for _, id := range ids {
-				out[id] = costReadBudget()
-			}
-			return
-		}
 		if pages == sessionCostPages {
-			// The count grew past the bound while the batch was read.
+			// The bound: whole only when the last count says every run
+			// was read (exactly 10,000 runs are whole, never "more");
+			// else the count grew past it while the batch was read.
+			// Only here: below it a count that fell between pages (a
+			// concurrent delete) would end the walk early.
+			if read >= total {
+				break
+			}
 			s.splitSessionBatch(ctx, ids, publicID, out, budget)
 			return
 		}
-		*budget--
+		if budget.left <= 0 {
+			for _, id := range ids {
+				out[id] = costReadBudget(budget.total)
+			}
+			return
+		}
+		budget.left--
 		page, err := s.db.Runs(ctx, q)
 		if err != nil {
 			slog.DebugContext(ctx, "studio: delegated sessions' runs could not be read to price them", "sessions", len(ids), "err", err)
@@ -1137,10 +1157,9 @@ func (s *Server) priceSessionBatch(ctx context.Context, ids []string, publicID s
 		for _, r := range page.Runs {
 			bySession[r.SessionID] = append(bySession[r.SessionID], r)
 		}
-		read += len(page.Runs)
-		// The last page: no cursor, an empty page, or the whole count
-		// read (exactly 10,000 runs are whole, never "more").
-		if page.NextBefore == nil || len(page.Runs) == 0 || read >= page.Total {
+		read, total = read+len(page.Runs), page.Total
+		// The last page: no cursor, or an empty page.
+		if page.NextBefore == nil || len(page.Runs) == 0 {
 			break
 		}
 		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
@@ -1156,7 +1175,7 @@ func (s *Server) priceSessionBatch(ctx context.Context, ids []string, publicID s
 
 // splitSessionBatch is priceSessionBatch past the bound: two halves
 // read again, or one session's tooManyRuns.
-func (s *Server) splitSessionBatch(ctx context.Context, ids []string, publicID string, out map[string]cost, budget *int) {
+func (s *Server) splitSessionBatch(ctx context.Context, ids []string, publicID string, out map[string]cost, budget *readBudget) {
 	if len(ids) == 1 {
 		out[ids[0]] = tooManyRuns()
 		return

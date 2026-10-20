@@ -899,16 +899,27 @@ func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err er
 // the id-rule span read take the call's retention cut (retention.go),
 // so the tree holds the runs Run's children, ChildRuns and the cost
 // reads hold: a child past weft_runs' TTL is out of all of them alike,
-// merged away or not, and a run past it is ErrNotFound here as in Run.
-// A run whose parent was cut is out too: the walk follows kept rows.
+// merged away or not, and a run past it — a derived one too — is
+// ErrNotFound here as in Run, checked before any other read. A run
+// whose parent was cut is out too: the walk follows kept rows. The
+// id-rule row read alone is uncut, its cut rows kept as
+// obsdb.TreeCutParent, so the id rule stops at a cut run: its
+// descendants stay out whether their rows name it or only their ids do.
 func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTree, err error) {
 	runID := q.RunID
 	if err := d.checkOpen(); err != nil {
 		return obsdb.RunTree{}, err
 	}
 	defer d.closedErr(&err)
-	if _, err := d.runTrace(ctx, runID); err != nil {
+	// The cut first, for every run — a derived one too (P9-pre-go-fix4):
+	// a run Run reads not found is not found here.
+	cut := d.runsCut(ctx)
+	seen, err := d.runLastSeen(ctx, runID)
+	if err != nil {
 		return obsdb.RunTree{}, err
+	}
+	if !cut.keeps(seen) {
+		return obsdb.RunTree{}, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
 	}
 	if t, _, ok := obsdb.ParseStockRunID(runID); ok {
 		spans, err := d.querySpans(ctx, stockTreeSpans, t, caps.TreeTrace+1)
@@ -920,29 +931,43 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 		tree.TraceTruncated = cut
 		return tree, nil
 	}
-	cut := d.runsCut(ctx)
-	rows, err := d.treeRunRows(ctx, treeIDRows(cut)+treeRowLimit, append(treeIDArgs(runID), caps.TreeRow+1)...)
+	// The id-rule rows are read uncut, and a row the cut holds is kept
+	// in parents as obsdb.TreeCutParent (P9-pre-go-fix4): no member, so
+	// out of the tree, and the id rule stops at it — a descendant of a
+	// cut child stays out whether its row names the child or only its id
+	// does, never re-attached to the root above the cut child.
+	all, seens, err := d.treeRunRows(ctx, treeIDRows()+treeRowLimit, append(treeIDArgs(runID), caps.TreeRow+1)...)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
-	parents := make(map[string]string, len(rows))
-	for _, r := range rows {
-		parents[r.ID] = r.ParentRunID
+	idCapped := len(all) > caps.TreeRow
+	if idCapped {
+		all, seens = all[:caps.TreeRow], seens[:caps.TreeRow]
 	}
-	if _, ok := parents[runID]; !ok && len(rows) <= caps.TreeRow {
-		// The row exists (runTrace) but the cut holds it: Run's answer.
+	parents := make(map[string]string, len(all))
+	var rows []obsdb.TreeRun
+	for i, r := range all {
+		if !cut.keeps(seens[i]) {
+			parents[r.ID] = obsdb.TreeCutParent
+			continue
+		}
+		parents[r.ID] = r.ParentRunID
+		rows = append(rows, r)
+	}
+	if p, ok := parents[runID]; (!ok || p == obsdb.TreeCutParent) && !idCapped {
+		// The row was there (runLastSeen) and is gone, or cut since.
 		return obsdb.RunTree{}, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
 	}
-	level, err := d.treeRunRows(ctx, treeChildRows(treeIDCondition, cut)+treeRowLimit, append(treeIDArgs(runID), caps.TreeRow+1)...)
+	level, _, err := d.treeRunRows(ctx, treeChildRows(treeIDCondition, cut)+treeRowLimit, append(treeIDArgs(runID), caps.TreeRow+1)...)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
 	// Past obsdb.TreeRowCap rows the walk stops: the tree is cut there
 	// (Truncated), its rows the first read.
-	for len(level) > 0 && len(rows) <= caps.TreeRow {
+	for len(level) > 0 && len(rows) <= caps.TreeRow && !idCapped {
 		var frontier []string
 		for _, r := range level {
-			if _, kept := parents[r.ParentRunID]; !kept {
+			if p, kept := parents[r.ParentRunID]; !kept || p == obsdb.TreeCutParent {
 				// Its parent is no member: an id-rule row the cut
 				// holds, so the child is out of the tree as it is out
 				// of every listing that reaches it through its parent.
@@ -957,7 +982,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 		level = nil
 		for len(frontier) > 0 {
 			n := idChunk(frontier)
-			more, err := d.treeRunRows(ctx, treeChildRows("RunId IN ("+placeholders(n)+")", cut)+treeRowLimit, append(anys(frontier[:n]), caps.TreeRow+1)...)
+			more, _, err := d.treeRunRows(ctx, treeChildRows("RunId IN ("+placeholders(n)+")", cut)+treeRowLimit, append(anys(frontier[:n]), caps.TreeRow+1)...)
 			if err != nil {
 				return obsdb.RunTree{}, err
 			}
@@ -965,8 +990,8 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 			frontier = frontier[n:]
 		}
 	}
-	rowsCut := len(rows) > caps.TreeRow
-	if rowsCut {
+	rowsCut := idCapped || len(rows) > caps.TreeRow
+	if len(rows) > caps.TreeRow {
 		for _, r := range rows[caps.TreeRow:] {
 			delete(parents, r.ID)
 		}
@@ -1008,9 +1033,10 @@ func treeRowOrder(cut runsCut) string {
 }
 
 // treeIDRows is the run's row and the rows the id rule names its
-// descendants, cut.
-func treeIDRows(cut runsCut) string {
-	return treeRowColumns + treeIDCondition + treeRowOrder(cut)
+// descendants, uncut: RunTreeSpans applies the cut in Go, keeping a
+// cut row as obsdb.TreeCutParent so the id rule stops at it.
+func treeIDRows() string {
+	return treeRowColumns + treeIDCondition + treeRowOrder(runsCut{})
 }
 
 // treeSpansByIDRule is the spans of the runs treeIDCondition selects
@@ -1061,27 +1087,30 @@ func anys(ids []string) []any {
 	return out
 }
 
-// treeRunRows reads one of the tree's row statements.
-func (d *DB) treeRunRows(ctx context.Context, q string, args ...any) ([]obsdb.TreeRun, error) {
+// treeRunRows reads one of the tree's row statements: the runs, and
+// beside each its newest LastSeen (the cut's column).
+func (d *DB) treeRunRows(ctx context.Context, q string, args ...any) ([]obsdb.TreeRun, []time.Time, error) {
 	rs, err := d.conn.Query(ctx, q, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = rs.Close() }()
 	var out []obsdb.TreeRun
+	var seens []time.Time
 	now := time.Now()
 	for rs.Next() {
 		var r obsdb.TreeRun
 		var failed, finished, rootEnded bool
 		var seen time.Time
 		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &r.Started, &failed, &finished, &rootEnded, &seen); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		r.Started = timeOf(r.Started)
 		r.Status = obsdb.DeriveStatus(failed, finished || rootEnded, timeOf(seen), now)
 		out = append(out, r)
+		seens = append(seens, seen)
 	}
-	return out, rs.Err()
+	return out, seens, rs.Err()
 }
 
 // treeSpans reads the members' spans (obsdb.TreeReadIDs: under a scope
@@ -1249,6 +1278,21 @@ func (d *DB) runTrace(ctx context.Context, runID string) (string, error) {
 		return "", fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
 	}
 	return trace, nil
+}
+
+// runLastSeen is runExists answering the run's newest LastSeen (the
+// retention cut's column). ErrNotFound for a run with no row.
+func (d *DB) runLastSeen(ctx context.Context, runID string) (time.Time, error) {
+	var n uint64
+	var seen time.Time
+	if err := d.conn.QueryRow(ctx,
+		`SELECT count(), max(LastSeen) FROM weft_runs WHERE RunId = ?`, runID).Scan(&n, &seen); err != nil {
+		return time.Time{}, err
+	}
+	if n == 0 {
+		return time.Time{}, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
+	}
+	return seen, nil
 }
 
 // Trace returns any trace's spans — weft and non-weft alike (the

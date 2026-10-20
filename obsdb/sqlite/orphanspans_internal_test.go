@@ -3,11 +3,14 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/internal/caps"
 )
 
 // TestSweepTakesOrphanSummarizerSpans (P9-pre-go-fix3): a summarizer
@@ -69,5 +72,55 @@ func TestSweepTakesOrphanSummarizerSpans(t *testing.T) {
 	}
 	if n := spans("kept"); n < 2 {
 		t.Errorf("the kept run's spans = %d, want its own and its summarizer span", n)
+	}
+}
+
+// TestSweepOrphanSpansInBatches (P9-pre-go-fix4): the orphan spans go
+// in statements of at most obsdb.SweepBatch spans (lowered to 3 here),
+// looping until a short batch — ten orphans in batches of 3, 3, 3, 1 —
+// so a write waits on one batch, never on every orphan at once. A kept
+// run's spans stay.
+func TestSweepOrphanSpansInBatches(t *testing.T) {
+	restore := caps.Lower(&caps.SweepBatch, 3)
+	defer restore()
+	var batches []int64
+	deleteBatchHook = func(n int64) { batches = append(batches, n) }
+	defer func() { deleteBatchHook = nil }()
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	d := db.(*DB)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	old := now.Add(-3 * time.Hour)
+	delFixture(t, db, "kept", "s_kept", "", now.Add(-time.Minute))
+	var orphans []obsdb.Span
+	for i := range 10 {
+		orphans = append(orphans, obsdb.Span{TraceID: strings.Repeat("ce", 16), SpanID: fmt.Sprintf("5bb00000000001%02d", i),
+			Name: "chat summary-mini", Kind: 3, Start: old, End: old.Add(time.Second),
+			Attrs: map[string]any{"gen_ai.operation.name": "chat", "weft.run.id": fmt.Sprintf("gone_%d", i),
+				obsdb.AttrChatRole: obsdb.ChatRoleSummarizer}})
+	}
+	if err := db.Write(ctx, obsdb.Batch{Spans: orphans}); err != nil {
+		t.Fatal(err)
+	}
+	batches = nil
+	if err := d.sweepOrphanSpans(ctx, now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(batches, []int64{3, 3, 3, 1}) {
+		t.Errorf("orphan span batches = %v, want [3 3 3 1]", batches)
+	}
+	var left, kept int
+	if err := d.reads.QueryRow(`SELECT count(*) FROM spans WHERE run_id LIKE 'gone_%'`).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.reads.QueryRow(`SELECT count(*) FROM spans WHERE run_id = 'kept'`).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 || kept == 0 {
+		t.Errorf("after the batches: %d orphans left, %d kept spans; want 0 and the kept run's", left, kept)
 	}
 }

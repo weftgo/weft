@@ -44,8 +44,10 @@ import (
 //     after it); a
 //     plain truncated hole when a read failed after the first byte (the
 //     status was already sent: the lines before it are whole); the
-//     timeline's not_recorded / stripped / hidden, whether the turns
-//     ran to the end or stopped; and not_recorded
+//     timeline's not_recorded / stripped / hidden when the turns ran
+//     to the end (stripped counted over the marks written), and when
+//     they stopped — no mark read — its hidden and not_recorded alone,
+//     the scope read's, made before the first byte; and not_recorded
 //     naming obsdb.SessionEventReader when the database cannot read
 //     the state log;
 //   - one "session_end" record, last: turns_exported, marks_exported
@@ -298,7 +300,8 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 		// The turns stopped (a failed read, the byte cap): no mark line,
 		// but the timeline's holes still say what the file could not
 		// hold whatever it carries — a panel token's hidden marks above
-		// all, counted by the scope read before the first byte.
+		// all, counted by the scope read before the first byte. No mark
+		// is read, so no stripped hole: hidden and not_recorded alone.
 		holes = append(holes, mb.holes(det.Runs, all, 0, false)...)
 	case !hasMarks:
 		holes = append(holes, stepHole{Hole: string(obsdb.HoleNotRecorded),

@@ -325,7 +325,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    {format, session_id, public_id, agent, turns, marks}, every turn's run jsonl export in turn order (≤ 200),
 //    //    the state log's session_mark lines (≤ 2,000), session_hole lines (truncated cause response_cap past a cap —
 //    //    64 MiB of every line before the holes, the session line included, sessionExportByteCap — or a plain truncated
-//    //    when a read fails mid-stream; the timeline's holes, whether the turns ran to the end or stopped), a session_end line {turns_exported, marks_exported, bytes} last; the turns'
+//    //    when a read fails mid-stream; the timeline's holes when the turns ran to the end, its hidden and not_recorded alone — the scope read's — when they stopped), a session_end line {turns_exported, marks_exported, bytes} last; the turns'
 //    //    children in one ChildRuns read; sessions/{id}'s scope, a read token's requests hidden and marks
 //    //    content_hidden; the session page's export / copy public id / open in app / delete verbs),
 //    //    sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's

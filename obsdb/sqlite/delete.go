@@ -143,12 +143,14 @@ func (d *DB) sweepPass(ctx context.Context, before time.Time) (roots, deleted in
 // cutoff whose session has no run left: the pass took the last turn
 // they sat beside, and no run delete names them (their run_id is "").
 // A session that still has a run keeps them, as DeleteSession would
-// take them with it. Its own writer statement, the pass committed.
+// take them with it. Its own writer statements, the pass committed, in
+// batches of obsdb.SweepBatch events (deleteInBatches).
 func (d *DB) sweepRunlessEvents(ctx context.Context, before time.Time) error {
-	_, err := d.writer.ExecContext(ctx, `DELETE FROM session_events
+	return d.deleteInBatches(ctx, `DELETE FROM session_events WHERE (session_id, run_id, kind, pos) IN (
+		SELECT session_id, run_id, kind, pos FROM session_events
 		WHERE run_id = '' AND time_ns < ?
-		AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.session_id = session_events.session_id AND runs.session_id <> '')`, unixNS(before))
-	return err
+		AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.session_id = session_events.session_id AND runs.session_id <> '')
+		LIMIT ?)`, unixNS(before))
 }
 
 // sweepOrphanSpans deletes the spans filed under a run id no runs row
@@ -162,12 +164,44 @@ func (d *DB) sweepRunlessEvents(ctx context.Context, before time.Time) error {
 // land before the run's run_start), so the orphan waits for the cutoff,
 // as the run would have. ClickHouse needs nothing alike: otel_traces'
 // TTL drops every span, orphan or not, on its own clock. Narrowed by
-// spans_start; its own writer statement.
+// spans_start; in batches of obsdb.SweepBatch spans, each its own
+// writer statement (P9-pre-go-fix4), so a write waits on one batch,
+// never on every orphan at once.
 func (d *DB) sweepOrphanSpans(ctx context.Context, before time.Time) error {
-	_, err := d.writer.ExecContext(ctx, `DELETE FROM spans
+	return d.deleteInBatches(ctx, `DELETE FROM spans WHERE (trace_id, span_id) IN (
+		SELECT trace_id, span_id FROM spans
 		WHERE start_ns < ? AND run_id <> ''
-		AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.run_id = spans.run_id)`, unixNS(before))
-	return err
+		AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.run_id = spans.run_id)
+		LIMIT ?)`, unixNS(before))
+}
+
+// deleteBatchHook, when set (tests), sees each deleteInBatches batch's
+// row count, its statement committed.
+var deleteBatchHook func(n int64)
+
+// deleteInBatches runs stmt — a DELETE whose last bind is its batch's
+// LIMIT — until a batch deletes fewer than obsdb.SweepBatch rows, each
+// batch its own writer statement.
+func (d *DB) deleteInBatches(ctx context.Context, stmt string, args ...any) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		res, err := d.writer.ExecContext(ctx, stmt, append(args[:len(args):len(args)], caps.SweepBatch)...)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if deleteBatchHook != nil {
+			deleteBatchHook(n)
+		}
+		if n < int64(caps.SweepBatch) {
+			return nil
+		}
+	}
 }
 
 // Vacuum folds the search index's segments and runs VACUUM (obsdb.DB):

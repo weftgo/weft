@@ -53,16 +53,23 @@ at most once a minute): `Runs` and `Search` (every filter), `Sessions`
 (rows, `Total`, turn facts, the tag and `Failed` filters, the
 summarizer usage), `Session` and its runs, `Run` and its children,
 `ChildRuns`, the run tree (`RunTreeSpans`: its rows and the spans of the
-runs it keeps — a run whose parent is cut is out with it) and
-`ResolvePublicID`. A run past it is neither counted nor paged nor
-found, merged away or not, `Total` always matches the rows, and no read
-keeps a turn another has cut; a run's own records and spans, read by
-id, stay until the merge drops them. The boundary is taken once per
-call — now minus the window, one instant for every statement of it —
-so a run crossing it between `Sessions`' count, page, turn facts and
-summarizer read is in all of them or in none. A failed `system.tables`
-read keeps the last window known for a minute (logged at Debug); with
-none known yet the reads cut nothing, as before the cut existed.
+runs it keeps — a run whose parent is cut is out with it, whether its
+row names that parent or only core's id rule does; a cut run, a
+derived one too, not found as in `Run`) and `ResolvePublicID`. A run
+past it is neither counted nor paged nor found, merged away or not,
+`Total` always matches the rows, and no read keeps a turn another has
+cut; a run's own records and spans, read by id, stay until the merge
+drops them. The boundary is taken once per call — one instant for
+every statement of it — so a run crossing it between `Sessions`' count,
+page, turn facts and summarizer read is in all of them or in none. It
+is on the server's clock, the one TTL merges use: the window's read
+takes the server's `now64(9)` beside it, and the boundary is the host's
+now plus that offset minus the window, so a host clock that drifts from
+the server's moves no run across it. A failed `system.tables` read
+keeps the last window known for a minute (logged at Debug), a read the
+caller cancelled holds nothing; with none known yet, or a window past
+about 100 years (DateTime's range), the reads cut nothing, as before
+the cut existed.
 
 The tag filters (`SessionQuery.Meta`, `RunQuery.Meta`) narrow their
 row scan on `idx_meta` (migration 0026), an ngram bloom filter over

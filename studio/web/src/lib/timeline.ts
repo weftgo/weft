@@ -23,7 +23,7 @@ import type {
   TimelineDoc,
   TimelineTurn,
 } from "./api"
-import { decider, decisionLine, outcomeOf } from "./decisions"
+import { decider, decisionLine, markWhoHole, outcomeOf } from "./decisions"
 import { compactionLine } from "./compaction"
 import { absoluteTime, plural, tokens } from "./format"
 import { runLink, sessionLink, sessionSearch, sessionViewLink } from "./links"
@@ -680,6 +680,8 @@ export interface DetailRow {
   title?: string
   /** A hole a reader cannot see past (lib/decisions.ts's WHO_HOLE). */
   hidden?: boolean
+  /** A value no record holds yet (lib/decisions.ts's WHO_UNRECORDED). */
+  unrecorded?: boolean
 }
 
 /** A link the drawer offers. */
@@ -707,8 +709,10 @@ export function markDetail(
   if (m.kind === "approval.decision") {
     const { c, d } = decisionOf(m, tools.get(str(f.call_id)))
     const who = decider(c, d)
+    const hole = markWhoHole(c, d, m.content_mark === "stripped")
     if (who) row("who", who)
-    else if (c.who_hidden) rows.push({ k: "who", v: "", hidden: true })
+    else if (hole === "hidden") rows.push({ k: "who", v: "", hidden: true })
+    else if (hole) rows.push({ k: "who", v: "", unrecorded: true })
     row("outcome", outcomeOf(c.outcome).word)
     if (c.reason) row("reason", c.reason)
     if (c.result) row("result", c.result)

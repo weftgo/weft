@@ -159,7 +159,7 @@ export function StepScrubber({
       <input
         id="step-scrubber"
         type="range"
-        className="min-w-32 flex-1 accent-[var(--thread)]"
+        className="h-6 min-w-32 flex-1 accent-[var(--thread)]"
         min={min}
         max={max}
         step={1}

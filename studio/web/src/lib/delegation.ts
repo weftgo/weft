@@ -285,17 +285,25 @@ export const linkedHoles = (d: {
 /** delegatedHoles is a session document's delegated block's holes:
  * the rows cut at 100 (truncated), a failed read (not_recorded) and the
  * server's own — the delegated sessions another public id holds, which
- * a panel token is not shown (hidden, with their count). */
+ * a panel token is not shown (hidden, with their count: sessions, "≥"
+ * when count_floor says the server stopped counting). */
 export const delegatedHoles = (d: {
   delegated_more?: boolean
   delegated_unknown?: boolean
-  delegated_holes?: HoleMark[]
-}) => [
+  delegated_holes?: (HoleMark & { count_floor?: boolean })[]
+}): HoleMark[] => [
   ...marks(
     d.delegated_more && ["truncated", DELEGATED_BLOCK.more],
     d.delegated_unknown && ["not_recorded", DELEGATED_BLOCK.unknown]
   ),
-  ...(d.delegated_holes ?? []),
+  ...(d.delegated_holes ?? []).map(({ count_floor, ...h }) =>
+    h.hole === "hidden" && h.count
+      ? {
+          ...h,
+          note: `${count_floor ? "≥ " : ""}${plural(h.count, "delegated session")}`,
+        }
+      : h
+  ),
 ]
 
 /** The meta keys a lineage line draws (never repeated as raw chips). */

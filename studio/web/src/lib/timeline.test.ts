@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest"
 
 import type { SessionMark, TimelineTurn } from "./api"
 import { summarizerView } from "./cost"
+import { markWhoHole } from "./decisions"
 import {
   busyEndSpans,
   compactionStarts,
@@ -273,6 +274,41 @@ describe("markLine", () => {
 })
 
 describe("markDetail", () => {
+  it("says a decider no stored resume names is not recorded yet, or hidden (P9-pre-web-fix3 F1)", () => {
+    // t4 parked again after resuming t3 as alice; bob decided it before
+    // t5 is stored: the server sends no actor (never alice's).
+    const parked = [
+      turn(3, { pending: 1, stopped_by: "parked", resumed_by: `${S}-t4` }),
+      turn(4, { pending: 1, stopped_by: "parked", resumed_from: `${S}-t3` }),
+    ]
+    const who = (m: ReturnType<typeof mark>) =>
+      markDetail(m, parked).rows.find((r) => r.k === "who")
+    const bare = mark(
+      "approval.decision",
+      4,
+      { call_id: "c1", outcome: "approve" },
+      { lane: "approvals" }
+    )
+    expect(who(bare)).toMatchObject({ v: "", unrecorded: true })
+    expect(markWhoHole(decisionOf(bare).c, decisionOf(bare).d)).toBe(
+      "not_recorded"
+    )
+    const hid = mark(
+      "approval.decision",
+      4,
+      { call_id: "c1", outcome: "approve" },
+      { lane: "approvals", content_hidden: true }
+    )
+    expect(who(hid)).toMatchObject({ v: "", hidden: true })
+    const read = mark(
+      "approval.decision",
+      4,
+      { call_id: "c1", outcome: "approve" },
+      { lane: "approvals", content: { who: "bob" } }
+    )
+    expect(who(read)?.v).toBe("bob")
+    expect(markWhoHole(decisionOf(read).c, decisionOf(read).d)).toBe(undefined)
+  })
   it("links an interrupt's interrupting turn and names the run it is filed under", () => {
     const { rows, links } = markDetail(marks[5], turns)
     expect(rows.find((r) => r.k === "filed under")?.v).toBe("t6")

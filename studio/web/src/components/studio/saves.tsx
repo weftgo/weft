@@ -158,7 +158,7 @@ export function KeepAsPrompt({
   return (
     <button
       type="button"
-      className="font-mono text-[11px] text-foreground underline decoration-thread-ink underline-offset-2 hover:decoration-2"
+      className="min-h-6 font-mono text-[11px] text-foreground underline decoration-thread-ink underline-offset-2 hover:decoration-2"
       data-keep-prompt
       title={
         !agent

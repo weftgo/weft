@@ -283,6 +283,14 @@ func TestSessionTimeline(t *testing.T) {
 	if _, _, eb := get(t, h, "/studio/api/sessions/s_parked/entries"); !strings.Contains(eb, `"hole":"not_recorded"`) {
 		t.Errorf("s_parked's entries = %s, want the not_recorded hole too", eb)
 	}
+	// ?run= (P9-pre-web-fix3 F5): the holes are that run's — the parked
+	// run's own not_recorded, none for a run that parked nothing.
+	if _, _, eb := get(t, h, "/studio/api/sessions/s_parked/entries?run=s_parked-t1"); !strings.Contains(eb, `"hole":"not_recorded"`) {
+		t.Errorf("s_parked's entries?run=s_parked-t1 = %s, want the parked run's not_recorded hole", eb)
+	}
+	if _, _, eb := get(t, h, "/studio/api/sessions/s_parked/entries?run=nope"); strings.Contains(eb, `"hole"`) {
+		t.Errorf("s_parked's entries?run=nope = %s, want no hole: that run parked nothing", eb)
+	}
 	// Marks and no turn (every record held at Close): the session-level marks.
 	code, _, body = get(t, h, "/studio/api/sessions/s_held/timeline")
 	if hv := decodeTimeline(t, body); code != http.StatusOK || len(hv.Turns) != 0 || len(hv.Marks) != 1 {
@@ -340,6 +348,18 @@ func TestSessionTimelineScope(t *testing.T) {
 		t.Errorf("playground token: the deny's content = %v, want who", pv.Marks[1].Content)
 	} else if n, _ := pv.hole("hidden"); n != 1 {
 		t.Errorf("playground token: hidden count %d, want 1 (the foreign mark)", n)
+	}
+	// P9-pre-web-fix3 F5: /entries?run= counts the run's marks alone —
+	// the foreign mark is filed under no run, so t1's page hides nothing
+	// from the playground token, and only t1's one content object from
+	// the read token.
+	_, _, body = getWith(t, h, "/studio/api/sessions/s_acme/entries?run=s_acme-t1", tok("pub_acme", scopePlayground), "")
+	if strings.Contains(body, `"hole":"hidden"`) {
+		t.Errorf("playground token entries?run=s_acme-t1 = %s, want no hidden hole (the foreign mark is no mark of t1)", body)
+	}
+	_, _, body = getWith(t, h, "/studio/api/sessions/s_acme/entries?run=s_acme-t1", tok("pub_acme", scopeRead), "")
+	if rv := decodeTimeline(t, body); func() int { n, _ := rv.hole("hidden"); return n }() != 1 || strings.Contains(body, "this session's marks") {
+		t.Errorf("read token entries?run=s_acme-t1 = %s, want hidden 1 (t1's decision content), no session-wide count", body)
 	}
 	for _, p := range []string{"/studio/api/sessions/s_acme/timeline", "/studio/api/sessions/s_acme/entries"} {
 		if code, _, _ := getWith(t, h, p, tok("pub_other", scopeRead), ""); code != http.StatusForbidden {

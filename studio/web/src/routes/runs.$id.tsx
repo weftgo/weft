@@ -121,7 +121,13 @@ import type { HoleMark } from "@/lib/honesty"
 // The ?tree=1 read: the descendant rules too (lib/waterfall-tree.ts).
 import { treeRows as waterfallRows } from "@/lib/waterfall-tree"
 import type { FoldedRun } from "@/lib/events"
-import { callGraph, catalogSources, nodeOfRun } from "@/lib/graph"
+import {
+  ROWS_LEVEL,
+  callGraph,
+  catalogSources,
+  nodeOfRun,
+  rowsCallGraph,
+} from "@/lib/graph"
 import { CallGraphView } from "@/components/studio/call-graph"
 import { LoopGraphView } from "@/components/studio/loop-graph"
 import {
@@ -694,10 +700,6 @@ function RunPage() {
       : ["order", "graph"]
   // The scale switch (and its t key) is offered when there is a choice.
   const scaled = scales.length > 1
-  // The agents level reads the spans (the call graph): without any, it
-  // is off with a not_recorded badge, and ?level=agents reads the loop.
-  const level: GraphLevel =
-    search.level === "agents" && haveTime ? "agents" : "loop"
   // Still waiting for late spans (U34-fix3): inside the 30 s after the
   // end (endSeen) with no invoke_agent span read yet, the spans read
   // polls (above) — an empty answer then is not "recorded none". A
@@ -725,13 +727,26 @@ function RunPage() {
     !haveTime && spans.isError
       ? spansUnreadable(spans.error.message)
       : undefined
-  const levelHole: HoleMark | undefined =
-    haveTime || spans.isError
-      ? undefined
-      : (spans.isSuccess && runStatus !== "running" && !spansAwaited) ||
-          (run.isSuccess && !run.data.trace_id)
-        ? NO_SPANS_LEVEL
-        : undefined
+  const spansNone =
+    !haveTime &&
+    !spans.isError &&
+    ((spans.isSuccess && runStatus !== "running" && !spansAwaited) ||
+      (run.isSuccess && !run.data.trace_id))
+  // No spans but subagent rows (P9-pre-web-fix3): the agents level is
+  // drawn from the run rows (rowsCallGraph), its badge saying what that
+  // leaves out; a run of no subagent has no agents level to draw.
+  const rowsAgents =
+    spansNone && !derived && (run.data?.children.length ?? 0) > 0
+  // The agents level reads the spans (the call graph), else the rows:
+  // without either it is off with a not_recorded badge, and
+  // ?level=agents reads the loop.
+  const level: GraphLevel =
+    search.level === "agents" && (haveTime || rowsAgents) ? "agents" : "loop"
+  const levelHole: HoleMark | undefined = rowsAgents
+    ? ROWS_LEVEL
+    : spansNone
+      ? NO_SPANS_LEVEL
+      : undefined
 
   // The child subtree in place (U9.2, UX-A-01): a child run row stays
   // one row until expanded; its rows (and its children's, lazily — drawn
@@ -1188,7 +1203,7 @@ function RunPage() {
   )
   const graph = useMemo(
     () =>
-      scale === "graph" && level === "agents"
+      scale === "graph" && level === "agents" && haveTime
         ? callGraph(
             treeSpansAll,
             id,
@@ -1198,7 +1213,7 @@ function RunPage() {
             (r) => r === id
           )
         : undefined,
-    [scale, level, treeSpansAll, id, sources]
+    [scale, level, haveTime, treeSpansAll, id, sources]
   )
   // The loop graph (U34): every child expanded (a subagent expands in
   // place: its loop is drawn from the same rows), on the tree's scale.
@@ -1284,6 +1299,15 @@ function RunPage() {
     [pricing, readRows]
   )
   const rowOfRun = useCallback((r: string) => readRows.get(r), [readRows])
+  // The agents level with no spans (rowsAgents): the rows' call graph.
+  const rowsGraph = useMemo(
+    () =>
+      scale === "graph" && level === "agents" && !haveTime
+        ? rowsCallGraph(readRows, id)
+        : undefined,
+    [scale, level, haveTime, readRows, id]
+  )
+  const shownGraph = graph ?? rowsGraph
   // The documents being read (U34-fix3): a missing row is "not read
   // yet" only while the read that would carry it is in flight — the
   // root's document, its own expanded document or its parent's; any
@@ -1765,7 +1789,7 @@ function RunPage() {
                       key={l}
                       type="button"
                       aria-pressed={level === l}
-                      disabled={l === "agents" && !haveTime}
+                      disabled={l === "agents" && !haveTime && !rowsAgents}
                       className={`rounded-md border px-2 py-1 disabled:opacity-50 ${
                         level === l
                           ? "border-thread/60 bg-secondary"
@@ -1957,12 +1981,12 @@ function RunPage() {
                           )
                         }
                       />
-                    ) : graph ? (
+                    ) : shownGraph ? (
                       <CallGraphView
-                        graph={graph}
+                        graph={shownGraph}
                         costOf={pricing ? costOfRuns : undefined}
                         rowOf={rowOfRun}
-                        selected={nodeOfRun(graph, selectedRow?.runId)?.id}
+                        selected={nodeOfRun(shownGraph, selectedRow?.runId)?.id}
                         onSelect={(n) => n.runs[0] && select(`r:${n.runs[0]}`)}
                       />
                     ) : (

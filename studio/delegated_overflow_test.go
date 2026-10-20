@@ -516,6 +516,47 @@ func TestDelegatedHiddenScoped(t *testing.T) {
 	if s := read("srv"); len(s.Holes) != 0 || !s.CostKnown {
 		t.Errorf("a hidden grandchild, server token: holes %+v known %v; want none, known", s.Holes, s.CostKnown)
 	}
+	// P9-pre-web-fix3 F6: a hidden child's own delegated sessions are
+	// counted too, at every depth — a hidden grandchild under it, and
+	// below that one of the token's own public id (under a hidden
+	// session, so hidden as well): 3, exact, never 1.
+	db4, err := sqlite.Open(t.TempDir() + "/hidden4.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db4.Close() })
+	db = db4
+	seedRun(t, db, "s_p-t1", "pub_a", "s_p", "", nil)
+	child("s_other", "pub_b")
+	under := func(id, pub, parent string) {
+		seedRun(t, db, id+"-t1", pub, id, "", map[string]any{
+			"weft.session.parent": parent, "weft.session.parent_call": "d_" + id,
+			"weft.caller.run.id": parent + "-t1", "weft.caller.call.id": "d_" + id,
+		})
+	}
+	under("s_ogc", "pub_b", "s_other")
+	under("s_oggc", "pub_a", "s_ogc")
+	h = Handler(DB(db), Token("srv"))
+	p = read(panel)
+	if len(p.Delegated) != 0 || len(p.Holes) != 1 || p.Holes[0].Count != 3 || p.CostKnown ||
+		strings.Contains(fmt.Sprint(p), "s_ogc") || strings.Contains(fmt.Sprint(p), "s_oggc") {
+		t.Errorf("a hidden child's subtree: delegated %+v holes %+v known %v; want none listed, one hole counting 3, unknown", p.Delegated, p.Holes, p.CostKnown)
+	}
+	if s := read("srv"); len(s.Holes) != 0 || !s.CostKnown {
+		t.Errorf("a hidden child's subtree, server token: holes %+v known %v; want none, known", s.Holes, s.CostKnown)
+	}
+}
+
+// TestHiddenDelegatedFloor (P9-pre-web-fix3 F6): past the walk's cap
+// the hidden count is a floor, said so — count_floor and "at least".
+func TestHiddenDelegatedFloor(t *testing.T) {
+	h := hiddenDelegatedHole(7, true)
+	if !h.CountFloor || h.Count != 7 || !strings.Contains(h.Reason, "at least 7") {
+		t.Errorf("floor hole = %+v, want count_floor, 7, at least", h)
+	}
+	if h := hiddenDelegatedHole(1, false); h.CountFloor || !strings.HasPrefix(h.Reason, "1 delegated session ") {
+		t.Errorf("exact hole = %+v", h)
+	}
 }
 
 // failDeepSessions fails every delegated read below root's own level.

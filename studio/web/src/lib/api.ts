@@ -1935,6 +1935,9 @@ export interface StepHole {
    * hiddenChildrenHole; the tree's hidden hole counts its runs too) —
    * drawn as the badge's note, holeWords' "N child runs". */
   count?: number
+  /** count is a floor (a session document's delegated_holes past the
+   * walk's cap): "≥ N delegated sessions". */
+  count_floor?: boolean
 }
 
 /** GET /api/runs/{id}/steps/{n}. request is attempt 1's RequestRow

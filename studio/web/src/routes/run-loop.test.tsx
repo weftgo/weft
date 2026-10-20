@@ -210,6 +210,35 @@ afterEach(() => {
 const node = (id: string) =>
   document.querySelector<SVGGElement>(`[data-loop-node="${CSS.escape(id)}"]`)!
 const loopOf = () => document.querySelector<HTMLElement>("[data-loop-graph]")
+// P9-pre-web-fix3 F2: every graph node's name holds its visible text,
+// in order — no <title> (or other text) inside a role=button but the
+// drawn labels, the hint its aria-description, its <title> on the
+// wrapper around it (the pointer's tooltip).
+const namesHoldTheirText = () => {
+  const all = document.querySelectorAll<SVGGElement>(
+    "[data-loop-node], [data-call-graph] [data-node]"
+  )
+  expect(all.length).toBeGreaterThan(0)
+  for (const n of all) {
+    expect(n.querySelector("title")).toBeNull()
+    const seen: string[] = []
+    const walk = (e: Node) => {
+      for (const c of e.childNodes) {
+        if (c.nodeType === Node.TEXT_NODE) seen.push(c.textContent ?? "")
+        else if (c instanceof Element && !c.hasAttribute("aria-hidden")) walk(c)
+      }
+    }
+    walk(n)
+    const text = seen.join("").replace(/\s+/g, " ").trim()
+    const label = n.getAttribute("aria-label")!.replace(/\s+/g, " ")
+    expect(label).toContain(text)
+    const hint = n.getAttribute("aria-description")
+    if (hint)
+      expect(
+        n.parentElement!.querySelector(":scope > title")?.textContent
+      ).toBe(hint)
+  }
+}
 const nodes = () =>
   Array.from(
     document.querySelectorAll<SVGGElement>("[data-loop-node^='t:']")
@@ -607,9 +636,9 @@ describe("U34-fix", () => {
   })
 
   it("without spans the agents level is off, with a not_recorded badge; ?level=agents reads the loop", async () => {
-    serve(DIRECTOR, { spans: false })
-    renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
-    await waitFor(() => expect(nodes()).toEqual([["t:ops_manager", "1", "0"]]))
+    serve(FLAKY, { spans: false })
+    renderApp(`/runs/${FLAKY.id}?scale=graph&level=agents`)
+    await waitFor(() => expect(nodes()).toHaveLength(4))
     expect(document.querySelector("[data-call-graph]")).toBeNull()
     expect(document.body.textContent).not.toContain("one agent, no subagents")
     const agents = Array.from(
@@ -621,6 +650,32 @@ describe("U34-fix", () => {
         document.querySelector("[data-level-hole] [data-hole='not_recorded']")
       ).not.toBeNull()
     )
+  })
+
+  it("without spans, a run with subagent rows draws its agents level from them, the badge saying what that leaves out (P9-pre-web-fix3)", async () => {
+    serve(DIRECTOR, { spans: false })
+    renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
+    await waitFor(() =>
+      expect(
+        [...document.querySelectorAll("[data-call-graph] [data-node]")].map(
+          (n) => n.getAttribute("data-node")
+        )
+      ).toEqual(["a:director", "a:ops-manager"])
+    )
+    expect(
+      document.querySelector("[data-edge='a:director>a:ops-manager']")
+    ).not.toBeNull()
+    const agents = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("[data-level] button")
+    ).find((b) => b.textContent === "agents")!
+    expect(agents.disabled).toBe(false)
+    expect(
+      document.querySelector("[data-level-hole] [data-hole='not_recorded']")
+        ?.textContent
+    ).toContain("drawn from the run rows")
+    expect(
+      document.querySelector("[data-level-hole]")?.textContent
+    ).not.toContain("recorded none")
   })
 
   it("the end node, an edge and the never-called insight select", async () => {
@@ -712,7 +767,7 @@ describe("U34-fix", () => {
       "[data-loop-node='t:ops_manager'] [data-loop-cost]"
     )!
     expect(known.getAttribute("data-cost-known")).toBe("true")
-    expect(known.textContent).toContain("$0.0125")
+    expect(known.getAttribute("data-cost-title")).toContain("$0.0125")
     // Into ops-manager's loop: its specialist is unpriced.
     fireEvent.click(
       document.querySelector(`[data-loop-expand="${CSS.escape(ops)}"]`)!
@@ -721,18 +776,22 @@ describe("U34-fix", () => {
     // read that carries its children's rows, U34-fix3)…
     await waitFor(() =>
       expect(
-        document.querySelector(
-          "[data-loop-node='t:inventory_specialist'] [data-loop-cost] title"
-        )?.textContent
+        document
+          .querySelector(
+            "[data-loop-node='t:inventory_specialist'] [data-loop-cost]"
+          )
+          ?.getAttribute("data-cost-title")
       ).toBe(COST_NOT_READ_YET)
     )
     // …until it answers and names its row.
     release()
     await waitFor(() =>
       expect(
-        document.querySelector(
-          "[data-loop-node='t:inventory_specialist'] [data-loop-cost] title"
-        )?.textContent
+        document
+          .querySelector(
+            "[data-loop-node='t:inventory_specialist'] [data-loop-cost]"
+          )
+          ?.getAttribute("data-cost-title")
       ).toBe("no price for acme/m1")
     )
     const unknown = document.querySelector(
@@ -740,9 +799,7 @@ describe("U34-fix", () => {
     )!
     expect(unknown.getAttribute("data-cost-known")).toBe("false")
     expect(unknown.textContent).toContain("—")
-    expect(unknown.querySelector("title")!.textContent).toBe(
-      "no price for acme/m1"
-    )
+    expect(unknown.getAttribute("data-cost-title")).toBe("no price for acme/m1")
     // The agents level: each agent's own.
     void router.navigate({
       to: "/runs/$id",
@@ -753,8 +810,9 @@ describe("U34-fix", () => {
       expect(document.querySelectorAll("[data-graph-cost]").length).toBe(3)
     )
     expect(
-      document.querySelector("[data-node='a:ops-manager'] [data-graph-cost]")!
-        .textContent
+      document
+        .querySelector("[data-node='a:ops-manager'] [data-graph-cost]")!
+        .getAttribute("data-cost-title")
     ).toContain("$0.0125")
     // The grandchild's row is not read with nothing selected under it,
     // and no read in flight would carry it: "—" not read on this page
@@ -763,7 +821,7 @@ describe("U34-fix", () => {
       "[data-node='a:inventory-specialist'] [data-graph-cost]"
     )!
     expect(unread.textContent).toContain("—")
-    expect(unread.querySelector("title")!.textContent).toBe(COST_NOT_READ_HERE)
+    expect(unread.getAttribute("data-cost-title")).toBe(COST_NOT_READ_HERE)
   })
 
   it("the agents level: each agent's steps and status word in its role — a failed and a parked subagent read so (U34-fix4, UX-S3-14)", async () => {
@@ -827,16 +885,20 @@ describe("U34-fix", () => {
     // would carry is the failure's words, and stays so.
     await waitFor(() =>
       expect(
-        document.querySelector(
-          "[data-loop-node='t:inventory_specialist'] [data-loop-cost] title"
-        )?.textContent
+        document
+          .querySelector(
+            "[data-loop-node='t:inventory_specialist'] [data-loop-cost]"
+          )
+          ?.getAttribute("data-cost-title")
       ).toBe(COST_READ_FAILED)
     )
     await new Promise((r) => setTimeout(r, 50))
     expect(
-      document.querySelector(
-        "[data-loop-node='t:inventory_specialist'] [data-loop-cost] title"
-      )?.textContent
+      document
+        .querySelector(
+          "[data-loop-node='t:inventory_specialist'] [data-loop-cost]"
+        )
+        ?.getAttribute("data-cost-title")
     ).toBe(COST_READ_FAILED)
     expect(COST_READ_FAILED).not.toContain("yet")
   })
@@ -995,8 +1057,8 @@ describe("U34-fix2", () => {
 
   it("the agents level: 'recorded none' on a successful empty read", async () => {
     // A trace id, and its spans read back empty: the read succeeded.
-    serve(DIRECTOR, { spans: false, trace: true })
-    renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
+    serve(FLAKY, { spans: false, trace: true })
+    renderApp(`/runs/${FLAKY.id}?scale=graph&level=agents`)
     await waitFor(() =>
       expect(
         document.querySelector("[data-level-hole]")?.textContent
@@ -1011,16 +1073,16 @@ describe("U34-fix2", () => {
     // window is not "recorded none" (U34-fix3).
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
-      serve(DIRECTOR, {
+      serve(FLAKY, {
         spans: false,
         trace: true,
         rows: {
-          [DIRECTOR.id]: {
+          [FLAKY.id]: {
             finished: new Date(Date.now() - 1000).toISOString(),
           },
         },
       })
-      renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
+      renderApp(`/runs/${FLAKY.id}?scale=graph&level=agents`)
       await waitFor(() => expect(nodes().length).toBeGreaterThan(0))
       // Spans read (empty) at least once, still inside the window.
       await vi.advanceTimersByTimeAsync(5000)
@@ -1068,7 +1130,7 @@ describe("U34-fix2", () => {
     )!
     expect(cost.getAttribute("data-cost-known")).toBe("false")
     expect(cost.textContent).toContain("—")
-    expect(cost.querySelector("title")!.textContent).toBe(
+    expect(cost.getAttribute("data-cost-title")).toBe(
       "a run's cost is not read yet"
     )
     expect(node("t:ops_manager").getAttribute("aria-label")).toContain("—")
@@ -1090,26 +1152,7 @@ describe("U34-fix2", () => {
     renderApp(`/runs/${DESK_PARKED.id}?scale=graph`)
     await waitFor(() => expect(nodes()).toHaveLength(2))
     await check()
-    // Each tool node's name starts with its visible words, in order.
-    for (const n of document.querySelectorAll<SVGGElement>(
-      "[data-loop-node^='t:']"
-    )) {
-      const seen = Array.from(n.querySelectorAll("text"))
-        .map((t) =>
-          Array.from(t.childNodes)
-            .filter(
-              (c) =>
-                c.nodeType === Node.TEXT_NODE ||
-                (c instanceof Element && !c.hasAttribute("aria-hidden"))
-            )
-            .map((c) => (c.nodeName === "title" ? "" : c.textContent))
-            .join("")
-        )
-        .join("")
-        .replace(/\s+/g, " ")
-        .trim()
-      expect(n.getAttribute("aria-label")!.replace(/\s+/g, " ")).toBe(seen)
-    }
+    namesHoldTheirText()
     cleanup()
     serve(DIRECTOR, { caps: ["pricing"] })
     renderApp(`/runs/${DIRECTOR.id}?scale=graph`)
@@ -1122,6 +1165,32 @@ describe("U34-fix2", () => {
       expect(loopOf()?.getAttribute("data-loop-graph")).toBe(ops)
     )
     await check()
+    namesHoldTheirText()
+    // The agents level's call graph: its cost badge's reason too.
+    cleanup()
+    serve(DIRECTOR, { caps: ["pricing"] })
+    renderApp(`/runs/${DIRECTOR.id}?scale=graph&level=agents`)
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-graph-cost]").length).toBe(3)
+    )
+    const res = await axe.run(
+      document.querySelector("[data-call-graph]")!.parentElement!,
+      { rules: { "label-content-name-mismatch": { enabled: true } } }
+    )
+    expect(res.violations.map((v) => v.id)).toEqual([])
+    namesHoldTheirText()
+    const n = document.querySelector<SVGGElement>(
+      "[data-node='a:ops-manager']"
+    )!
+    expect(n.parentElement!.querySelector(":scope > title")?.textContent).toBe(
+      n.getAttribute("aria-description")
+    )
+    fireEvent.focus(n)
+    expect(document.querySelector("[data-graph-hint]")?.textContent).toBe(
+      n.getAttribute("aria-description")
+    )
+    fireEvent.blur(n)
+    expect(document.querySelector("[data-graph-hint]")).toBeNull()
   })
 
   it("a text-delta batch on a live run does not rebuild the loop's rows; a tool call does", async () => {

@@ -157,6 +157,41 @@ describe("decisionRows", () => {
     )
     expect(rowOutcome(r).word).toBe("approved · always")
   })
+
+  it("a user's decision no stored resume names says its decider is not recorded yet; a grant's and an expiry's need none (P9-pre-web-fix3 F1)", () => {
+    const rows = decisionRows(
+      [
+        mark("approval.decision", 1, {
+          call_id: "u1",
+          outcome: "approve",
+          via: "user",
+        }),
+        mark("approval.decision", 1, {
+          call_id: "g1",
+          outcome: "approve",
+          via: "grant",
+        }),
+        mark("approval.decision", 1, {
+          call_id: "p1",
+          outcome: "deny",
+          via: "expiry",
+        }),
+        mark(
+          "approval.decision",
+          1,
+          { call_id: "w1", outcome: "approve", via: "user" },
+          { who: "bob" }
+        ),
+      ],
+      [turn(1, { pending: 1 })]
+    )
+    expect(rows.map((r) => [r.call, !!r.whoUnrecorded])).toEqual([
+      ["u1", true],
+      ["g1", false],
+      ["p1", false],
+      ["w1", false],
+    ])
+  })
 })
 
 describe("grantRows", () => {

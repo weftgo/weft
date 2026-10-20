@@ -74,7 +74,7 @@ export function JsonNode({
     ) : null
   if (!container) {
     return (
-      <div className="pl-4 leading-relaxed">
+      <div className="pl-6 leading-relaxed">
         {key}
         <Primitive value={value} />
         {last ? "" : <span className="text-code-mut">,</span>}
@@ -86,11 +86,11 @@ export function JsonNode({
     : Object.entries(value)
   const [o, c] = Array.isArray(value) ? ["[", "]"] : ["{", "}"]
   return (
-    <div className={depth > 0 ? "pl-4" : ""}>
+    <div className={depth > 0 ? "pl-6" : ""}>
       <div className="group/node flex items-center gap-1 leading-relaxed">
         <button
           type="button"
-          className="-ml-4 flex w-4 items-center justify-center text-code-mut hover:text-code-ink"
+          className="-ml-6 flex h-6 w-6 shrink-0 items-center justify-center text-code-mut hover:text-code-ink"
           aria-label={open ? "collapse" : "expand"}
           aria-expanded={open}
           onClick={() => setOpen((x) => !x)}
@@ -145,7 +145,8 @@ export function JsonNode({
 /** The code window's surface, for a tree drawn outside one (U34-fix3):
  * the tree's colours are the code window's (--code-*, made for its
  * dark --code-bg in both themes) and read 1.2:1 on paper. */
-export const CODE_SURFACE = "rounded-md bg-code-bg py-2 pr-3"
+export const CODE_SURFACE =
+  "max-w-full overflow-x-auto rounded-md bg-code-bg py-2 pr-3"
 
 export function JsonTree({
   value,
@@ -157,7 +158,9 @@ export function JsonTree({
   className?: string
 }) {
   return (
-    <div className={`pl-4 font-mono text-[12.5px] ${className}`}>
+    <div
+      className={`pl-6 font-mono text-[12.5px] [overflow-wrap:anywhere] ${className}`}
+    >
       <JsonNode value={value} depth={0} openDepth={openDepth} path="" last />
     </div>
   )

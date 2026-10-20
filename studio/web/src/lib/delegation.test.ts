@@ -185,4 +185,15 @@ describe("linkedHoles / delegatedHoles (U14-fix)", () => {
     ).toEqual(["truncated", "not_recorded"])
     expect(delegatedHoles({})).toEqual([])
   })
+  it("count the hidden sessions as sessions, a floor as ≥ (P9-pre-web-fix3 F6)", () => {
+    const h = (count_floor?: boolean) =>
+      delegatedHoles({
+        delegated_holes: [
+          { hole: "hidden", reason: "r", count: 2, count_floor },
+        ],
+      })[0]
+    expect(h().note).toBe("2 delegated sessions")
+    expect(h(true).note).toBe("≥ 2 delegated sessions")
+    expect(h(true)).not.toHaveProperty("count_floor")
+  })
 })

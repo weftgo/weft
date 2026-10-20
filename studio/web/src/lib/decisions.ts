@@ -81,6 +81,37 @@ export const WHO_HOLE = {
   fix: "",
 }
 
+/** Who decided, on a state-log decision mark nothing names a decider
+ * for (hole not_recorded): no stored turn resumed the run yet — its
+ * actor names the decider, never the parked run's own — and the record
+ * carries no who or key. */
+export const WHO_UNRECORDED = {
+  reason:
+    "who decided is not recorded yet: no stored turn resumed this run, and the decision names no who or key",
+  fix: "resume the run with weft.approval.actor set, or record with content on",
+}
+
+/** The hole a decision mark's who reads as when nothing names its
+ * decider: hidden to a reader that may not read content, else
+ * not_recorded (WHO_UNRECORDED) while no resume's actor is stored;
+ * undefined when one is named (a resume's several deciders, actor_of
+ * "resume", name the resume's, not a hole), when no person decided (a
+ * grant, an approver, an expiry, an interrupt: via says what), or when the
+ * mark is stripped (its record badge says so). */
+export function markWhoHole(
+  c: DecidedCall,
+  d: DecisionDoc,
+  stripped = false
+): "hidden" | "not_recorded" | undefined {
+  if (decider(c, d)) return undefined
+  if (c.who_hidden) return "hidden"
+  if (stripped || d.actor || NO_PERSON.has(c.via ?? "")) return undefined
+  return "not_recorded"
+}
+
+/** The ways a call is decided with no person to name (thread's via). */
+const NO_PERSON = new Set(["grant", "approver", "expiry", "interrupt"])
+
 /** A block whose calls no record names (hole not_recorded): no
  * weft.resume.calls, no pre-step result, no decided span. */
 export const CALLS_HOLE = {

@@ -1690,11 +1690,14 @@ if any, is not linked yet". A decided park's detail says "1 call decided
 · resumed in t2" only on the stored `resumed_by`; a park found by the
 next turn alone says "1 call · next turn t2 (decided or dropped)" — after
 a Branch, a Rollback or an undecided Send that turn is no resume. The
-sessions list's status is the newest turn's outcome (`obsdb.OutcomeOf`:
-`cancelled`, `ended`, `parked` or `resumed` beside the four — the word
-`?status=` filters by, so a row and the filter agree; it was the stored
-word before 0.18.0), with its turn
-facts beside it since U16 (record contract §6): `pending` when the
+sessions list's status is the newest turn's outcome (`obsdb.OutcomeOf`):
+for the four run words (`succeeded`, `failed`, `running`,
+`interrupted`) it agrees with `?status=`; the other four (`cancelled`,
+`ended`, `parked`, `resumed`) are not filterable — `?status=` with one
+is a 400, `awaiting=1` is the open park. Before 0.18.0 it read `failed`
+for a cancelled or busy-ended turn and `succeeded` for a parked one:
+read the outcome word instead. Its turn
+facts sit beside it since U16 (record contract §6): `pending` when the
 newest turn is an open park ("⏸ awaiting a decision"), each turn's
 parked / resumed / cancelled / ended word in `outcomes`, `failed_turns`
 apart from `ended_turns`. The runs list's status filter has `parked`
@@ -1821,7 +1824,11 @@ server (a tool whose request-catalog source starts `mcp`, the run's own
 calls; a child run's MCP calls are said not shown, its catalog not read
 here), each edge its call count and slowest call (the slowest, not a
 percentile; an agent node's runs' own cost), a self-call a loop over
-its node; off on a run without spans — a `not recorded` badge only
+its node; a run without spans that has subagent rows draws it from
+the run rows this page read (`rowsCallGraph`: agents, edges, statuses
+and steps; no MCP server, no tokens, a subagent's own subagents once
+its node is selected — the `not recorded` badge `ROWS_LEVEL` says so);
+off on any other run without spans — a `not recorded` badge only
 when the spans read back empty once the 30 s late-spans poll after the
 end is over (or the run has no trace), the read's error in words when
 it failed, nothing while it reads or polls; a node

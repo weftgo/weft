@@ -242,6 +242,10 @@ type stepHole struct {
 	// Count is the runs a hidden hole stands for (hiddenChildrenHole):
 	// child runs a panel token's scope left out. Absent elsewhere.
 	Count int `json:"count,omitempty"`
+	// CountFloor says Count is at least the sessions it stands for (a
+	// session document's delegated_holes past the walk's cap). Absent
+	// elsewhere.
+	CountFloor bool `json:"count_floor,omitempty"`
 }
 
 // truncatedMarker is the marker core's capResult ends a cut tool

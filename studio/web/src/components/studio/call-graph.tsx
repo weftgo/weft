@@ -30,6 +30,7 @@ import {
   nodeStatusLine,
 } from "@/lib/graph"
 import { ROLE_SVG, studioVar } from "@/lib/status-class"
+import { GraphHint, GraphTip } from "@/components/studio/graph-tip"
 import type { StatusKey } from "@/lib/status"
 
 /** The statuses a node is coloured by (its stroke and name): the ones
@@ -93,6 +94,8 @@ export function CallGraphView({
     .sort(([a], [b]) => a - b)
     .flatMap(([, list]) => list.map((n) => n.id))
   const [focus, setFocus] = useState<string>()
+  // The focused node's hint, shown under the graph (GraphHint).
+  const [tip, setTip] = useState<string>()
   const stop =
     focus && order.includes(focus)
       ? focus
@@ -241,110 +244,121 @@ export function CallGraphView({
               ROLE_SVG[st ? studioVar(st.status.role) : "muted-foreground"]
             const loud = st !== undefined && LOUD.has(st.status.key)
             return (
-              <g
-                key={n.id}
-                transform={`translate(${p.x},${p.y})`}
-                ref={(el: SVGGElement | null) => {
-                  if (el) refs.current.set(n.id, el)
-                  else refs.current.delete(n.id)
-                }}
-                role="button"
-                tabIndex={n.id === stop ? 0 : -1}
-                aria-pressed={on}
-                // The name starts with the visible words, in their order
-                // (axe label-content-name-mismatch): the glyph is aria-hidden.
-                aria-label={`${n.label} ${nodeLine(n)}${line ? ` ${line.word}${line.rest}` : ""}${cost ? ` ${cost.text}` : ""}`}
-                data-node={n.id}
-                data-node-status={st?.status.key}
-                className="group cursor-pointer outline-none"
-                onClick={() => {
-                  setFocus(n.id)
-                  onSelect(n)
-                }}
-                onFocus={() => setFocus(n.id)}
-                onKeyDown={onKey(n)}
-              >
-                {/* Selected: the thread's 2px frame on the page's fill
+              <GraphTip key={n.id} hint={cost?.title}>
+                <g
+                  transform={`translate(${p.x},${p.y})`}
+                  ref={(el: SVGGElement | null) => {
+                    if (el) refs.current.set(n.id, el)
+                    else refs.current.delete(n.id)
+                  }}
+                  role="button"
+                  tabIndex={n.id === stop ? 0 : -1}
+                  aria-pressed={on}
+                  // The name starts with the visible words, in their order
+                  // (axe label-content-name-mismatch): the glyph is aria-hidden.
+                  aria-label={`${n.label} ${nodeLine(n)}${line ? ` ${line.word}${line.rest}` : ""}${cost ? ` ${cost.text}` : ""}`}
+                  // The cost's reason: no <title> inside the button (axe
+                  // counts it as visible text) — GraphTip's wraps it.
+                  aria-description={cost?.title}
+                  data-node={n.id}
+                  data-node-status={st?.status.key}
+                  className="group cursor-pointer outline-none"
+                  onClick={() => {
+                    setFocus(n.id)
+                    onSelect(n)
+                  }}
+                  onFocus={() => {
+                    setFocus(n.id)
+                    setTip(cost?.title)
+                  }}
+                  onBlur={() => setTip(undefined)}
+                  onKeyDown={onKey(n)}
+                >
+                  {/* Selected: the thread's 2px frame on the page's fill
                   (a status word in its ink clears 4.5:1 on paper; the
                   accent wash took interrupted's mustard to 4.19). */}
-                <rect
-                  width={W}
-                  height={H}
-                  rx={6}
-                  className={`fill-background ${
-                    on
-                      ? "stroke-thread"
-                      : loud
-                        ? paint.stroke
-                        : n.fails
-                          ? "stroke-ev-error"
-                          : "stroke-border"
-                  }`}
-                  strokeWidth={on || loud ? 2 : 1}
-                  data-node-frame
-                />
-                {/* The keyboard focus: a ring outside the node (its own
+                  <rect
+                    width={W}
+                    height={H}
+                    rx={6}
+                    className={`fill-background ${
+                      on
+                        ? "stroke-thread"
+                        : loud
+                          ? paint.stroke
+                          : n.fails
+                            ? "stroke-ev-error"
+                            : "stroke-border"
+                    }`}
+                    strokeWidth={on || loud ? 2 : 1}
+                    data-node-frame
+                  />
+                  {/* The keyboard focus: a ring outside the node (its own
                   stroke says selected or failed). */}
-                <rect
-                  x={-3}
-                  y={-3}
-                  width={W + 6}
-                  height={H + 6}
-                  rx={8}
-                  className="fill-none stroke-ring opacity-0 group-focus-visible:opacity-100"
-                  strokeWidth={2}
-                  aria-hidden
-                  data-focus-ring
-                />
-                <text
-                  x={10}
-                  y={18}
-                  className={`text-[11px] font-medium ${
-                    loud
-                      ? paint.fill
-                      : n.fails
-                        ? "fill-ev-error"
-                        : "fill-foreground"
-                  }`}
-                >
-                  <tspan aria-hidden>{n.kind === "agent" ? "▣ " : "⧉ "}</tspan>
-                  {n.label}{" "}
-                </text>
-                <text
-                  x={10}
-                  y={34}
-                  className="fill-muted-foreground text-[10px]"
-                >
-                  {nodeLine(n)}{" "}
-                </text>
-                {line ? (
-                  <text x={10} y={50} className="text-[10px]" data-node-line>
-                    <tspan className={paint.fill} data-node-word>
-                      {line.word}
-                    </tspan>
-                    <tspan className="fill-muted-foreground">
-                      {line.rest}{" "}
-                    </tspan>
-                  </text>
-                ) : null}
-                {cost ? (
+                  <rect
+                    x={-3}
+                    y={-3}
+                    width={W + 6}
+                    height={H + 6}
+                    rx={8}
+                    className="fill-none stroke-ring opacity-0 group-focus-visible:opacity-100"
+                    strokeWidth={2}
+                    aria-hidden
+                    data-focus-ring
+                  />
                   <text
-                    x={W - 8}
+                    x={10}
                     y={18}
-                    textAnchor="end"
-                    className="fill-muted-foreground text-[10px]"
-                    data-cost-known={cost.known ? "true" : "false"}
-                    data-graph-cost
+                    className={`text-[11px] font-medium ${
+                      loud
+                        ? paint.fill
+                        : n.fails
+                          ? "fill-ev-error"
+                          : "fill-foreground"
+                    }`}
                   >
-                    <title>{cost.title}</title>
-                    {cost.text}
+                    <tspan aria-hidden>
+                      {n.kind === "agent" ? "▣ " : "⧉ "}
+                    </tspan>
+                    {n.label}{" "}
                   </text>
-                ) : null}
-              </g>
+                  <text
+                    x={10}
+                    y={34}
+                    className="fill-muted-foreground text-[10px]"
+                  >
+                    {nodeLine(n)}{" "}
+                  </text>
+                  {line ? (
+                    <text x={10} y={50} className="text-[10px]" data-node-line>
+                      <tspan className={paint.fill} data-node-word>
+                        {line.word}
+                      </tspan>
+                      <tspan className="fill-muted-foreground">
+                        {line.rest}{" "}
+                      </tspan>
+                    </text>
+                  ) : null}
+                  {cost ? (
+                    <text
+                      x={W - 8}
+                      y={18}
+                      textAnchor="end"
+                      className="fill-muted-foreground text-[10px]"
+                      data-cost-known={cost.known ? "true" : "false"}
+                      data-cost-title={cost.title}
+                      data-graph-cost
+                    >
+                      {cost.text}
+                    </text>
+                  ) : null}
+                </g>
+              </GraphTip>
             )
           })}
         </svg>
       </div>
+      <GraphHint hint={tip} />
       {graph.edges.length === 0 ? (
         <p className="px-1 pt-1 text-muted-foreground">{GRAPH_ALONE}</p>
       ) : null}

@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"slices"
 	"strconv"
-
 	"strings"
 	"time"
 
@@ -2220,8 +2220,11 @@ func (s *Server) delegatedSessions(ctx context.Context, id, pub string, doc *ses
 	var parts []runCost
 	var why string
 	walked := 0
-	hidden := 0      // the sessions a panel token's scope left out, every level's
-	allExact := true // every visited session's own cost reported its cache split exact
+	hidden := 0              // the sessions a panel token's scope left out, every level's
+	var hiddenFront []string // the last level's hidden sessions: their own delegated ones are hidden too
+	hiddenBudget := delegatedTreeCap
+	hiddenFloor := false // hiddenBudget ran out: hidden is a floor
+	allExact := true     // every visited session's own cost reported its cache split exact
 	// price costs one level's sessions in one batched read and folds
 	// them into the figures, in the order the level listed them.
 	price := func(depth int, rows []obsdb.SessionRow) {
@@ -2266,8 +2269,11 @@ walk:
 				scopedTotal = page.Total
 				// The level's sessions the scope left out — a visible
 				// child's own delegated session under another public id
-				// as much as a direct one.
-				hidden += s.hiddenDelegated(ctx, id, level, pub, scopedTotal)
+				// as much as a direct one, and every session under a
+				// hidden one (P9-pre-web-fix3 F6).
+				n, front, floor := s.hiddenDelegated(ctx, id, level, hiddenFront, pub, scopedTotal, &hiddenBudget)
+				hidden += n
+				hiddenFront, hiddenFloor = front, hiddenFloor || floor
 			}
 			if depth == 0 {
 				doc.DelegatedMore = page.Total > delegatedCap
@@ -2294,8 +2300,16 @@ walk:
 		price(depth, rows)
 		level = next
 	}
+	// Below the last visible level, the hidden sessions' own delegated
+	// sessions: counted, never read past their ids. A walk that stopped
+	// early (a failed read, the cap) leaves level set: its reason says so.
+	for len(level) == 0 && len(hiddenFront) > 0 {
+		n, front, floor := s.hiddenDelegated(ctx, id, nil, hiddenFront, pub, 0, &hiddenBudget)
+		hidden += n
+		hiddenFront, hiddenFloor = front, hiddenFloor || floor
+	}
 	if hidden > 0 {
-		h := hiddenDelegatedHole(hidden)
+		h := hiddenDelegatedHole(hidden, hiddenFloor)
 		doc.DelegatedHoles = append(doc.DelegatedHoles, h)
 		if why != "" {
 			why += "; "
@@ -2330,32 +2344,72 @@ walk:
 }
 
 // hiddenDelegated is how many sessions one level of id's delegated
-// tree (the sessions level delegated) a panel token's scope left out:
-// the level's unscoped total less its scoped one (callerLinked's rule),
-// one Limit 1 read per level. 0 for an unscoped read, or when the
-// unscoped total could not be read (logged; the walk's own error says
-// a failed scoped read).
-func (s *Server) hiddenDelegated(ctx context.Context, id string, level []string, pub string, scopedTotal int) int {
-	if pub == "" || scopedTotal < 0 {
-		return 0
+// tree a panel token's scope left out: the sessions level (the visible
+// sessions of the level above) and hiddenFront (its hidden ones)
+// delegated, less scopedTotal, level's children in the scope
+// (callerLinked's rule) — one Limit 1 read — and, when some are hidden,
+// their ids (pages of 500, the ids alone: never shown), the hidden
+// parents of the next level, at most *budget over the whole walk
+// (delegatedTreeCap): past it floor, the deeper levels not counted. A
+// session under a hidden one is hidden whatever its public id. 0 for
+// an unscoped read, or when the unscoped read failed (logged; the
+// walk's own error says a failed scoped read).
+func (s *Server) hiddenDelegated(ctx context.Context, id string, level, hiddenFront []string, pub string, scopedTotal int, budget *int) (n int, front []string, floor bool) {
+	parents := append(slices.Clone(level), hiddenFront...)
+	if pub == "" || scopedTotal < 0 || len(parents) == 0 {
+		return 0, nil, false
 	}
-	all, err := s.db.Sessions(ctx, obsdb.SessionQuery{Parents: level, Limit: 1})
+	q := obsdb.SessionQuery{Parents: parents, Limit: 1}
+	all, err := s.db.Sessions(ctx, q)
 	if err != nil {
 		slog.DebugContext(ctx, "studio: a session's unscoped delegated count could not be read", "session", id, "err", err)
-		return 0
+		return 0, nil, false
 	}
-	return max(all.Total-scopedTotal, 0)
+	n = max(all.Total-scopedTotal, 0)
+	if n == 0 {
+		return 0, nil, false
+	}
+	underHidden := make(map[string]bool, len(hiddenFront))
+	for _, h := range hiddenFront {
+		underHidden[h] = true
+	}
+	q.Limit = 500
+	for {
+		page, err := s.db.Sessions(ctx, q)
+		if err != nil {
+			slog.DebugContext(ctx, "studio: a session's hidden delegated sessions could not be read", "session", id, "err", err)
+			return n, front, true
+		}
+		for _, sr := range page.Sessions {
+			if sr.PublicID == pub && !underHidden[sr.ParentSession] {
+				continue
+			}
+			if *budget == 0 {
+				return n, front, true
+			}
+			*budget--
+			front = append(front, sr.ID)
+		}
+		if page.NextBefore == nil || len(page.Sessions) == 0 {
+			return n, front, false
+		}
+		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
+	}
 }
 
 // hiddenDelegatedHole is the hidden hole of a session document whose
 // n delegated sessions a panel token's scope left out: counted, never
-// named.
-func hiddenDelegatedHole(n int) stepHole {
+// named — at least n (count_floor) when the hidden subtrees were more
+// than the walk counts.
+func hiddenDelegatedHole(n int, floor bool) stepHole {
 	r := fmt.Sprintf("%d delegated sessions carry another public id, or none: a panel token reads its own public id's sessions, so they are left out and the delegated figures do not cover them", n)
-	if n == 1 {
+	switch {
+	case floor:
+		r = fmt.Sprintf("at least %d delegated sessions carry another public id, or none, or sit under one (past %d hidden ones the deeper levels are not counted): a panel token reads its own public id's sessions, so they are left out and the delegated figures do not cover them", n, delegatedTreeCap)
+	case n == 1:
 		r = "1 delegated session carries another public id, or none: a panel token reads its own public id's sessions, so it is left out and the delegated figures do not cover it"
 	}
-	return stepHole{Hole: string(obsdb.HoleHidden), Reason: r, Fix: "open the session with the server (dev) token", Count: n}
+	return stepHole{Hole: string(obsdb.HoleHidden), Reason: r, Fix: "open the session with the server (dev) token", Count: n, CountFloor: floor}
 }
 
 // panelPublicID is the request's panel token's public id, "" for any

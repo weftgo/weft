@@ -53,6 +53,7 @@ import { useMediaQuery } from "@/hooks/use-media-query"
 import { OPEN_RUN } from "@/lib/waterfall"
 import { fittedSize, graphScrollLabel } from "@/lib/graph"
 import { HoleBadge } from "@/components/studio/hole-badge"
+import { GraphHint, GraphTip } from "@/components/studio/graph-tip"
 
 const PAD = 12
 const PW = 110 // the prompt node
@@ -208,6 +209,8 @@ export function LoopGraphView({
   // the selected node's (a landing that arrives after the first draw
   // included), else the prompt.
   const [focus, setFocus] = useState<string>()
+  // The focused node's hint, shown under the graph (GraphHint).
+  const [tip, setTip] = useState<string>()
   const [focusAt, setFocusAt] = useState(selectedNode)
   if (focusAt !== selectedNode) {
     setFocusAt(selectedNode)
@@ -290,7 +293,12 @@ export function LoopGraphView({
       move(to)
     }
   }
-  const nodeProps = (id: string, label: string, act: () => void) => ({
+  const nodeProps = (
+    id: string,
+    label: string,
+    act: () => void,
+    hint?: string
+  ) => ({
     ref: (n: SVGGElement | null) => {
       if (n) refs.current.set(id, n)
       else refs.current.delete(id)
@@ -298,15 +306,22 @@ export function LoopGraphView({
     role: "button",
     tabIndex: id === stop ? 0 : -1,
     "aria-pressed": id === pressed,
-    // The name starts with the visible words (axe label-content-name-mismatch).
+    // The name is the visible words, in order (axe
+    // label-content-name-mismatch); the hint is no text inside the
+    // button (GraphTip's <title> wraps it): its description.
     "aria-label": label,
+    "aria-description": hint,
     "data-loop-node": id,
     className: "group cursor-pointer outline-none",
     onClick: () => {
       setFocus(id)
       act()
     },
-    onFocus: () => setFocus(id),
+    onFocus: () => {
+      setFocus(id)
+      setTip(hint)
+    },
+    onBlur: () => setTip(undefined),
     onKeyDown: onKey(id, act),
   })
   const ring = (w: number) => (
@@ -591,69 +606,75 @@ export function LoopGraphView({
             const tone = toolTone(t)
             const cost = agentCost(t, costOf)
             const label = `${t.agent ?? t.name} ${toolMarks(t)} ${toolLine(t)}${cost ? ` ${cost.text}` : ""}`
+            const hint = `${toolHint(t)}${cost ? ` · ${cost.title}` : ""}`
             return (
-              <g
-                key={t.id}
-                transform={`translate(${colX[2]},${toolY(i)})`}
-                opacity={dimmed(t.id)}
-                {...nodeProps(t.id, label, () => {
-                  const k = keyOf(t.calls[0])
-                  if (k) select(k)
-                })}
-                data-calls={t.calls.length}
-                data-marks={toolMarks(t)}
-                data-fails={t.fails}
-                data-parked={t.parked || undefined}
-                data-denied={t.denied || undefined}
-                data-agent={t.agent}
-              >
-                <title>{toolHint(t)}</title>
-                <rect
-                  width={TW}
-                  height={H}
-                  rx={t.agent ? 2 : 6}
-                  className={`${on ? "fill-accent" : "fill-background"} ${
-                    on ? "stroke-thread" : STROKE[tone]
-                  } ${t.running ? "motion-safe:animate-pulse" : ""}`}
-                  strokeWidth={on ? 2 : t.agent ? 1.5 : 1}
-                  strokeDasharray={t.parked || t.denied ? "4 3" : undefined}
-                />
-                {ring(TW)}
-                <text
-                  x={10}
-                  y={18}
-                  className={`text-[11px] font-medium ${TEXT[tone]}`}
+              <GraphTip key={t.id} hint={hint}>
+                <g
+                  transform={`translate(${colX[2]},${toolY(i)})`}
+                  opacity={dimmed(t.id)}
+                  {...nodeProps(
+                    t.id,
+                    label,
+                    () => {
+                      const k = keyOf(t.calls[0])
+                      if (k) select(k)
+                    },
+                    hint
+                  )}
+                  data-calls={t.calls.length}
+                  data-marks={toolMarks(t)}
+                  data-fails={t.fails}
+                  data-parked={t.parked || undefined}
+                  data-denied={t.denied || undefined}
+                  data-agent={t.agent}
                 >
-                  <tspan aria-hidden>{t.agent ? "▣ " : "⚙ "}</tspan>
-                  {t.agent ?? t.name}{" "}
-                  <tspan className="fill-muted-foreground">
-                    {toolMarks(t)}
-                  </tspan>{" "}
-                </text>
-                {/* Each line ends in a space: the accessible name is the
+                  <rect
+                    width={TW}
+                    height={H}
+                    rx={t.agent ? 2 : 6}
+                    className={`${on ? "fill-accent" : "fill-background"} ${
+                      on ? "stroke-thread" : STROKE[tone]
+                    } ${t.running ? "motion-safe:animate-pulse" : ""}`}
+                    strokeWidth={on ? 2 : t.agent ? 1.5 : 1}
+                    strokeDasharray={t.parked || t.denied ? "4 3" : undefined}
+                  />
+                  {ring(TW)}
+                  <text
+                    x={10}
+                    y={18}
+                    className={`text-[11px] font-medium ${TEXT[tone]}`}
+                  >
+                    <tspan aria-hidden>{t.agent ? "▣ " : "⚙ "}</tspan>
+                    {t.agent ?? t.name}{" "}
+                    <tspan className="fill-muted-foreground">
+                      {toolMarks(t)}
+                    </tspan>{" "}
+                  </text>
+                  {/* Each line ends in a space: the accessible name is the
                     visible words in their order (label above), and a
                     screen reader's text never runs two lines together. */}
-                <text
-                  x={10}
-                  y={34}
-                  className="fill-muted-foreground text-[10px]"
-                >
-                  {toolLine(t)}{" "}
-                </text>
-                {cost ? (
                   <text
-                    x={TW - 8}
-                    y={18}
-                    textAnchor="end"
+                    x={10}
+                    y={34}
                     className="fill-muted-foreground text-[10px]"
-                    data-cost-known={cost.known ? "true" : "false"}
-                    data-loop-cost
                   >
-                    <title>{cost.title}</title>
-                    {cost.text}
+                    {toolLine(t)}{" "}
                   </text>
-                ) : null}
-              </g>
+                  {cost ? (
+                    <text
+                      x={TW - 8}
+                      y={18}
+                      textAnchor="end"
+                      className="fill-muted-foreground text-[10px]"
+                      data-cost-known={cost.known ? "true" : "false"}
+                      data-cost-title={cost.title}
+                      data-loop-cost
+                    >
+                      {cost.text}
+                    </text>
+                  ) : null}
+                </g>
+              </GraphTip>
             )
           })}
           {/* A subagent's own loop: expand in place (→ on the node), or
@@ -710,69 +731,79 @@ export function LoopGraphView({
             </g>
           ) : null}
           {offered.map((n, i) => (
-            <g
-              key={`o:${n}`}
-              transform={`translate(${colX[2]},${toolY(shown.length + (hidden ? 1 : 0) + i)})`}
-              {...nodeProps(`o:${n}`, `${n} ${NEVER_CALLED}`, () =>
-                setPicked(`o:${n}`)
-              )}
-              aria-disabled
-              data-never-called={n}
-              opacity={picked === `o:${n}` ? 1 : 0.6}
-            >
-              <title>{NEVER_HINT}</title>
-              <rect
-                width={TW}
-                height={H}
-                rx={6}
-                className={
-                  picked === `o:${n}`
-                    ? "fill-accent stroke-thread"
-                    : "fill-background stroke-border"
-                }
-                strokeDasharray="4 3"
-              />
-              {ring(TW)}
-              <text x={10} y={27} className="fill-muted-foreground text-[11px]">
-                <tspan aria-hidden>⚙ </tspan>
-                {n} {NEVER_CALLED}
-              </text>
-            </g>
+            <GraphTip key={`o:${n}`} hint={NEVER_HINT}>
+              <g
+                transform={`translate(${colX[2]},${toolY(shown.length + (hidden ? 1 : 0) + i)})`}
+                {...nodeProps(
+                  `o:${n}`,
+                  `${n} ${NEVER_CALLED}`,
+                  () => setPicked(`o:${n}`),
+                  NEVER_HINT
+                )}
+                aria-disabled
+                data-never-called={n}
+                opacity={picked === `o:${n}` ? 1 : 0.6}
+              >
+                <rect
+                  width={TW}
+                  height={H}
+                  rx={6}
+                  className={
+                    picked === `o:${n}`
+                      ? "fill-accent stroke-thread"
+                      : "fill-background stroke-border"
+                  }
+                  strokeDasharray="4 3"
+                />
+                {ring(TW)}
+                <text
+                  x={10}
+                  y={27}
+                  className="fill-muted-foreground text-[11px]"
+                >
+                  <tspan aria-hidden>⚙ </tspan>
+                  {n} {NEVER_CALLED}
+                </text>
+              </g>
+            </GraphTip>
           ))}
           {/* The end */}
-          <g
-            transform={`translate(${colX[1] - 25},${endY})`}
-            {...nodeProps(
-              END,
-              `${graph.end.word} ${endTokens(graph.end)}`.trim(),
-              () => (lastKey ? select(lastKey) : undefined)
-            )}
-            data-loop-end={graph.end.by ?? ""}
-            data-word={graph.end.word}
-          >
-            <title>{graph.end.hint}</title>
-            <rect
-              width={MW + 50}
-              height={H}
-              rx={6}
-              className={`${pressed === END ? "fill-accent" : "fill-background"} ${STROKE[graph.end.tone]} ${graph.end.tone === "running" ? "motion-safe:animate-pulse" : ""}`}
-              strokeWidth={pressed === END ? 2 : 1.5}
-            />
-            {ring(MW + 50)}
-            <text
-              x={10}
-              y={18}
-              className={`text-[11px] ${TEXT[graph.end.tone]}`}
+          <GraphTip hint={graph.end.hint}>
+            <g
+              transform={`translate(${colX[1] - 25},${endY})`}
+              {...nodeProps(
+                END,
+                `${graph.end.word} ${endTokens(graph.end)}`.trim(),
+                () => (lastKey ? select(lastKey) : undefined),
+                graph.end.hint
+              )}
+              data-loop-end={graph.end.by ?? ""}
+              data-word={graph.end.word}
             >
-              <tspan aria-hidden>■ </tspan>
-              {graph.end.word}{" "}
-            </text>
-            <text x={10} y={34} className="fill-muted-foreground text-[10px]">
-              {endTokens(graph.end)}
-            </text>
-          </g>
+              <rect
+                width={MW + 50}
+                height={H}
+                rx={6}
+                className={`${pressed === END ? "fill-accent" : "fill-background"} ${STROKE[graph.end.tone]} ${graph.end.tone === "running" ? "motion-safe:animate-pulse" : ""}`}
+                strokeWidth={pressed === END ? 2 : 1.5}
+              />
+              {ring(MW + 50)}
+              <text
+                x={10}
+                y={18}
+                className={`text-[11px] ${TEXT[graph.end.tone]}`}
+              >
+                <tspan aria-hidden>■ </tspan>
+                {graph.end.word}{" "}
+              </text>
+              <text x={10} y={34} className="fill-muted-foreground text-[10px]">
+                {endTokens(graph.end)}
+              </text>
+            </g>
+          </GraphTip>
         </svg>
       </div>
+      <GraphHint hint={tip} />
       {graph.offered === null && offeredHole ? (
         <div className="flex items-center gap-1.5" data-loop-offered-hole>
           <span className="text-muted-foreground">{NEVER_CALLED}:</span>

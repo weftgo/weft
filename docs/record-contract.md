@@ -1117,7 +1117,7 @@ body's content object)), the six lanes with their counts — `approvals`
 `other` for a kind this build does not know — `marks_total` and the
 holes — and `GET /api/sessions/{id}/entries?offset=&limit=&run=` (the same
 marks paged, ≤ 1,000, `next_offset`; `run` one run's marks alone,
-`obsdb.SessionEventQuery.RunIDs`, its total that run's). Holes: `not_recorded` (not one
+`obsdb.SessionEventQuery.RunIDs`, its total, holes and hidden count that run's). Holes: `not_recorded` (not one
 mark although a turn shows what thread records — it parked a call
 (`pending`, stopped by `parked`) or is half of an approval link
 (`resumed_from` / `resumed_by`) — so the state log never reached the
@@ -1365,9 +1365,13 @@ dropped and the kind stays in the hint. Studio and the devtools panel
 draw these words from one table (`studio/web/src/lib/status.ts`), each
 in one colour role (`lib/palette.ts`'s `ROLE`); the `run` host event
 keeps the plain words (`parked` = succeeded with pending calls). The
-sessions list's status is the newest turn's outcome (`obsdb.OutcomeOf`,
-the word `SessionQuery.Status` filters by: `cancelled`, `ended`,
-`parked` or `resumed` beside the four), and since U16
+sessions list's status is the newest turn's outcome (`obsdb.OutcomeOf`):
+for the four run words (`succeeded`, `failed`, `running`,
+`interrupted`) it agrees with `SessionQuery.Status` (`?status=`); the
+other four (`cancelled`, `ended`, `parked`, `resumed`) are not
+filterable — `?status=` with one is a 400, and `awaiting=1` is the open
+park. Before 0.18.0 it read `failed` for a cancelled or busy-ended turn
+and `succeeded` for a parked one: read the outcome word instead. Since U16
 the row carries its turn facts beside it (§6): `pending` when the
 newest turn is an open park (the list's "awaiting a decision"),
 `outcomes` with each turn's parked / resumed / cancelled / ended word,

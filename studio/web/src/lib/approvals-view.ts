@@ -11,7 +11,7 @@
 // the session log, not evidence (ADR 0021 §5). Studio only: the panel
 // hands off to this view.
 import type { DecidedCall, SessionMark, TimelineTurn } from "./api"
-import { decisionDetail, decider, outcomeOf } from "./decisions"
+import { decisionDetail, decider, markWhoHole, outcomeOf } from "./decisions"
 import type { OUTCOME } from "./decisions"
 import { absoluteTime, plural } from "./format"
 import { AWAITING } from "./status"
@@ -64,6 +64,9 @@ export interface DecisionRow {
   who: string
   /** Who is content the identity may not read. */
   whoHidden: boolean
+  /** Nothing names the decider yet (lib/decisions.ts's WHO_UNRECORDED:
+   * no stored turn resumed the run, no who or key recorded). */
+  whoUnrecorded?: boolean
   grant: string
   at: string
   /** The turn that parked the call (the run the decision is filed
@@ -124,6 +127,9 @@ export function decisionRows(
       c,
       who: [who, detail].filter(Boolean).join(" · "),
       whoHidden: !who && !!c.who_hidden,
+      whoUnrecorded:
+        markWhoHole(c, d, m.content_mark === "stripped") === "not_recorded" ||
+        undefined,
       grant: [str(m.fields.grant_id), str(m.fields.grant_scope)]
         .filter(Boolean)
         .join(" · "),

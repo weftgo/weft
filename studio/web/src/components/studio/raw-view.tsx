@@ -68,7 +68,7 @@ function KindChip({
   return (
     <button
       type="button"
-      className={`flex items-center gap-1.5 rounded-full border px-2 py-px font-mono text-[11px] transition-colors ${
+      className={`flex min-h-6 items-center gap-1.5 rounded-full border px-2 py-px font-mono text-[11px] transition-colors ${
         on
           ? "border-border bg-secondary text-foreground"
           : "border-transparent text-faint line-through hover:text-muted-foreground"
@@ -121,7 +121,7 @@ function EventRow({
       <div className="grid grid-cols-[3.5rem_1rem_9.5rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1 font-mono text-[12px] hover:bg-secondary/60">
         <button
           type="button"
-          className="col-span-4 grid cursor-pointer grid-cols-subgrid items-center text-left"
+          className="col-span-4 grid min-h-6 cursor-pointer grid-cols-subgrid items-center text-left"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           data-ev-toggle
@@ -510,7 +510,7 @@ export function RawView({
               type="button"
               role="tab"
               aria-selected={surface === s}
-              className={`rounded-sm px-2.5 py-1 font-mono text-[11px] ${
+              className={`min-h-6 rounded-sm px-2.5 py-1 font-mono text-[11px] ${
                 surface === s
                   ? "bg-secondary text-foreground"
                   : "text-muted-foreground hover:text-foreground"

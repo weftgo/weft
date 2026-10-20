@@ -212,6 +212,9 @@ export interface HoleMark {
   cause?: string
   /** hidden: how many runs the scope left out (StepHole.count). */
   count?: number
+  /** The badge's visible words after its label, when not holeWords'
+   * (a delegated block's hidden sessions). */
+  note?: string
 }
 
 /** The weft.content.* attributes an event row or a live frame carries

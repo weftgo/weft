@@ -10,8 +10,9 @@
 // Pool children (thread/pool) are sessions of their own, not runs of
 // this trace: the graph does not draw them. Plain TypeScript, no React:
 // Studio only (the panel links here).
-import type { Span } from "./api"
+import type { RunRow, Span } from "./api"
 import { plural } from "./format"
+import type { HoleMark } from "./honesty"
 import { statusOf } from "./status"
 import type { Status, StatusKey, StatusRow } from "./status"
 import { attrsOf, instantMs, int, opOf, str, took } from "./waterfall"
@@ -214,6 +215,64 @@ export function callGraph(
   const deepest = Math.max(0, ...all.map((n) => n.depth))
   for (const n of all) if (n.depth < 0) n.depth = deepest + 1
   return { nodes: all, edges: out, unsourced: [...unsourced].sort() }
+}
+
+/**
+ * rowsCallGraph is the agents level of a run that recorded no spans
+ * (P9-pre-web-fix3): the same graph from the run rows the page read —
+ * rootRun's and each row under it by parent_run_id — each run as its
+ * row says it (agent, start to finish, failed, steps, pending). A row's
+ * usage counts its subagents', so no node carries tokens; no MCP server
+ * is drawn (that needs the execute_tool spans): ROWS_LEVEL says both.
+ * undefined when no row under rootRun was read.
+ */
+export function rowsCallGraph(
+  rows: ReadonlyMap<string, RunRow>,
+  rootRun: string
+): CallGraph | undefined {
+  const root = rows.get(rootRun)
+  if (!root) return undefined
+  const under = (r: RunRow): boolean => {
+    for (let p = r.parent_run_id, n = 0; p && n < 64; n++) {
+      if (p === rootRun) return true
+      p = rows.get(p)?.parent_run_id ?? ""
+    }
+    return false
+  }
+  const tree = [...rows.values()].filter((r) => r.id === rootRun || under(r))
+  if (tree.length < 2) return undefined
+  const spans: Span[] = tree.map((r) => ({
+    trace_id: r.trace_id,
+    span_id: r.id,
+    parent_span_id: "",
+    name: `invoke_agent ${r.agent}`,
+    kind: "internal",
+    start: r.started,
+    end: r.finished ?? r.last_seen,
+    status: r.status === "failed" ? "error" : "ok",
+    status_message: "",
+    service: "",
+    attrs: {
+      "gen_ai.operation.name": "invoke_agent",
+      "gen_ai.agent.name": r.agent,
+      "weft.run.steps": r.steps,
+      "weft.run.pending": r.pending,
+    },
+    events: [],
+    run_id: r.id,
+    parent_run_id: r.parent_run_id || undefined,
+  }))
+  return callGraph(spans, rootRun)
+}
+
+/** The agents level drawn from the run rows (rowsCallGraph): the badge
+ * that says what it leaves out and what would record the rest. */
+export const ROWS_LEVEL: HoleMark = {
+  hole: "not_recorded",
+  cause: "no_spans",
+  reason:
+    "this run recorded no spans: its agents are drawn from the run rows this page read — no MCP server, no tokens, a subagent's own subagents once its node is selected",
+  fix: "install a tracer (otel.Install records spans)",
 }
 
 /** The node whose runs hold `run` (the selection's), if any. */

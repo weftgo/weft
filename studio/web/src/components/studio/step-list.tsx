@@ -457,7 +457,7 @@ export function ToolCallRow({
       <div className="-ml-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-r-md py-0.5 pl-3 hover:bg-secondary/60">
         <button
           type="button"
-          className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-left"
+          className="flex min-h-6 min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-left"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           data-call-toggle

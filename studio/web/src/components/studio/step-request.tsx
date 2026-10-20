@@ -442,7 +442,7 @@ function ToolRow({ t }: { t: ToolEntry }) {
     <li className="space-y-1">
       <button
         type="button"
-        className="flex items-center gap-1 font-mono text-[12px] text-ev-tool hover:underline"
+        className="flex min-h-6 items-center gap-1 font-mono text-[12px] text-ev-tool hover:underline"
         aria-expanded={open}
         onClick={() => setOpen((x) => !x)}
       >
@@ -577,7 +577,7 @@ function MessagesView({
         <div className="space-y-1">
           <button
             type="button"
-            className="flex items-center gap-1 font-mono text-[11px] text-foreground underline decoration-thread-ink underline-offset-2 hover:decoration-2"
+            className="flex min-h-6 items-center gap-1 font-mono text-[11px] text-foreground underline decoration-thread-ink underline-offset-2 hover:decoration-2"
             aria-expanded={earlier}
             onClick={() => setEarlier((x) => !x)}
           >
@@ -1003,7 +1003,7 @@ export function RequestSection({
             aria-selected={tab === t}
             aria-controls={`${tabId(t)}-panel`}
             data-pane-tab={t}
-            className={`rounded-sm px-2.5 py-0.5 font-mono text-[11px] ${
+            className={`min-h-6 rounded-sm px-2.5 py-0.5 font-mono text-[11px] ${
               tab === t
                 ? "bg-secondary text-foreground"
                 : "text-muted-foreground hover:text-foreground"

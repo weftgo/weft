@@ -303,9 +303,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    sessions/{id} (+ delegated: its delegated sessions,
 //    //    each with its cost — a session priced up to 10,000 runs, a level's reads bounded at 20 pages per 50 sessions and 20 more, the
 //    //    sessions past either unknown with a reason; delegated_usage and delegated_sessions_cost_* the whole delegated tree's, beside its own, U14; delegated_holes:
-//    //    one hidden hole counting the delegated sessions, at any depth, a panel token is not shown, the delegated cost then unknown with a reason;
+//    //    one hidden hole counting the delegated sessions, at any depth, a panel token is not shown (under a hidden one too; count_floor past 500), the delegated cost then unknown with a reason;
 //    //    a panel token reads an unknown session id as it reads another public id's, 403 — sessions/{id}, its timeline, entries, export;
-//    //    a session of session-level marks alone answers sessions/{id} as its timeline, 200; the row status (and the document's) the newest turn's outcome, ?status='s word),
+//    //    a session of session-level marks alone answers sessions/{id} as its timeline, 200; the row status (and the document's) the newest turn's outcome — agreeing with ?status= for the four run words (succeeded, failed, running, interrupted); cancelled, ended, parked, resumed not filterable (a 400; awaiting=1 is the open park); before 0.18.0 failed for a cancelled or busy-ended turn, succeeded for a parked one: read the outcome word instead),
 //    //    sessions/{id}/timeline (U12.2, capability "timeline" — obsdb.SessionEventReader over the session_events index,
 //    //    SQLite 0022 / ClickHouse 0025, every thread record and compaction marker by session, a record filed under no run
 //    //    included: the turns in order, the marks in record-time order — kind, lane approvals|grants|compaction|steer_queue|
@@ -320,7 +320,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    on the origin), a context lane per turn, interrupt / rollback ends worded as such, the page live on /api/live?session=; U15.2-fix:
 //    //    ?view=approvals every decision (call, tool, outcome, who / via / key, grant, parked → resumed turn, refused signatures) and grant
 //    //    (rule, scope, uses n of max with their calls, revoked / expired); the forks read in one obsdb.SessionQuery.IDs query, both backends) and sessions/{id}/entries?offset=&limit=&run=
-//    //    (the same marks paged, ≤ 1,000, next_offset; run= one run's marks alone, obsdb.SessionEventQuery.RunIDs — a parked run's request expiry in one read; sessions/{id}'s scope, 501 without the capability),
+//    //    (the same marks paged, ≤ 1,000, next_offset; run= one run's marks alone, its holes and hidden count too, obsdb.SessionEventQuery.RunIDs — a parked run's request expiry in one read; sessions/{id}'s scope, 501 without the capability),
 //    //    sessions/{id}/export?format=jsonl (UX-B-29: the conversation as JSON lines, streamed — a session line
 //    //    {format, session_id, public_id, agent, turns, marks}, every turn's run jsonl export in turn order (≤ 200),
 //    //    the state log's session_mark lines (≤ 2,000), session_hole lines (truncated cause response_cap past a cap —

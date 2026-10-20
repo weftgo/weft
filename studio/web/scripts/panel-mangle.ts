@@ -813,7 +813,9 @@ export function checkFlows(
             if (!ps.length) return
             const k = Math.min(i, ps.length - 1)
             const pd = ps[k]
-            const given = sig.parameters[Math.min(i, sig.parameters.length - 1)]
+            const given = sig.parameters.at(
+              Math.min(i, sig.parameters.length - 1)
+            )
             let pt =
               std && given
                 ? checker.getTypeOfSymbolAtLocation(given, n)

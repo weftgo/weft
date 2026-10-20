@@ -38,11 +38,14 @@ import (
 //     events;
 //   - one "session_hole" record per hole: truncated (cause
 //     response_cap) past the turn cap, the mark cap or the byte cap
-//     (sessionExportByteCap, 64 MiB: a turn or mark line that would
-//     pass it is not written, nor anything of its kind after it); a
+//     (sessionExportByteCap, 64 MiB of every line before the holes —
+//     the session line, the turns', the marks': a turn or mark line
+//     that would pass it is not written, nor anything of its kind
+//     after it); a
 //     plain truncated hole when a read failed after the first byte (the
 //     status was already sent: the lines before it are whole); the
-//     timeline's not_recorded / stripped / hidden; and not_recorded
+//     timeline's not_recorded / stripped / hidden, whether the turns
+//     ran to the end or stopped; and not_recorded
 //     naming obsdb.SessionEventReader when the database cannot read
 //     the state log;
 //   - one "session_end" record, last: turns_exported, marks_exported
@@ -67,8 +70,9 @@ const sessionExportVersion = "weft.session.export/1"
 // sessionExportTurnCap bounds the turns one session export reads.
 var sessionExportTurnCap = 200
 
-// sessionExportByteCap bounds the bytes of one session export's turn
-// and mark lines: 64 MiB. The holes and the session_end line close the
+// sessionExportByteCap bounds the bytes of every line one session
+// export writes before its holes — the session line, the turns' and the
+// marks' lines: 64 MiB. The holes and the session_end line close the
 // file past it. A variable for tests.
 var sessionExportByteCap = 64 << 20
 
@@ -290,6 +294,12 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 			truncatedAt = read
 		}
 		holes = append(holes, mb.holes(det.Runs, all, truncatedAt, false)...)
+	case hasMarks:
+		// The turns stopped (a failed read, the byte cap): no mark line,
+		// but the timeline's holes still say what the file could not
+		// hold whatever it carries — a panel token's hidden marks above
+		// all, counted by the scope read before the first byte.
+		holes = append(holes, mb.holes(det.Runs, all, 0, false)...)
 	case !hasMarks:
 		holes = append(holes, stepHole{Hole: string(obsdb.HoleNotRecorded),
 			Reason: "the session's state log is not in this export: " + offTimeline,

@@ -212,16 +212,16 @@ func TestRunTreeAndChildRunsUseTheirIndexes(t *testing.T) {
 	// U9.1-fix: the tree is found from the rows — the id rule's on the
 	// primary key, their children on idx_parent_run — and its spans read
 	// by run id on idx_weft_run_id, never the whole trace.
-	if p := explain(treeIDRows, treeIDArgs("tr_p")...); !strings.Contains(p, "Keys:\nRunId") || strings.Contains(p, "Condition: true") {
+	if p := explain(treeIDRows(runsCut{on: true, afterNs: 1}), treeIDArgs("tr_p")...); !strings.Contains(p, "Keys:\nRunId") || strings.Contains(p, "Condition: true") {
 		t.Errorf("the id rule's rows are not read on weft_runs' primary key:\n%s", p)
 	}
 	if p := explain(treeChildIDs(treeIDCondition), treeIDArgs("tr_p")...); !strings.Contains(p, "idx_parent_run") {
 		t.Errorf("the tree's children read names no idx_parent_run:\n%s", p)
 	}
-	if p := explain(treeSpansByIDRule+" OR RunId IN (?))"+treeSpanOrder, append(treeIDArgs("tr_p"), "x", 10)...); !strings.Contains(p, "idx_weft_run_id") || strings.Contains(p, "idx_trace_id") {
+	if p := explain(treeSpansByIDRule(runsCut{on: true, afterNs: 1})+" OR RunId IN (?))"+treeSpanOrder, append(treeIDArgs("tr_p"), "x", 10)...); !strings.Contains(p, "idx_weft_run_id") || strings.Contains(p, "idx_trace_id") {
 		t.Errorf("the tree's spans read names no idx_weft_run_id (or reads by trace):\n%s", p)
 	}
-	if p := explain(childRunsSQL(2, ""), "tr_p", "x", "tr_p", "x"); !strings.Contains(p, "idx_parent_run") {
+	if p := explain(childRunsSQL(2, runsCut{}), "tr_p", "x", "tr_p", "x"); !strings.Contains(p, "idx_parent_run") {
 		t.Errorf("ChildRuns' plan names no idx_parent_run:\n%s", p)
 	}
 }

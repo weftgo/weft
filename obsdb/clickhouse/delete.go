@@ -13,7 +13,8 @@ import (
 )
 
 // Deletion and retention (plan A7, §13.13) on ClickHouse: lightweight
-// DELETE FROM … WHERE (GA since ClickHouse 23.3; the tables are all
+// DELETE FROM … WHERE (GA since ClickHouse 23.3, below the schema's own
+// 25.6 floor — README.md; the tables are all
 // MergeTree-family, none carries a projection) on obsdb's tables only —
 // otel_traces, otel_logs, weft_records, weft_deltas, weft_session_events,
 // weft_runs. Deleted

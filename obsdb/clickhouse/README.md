@@ -16,6 +16,12 @@ db, err := clickhouse.Open("clickhouse://default:pass@localhost:9000/weft",
 // Experiments, Experiment, Close.
 ```
 
+**ClickHouse 25.6 or later.** The schema's TTLs are on `DateTime64(9)`
+columns (migration 0001), which a server accepts from 25.6: older ones
+— 23.3, 23.8, 24.8, 25.3, 25.4 and 25.5 tried — refuse 0001 with "TTL
+expression result column should have DateTime or Date type, but has
+DateTime64(9)". CI pins 25.8 (the recipe below).
+
 `Open` creates and versions the schema in `obsdb_migrations` (the
 SQLite backend's numbering rule), writes go through async inserts
 (`async_insert=1, wait_for_async_insert=1`), and the weft tables are
@@ -46,10 +52,17 @@ opens runs cuts at `weft_runs`' own window itself (the table's
 at most once a minute): `Runs` and `Search` (every filter), `Sessions`
 (rows, `Total`, turn facts, the tag and `Failed` filters, the
 summarizer usage), `Session` and its runs, `Run` and its children,
-`ChildRuns` and `ResolvePublicID`. A run past it is neither counted nor
-paged nor found, merged away or not, `Total` always matches the rows,
-and no read keeps a turn another has cut; a run's own records and
-spans, read by id, stay until the merge drops them.
+`ChildRuns`, the run tree (`RunTreeSpans`: its rows and the spans of the
+runs it keeps — a run whose parent is cut is out with it) and
+`ResolvePublicID`. A run past it is neither counted nor paged nor
+found, merged away or not, `Total` always matches the rows, and no read
+keeps a turn another has cut; a run's own records and spans, read by
+id, stay until the merge drops them. The boundary is taken once per
+call — now minus the window, one instant for every statement of it —
+so a run crossing it between `Sessions`' count, page, turn facts and
+summarizer read is in all of them or in none. A failed `system.tables`
+read keeps the last window known for a minute (logged at Debug); with
+none known yet the reads cut nothing, as before the cut existed.
 
 The tag filters (`SessionQuery.Meta`, `RunQuery.Meta`) narrow their
 row scan on `idx_meta` (migration 0026), an ngram bloom filter over
@@ -62,7 +75,8 @@ granule's Meta, as before.
 Deletion (`DeleteRun`, `DeleteSession`, `Sweep` — Studio's `DELETE`
 verbs and `studio.Retain`) is a lightweight `DELETE FROM … WHERE` on
 `otel_traces`, `otel_logs`, `weft_records`, `weft_deltas` and
-`weft_runs` (ClickHouse 23.3 or later): rows are masked at once and
+`weft_runs` (lightweight deletes, GA since ClickHouse 23.3, below the
+schema's own 25.6 floor): rows are masked at once and
 leave the parts at the next merge; `Vacuum` (`weft vacuum`) forces that
 with `OPTIMIZE TABLE … FINAL` on the same tables — heavy on a large
 database. Each chunk of a deletion (400 runs, 200 span keys) issues up

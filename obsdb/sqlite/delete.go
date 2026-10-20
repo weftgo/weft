@@ -80,7 +80,8 @@ const notRunning = `(failed = 1 OR finished_ok = 1 OR root_ended = 1 OR last_see
 // parent is running, or was never stored — is its own root. Each pass
 // is one writer transaction over at most obsdb.SweepBatch roots, so a
 // write waits on one pass, never on the whole sweep; a pass that found
-// fewer roots than the batch was the last.
+// fewer roots than the batch was the last. The passes done, the orphan
+// spans older than the cutoff go too (sweepOrphanSpans).
 func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 	if err := d.checkOpen(); err != nil {
 		return 0, err
@@ -99,7 +100,7 @@ func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 			return n, err
 		}
 		if roots < caps.SweepBatch {
-			return n, nil
+			return n, d.sweepOrphanSpans(ctx, before)
 		}
 		if sweepPassHook != nil {
 			sweepPassHook()
@@ -147,6 +148,25 @@ func (d *DB) sweepRunlessEvents(ctx context.Context, before time.Time) error {
 	_, err := d.writer.ExecContext(ctx, `DELETE FROM session_events
 		WHERE run_id = '' AND time_ns < ?
 		AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.session_id = session_events.session_id AND runs.session_id <> '')`, unixNS(before))
+	return err
+}
+
+// sweepOrphanSpans deletes the spans filed under a run id no runs row
+// holds that started before the cutoff (P9-pre-go-fix3). Only a
+// summarizer span is ever one: every other span with a run id makes or
+// keeps its run's row (Write), and DeleteRun and the passes take a
+// run's spans with it — but a summarizer span feeds no row, so one
+// landing after its run was deleted is stored under the gone id and no
+// run delete names it. Write keeps it: it cannot tell a deleted run
+// from one whose records are still on their way (an OTLP span batch can
+// land before the run's run_start), so the orphan waits for the cutoff,
+// as the run would have. ClickHouse needs nothing alike: otel_traces'
+// TTL drops every span, orphan or not, on its own clock. Narrowed by
+// spans_start; its own writer statement.
+func (d *DB) sweepOrphanSpans(ctx context.Context, before time.Time) error {
+	_, err := d.writer.ExecContext(ctx, `DELETE FROM spans
+		WHERE start_ns < ? AND run_id <> ''
+		AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.run_id = spans.run_id)`, unixNS(before))
 	return err
 }
 

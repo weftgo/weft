@@ -312,8 +312,12 @@ in no `summarizer_usage`). Its usage is never
 part of the run's own (the `invoke_agent` span's) usage, and it gives
 the run row nothing: no `provider`, `model`, `trace_id`, `meta` or
 `last_seen`, and no row at all for a run `DeleteRun` removed
-(ClickHouse's 0024 traces view leaves the span out; SQLite's writer
-stores the span and skips the row; §6's `last_seen`) — the
+(ClickHouse's 0024 traces view leaves the span out, restated by 0027
+for a database that applied 0024's first text; SQLite's writer stores
+the span and skips the row; §6's `last_seen`). Such a late span stays
+stored under the gone id, in no run's reads, until SQLite's `Sweep`
+deletes it with the spans older than its cutoff that no run row names,
+and ClickHouse's `otel_traces` TTL drops it as it drops every span — the
 summarizing model is not the run's (`thread_summarizer`: a
 `SummaryModel` reporting `xai` / `summary-mini`, the run rows
 `wefttest` / `script`). The session row counts it apart, as

@@ -182,9 +182,9 @@ timeout while another process writes) or `OPTIMIZE TABLE … FINAL` on
 the tables deletions mutate (ClickHouse: every part merged — heavy on a
 large database) — and `make vacuum` runs it on `$WEFT_DB`, else
 `./.weft/weft.db`. All of it touches Studio's tables only. On
-ClickHouse deletion is a lightweight `DELETE FROM … WHERE` (ClickHouse
-23.3 or later) and the tables' TTLs (`clickhouse.TTL`) stay as they are:
-retention is additive.
+ClickHouse (25.6 or later, the schema's floor: obsdb/clickhouse/README.md)
+deletion is a lightweight `DELETE FROM … WHERE` and the tables' TTLs
+(`clickhouse.TTL`) stay as they are: retention is additive.
 
 **Cost (plan A5).** Studio prices usage at read time — never stored,
 never sent, nothing fetched. The table is a plain JSON file, USD per 1M
@@ -2703,16 +2703,19 @@ per state-log mark, `{"record":"session_mark","mark":…}` with the mark
 as the timeline serves it, in record-time order; one `session_hole`
 line per hole; one `session_end` line last, `{turns_exported,
 marks_exported, bytes}` (the bytes before it) — a file without it was
-cut in transit. Caps: 200 turns, 2,000 marks, and 64 MiB of turn and
-mark lines (`sessionExportByteCap`; the holes and `session_end` close
-the file past it) — a line that would pass a cap is not written, nor
-any of its kind after it. Holes: `truncated` with `cause:
+cut in transit. Caps: 200 turns, 2,000 marks, and 64 MiB of every line
+before the holes — the `session` line, the turns', the marks'
+(`sessionExportByteCap`; the holes and `session_end` close the file
+past it) — a line that would pass a cap is not written, nor any of its
+kind after it. Holes: `truncated` with `cause:
 "response_cap"` past each cap (`count` the turns or marks left out);
 a plain `truncated` when a read fails after the first byte (the status
 was sent: the lines before it are whole); the timeline's
-`not_recorded` / `stripped` / `hidden`; `not_recorded` naming
-`obsdb.SessionEventReader` when the database cannot read the state
-log. The turns' children are read in one `ChildRuns` read for all
+`not_recorded` / `stripped` / `hidden`, whether the turns ran to the
+end or stopped at a cap or a failed read (a panel token's `hidden`
+count is the scope read's, made before the first byte); `not_recorded`
+naming `obsdb.SessionEventReader` when the database cannot read the
+state log. The turns' children are read in one `ChildRuns` read for all
 turns (a TreeReader's), each turn's events, transcript, compactions,
 spans and requests by its own reads. `format` other than `jsonl` is
 400 (a single turn's json, otlp or wefttest export is the run's route).

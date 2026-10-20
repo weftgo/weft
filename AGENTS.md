@@ -301,7 +301,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    turn's outcome as the session page words it, the four — a cancelled or busy-ended turn is not failed, a parked one not succeeded) / lineage=child|fork / since= — obsdb.SessionQuery Awaiting/Failed/Compacted/Status/Lineage/Since, a bad
 //    //    value a 400; the UI page /conversations/$id is a public id's runs, experiments nested, live — lib/links.ts conversationLink),
 //    //    sessions/{id} (+ delegated: its delegated sessions,
-//    //    each with its cost; delegated_usage and delegated_sessions_cost_* the whole delegated tree's, beside its own, U14; delegated_holes:
+//    //    each with its cost — a session priced up to 10,000 runs, a level's reads bounded at 20 pages per 50 sessions and 20 more, the
+//    //    sessions past either unknown with a reason; delegated_usage and delegated_sessions_cost_* the whole delegated tree's, beside its own, U14; delegated_holes:
 //    //    one hidden hole counting the delegated sessions, at any depth, a panel token is not shown, the delegated cost then unknown with a reason;
 //    //    a panel token reads an unknown session id as it reads another public id's, 403 — sessions/{id}, its timeline, entries, export;
 //    //    a session of session-level marks alone answers sessions/{id} as its timeline, 200; the row status (and the document's) the newest turn's outcome, ?status='s word),
@@ -323,8 +324,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    sessions/{id}/export?format=jsonl (UX-B-29: the conversation as JSON lines, streamed — a session line
 //    //    {format, session_id, public_id, agent, turns, marks}, every turn's run jsonl export in turn order (≤ 200),
 //    //    the state log's session_mark lines (≤ 2,000), session_hole lines (truncated cause response_cap past a cap —
-//    //    64 MiB of turn and mark lines, sessionExportByteCap — or a plain truncated when a read fails mid-stream;
-//    //    the timeline's holes), a session_end line {turns_exported, marks_exported, bytes} last; the turns'
+//    //    64 MiB of every line before the holes, the session line included, sessionExportByteCap — or a plain truncated
+//    //    when a read fails mid-stream; the timeline's holes, whether the turns ran to the end or stopped), a session_end line {turns_exported, marks_exported, bytes} last; the turns'
 //    //    children in one ChildRuns read; sessions/{id}'s scope, a read token's requests hidden and marks
 //    //    content_hidden; the session page's export / copy public id / open in app / delete verbs),
 //    //    sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's

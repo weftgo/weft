@@ -204,4 +204,28 @@ func TestSessionExportByteCap(t *testing.T) {
 		!strings.Contains(body, `12 marks after it are not in this file`) {
 		t.Errorf("capped export: no byte-cap holes: %s", body[strings.LastIndex(body, `"record":"run"`):])
 	}
+
+	// P9-pre-go-fix3: a panel token's export cut by bytes still says the
+	// marks its token does not see — the hidden hole the scope read
+	// counted before the first byte — though no mark line is written.
+	ht := Handler(DB(timelineDB(t)), Token("srv"))
+	panel, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_acme", Scope: scopePlayground, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, body = getWith(t, ht, "/studio/api/sessions/s_acme/export", panel, "")
+	if code != http.StatusOK {
+		t.Fatalf("panel export: %d %s", code, body)
+	}
+	kinds, lines = exportLines(t, body)
+	var hidden map[string]any
+	for _, l := range lines {
+		if l["record"] == "session_hole" && l["hole"] == "hidden" {
+			hidden = l
+		}
+	}
+	if slices.Contains(kinds, "session_mark") || hidden == nil || hidden["count"] != float64(1) || !strings.Contains(body, `"hole":"truncated","cause":"response_cap"`) {
+		t.Errorf("a panel token's byte-capped export: marks %v, hidden hole %v; want no mark, the byte cap's hole and hidden 1 (the foreign mark)",
+			slices.Contains(kinds, "session_mark"), hidden)
+	}
 }

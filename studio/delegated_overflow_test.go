@@ -161,10 +161,75 @@ func TestDelegatedReadsPerLevel(t *testing.T) {
 	// P9-pre-go-fix2: a level past one batch's budget. 400 sessions × 30
 	// turns, 12,000 runs: 8 batches of 50 × 1,500 runs, 4 pages each
 	// (33 reads with the lead's own walk). 50 × 210, 10,500 runs in one
-	// batch: past the budget at 20 pages, then two halves of 5,250 (11
-	// pages each) — 43 reads.
+	// batch: past the bound on its first page's Total, then two halves
+	// of 5,250 (11 pages each) — 23 reads of the level's budget of 40.
 	t.Run("a level past one batch", func(t *testing.T) { delegatedWide(t, 400, 30, 40) })
 	t.Run("an overflowing batch halves", func(t *testing.T) { delegatedWide(t, 50, 210, 50) })
+	// P9-pre-go-fix3: a session of exactly 10,000 runs is whole, never
+	// "more than 10000" (its 20th page reads the count out: no 21st);
+	// the lead's walk, the level read, 20 pages.
+	t.Run("exactly 10,000 runs is known", func(t *testing.T) { delegatedWide(t, 1, sessionCostPages*500, 25) })
+	// P9-pre-go-fix3: every session past the bound. The reads stay in
+	// sessionCosts' budget — 20 pages a batch and 20 for the halvings,
+	// not 20 a session — and every session answers unknown.
+	t.Run("every session past the bound", func(t *testing.T) {
+		for _, n := range []int{50, 500} {
+			delegatedHuge(t, n, int64(sessionCostReads(n)))
+		}
+	})
+}
+
+// hugeRuns answers every RunQuery.SessionIDs read as if each session
+// held sessionCostPages × 500 + 1 runs: a Total past the bound, a full
+// page of 500 and a cursor on every page.
+type hugeRuns struct {
+	obsdb.DB
+	n *atomic.Int64
+}
+
+func (h hugeRuns) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) {
+	h.n.Add(1)
+	if len(q.SessionIDs) == 0 {
+		return h.DB.Runs(ctx, q)
+	}
+	at := time.Now().Add(-time.Hour)
+	page := obsdb.RunPage{Total: len(q.SessionIDs) * (sessionCostPages*500 + 1), NextBefore: &at, NextBeforeID: "x"}
+	for i := range 500 {
+		sid := q.SessionIDs[i%len(q.SessionIDs)]
+		page.Runs = append(page.Runs, obsdb.RunRow{ID: fmt.Sprintf("%s-t%d", sid, i), SessionID: sid, Started: at, LastSeen: at})
+	}
+	return page, nil
+}
+
+// delegatedHuge prices n delegated sessions every one past the bound:
+// at most maxReads Runs reads, every session unknown.
+func delegatedHuge(t *testing.T, n int, maxReads int64) {
+	t.Helper()
+	db, err := sqlite.Open(t.TempDir() + "/huge.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	var reads atomic.Int64
+	srv := New(DB(hugeRuns{DB: db, n: &reads}))
+	t.Cleanup(func() { _ = srv.Close() })
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("s_h%03d", i)
+	}
+	out := srv.sessionCosts(context.Background(), ids, "")
+	if got := reads.Load(); got > maxReads {
+		t.Errorf("%d sessions past the bound: %d Runs reads, want at most %d (the call's budget)", n, got, maxReads)
+	}
+	if len(out) != n {
+		t.Fatalf("%d sessions priced, want every one of %d", len(out), n)
+	}
+	for _, id := range ids {
+		c, ok := out[id]
+		if !ok || c.known || c.badge != costUnknown || c.reason == "" {
+			t.Errorf("session %s: %+v; want unknown with a reason", id, c)
+		}
+	}
 }
 
 // delegatedWide (P9-pre-go-fix2): a level of sessions delegated

@@ -366,7 +366,7 @@ func TestContractKeysMatchMetaOf(t *testing.T) {
 // grouped rows, never to weft_runs' stored ones; the row-level narrowing
 // beside it (idx_meta's LIKE, 0026) only picks the runs to collapse.
 func TestRunsInnerMetaFilter(t *testing.T) {
-	sql, _ := runsInner(obsdb.RunQuery{Meta: map[string]string{"tenant": "acme"}}, "")
+	sql, _ := runsInner(obsdb.RunQuery{Meta: map[string]string{"tenant": "acme"}}, runsCut{})
 	for _, want := range []string{
 		"JSONHas(Meta, ?)",
 		"JSONExtractString(Meta, ?) = ?",
@@ -388,7 +388,7 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 	sql, args := runsInner(obsdb.RunQuery{
 		Agent: "a", SessionID: "s", PublicID: "p", ParentRunID: "par",
 		ExperimentID: "e", Playground: &yes,
-	}, "")
+	}, runsCut{})
 	inner, outer, ok := strings.Cut(sql, " GROUP BY RunId) WHERE ")
 	if !ok {
 		t.Fatalf("runsInner has no grouped subquery:\n%s", sql)
@@ -482,7 +482,7 @@ func TestMigrationContractTuple(t *testing.T) {
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, at0015}, {17, 1, at0017}, {18, 2, at0018}, {19, 2, at0019}, {21, 2, at0021}, {22, 2, at0022}, {23, 2, at0023}, {24, 1, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, at0015}, {17, 1, at0017}, {18, 2, at0018}, {19, 2, at0019}, {21, 2, at0021}, {22, 2, at0022}, {23, 2, at0023}, {24, 1, contractKeys}, {27, 1, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)
@@ -995,12 +995,12 @@ func TestRunsInnerParentScoping(t *testing.T) {
 		q    obsdb.RunQuery
 		want string
 	}{{obsdb.RunQuery{}, "ParentRunID = ''"}, {obsdb.RunQuery{ParentRunID: "p"}, "ParentRunID = ?"}} {
-		sql, _ := runsInner(c.q, "")
+		sql, _ := runsInner(c.q, runsCut{})
 		if !strings.Contains(sql, c.want) {
 			t.Errorf("runsInner(%+v) missing %q", c.q, c.want)
 		}
 	}
-	sql, _ := runsInner(obsdb.RunQuery{ParentRunID: "*"}, "")
+	sql, _ := runsInner(obsdb.RunQuery{ParentRunID: "*"}, runsCut{})
 	if strings.Contains(sql, "ParentRunID =") {
 		t.Error("'*' must not scope parentage")
 	}

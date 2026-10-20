@@ -174,7 +174,7 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 //
 // cut is the retention cut (DB.runsCut) over the grouped rows: every run
 // list states it, so no list shows a run another has already cut.
-func runsInner(q obsdb.RunQuery, cut string) (string, []any) {
+func runsInner(q obsdb.RunQuery, cut runsCut) (string, []any) {
 	var narrow, conds []string
 	var narrowArgs, args []any
 	eq := func(col, v string) {
@@ -272,7 +272,7 @@ func runsInner(q obsdb.RunQuery, cut string) (string, []any) {
 	}
 	return "SELECT * FROM (SELECT " + runAggregates + " FROM weft_runs WHERE " +
 		strings.Join(or1(narrow), " AND ") + " GROUP BY RunId) WHERE " +
-		strings.Join(or1(conds), " AND ") + cut, append(narrowArgs, args...)
+		strings.Join(or1(conds), " AND ") + cut.where(), append(narrowArgs, args...)
 }
 
 // metaNarrow is the tag filters' index narrowing (migration 0026's
@@ -332,7 +332,7 @@ func (d *DB) Run(ctx context.Context, id string) (_ obsdb.RunDetail, err error) 
 	now := time.Now()
 	cut := d.runsCut(ctx)
 	rows, err := d.queryRunRows(ctx, now,
-		"SELECT "+runColumns+" FROM weft_runs FINAL WHERE RunId = ?"+cut, id)
+		"SELECT "+runColumns+" FROM weft_runs FINAL WHERE RunId = ?"+cut.where(), id)
 	if err != nil {
 		return obsdb.RunDetail{}, err
 	}
@@ -345,7 +345,7 @@ func (d *DB) Run(ctx context.Context, id string) (_ obsdb.RunDetail, err error) 
 	// the whole table for every run page.
 	children, err := d.queryRunRows(ctx, now,
 		"SELECT "+runColumns+" FROM weft_runs FINAL WHERE "+
-			"RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.ParentRunID = ?) AND ParentRunID = ?"+cut+
+			"RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.ParentRunID = ?) AND ParentRunID = ?"+cut.where()+
 			" ORDER BY Started, RunId", id, id)
 	if err != nil {
 		return obsdb.RunDetail{}, err
@@ -895,7 +895,12 @@ func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err er
 // the id-rule rows, their children, the spans; a deeper chain of
 // non-Subagent children one statement more per level, bounded by the
 // tree's own depth. A derived run reads its trace's first
-// obsdb.TreeTraceCap spans (stockTreeSpans).
+// obsdb.TreeTraceCap spans (stockTreeSpans). Every row statement and
+// the id-rule span read take the call's retention cut (retention.go),
+// so the tree holds the runs Run's children, ChildRuns and the cost
+// reads hold: a child past weft_runs' TTL is out of all of them alike,
+// merged away or not, and a run past it is ErrNotFound here as in Run.
+// A run whose parent was cut is out too: the walk follows kept rows.
 func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTree, err error) {
 	runID := q.RunID
 	if err := d.checkOpen(); err != nil {
@@ -915,7 +920,8 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 		tree.TraceTruncated = cut
 		return tree, nil
 	}
-	rows, err := d.treeRunRows(ctx, treeIDRows+treeRowLimit, append(treeIDArgs(runID), caps.TreeRow+1)...)
+	cut := d.runsCut(ctx)
+	rows, err := d.treeRunRows(ctx, treeIDRows(cut)+treeRowLimit, append(treeIDArgs(runID), caps.TreeRow+1)...)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
@@ -923,7 +929,11 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 	for _, r := range rows {
 		parents[r.ID] = r.ParentRunID
 	}
-	level, err := d.treeRunRows(ctx, treeChildRows(treeIDCondition)+treeRowLimit, append(treeIDArgs(runID), caps.TreeRow+1)...)
+	if _, ok := parents[runID]; !ok && len(rows) <= caps.TreeRow {
+		// The row exists (runTrace) but the cut holds it: Run's answer.
+		return obsdb.RunTree{}, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
+	}
+	level, err := d.treeRunRows(ctx, treeChildRows(treeIDCondition, cut)+treeRowLimit, append(treeIDArgs(runID), caps.TreeRow+1)...)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
@@ -932,6 +942,12 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 	for len(level) > 0 && len(rows) <= caps.TreeRow {
 		var frontier []string
 		for _, r := range level {
+			if _, kept := parents[r.ParentRunID]; !kept {
+				// Its parent is no member: an id-rule row the cut
+				// holds, so the child is out of the tree as it is out
+				// of every listing that reaches it through its parent.
+				continue
+			}
 			if _, ok := parents[r.ID]; !ok {
 				parents[r.ID] = r.ParentRunID
 				rows = append(rows, r)
@@ -941,7 +957,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 		level = nil
 		for len(frontier) > 0 {
 			n := idChunk(frontier)
-			more, err := d.treeRunRows(ctx, treeChildRows("RunId IN ("+placeholders(n)+")")+treeRowLimit, append(anys(frontier[:n]), caps.TreeRow+1)...)
+			more, err := d.treeRunRows(ctx, treeChildRows("RunId IN ("+placeholders(n)+")", cut)+treeRowLimit, append(anys(frontier[:n]), caps.TreeRow+1)...)
 			if err != nil {
 				return obsdb.RunTree{}, err
 			}
@@ -956,7 +972,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 		}
 		rows = rows[:caps.TreeRow]
 	}
-	spans, err := d.treeSpans(ctx, q, parents, rows)
+	spans, err := d.treeSpans(ctx, q, parents, rows, cut)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
@@ -965,11 +981,10 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 
 // The run tree's statements (RunTreeSpans; runspans_internal_test.go
 // pins their indexes). A run's merged columns are read grouped by
-// RunId, in RunRow order.
+// RunId, in RunRow order, held to the retention cut (treeRowOrder).
 const (
 	treeRowColumns = "SELECT RunId, max(ParentRunID), max(PublicID), min(Started) AS started, " +
 		"max(Failed), max(FinishedOK), max(RootEnded), max(LastSeen) FROM weft_runs WHERE "
-	treeRowOrder = " GROUP BY RunId ORDER BY started, RunId"
 	// treeRowLimit bounds each row read: obsdb.TreeRowCap and one more.
 	treeRowLimit = " LIMIT ?"
 	// treeIDCondition: the run and the ids the id rule names its
@@ -978,15 +993,36 @@ const (
 	// rule, treeIDArgs' pattern) — obsdb.TreeMembers keeps those whose
 	// row names no parent.
 	treeIDCondition = "RunId = ? OR (startsWith(RunId, ?) AND match(RunId, ?))"
-	treeIDRows      = treeRowColumns + treeIDCondition + treeRowOrder
-	// treeSpansByIDRule: the spans of the runs treeIDCondition selects,
-	// by RunId; treeSpans closes the parenthesis, after the literal list
-	// of the other members when there are any.
-	treeSpansByIDRule = "SELECT " + spanColumns + " FROM otel_traces WHERE RunId != '' AND " +
-		"(RunId IN (SELECT RunId FROM weft_runs WHERE " + treeIDCondition + ")"
 	// treeSpanOrder: start order, one row per span, the cap and one more.
 	treeSpanOrder = " ORDER BY Timestamp, SpanId LIMIT 1 BY TraceId, SpanId LIMIT ?"
 )
+
+// treeRowOrder groups a tree row read by RunId and keeps the runs the
+// retention cut keeps (their newest LastSeen after it), in RunRow order.
+func treeRowOrder(cut runsCut) string {
+	having := ""
+	if cut.on {
+		having = " HAVING 1 = 1" + cut.over("max(LastSeen)")
+	}
+	return " GROUP BY RunId" + having + " ORDER BY started, RunId"
+}
+
+// treeIDRows is the run's row and the rows the id rule names its
+// descendants, cut.
+func treeIDRows(cut runsCut) string {
+	return treeRowColumns + treeIDCondition + treeRowOrder(cut)
+}
+
+// treeSpansByIDRule is the spans of the runs treeIDCondition selects
+// and the cut keeps, by RunId; treeSpans closes the parenthesis, after
+// the literal list of the other members when there are any.
+func treeSpansByIDRule(cut runsCut) string {
+	ids := "SELECT RunId FROM weft_runs WHERE " + treeIDCondition
+	if cut.on {
+		ids += " GROUP BY RunId HAVING 1 = 1" + cut.over("max(LastSeen)")
+	}
+	return "SELECT " + spanColumns + " FROM otel_traces WHERE RunId != '' AND (RunId IN (" + ids + ")"
+}
 
 // treeIDArgs is treeIDCondition's binds for runID: the id, its prefix,
 // and the RE2 pattern of core's child shape under it (obsdb.TreeChildID:
@@ -1003,8 +1039,8 @@ const stockTreeSpans = traceSpans + " LIMIT ?"
 // treeChildRows is the rows whose ParentRunID is one of the runs the
 // condition parents selects on weft_runs — idx_parent_run's narrowing,
 // then the runs' merged columns.
-func treeChildRows(parents string) string {
-	return treeRowColumns + "RunId IN (" + treeChildIDs(parents) + ")" + treeRowOrder
+func treeChildRows(parents string, cut runsCut) string {
+	return treeRowColumns + "RunId IN (" + treeChildIDs(parents) + ")" + treeRowOrder(cut)
 }
 
 // treeChildIDs is treeChildRows' narrowing: the ids of the rows whose
@@ -1056,7 +1092,7 @@ func (d *DB) treeRunRows(ctx context.Context, q string, args ...any) ([]obsdb.Tr
 // ids a statement, the first chunk in the subquery's statement), each
 // statement in start order and capped at obsdb.TreeSpanCap + 1, merged
 // in that order when there is more than one.
-func (d *DB) treeSpans(ctx context.Context, q obsdb.TreeQuery, parents map[string]string, rows []obsdb.TreeRun) ([]obsdb.Span, error) {
+func (d *DB) treeSpans(ctx context.Context, q obsdb.TreeQuery, parents map[string]string, rows []obsdb.TreeRun, cut runsCut) ([]obsdb.Span, error) {
 	ids := obsdb.TreeReadIDs(q, parents, rows)
 	read := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -1089,7 +1125,7 @@ func (d *DB) treeSpans(ctx context.Context, q obsdb.TreeQuery, parents map[strin
 		if len(others) > 0 {
 			n = idChunk(others)
 		}
-		stmt, args := treeSpansByIDRule, treeIDArgs(q.RunID)
+		stmt, args := treeSpansByIDRule(cut), treeIDArgs(q.RunID)
 		if n > 0 {
 			stmt += " OR RunId IN (" + placeholders(n) + ")"
 			args = append(args, anys(others[:n])...)
@@ -1186,11 +1222,11 @@ func (d *DB) ChildRuns(ctx context.Context, parentIDs []string) (_ map[string][]
 // childRunsSQL is ChildRuns' statement for n parent ids (bound twice:
 // the narrowing, then the merged rows' equality), in
 // RunDetail.Children's order; cut the retention cut (DB.runsCut).
-func childRunsSQL(n int, cut string) string {
+func childRunsSQL(n int, cut runsCut) string {
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", n), ",")
 	return "SELECT " + runColumns + " FROM weft_runs FINAL WHERE " +
 		"RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.ParentRunID IN (" + placeholders + ")) " +
-		"AND ParentRunID IN (" + placeholders + ") AND ParentRunID != ''" + cut + " ORDER BY Started, RunId"
+		"AND ParentRunID IN (" + placeholders + ") AND ParentRunID != ''" + cut.where() + " ORDER BY Started, RunId"
 }
 
 // RunSpans' two statements: by the run row's trace and run id, and by
@@ -1496,6 +1532,9 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		return obsdb.SessionPage{}, err
 	}
 	defer d.closedErr(&err)
+	// One retention cut for the whole call (retention.go): the count,
+	// the page, the turn facts and the summarizer read agree.
+	cut := d.runsCut(ctx)
 	var having []string
 	var hargs, runArgs []any // runArgs: the runs subquery's parameters
 	var narrows []string
@@ -1562,7 +1601,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 			" max(ParentRunID) AS ParentRunID, max(CallerRunID) AS CallerRunID, max(Turn) AS Turn, max(Playground) AS Playground," +
 			" max(LastSeen) AS LastSeen" +
 			" FROM weft_runs WHERE RunId IN (SELECT t.RunId FROM weft_runs AS t WHERE " + inner + ")" +
-			" GROUP BY RunId) WHERE SessionID != '' AND Playground = 0 AND " + ownTurnCH + d.runsCut(ctx)
+			" GROUP BY RunId) WHERE SessionID != '' AND Playground = 0 AND " + ownTurnCH + cut.where()
 		if q.PublicID != "" {
 			tagged += " AND PublicID = ?"
 			targs = append(targs, q.PublicID)
@@ -1582,7 +1621,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	runArgs = append(narrowArgs, condArgs...)
 	// Cut at the table's TTL (retention.go): Total and the page agree
 	// whether a merge has dropped an expired run yet or not.
-	runs := sessionRuns(narrow, cond, d.runsCut(ctx))
+	runs := sessionRuns(narrow, cond, cut)
 	hargs = append(hargs, runArgs...)
 	if q.Agent != "" {
 		having = append(having, "max(Agent) = ?")
@@ -1728,10 +1767,10 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		end := page.Sessions[len(page.Sessions)-1]
 		page.NextBefore, page.NextBeforeID = &end.LastSeen, end.ID
 	}
-	if err := d.fillSummarizerUsage(ctx, page.Sessions, q.PublicID); err != nil {
+	if err := d.fillSummarizerUsage(ctx, page.Sessions, q.PublicID, cut); err != nil {
 		return obsdb.SessionPage{}, err
 	}
-	if err := d.fillTurnFacts(ctx, page.Sessions, q.PublicID, now); err != nil {
+	if err := d.fillTurnFacts(ctx, page.Sessions, q.PublicID, now, cut); err != nil {
 		return obsdb.SessionPage{}, err
 	}
 	return page, nil
@@ -1751,7 +1790,7 @@ const failedTurnCH = "Failed = 1 AND CancelCause != ? AND ErrorType != ?"
 // each (LIMIT n BY SessionID) with only the columns an outcome reads,
 // statuses on the page's clock (now), then their resumers
 // (fillResumedByOf). The SQLite backend's rule.
-func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub string, now time.Time) error {
+func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub string, now time.Time, cut runsCut) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1766,7 +1805,7 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 		cond += " AND PublicID = ?"
 		args = append(args, pub)
 	}
-	runs := sessionRuns(" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID"+in+")", cond, d.runsCut(ctx))
+	runs := sessionRuns(" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID"+in+")", cond, cut)
 	type counts struct {
 		failed, ended, cancelled, resumes uint64
 		fork                              string
@@ -1851,7 +1890,7 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 // the runs the retention cut keeps (runsCut, over each run's newest
 // row), the spans read once each (spanDedup's key) — the SQLite
 // backend's rule. One read for the page.
-func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, pub string) error {
+func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, pub string, cut runsCut) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1873,7 +1912,7 @@ func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, p
 		FROM (SELECT TraceId, SpanId, SpanAttributes FROM otel_traces
 			WHERE RunId IN (SELECT RunId FROM (SELECT r.RunId AS RunId, max(r.LastSeen) AS LastSeen FROM weft_runs AS r
 				WHERE r.SessionID IN (?`+strings.Repeat(",?", len(rows)-1)+`) AND r.SessionID != ''`+scope+` GROUP BY r.RunId)
-				WHERE 1 = 1`+d.runsCut(ctx)+`)
+				WHERE 1 = 1`+cut.where()+`)
 				AND SpanAttributes['`+obsdb.AttrChatRole+`'] = '`+obsdb.ChatRoleSummarizer+`'
 			LIMIT 1 BY TraceId, SpanId)
 		GROUP BY sid, provider, model`, args...)
@@ -1984,7 +2023,7 @@ func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firs
 // scan to the one session's runs), cond onto the collapsed rows, and
 // cut — the retention cut (DB.runsCut), a parameter so no session read
 // can leave it out — after it.
-func sessionRuns(narrow, cond, cut string) string {
+func sessionRuns(narrow, cond string, cut runsCut) string {
 	return `(SELECT * FROM (SELECT RunId, max(SessionID) AS SessionID, max(PublicID) AS PublicID,
 				max(Agent) AS Agent, max(ParentRunID) AS ParentRunID, max(CallerRunID) AS CallerRunID,
 				max(Playground) AS Playground,
@@ -2001,7 +2040,7 @@ func sessionRuns(narrow, cond, cut string) string {
 				max(JSONExtractString(Meta, '` + obsdb.SessionForkedFromKey + `')) AS ForkedSession
 			FROM weft_runs` + narrow + `
 			GROUP BY RunId)
-		WHERE ` + ownTurnCH + ` AND Playground = 0 AND SessionID != ''` + cond + cut + `)`
+		WHERE ` + ownTurnCH + ` AND Playground = 0 AND SessionID != ''` + cond + cut.where() + `)`
 }
 
 // ownTurnCH is the own-turn rule over a collapsed run row (D3; the
@@ -2063,7 +2102,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	now := time.Now()
 	row.Status = obsdb.DeriveStatus(failed, ok, newestSeen, now)
 	one := []obsdb.SessionRow{row}
-	if err := d.fillSummarizerUsage(ctx, one, ""); err != nil {
+	if err := d.fillSummarizerUsage(ctx, one, "", cut); err != nil {
 		return obsdb.SessionDetail{}, err
 	}
 	row = one[0]
@@ -2073,7 +2112,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	runs, err := d.queryRunRows(ctx, now,
 		`SELECT `+runColumns+` FROM weft_runs FINAL
 		WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID = ?)
-			AND SessionID = ? AND `+ownTurnCH+` AND Playground = 0`+cut+`
+			AND SessionID = ? AND `+ownTurnCH+` AND Playground = 0`+cut.where()+`
 		ORDER BY Turn, Started, RunId`, id, id)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
@@ -2106,7 +2145,7 @@ func (d *DB) ResolvePublicID(ctx context.Context, publicID string) (_ string, er
 	err = d.conn.QueryRow(ctx,
 		`SELECT SessionID FROM weft_runs FINAL
 		WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.PublicID = ?)
-			AND PublicID = ? AND SessionID != ''`+d.runsCut(ctx)+` ORDER BY Turn DESC, Started DESC, RunId DESC LIMIT 1`,
+			AND PublicID = ? AND SessionID != ''`+d.runsCut(ctx).where()+` ORDER BY Turn DESC, Started DESC, RunId DESC LIMIT 1`,
 		publicID, publicID).Scan(&sessionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

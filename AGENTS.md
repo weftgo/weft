@@ -725,7 +725,7 @@ ignore it.
 
 ## Working in this repo
 
-- Run `make test` (`go test -race ./...`), `make vet`, `make lint`
+- Run `make test` (`go test -race -timeout 20m ./...`), `make vet`, `make lint`
   before claiming done. Add a test in `contract_test.go` for any promise
   you add or change; add a godoc example for any public feature.
 - Keep the public surface small: functional options, sealed interfaces

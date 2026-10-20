@@ -19,8 +19,14 @@ MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
 
+# The per-package timeout `make test` passes: the one CI's test job
+# passes (.github/workflows/ci.yml). studio takes ~520 s under -race,
+# close to Go's 10-minute default. Override per invocation:
+#   make test TEST_TIMEOUT=30m
+TEST_TIMEOUT ?= 20m
+
 test:
-	for m in $(MODULES); do (cd $$m && $(GO) test -race ./...) || exit 1; done
+	for m in $(MODULES); do (cd $$m && $(GO) test -race -timeout $(TEST_TIMEOUT) ./...) || exit 1; done
 
 vet:
 	for m in $(MODULES); do (cd $$m && $(GO) vet ./...) || exit 1; done

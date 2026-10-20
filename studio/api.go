@@ -2138,6 +2138,25 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, out)
 }
 
+// sessionSubRoute is one GET /api/sessions/{id}/<ext> sub-route.
+type sessionSubRoute struct {
+	ext   string
+	serve func(http.ResponseWriter, *http.Request, string)
+}
+
+// sessionSubRoutes is serveSessionRoutes' table: what follows a
+// session id. One table, so the auth matrix's completeness check
+// (TestAuthMatrix) enumerates the same sub-routes the dispatch serves.
+// A session id carries no slash, so at most one suffix matches.
+func (s *Server) sessionSubRoutes() []sessionSubRoute {
+	return []sessionSubRoute{
+		{"public_id", s.serveSessionPublicID},
+		{"timeline", s.serveSessionTimeline},
+		{"entries", s.serveSessionEntries},
+		{"export", s.serveSessionExport}, // UX-B-29, session_export.go
+	}
+}
+
 // serveSessionRoutes dispatches /api/sessions/{id}: the thread's turns
 // in order (obsdb's SessionDetail); /api/sessions/{id}/public_id is the
 // reverse of api/public (serveSessionPublicID); /timeline and /entries
@@ -2146,17 +2165,9 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 // slash, so the sub-route shadows none.
 func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
-	if sid, ok := strings.CutSuffix(id, "/public_id"); ok && sid != "" && !strings.Contains(sid, "/") {
-		s.serveSessionPublicID(w, r, sid)
-		return
-	}
-	for ext, serve := range map[string]func(http.ResponseWriter, *http.Request, string){
-		"/timeline": s.serveSessionTimeline,
-		"/entries":  s.serveSessionEntries,
-		"/export":   s.serveSessionExport, // UX-B-29, session_export.go
-	} {
-		if sid, ok := strings.CutSuffix(id, ext); ok && sid != "" && !strings.Contains(sid, "/") {
-			serve(w, r, sid)
+	for _, sub := range s.sessionSubRoutes() {
+		if sid, ok := strings.CutSuffix(id, "/"+sub.ext); ok && sid != "" && !strings.Contains(sid, "/") {
+			sub.serve(w, r, sid)
 			return
 		}
 	}

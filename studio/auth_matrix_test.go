@@ -436,6 +436,12 @@ func TestAuthMatrix(t *testing.T) {
 		// stream (a refusal there is the row's answer), then opens the
 		// path with the sig alone — no bearer.
 		grant bool
+		// ingest: the OTLP receiver's wall — the ingest token as a
+		// bearer alone opens it; every API identity is 401.
+		ingest bool
+		// noRoute: the row pins a path no route serves (the API's 404,
+		// behind the wall); the completeness check holds it to that.
+		noRoute bool
 	}
 	all := []string{"A", "B", "none", "missing"}
 	one := []string{"A"}
@@ -861,7 +867,7 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/panel-handoff?to=/../x", method: "GET", path: fixed("/api/panel-handoff?to=/../x"), resources: one, want: handoffBad},
 		{name: "GET /api/panel-handoff?to=", method: "GET", path: fixed("/api/panel-handoff?to="), resources: one, want: handoffBad},
 		{name: "GET /api/panel-handoff (no to)", method: "GET", path: fixed("/api/panel-handoff"), resources: one, want: handoffBad},
-		{name: "POST /api/panel-handoff", method: "POST", path: fixed("/api/panel-handoff?to=/runs/run_a"), resources: one, want: anyValid(miss)}, // another method: no route, the API's 404
+		{name: "POST /api/panel-handoff", method: "POST", path: fixed("/api/panel-handoff?to=/runs/run_a"), resources: one, want: anyValid(miss), noRoute: true}, // another method: no route, the API's 404
 
 		// The playground.
 		{name: "GET /api/runtimes", method: "GET", path: fixed("/api/runtimes"), resources: one, want: anyValid(ok)},
@@ -991,11 +997,17 @@ func TestAuthMatrix(t *testing.T) {
 			body: fixed(`{"instructions":"x"}`), resources: one, want: serverOnly(miss)},
 		{name: "DELETE /api/agents/{name}/proposal", method: "DELETE", path: fixed("/api/agents/acme-support/proposal"), resources: one, want: serverOnly(ok)},
 		{name: "DELETE /api/agents/{name}/proposal (none)", method: "DELETE", path: fixed("/api/agents/acme-support/proposal"), resources: one, want: serverOnly(miss)},
-		{name: "PATCH /api/runs/{id}", method: "PATCH", path: func(res string) string { return "/api/runs/" + run[res] }, resources: one, want: anyValid(miss)},
-		{name: "PUT /api/sessions/{id}", method: "PUT", path: func(res string) string { return "/api/sessions/" + session[res] }, resources: one, want: anyValid(miss)},
+		{name: "PATCH /api/runs/{id}", method: "PATCH", path: func(res string) string { return "/api/runs/" + run[res] }, resources: one, want: anyValid(miss), noRoute: true},
+		{name: "PUT /api/sessions/{id}", method: "PUT", path: func(res string) string { return "/api/sessions/" + session[res] }, resources: one, want: anyValid(miss), noRoute: true},
 
 		// Unknown API paths: walled like the rest, then 404.
-		{name: "GET /api/nope", method: "GET", path: fixed("/api/nope"), resources: one, want: anyValid(miss)},
+		{name: "GET /api/nope", method: "GET", path: fixed("/api/nope"), resources: one, want: anyValid(miss), noRoute: true},
+
+		// OTLP ingest (S4.4): its own token, as a bearer, and nothing
+		// else — no API identity opens it (the ?token= form is pinned
+		// below). An empty export is valid for both signals.
+		{name: "POST /v1/traces", method: "POST", path: fixed("/v1/traces"), body: fixed(`{}`), resources: one, ingest: true},
+		{name: "POST /v1/logs", method: "POST", path: fixed("/v1/logs"), body: fixed(`{}`), resources: one, ingest: true},
 	}
 
 	for _, rt := range routes {
@@ -1003,6 +1015,10 @@ func TestAuthMatrix(t *testing.T) {
 			for _, id := range identities {
 				want := unauthorized
 				switch {
+				case rt.ingest:
+					if id.token == ingestTok && !id.query {
+						want = ok
+					}
 				case rt.open:
 					want = ok
 				case id.kind != "bad":
@@ -1023,6 +1039,17 @@ func TestAuthMatrix(t *testing.T) {
 				}
 			}
 		}
+	}
+
+	// Completeness: every route Studio registers has a row above, and
+	// every row reaches a registered route (auth_matrix_complete_test.go).
+	routesNow, problems := registeredRoutes(t, srv)
+	rows := make([]matrixRow, 0, len(routes))
+	for _, rt := range routes {
+		rows = append(rows, matrixRow{name: rt.name, method: rt.method, path: rt.path(rt.resources[0]), noRoute: rt.noRoute})
+	}
+	for _, p := range append(problems, authMatrixGaps(srv, routesNow, rows)...) {
+		t.Error(p)
 	}
 
 	// A grant opens one stream, until it expires, and nothing else:

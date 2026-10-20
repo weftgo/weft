@@ -59,7 +59,7 @@ Each target loops over these modules (`MODULES = go list -m -f '{{.Dir}}'`)
 and runs the Go tool in each one:
 
 ```sh
-make test   # go test -race ./...   (no -timeout: Go's 10 min per package)
+make test   # go test -race -timeout 20m ./...   (TEST_TIMEOUT, CI's value)
 make vet    # go vet ./...
 make lint   # golangci-lint run, using .golangci.yml at the root
 make fmt    # go fmt ./...  (rewrites files; commit the result)
@@ -80,9 +80,11 @@ toolchain is newer than the linter.
 **Measured.** `make vet` 7 s, `make lint` 5 s (cached), `make test`
 about 10 minutes (601 s). `studio` is the slowest package at about 520 s
 under `-race` on a loaded machine. That is close to Go's default
-10-minute per-package timeout, which `make test` does not raise (CI
-passes `-timeout 20m`). If `studio` times out locally, run
-`go test -race -timeout 20m ./studio/`. The next slowest are
+10-minute per-package timeout, so `make test` passes `-timeout 20m`,
+the value CI passes (`TEST_TIMEOUT ?= 20m` in the Makefile; raise it
+per invocation with `make test TEST_TIMEOUT=30m`). A bare
+`go test -race ./studio/` still has Go's 10-minute default; pass
+`-timeout 20m` there too. The next slowest are
 `obsdb/sqlite` (~130 s), `thread/sqlite` (~95 s), and `cmd/weft`,
 `core`, `thread`, `runtime` and `otel` (40–50 s each).
 
@@ -125,8 +127,14 @@ go test -short ./thread/...   # a few long tests shrink under -short
 - **`studio/auth_matrix_test.go`.** `TestAuthMatrix` runs every
   registered route against every identity (no token, the ingest token,
   the server token, read and playground panel tokens for the right
-  public id and for another one). `TestAuthMatrixTreeScope` and
-  `TestAuthMatrixChildScope` cover the scope rules.
+  public id and for another one). It also fails naming any route
+  Studio registers (method + pattern) that has no row, and any row
+  that reaches no registered route: the routes are read from the
+  package's `HandleFunc`/`Handle` pattern literals and the run and
+  session sub-route tables (`studio/auth_matrix_complete_test.go`;
+  `TestAuthMatrixCompletenessCheck` pins the check itself).
+  `TestAuthMatrixTreeScope` and `TestAuthMatrixChildScope` cover the
+  scope rules.
 
 **Reading a failure.** A failing test prints its name and file:line.
 Re-run that one test with `-run '^Name$' -count=1 -v` in its package.
@@ -646,7 +654,7 @@ first, from a clean tree, each exiting 0:
 | A message part or event type | a JSON round-trip test, a seed for `FuzzMessageUnmarshal` / `FuzzUnmarshalEvent` (`f.Add` or `core/testdata/fuzz/<Target>/`), and `make generate` |
 | A record attribute or record kind | the row in `docs/record-contract.md` (`TestRecordContractDocNames` fails otherwise), a case or a regenerated fixture under `obsdb/testdata/contract/` (`-update-contract`), and both backends |
 | An `obsdb.DB` method | a row in `obsdb/obsdbtest`, run by SQLite and ClickHouse |
-| A Studio route | its rows in `TestAuthMatrix` (`studio/auth_matrix_test.go`) for every identity and public id. Nothing flags a route that has no rows, so check it in review. Also add an API golden if the route serves a document |
+| A Studio route | its rows in `TestAuthMatrix` (`studio/auth_matrix_test.go`) for every identity and public id. `TestAuthMatrix` fails naming a route that has no row (and a row whose route is gone). Also add an API golden if the route serves a document |
 | A panel change | the rebuilt `studio/dist/panel/panel.js` and its row appended to `studio/web/panel-budget.json` in the same commit; parity rows if Studio draws the same thing; a11y modes if it adds a surface |
 | An adapter behaviour | a recorded `.sse` fixture and a conformance case (ADR 0013) |
 | A `thread` entry kind or decoder | a seed for the thread fuzz targets, and the format reference in ADR 0011 |

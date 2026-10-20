@@ -981,7 +981,7 @@ deferred `runtime.Install(...)` call.
 ## Development
 
 ```sh
-make test   # go test -race ./... in every workspace module
+make test   # go test -race -timeout 20m ./... in every workspace module
 make vet
 make lint   # golangci-lint (CI uses .golangci.yml)
 make live   # adapter conformance against real keys (-tags live)

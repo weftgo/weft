@@ -215,9 +215,9 @@ cat "$RUN/gate9-ui.txt"
 
 # ---- (s) make studio-check + the ledger ---------------------------------
 # The phase 9 floor: headroom ≥ 7,500 B, except the user-accepted UX-B-41
-# countdown (P9-pre-web-fix5/6), which allows ≥ 6,820 B with the ledger's
-# last row P9-pre-web-fix6.
-FLOOR="${FLOOR:-6820}"; LAST_ROW="${LAST_ROW:-P9-pre-web-fix6}"
+# countdown (P9-pre-web-fix5–7), which allows ≥ 6,820 B with the ledger's
+# last row P9-pre-web-fix7.
+FLOOR="${FLOOR:-6820}"; LAST_ROW="${LAST_ROW:-P9-pre-web-fix7}"
 ps=$(cd "$HERE" && bun panel-size.ts "$REPO" 2>&1 | tail -1)
 if [ "${STUDIO_CHECK:-1}" != 0 ]; then
   ( cd "$REPO" && make studio-check ) > "$RUN/studio-check.log" 2>&1; SCRC=$?

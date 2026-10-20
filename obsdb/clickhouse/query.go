@@ -76,9 +76,11 @@ const statusCase = `CASE WHEN Failed = 1 THEN 'failed'
 // above 0 and no run whose ResumedFrom names it: resumed_by's rule — the
 // NOT IN set is built from every row's ResumedFrom, a column scan the
 // bloom idx_resumed_from cannot narrow (it serves lookups of given ids;
-// README.md states the cost)), cancelled a failed run whose ErrorType
-// is cancelled. None for "".
-func statusConds(st obsdb.Status, now time.Time) ([]string, []any) {
+// README.md states the cost), and only the resumers cut keeps count
+// (resumedFromSet): a cut resume is no resumer, so its parked run reads
+// parked again, as fillResumedByOf leaves its resumed_by empty),
+// cancelled a failed run whose ErrorType is cancelled. None for "".
+func statusConds(st obsdb.Status, now time.Time, cut runsCut) ([]string, []any) {
 	if st == "" {
 		return nil, nil
 	}
@@ -89,9 +91,25 @@ func statusConds(st obsdb.Status, now time.Time) ([]string, []any) {
 		conds = append(conds, "ErrorType = ?")
 		args = append(args, obsdb.ErrorTypeCancelled)
 	case obsdb.StatusParked:
-		conds = append(conds, "Pending > 0 AND RunId NOT IN (SELECT rb.ResumedFrom FROM weft_runs AS rb WHERE rb.ResumedFrom <> '')")
+		conds = append(conds, "Pending > 0 AND RunId NOT IN ("+resumedFromSet(cut)+")")
 	}
 	return conds, args
+}
+
+// resumedFromSet is the set of parked-run ids the runs cut keeps a
+// resumer of: each kept resumer's ResumedFrom (P9-pre-go-fix5). With no
+// window known it is every row's ResumedFrom, a column scan; under a cut
+// the resumers are collapsed first (each one's newest LastSeen, the
+// cut's column), the collapse narrowed to the runs some row of which
+// names a parked run. The aliases are rb*: ClickHouse aliases are
+// query-global, and the enclosing reads alias max(LastSeen) AS LastSeen.
+func resumedFromSet(cut runsCut) string {
+	if !cut.on {
+		return "SELECT rb.ResumedFrom FROM weft_runs AS rb WHERE rb.ResumedFrom <> ''"
+	}
+	return "SELECT rbFrom FROM (SELECT max(rb.ResumedFrom) AS rbFrom, max(rb.LastSeen) AS rbSeen FROM weft_runs AS rb" +
+		" WHERE rb.RunId IN (SELECT rc.RunId FROM weft_runs AS rc WHERE rc.ResumedFrom <> '') GROUP BY rb.RunId)" +
+		" WHERE rbFrom <> ''" + cut.over("rbSeen")
 }
 
 func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err error) {
@@ -100,8 +118,9 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 	}
 	defer d.closedErr(&err)
 	now := time.Now()
-	inner, args := runsInner(q, d.runsCut(ctx))
-	conds, outerArgs := statusConds(q.Status, now)
+	cut := d.runsCut(ctx) // one instant: the list, its parked filter, its resumers
+	inner, args := runsInner(q, cut)
+	conds, outerArgs := statusConds(q.Status, now, cut)
 	total, err := d.countRows(ctx,
 		"SELECT count() FROM ("+inner+") WHERE "+strings.Join(or1(conds), " AND "), args, outerArgs)
 	if err != nil {
@@ -143,7 +162,7 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 	if err != nil {
 		return obsdb.RunPage{}, err
 	}
-	if err := d.fillCounts(ctx, rowPtrs(rows)); err != nil {
+	if err := d.fillCounts(ctx, rowPtrs(rows), cut); err != nil {
 		return obsdb.RunPage{}, err
 	}
 	page := obsdb.RunPage{Runs: rows, Total: total}
@@ -352,7 +371,7 @@ func (d *DB) Run(ctx context.Context, id string) (_ obsdb.RunDetail, err error) 
 	}
 	ptrs := rowPtrs(children)
 	ptrs = append(ptrs, &rows[0])
-	if err := d.fillCounts(ctx, ptrs); err != nil {
+	if err := d.fillCounts(ctx, ptrs, cut); err != nil {
 		return obsdb.RunDetail{}, err
 	}
 	return obsdb.RunDetail{RunRow: rows[0], Children: children}, nil
@@ -472,8 +491,10 @@ func rowPtrs(rows []obsdb.RunRow) []*obsdb.RunRow {
 // weft_records: uniqExact over the (RunId, Kind, Pos) key is exact even
 // before ReplacingMergeTree merges a retried batch's duplicates, so a
 // transport retry can never inflate a count (the reason counts are
-// derived here rather than summed in weft_runs).
-func (d *DB) fillCounts(ctx context.Context, rows []*obsdb.RunRow) error {
+// derived here rather than summed in weft_runs). cut is the calling
+// read's own retention cut (DB.runsCut) — never a second one, so the
+// resumers fillResumedByOf names are the ones that read keeps.
+func (d *DB) fillCounts(ctx context.Context, rows []*obsdb.RunRow, cut runsCut) error {
 	byID := make(map[string]*obsdb.RunRow, len(rows))
 	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -493,7 +514,7 @@ func (d *DB) fillCounts(ctx context.Context, rows []*obsdb.RunRow) error {
 		if err := d.fillPreviewsOf(ctx, ids[:n], byID); err != nil {
 			return err
 		}
-		if err := d.fillResumedByOf(ctx, ids[:n], byID); err != nil {
+		if err := d.fillResumedByOf(ctx, ids[:n], byID, cut); err != nil {
 			return err
 		}
 		ids = ids[n:]
@@ -509,8 +530,12 @@ func (d *DB) fillCounts(ctx context.Context, rows []*obsdb.RunRow) error {
 // ingested before or after the parked run links it alike and no row is
 // written for a parked run not stored (migration 0019). Each resumer's
 // partial rows are merged first (min Started), the way every run read
-// does; idx_resumed_from skips the granules no resumer names.
-func (d *DB) fillResumedByOf(ctx context.Context, ids []string, byID map[string]*obsdb.RunRow) error {
+// does; idx_resumed_from skips the granules no resumer names. A
+// resumer the call's cut drops (cut, the caller's DB.runsCut) is no
+// resumer (P9-pre-go-fix5): Run and every list leave it out, so the
+// parked run reads parked and names no resumed_by — the SQLite
+// backend's reading once the resume is deleted.
+func (d *DB) fillResumedByOf(ctx context.Context, ids []string, byID map[string]*obsdb.RunRow, cut runsCut) error {
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 	args := make([]any, len(ids))
 	for i, id := range ids {
@@ -518,9 +543,9 @@ func (d *DB) fillResumedByOf(ctx context.Context, ids []string, byID map[string]
 	}
 	rs, err := d.conn.Query(ctx,
 		"SELECT ResumedFrom, argMax(RunId, (Started, RunId)) FROM ("+
-			"SELECT RunId, max(ResumedFrom) AS ResumedFrom, min(Started) AS Started FROM weft_runs "+
+			"SELECT RunId, max(ResumedFrom) AS ResumedFrom, min(Started) AS Started, max(LastSeen) AS LastSeen FROM weft_runs "+
 			"WHERE RunId IN (SELECT RunId FROM weft_runs WHERE ResumedFrom IN ("+placeholders+")) GROUP BY RunId"+
-			") WHERE ResumedFrom IN ("+placeholders+") GROUP BY ResumedFrom",
+			") WHERE ResumedFrom IN ("+placeholders+")"+cut.where()+" GROUP BY ResumedFrom",
 		append(args, args...)...)
 	if err != nil {
 		return err
@@ -1237,7 +1262,7 @@ func (d *DB) ChildRuns(ctx context.Context, parentIDs []string) (_ map[string][]
 			return nil, obsdb.ErrChildRunsCapped
 		}
 		left -= len(rows)
-		if err := d.fillCounts(ctx, rowPtrs(rows)); err != nil {
+		if err := d.fillCounts(ctx, rowPtrs(rows), cut); err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
@@ -1721,7 +1746,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		const newest = "(Turn, Started, RunId)"
 		having = append(having, "(argMax(Failed, "+newest+") = 0 AND argMax(greatest(FinishedOK, RootEnded), "+newest+") = 1"+
 			" AND argMax(Pending, "+newest+") > 0"+
-			" AND argMax(RunId, "+newest+") NOT IN (SELECT rb.ResumedFrom FROM weft_runs AS rb WHERE rb.ResumedFrom != ''))")
+			" AND argMax(RunId, "+newest+") NOT IN ("+resumedFromSet(cut)+"))")
 	}
 	switch q.Lineage {
 	case "":
@@ -1804,7 +1829,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	if err := rs.Err(); err != nil {
 		return obsdb.SessionPage{}, err
 	}
-	if err := d.fillFirstPrompts(ctx, page.Sessions, firstRuns); err != nil {
+	if err := d.fillFirstPrompts(ctx, page.Sessions, firstRuns, cut); err != nil {
 		return obsdb.SessionPage{}, err
 	}
 	if len(page.Sessions) >= limit {
@@ -1909,7 +1934,7 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 	}
 	for len(runIDs) > 0 {
 		n := idChunk(runIDs)
-		if err := d.fillResumedByOf(ctx, runIDs[:n], byID); err != nil {
+		if err := d.fillResumedByOf(ctx, runIDs[:n], byID, cut); err != nil {
 			return err
 		}
 		runIDs = runIDs[n:]
@@ -2034,11 +2059,11 @@ func (f *firstTurn) row(now time.Time) *obsdb.RunRow {
 // prompt preview (firsts[i] is rows[i]'s first turn) and ContentOff
 // from that turn (obsdb.SessionContentOff) once fillCounts has given it
 // the run rows' own counts; "" for a turn that has none.
-func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firsts []*obsdb.RunRow) error {
+func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firsts []*obsdb.RunRow, cut runsCut) error {
 	if len(firsts) == 0 {
 		return nil
 	}
-	if err := d.fillCounts(ctx, firsts); err != nil {
+	if err := d.fillCounts(ctx, firsts, cut); err != nil {
 		return err
 	}
 	// fillCounts fills the first row of each id: read every row's from it.
@@ -2161,7 +2186,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	if err != nil {
 		return obsdb.SessionDetail{}, err
 	}
-	if err := d.fillCounts(ctx, rowPtrs(runs)); err != nil {
+	if err := d.fillCounts(ctx, rowPtrs(runs), cut); err != nil {
 		return obsdb.SessionDetail{}, err
 	}
 	for _, r := range runs { // the first turn's preview, filled with the counts

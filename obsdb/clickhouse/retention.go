@@ -26,9 +26,25 @@ import (
 // id-rule span read (RunTreeSpans: its own row first, a derived run's
 // too; treeChildRows, treeSpansByIDRule; the id-rule rows cut in Go,
 // runsCut.keeps, a cut one kept as obsdb.TreeCutParent so the id rule
-// stops at it) and ResolvePublicID. The builders take the cut as a parameter, so a new
-// read cannot leave it out unseen. A run's own records and spans
-// (Events, RunSpans, …) are read by id, not listed: they are not cut.
+// stops at it) and ResolvePublicID — and, under each of these, the
+// resumers (P9-pre-go-fix5): fillResumedByOf's resumed_by, the parked
+// filter's and Sessions' Awaiting subquery (resumedFromSet), so a cut
+// resume is no resumer and its parked run reads parked — no
+// resumed_by, kept by status parked and Awaiting, its session's
+// Pending / Resumes / Outcomes agreeing — as SQLite reads a parked run
+// whose resume DeleteRun removed. The builders take the cut as a
+// parameter, and fillCounts takes the calling read's own, so a new read
+// cannot leave it out unseen nor take a second instant.
+//
+// The weft_runs reads that are not cut, each by the by-id rule — a
+// run's own facts, read by its id, stay until the merge drops them:
+// Events' terminal flags, Compactions' time window, runTrace
+// (RunSpans), runExists (TranscriptBatches, Requests, Prompt, Catalogs,
+// DeleteRun), and runLastSeen and the id-rule rows (treeIDRows), which RunTreeSpans
+// cuts in Go (runsCut.keeps). The narrowing subqueries (RunId IN
+// (SELECT … FROM weft_runs AS r WHERE …)) are supersets the cut
+// collapsed rows above them then decide. DeleteRun, DeleteSession and
+// Sweep (delete.go) are writes: they remove what is stored, cut or not.
 //
 // The boundary is computed once per obsdb call, in Go (P9-pre-go-fix3):
 // the window read once, the cutoff computed once, and every statement

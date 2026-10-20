@@ -55,7 +55,12 @@ summarizer usage), `Session` and its runs, `Run` and its children,
 `ChildRuns`, the run tree (`RunTreeSpans`: its rows and the spans of the
 runs it keeps — a run whose parent is cut is out with it, whether its
 row names that parent or only core's id rule does; a cut run, a
-derived one too, not found as in `Run`) and `ResolvePublicID`. A run
+derived one too, not found as in `Run`) and `ResolvePublicID`. A
+resume past it is no resumer, in the same call's instant: its parked
+run reads parked — no `resumed_by`, kept by `?status=parked` and
+`SessionQuery.Awaiting`, its session's pending calls, resumes and
+outcomes agreeing — as SQLite, which cuts nothing, reads a parked run
+whose resume `DeleteRun` removed. A run
 past it is neither counted nor paged nor found, merged away or not,
 `Total` always matches the rows, and no read keeps a turn another has
 cut; a run's own records and spans, read by id, stay until the merge
@@ -101,7 +106,11 @@ ResumedFrom … WHERE ResumedFrom <> '')` set is built from the
 bloom filter) serves a lookup of given ids, not "every non-empty
 value" — so the parked filter reads one String column across the whole
 table per query (the resumes only are kept in the set, small next to
-the runs). On a large table expect that column scan; the other status
+the runs). Under the retention cut the set holds the kept resumes
+alone: the resumes are collapsed per run (their newest `LastSeen`) and
+cut at the call's one boundary, which adds a primary-key read of the
+resumes' own rows to that scan; `SessionQuery.Awaiting` reads the same
+set. On a large table expect that column scan; the other status
 words read only the grouped rows the order index walks.
 
 DSN forms: `clickhouse://user:pass@host:9000/database` (native

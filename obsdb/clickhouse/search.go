@@ -99,12 +99,13 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 	now := time.Now()
 	rq := q.RunQuery
 	rq.Before, rq.BeforeID = time.Time{}, ""
-	inner, innerArgs := runsInner(rq, d.runsCut(ctx))
+	cut := d.runsCut(ctx) // one instant: the match, its parked filter, its resumers
+	inner, innerArgs := runsInner(rq, cut)
 
 	// The cheap filters, over the grouped rows.
 	var cheap []string
 	var cheapArgs []any
-	if sc, sa := statusConds(q.Status, now); len(sc) > 0 {
+	if sc, sa := statusConds(q.Status, now, cut); len(sc) > 0 {
 		cheap = append(cheap, sc...)
 		cheapArgs = append(cheapArgs, sa...)
 	}
@@ -175,7 +176,7 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 			return obsdb.RunPage{}, err
 		}
 	}
-	if err := d.fillCounts(ctx, rowPtrs(rows)); err != nil {
+	if err := d.fillCounts(ctx, rowPtrs(rows), cut); err != nil {
 		return obsdb.RunPage{}, err
 	}
 	return obsdb.RunPage{Runs: rows, Total: total}, nil

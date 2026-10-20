@@ -59,7 +59,11 @@ func occupy(t testing.TB, a string) {
 	t.Cleanup(func() { _ = ln.Close() })
 }
 
-// serveStudio serves a Studio on a over path (token "" = none).
+// serveStudio serves a Studio on a over path (token "" = none) and
+// returns once it has answered GET /api/meta: a fresh Studio's first
+// meta does one-time work (the embedded panel's version stamp is read
+// on first use — past 500 ms under -race on a loaded CI runner), and
+// the tests pin the port policy's verdicts, not a cold start's speed.
 func serveStudio(t testing.TB, a, path, token string) {
 	t.Helper()
 	ln, err := net.Listen("tcp", a)
@@ -74,13 +78,33 @@ func serveStudio(t testing.TB, a, path, token string) {
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: time.Second}
 	go func() { _ = hs.Serve(ln) }()
 	t.Cleanup(func() { _ = hs.Close(); _ = srv.Close() })
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		req, err := http.NewRequest(http.MethodGet, "http://"+a+"/api/meta", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the Studio on %s never answered /api/meta: %v", a, err)
+		}
+	}
 }
 
+// choose runs listen.Choose with r's Timeout, else ProbeTimeout: a
+// probe that must hear a Studio's answer never races a short deadline.
+// A test that waits a probe out (a listener that never answers) sets
+// its own short Timeout.
 func choose(t testing.TB, r listen.Request) (listen.Choice, error) {
 	t.Helper()
-	if r.Timeout == 0 {
-		r.Timeout = 500 * time.Millisecond
-	}
 	c, err := listen.Choose(context.Background(), r)
 	if c.Listener != nil {
 		t.Cleanup(func() { _ = c.Listener.Close() })
@@ -135,7 +159,7 @@ func TestBusyAddressMovesOn(t *testing.T) {
 		reason string
 	}{
 		{"a foreign listener", func(t *testing.T, a string) { occupy(t, a) },
-			listen.Request{DBPath: "/x/weft.db"}, "not a weft Studio"},
+			listen.Request{DBPath: "/x/weft.db", Timeout: 200 * time.Millisecond}, "not a weft Studio"},
 		{"a foreign HTTP server", func(t *testing.T, a string) {
 			ln, err := net.Listen("tcp", a)
 			if err != nil {

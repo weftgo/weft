@@ -485,7 +485,8 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// the agent's (or the caller's) Params. The model seam keeps
 		// the lighter slice copies (requestMessages, modelRequest):
 		// adapters hold the read-only request contract for the payload
-		// bytes inside parts.
+		// bytes inside parts — under a chain, applied to what the chain
+		// returns, so a message a function keeps is never the model's.
 		if a.prepare != nil {
 			req.Messages = cloneMessages(res.Messages)
 			req.Tools = cloneTools(tools)
@@ -576,6 +577,13 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// step's reporter (already allocated, so timing costs no
 		// allocation) — and nothing the loop decides on.
 		mreq := modelRequest(req)
+		if a.prepare != nil {
+			// The chain's Messages may hold a message a function keeps
+			// across steps (a pinned instruction spliced in): the model
+			// gets its own slices of those too, as it does without a
+			// chain (requestMessages above).
+			mreq.Messages = requestMessages(mreq.Messages)
+		}
 		consume := func() (err error) {
 			rep.start = time.Now()
 			defer func() {
@@ -922,9 +930,10 @@ func snapshotPending(pending []ToolCallPart) []ToolCallPart {
 // writes through a sampling knob's pointer, reaches neither what the
 // step dispatches, what the request recorder remembers and re-emits
 // for a retried attempt, nor the agent's or the caller's Params.
-// Messages are already the model's own (requestMessages, or the
-// PrepareStep chain's result). One allocation for the slice, at most
-// two more when knobs are set.
+// Messages are already the model's own without a PrepareStep chain
+// (requestMessages); the chain's result is copied again at the call
+// site, since a function may return a message it keeps. One allocation
+// for the slice, at most two more when knobs are set.
 func modelRequest(req ModelRequest) ModelRequest {
 	req.Tools = slices.Clone(req.Tools)
 	req.Params = cloneParams(req.Params)

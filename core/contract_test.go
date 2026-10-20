@@ -7090,6 +7090,36 @@ func TestModelRequestMutationCannotReachTheRun(t *testing.T) {
 	}
 }
 
+// Under a PrepareStep chain the model is handed fresh Messages and
+// Content slices too (ModelRequest's godoc): a message the function
+// splices in and keeps across steps — a pinned instruction — is never
+// rewritten by a model writing into its request (0.18.1: modelRequest
+// copied Tools and Params but passed the chain's Messages through).
+func TestPrepareStepRetainedMessageSurvivesTheModel(t *testing.T) {
+	pinned := []core.Message{core.User("PINNED")}
+	var seen []string
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup", ID: "c1"}),
+		wefttest.Say("done"),
+	)
+	lookup := core.Tool("lookup", "Look up.", func(context.Context, struct{}) (string, error) { return "found", nil })
+	agt := core.New(model, lookup,
+		core.WrapModel(func(next core.Model) core.Model {
+			return mutatingModel{next: next, tool: func(t *core.ToolDef) *core.ToolDef { return t }}
+		}),
+		core.PrepareStep(func(_ context.Context, _ int, req core.ModelRequest) (core.ModelRequest, error) {
+			seen = append(seen, pinned[0].Text())
+			req.Messages = append(pinned[:len(pinned):len(pinned)], req.Messages...)
+			return req, nil
+		}))
+	if _, err := agt.Generate(context.Background(), core.Prompt("hello")); err != nil {
+		t.Fatal(err)
+	}
+	if got := pinned[0].Text(); got != "PINNED" || !slices.Equal(seen, []string{"PINNED", "PINNED"}) {
+		t.Fatalf("the model wrote into PrepareStep's retained message: now %q, seen per step %q", got, seen)
+	}
+}
+
 // grownFrom reports whether next keeps everything prev had: every key
 // of an object (recursively grown), every element of an array (the
 // array no shorter, each element grown) and every scalar's type: a

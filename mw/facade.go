@@ -26,6 +26,9 @@ import (
 // a backup's with AttemptInfo.Layer core.AttemptLayerFallback, the
 // marker a reader's fallbacks counter keys on. A backup that reports
 // its own attempts (a Retry around it) reports them itself, unmarked.
+// Each model tried is handed its own copy of the request's slices and
+// Params values, so what a failed model wrote into its request never
+// reaches the next one.
 func Fallback(models ...weft.Model) weft.ModelMiddleware { return coremw.Fallback(models...) }
 
 // FallbackWhen is Fallback with a predicate: the next model is tried
@@ -103,6 +106,9 @@ func Classifier(fn func(error) bool) RetryOption { return coremw.Classifier(fn) 
 // the 429 discarded — here the same ask is honoured, capped by MaxWait,
 // and visible in Log. Each try is reported as one attempt on the run's
 // record (core.ReportFromContext) — reporting only, a no-op outside a run.
+// Each try is handed its own copy of the request's slices and Params
+// values, so what a failed try's model (or a middleware inside Retry)
+// wrote into its request never reaches the next try.
 func Retry(opts ...RetryOption) weft.ModelMiddleware { return coremw.Retry(opts...) }
 
 // Retryable is Retry's default classifier: true for core.ErrStreamIdle,

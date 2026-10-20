@@ -6,6 +6,7 @@ import (
 	"iter"
 	"log/slog"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -24,6 +25,9 @@ import (
 // a backup's with AttemptInfo.Layer core.AttemptLayerFallback, the
 // marker a reader's fallbacks counter keys on. A backup that reports
 // its own attempts (a Retry around it) reports them itself, unmarked.
+// Each model tried is handed its own copy of the request's slices and
+// Params values, so what a failed model wrote into its request never
+// reaches the next one.
 func Fallback(models ...core.Model) core.ModelMiddleware {
 	return FallbackWhen(defaultFallback, models...)
 }
@@ -78,7 +82,7 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 			if i == 0 {
 				actx, wait = ctx, waitOf(ctx)
 			}
-			yielded, failed := replay(actx, model, req, layer, wait, yield)
+			yielded, failed := replay(actx, model, attemptRequest(req), layer, wait, yield)
 			if failed == nil {
 				return
 			}
@@ -115,6 +119,61 @@ func replay(ctx context.Context, model core.Model, req core.ModelRequest, layer 
 	core.ReportFromContext(ctx).Attempt(core.AttemptInfo{Model: info.Name, Provider: info.Provider,
 		Start: start, End: end, Err: failed, RetryAfter: ask, Layer: layer, Wait: wait, HTTPStatus: status})
 	return yielded, failed
+}
+
+// attemptRequest is one attempt's own copy of the request Retry or
+// Fallback was handed: fresh Messages, Content and Tools slices and
+// fresh Params values, so what a failed attempt's model — or a
+// middleware inside the layer — reassigns or writes through a knob's
+// pointer (ModelRequest's godoc allows both) never reaches the next
+// attempt, the next model of the chain, or the caller's request. The
+// loop's own copy (core's modelRequest) is the same shape; the part
+// values, the bytes behind them and the ToolDefs stay shared and
+// read-only. Paid per attempt, on the Retry/Fallback path only.
+func attemptRequest(req core.ModelRequest) core.ModelRequest {
+	if req.Messages != nil {
+		n := 0
+		for _, m := range req.Messages {
+			n += len(m.Content)
+		}
+		msgs := make([]core.Message, len(req.Messages))
+		parts := make([]core.Part, n)
+		for i, m := range req.Messages {
+			if m.Content != nil {
+				k := copy(parts, m.Content)
+				m.Content, parts = parts[:k:k], parts[k:]
+			}
+			msgs[i] = m
+		}
+		req.Messages = msgs
+	}
+	req.Tools = slices.Clone(req.Tools)
+	p := &req.Params
+	if p.Temperature != nil || p.TopP != nil || p.MaxTokens != nil || p.Seed != nil {
+		box := new(struct {
+			temperature, topP float64
+			maxTokens         int
+			seed              int64
+		})
+		if p.Temperature != nil {
+			box.temperature = *p.Temperature
+			p.Temperature = &box.temperature
+		}
+		if p.TopP != nil {
+			box.topP = *p.TopP
+			p.TopP = &box.topP
+		}
+		if p.MaxTokens != nil {
+			box.maxTokens = *p.MaxTokens
+			p.MaxTokens = &box.maxTokens
+		}
+		if p.Seed != nil {
+			box.seed = *p.Seed
+			p.Seed = &box.seed
+		}
+	}
+	p.Stop = slices.Clone(p.Stop)
+	return req
 }
 
 // waitKey carries the backoff Retry slept before a try to the layer

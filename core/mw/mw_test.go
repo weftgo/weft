@@ -579,3 +579,121 @@ func TestUnwrapConvention(t *testing.T) {
 		t.Errorf("Unwrap on a non-wrapper = %#v, want nil", got)
 	}
 }
+
+// mutatingModel checks every request it is handed against the
+// original, then writes into every field the request's godoc lets a
+// model reassign — a knob's value, a Stop element, a message, a part,
+// a tool — and fails its first fails calls with a retryable error.
+type mutatingModel struct {
+	t     *testing.T
+	name  string
+	fails int
+	calls int
+}
+
+func (m *mutatingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	m.calls++
+	if got := describeRequest(req); got != originalRequestDesc {
+		m.t.Errorf("%s call %d was handed a request an earlier attempt wrote into:\n got %s\nwant %s", m.name, m.calls, got, originalRequestDesc)
+	}
+	*req.Params.Temperature = 0.9
+	*req.Params.MaxTokens = 1
+	req.Params.Stop[0] = "WROTE"
+	req.Messages[0].Content[0] = core.TextPart{Text: "ATTEMPT"}
+	req.Messages[1] = core.User("REPLACED")
+	req.Tools[0] = nil
+	if m.calls <= m.fails {
+		return func(yield func(core.ModelEvent, error) bool) { yield(nil, core.ErrStreamIdle) }
+	}
+	return wefttest.Script(wefttest.Say("ok")).Stream(ctx, req)
+}
+
+const originalRequestDesc = "temp=0.2 max=64 stop=END msg0=first msg1=second tool0=lookup"
+
+func describeRequest(req core.ModelRequest) string {
+	s := "temp=?"
+	if p := req.Params.Temperature; p != nil {
+		s = "temp=" + strconv.FormatFloat(*p, 'g', -1, 64)
+	}
+	if p := req.Params.MaxTokens; p != nil {
+		s += " max=" + strconv.Itoa(*p)
+	}
+	s += " stop=" + strings.Join(req.Params.Stop, ",")
+	for i, msg := range req.Messages {
+		s += fmt.Sprintf(" msg%d=%s", i, msg.Text())
+	}
+	if len(req.Tools) > 0 {
+		if req.Tools[0] == nil {
+			s += " tool0=nil"
+		} else {
+			s += " tool0=" + req.Tools[0].Name
+		}
+	}
+	return s
+}
+
+func originalRequest() (core.ModelRequest, *float64) {
+	temp, maxTok := 0.2, 64
+	lookup := core.Tool("lookup", "Look something up.", func(context.Context, struct{}) (string, error) { return "", nil })
+	return core.ModelRequest{
+		Messages: []core.Message{core.User("first"), core.User("second")},
+		Tools:    []*core.ToolDef{lookup},
+		Params:   core.RequestParams{Temperature: &temp, MaxTokens: &maxTok, Stop: []string{"END"}},
+	}, &temp
+}
+
+// mw.Retry and mw.Fallback hand each attempt its own copy of the
+// request's slices and Params (0.18.1): what a failed attempt's model
+// — or a middleware inside the layer — wrote into its request never
+// reaches the next attempt, nor the caller's request and variables.
+func TestRetryAndFallbackAttemptsGetTheirOwnRequest(t *testing.T) {
+	cases := []struct {
+		name  string
+		build func(t *testing.T) (core.Model, []*mutatingModel)
+	}{
+		{"Retry", func(t *testing.T) (core.Model, []*mutatingModel) {
+			x := &mutatingModel{t: t, name: "x", fails: 2}
+			return mw.Retry(mw.BaseDelay(0))(x), []*mutatingModel{x}
+		}},
+		{"Fallback", func(t *testing.T) (core.Model, []*mutatingModel) {
+			p := &mutatingModel{t: t, name: "primary", fails: 1}
+			b1 := &mutatingModel{t: t, name: "backup1", fails: 1}
+			b2 := &mutatingModel{t: t, name: "backup2"}
+			return mw.Fallback(b1, b2)(p), []*mutatingModel{p, b1, b2}
+		}},
+		{"Retry(Fallback(Retry))", func(t *testing.T) (core.Model, []*mutatingModel) {
+			x := &mutatingModel{t: t, name: "x", fails: 100}
+			y := &mutatingModel{t: t, name: "y", fails: 1}
+			inner := mw.Retry(mw.BaseDelay(0), mw.MaxRetries(1))(x)
+			return mw.Retry(mw.BaseDelay(0), mw.MaxRetries(1))(mw.Fallback(y)(inner)), []*mutatingModel{x, y}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model, inner := tc.build(t)
+			req, temp := originalRequest()
+			var text string
+			for ev, err := range model.Stream(context.Background(), req) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if d, ok := ev.(core.ModelTextDelta); ok {
+					text += d.Text
+				}
+			}
+			if text != "ok" {
+				t.Errorf("text = %q", text)
+			}
+			calls := 0
+			for _, m := range inner {
+				calls += m.calls
+			}
+			if calls < 3 {
+				t.Fatalf("only %d attempts ran", calls)
+			}
+			if got := describeRequest(req); got != originalRequestDesc || *temp != 0.2 {
+				t.Errorf("the caller's request was written into: %s (temp %v)", got, *temp)
+			}
+		})
+	}
+}

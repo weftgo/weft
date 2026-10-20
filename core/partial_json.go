@@ -132,7 +132,8 @@ func holdStringTail(s string) string {
 		case sc.esc >= 0:
 			cut = sc.esc
 		case cut < n: // the cut rune goes
-		case sc.last >= 0 && sc.last == n-6 && isHighSurrogate(s[n-4:]):
+		case sc.last >= 0 && sc.last == n-6 && s[sc.last+1] == 'u' && isHighSurrogate(s[n-4:]):
+			// Only a \u escape: \\DBFF, \nDAD0 are an escape then text.
 			cut = sc.last
 		default:
 			return s

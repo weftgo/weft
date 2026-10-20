@@ -106,6 +106,9 @@ func Classifier(fn func(error) bool) RetryOption {
 // the 429 discarded — here the same ask is honoured, capped by MaxWait,
 // and visible in Log. Each try is reported as one attempt on the run's
 // record (core.ReportFromContext) — reporting only, a no-op outside a run.
+// Each try is handed its own copy of the request's slices and Params
+// values, so what a failed try's model (or a middleware inside Retry)
+// wrote into its request never reaches the next try.
 func Retry(opts ...RetryOption) core.ModelMiddleware {
 	cfg := retryConfig{
 		maxRetries: defaultMaxRetries,
@@ -146,7 +149,7 @@ func (m *retryModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq
 		// nested under a Fallback under a Retry must not clear it.
 		wait := waitOf(ctx)
 		for attempt := 0; ; attempt++ {
-			yielded, failed := replay(withWait(ctx, wait), m.next, req, "", wait, yield)
+			yielded, failed := replay(withWait(ctx, wait), m.next, attemptRequest(req), "", wait, yield)
 			if failed == nil {
 				return
 			}

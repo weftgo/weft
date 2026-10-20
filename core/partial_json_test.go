@@ -44,6 +44,14 @@ func TestClosedPrefix(t *testing.T) {
 		{`{"a":"x\ud83d\`, `{"a":"x"}`},
 		{`{"a":"x\ud83d\ude`, `{"a":"x"}`},
 		{`{"a":"x😀`, `{"a":"x😀"}`},
+		// Only a \u escape waits for a low surrogate: a \\, \n or \t
+		// followed by four hex characters is whole text (0.18.1-fix3:
+		// C:\DBF, then C:).
+		{`{"p":"C:\\DBFF`, `{"p":"C:\\DBFF"}`},
+		{`{"p":"C:\\DBFF\\x"}`, `{"p":"C:\\DBFF\\x"}`},
+		{`{"n":"a\nDAD0`, `{"n":"a\nDAD0"}`},
+		{`{"a":"x\nD83D`, `{"a":"x\nD83D"}`},
+		{`{"a":"x\tD800`, `{"a":"x\tD800"}`},
 		{`{"a":1}}`, `{"a":1}`}, // garbage after the close: keep the valid prefix
 		{`not json`, ``},
 		{`12`, ``}, // scalars never carry tool args
@@ -78,6 +86,11 @@ func FuzzPartialJSON(f *testing.F) {
 		`{"s":"\\\\\\","t":"a\\"}`,
 		`{"pair":"😀 é","k🎮":1}`,
 		`{"r":"é😀🎮","l":["ü","\/"]}`,
+		// A non-u escape followed by four hex characters in D800–DBFF
+		// is no high surrogate (0.18.1-fix3).
+		`{"p":"C:\\DBFF\\x"}`,
+		`{"n":"a\nDAD0b"}`,
+		`{"a":"x\nD83Dz"}`,
 	} {
 		f.Add(seed)
 	}
@@ -321,11 +334,22 @@ func genPartialDoc(r *rand.Rand, depth int) string {
 	}
 }
 
+// genPartialString writes a JSON string from pieces a streamed one is
+// cut inside: escapes of every kind (\uXXXX ones included — surrogate
+// pairs written as escapes, lone high and low surrogates, a high one
+// doubled), a non-u escape followed by four hex characters (the
+// shape of a high surrogate escape that is not one: C:\\DBFF), raw
+// multi-byte runes and invalid UTF-8.
 func genPartialString(r *rand.Rand) string {
-	pieces := []string{"a", "bc", `\n`, `\\`, `\"`, `é`, `😀`, "é", "😀", "🎮", `\/`, ",", ":", "{", "]"}
+	pieces := []string{
+		"a", "bc", `\n`, `\\`, `\"`, `\t`, `\/`, `é`, `😀`, "é", "😀", "🎮", ",", ":", "{", "]",
+		`\u00e9`, `\u0041`, `\uD83D\uDE00`, `\uDBFF\uDFFF`, `\uD83D`, `\uDE00`, `\uD83D\uD83D`,
+		`\\DBFF`, `\nDAD0`, `\tD800`, `\\uD83D`, `\\\\`, "D83D", "uDBFF",
+		"\xff", "\xe2\x82", "\xc0\xaf", "\xed\xa0\x80", "\xf0\x9f\x98",
+	}
 	var b strings.Builder
 	b.WriteByte('"')
-	for range r.IntN(5) {
+	for range r.IntN(7) {
 		b.WriteString(pieces[r.IntN(len(pieces))])
 	}
 	b.WriteByte('"')

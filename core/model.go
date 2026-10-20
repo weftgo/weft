@@ -155,7 +155,9 @@ type RequestParams struct {
 // a tool — cannot reach the run's transcript, what the step
 // dispatches, or the agent. The model's request is its own copy of
 // the step's: the loop dispatches from (and records) a tool slice the
-// model is never handed, with or without a PrepareStep chain, and
+// model is never handed, with or without a PrepareStep chain (whose
+// returned Messages are copied again for the model, so a message a
+// function keeps across steps is never the model's to rewrite), and
 // Params' values are copied too, so a write through a knob's pointer
 // or into Stop reaches neither the agent's or the run option's
 // Params, the caller's variables behind them, nor a later step or

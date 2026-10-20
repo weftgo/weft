@@ -38,8 +38,10 @@ import (
 // processes run in a scratch directory with XDG_RUNTIME_DIR,
 // XDG_CACHE_HOME and HOME pointed into it (where a starting Studio
 // writes studio.json and where the reader looks), WEFT_STUDIO_URL/TOKEN
-// unset, and WEFT_DISCOVERY=off everywhere but the no-flag spawn; the
-// developer's own discovery files are compared before and after.
+// unset, and WEFT_DISCOVERY=off only on the --url spawn — the Studio
+// must write its file (none is written under off) and the no-flag spawn
+// must read it, both inside scratch; the developer's own discovery
+// files are compared before and after.
 // Behind the livecheck tag: it starts a server on a port, so `make test`
 // never runs it.
 func TestMCPLiveCheck(t *testing.T) {
@@ -72,7 +74,7 @@ func TestMCPLiveCheck(t *testing.T) {
 	addr := freeAddr(t)
 	db := filepath.Join(scratch, "weft.db")
 	studio := exec.Command(bin, "studio", "--db", "sqlite://"+db, "--addr", addr, "--no-playground")
-	studio.Dir, studio.Env = home, append(env, "WEFT_DISCOVERY=off")
+	studio.Dir, studio.Env = home, env // discovery on: it writes scratch/run/weft/studio.json
 	var studioOut syncBuffer
 	studio.Stdout, studio.Stderr = &studioOut, &studioOut
 	if err := studio.Start(); err != nil {
@@ -290,7 +292,8 @@ func spawnMCP(t *testing.T, ctx context.Context, bin, dir string, env []string, 
 // mcpCheckEnv is the environment every process runs with: the
 // caller's, minus anything that could name another Studio or reach the
 // developer's discovery file, the discovery locations inside scratch.
-// WEFT_DISCOVERY is removed; each spawn adds "off" but the no-flag one.
+// WEFT_DISCOVERY is removed; only the --url mcp spawn adds "off" (the
+// Studio writes the scratch discovery file, the no-flag spawn reads it).
 func mcpCheckEnv(scratch, home string) []string {
 	var env []string
 	for _, kv := range os.Environ() {

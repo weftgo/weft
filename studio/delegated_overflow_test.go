@@ -559,6 +559,182 @@ func TestHiddenDelegatedFloor(t *testing.T) {
 	}
 }
 
+// countHiddenReads counts the unscoped Sessions pages of 500 a
+// delegated walk reads for its hidden ids (hiddenDelegated's paging).
+type countHiddenReads struct {
+	obsdb.DB
+	n *atomic.Int64
+}
+
+func (c countHiddenReads) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionPage, error) {
+	if len(q.Parents) > 0 && q.PublicID == "" && q.Limit == 500 {
+		c.n.Add(1)
+	}
+	return c.DB.Sessions(ctx, q)
+}
+
+// delegatedChildren writes one turn of each delegated session of s_p
+// named in pubs (session id → public id), the i-th at base + i ms.
+func delegatedChildren(t *testing.T, db obsdb.DB, base time.Time, sessions []string, pubs map[string]string) {
+	t.Helper()
+	var recs []obsdb.Record
+	for i, sid := range sessions {
+		id := sid + "-t1"
+		at := base.Add(time.Duration(i) * time.Millisecond)
+		attrs := func(ev string, pos int64) map[string]any {
+			return map[string]any{"weft.record": "event", "weft.run.id": id, "gen_ai.agent.name": "acme-support",
+				"weft.session.id": sid, "weft.turn": int64(1), "weft.session.parent": "s_p", "weft.public_id": pubs[sid],
+				"weft.caller.run.id": "s_p-t1", "weft.event.type": ev, "weft.event.pos": pos}
+		}
+		recs = append(recs,
+			obsdb.Record{Time: at, EventName: "weft.event", Severity: 9, Service: "svc", Attrs: attrs("run_start", 0),
+				Body: `{"type":"run_start","id":"` + id + `","model":{"provider":"wefttest","name":"script"},"agent":"acme-support"}`},
+			obsdb.Record{Time: at, EventName: "weft.event", Severity: 9, Service: "svc", Attrs: attrs("run_finish", 1),
+				Body: `{"type":"run_finish","run_id":"` + id + `","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`})
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestHiddenDelegatedBounded (P9-pre-go-fix6): the hidden-id walk is
+// bounded — 10,000 visible children and one hidden one, the oldest,
+// cost at most hiddenDelegatedPages pages of 500 for a panel token's
+// read, never the ~21 that skipping every visible one would page
+// through; the hidden one still counted, the count a floor. One hidden
+// child among a few visible ones is found on the first page and the
+// paging stops there: exact.
+func TestHiddenDelegatedBounded(t *testing.T) {
+	read := func(n int, hiddenNewest bool) (int64, sessionDoc) {
+		t.Helper()
+		db, err := sqlite.Open(t.TempDir() + "/bounded.db")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		seedRun(t, db, "s_p-t1", "pub_a", "s_p", "", nil)
+		pubs := map[string]string{"s_hidden": "pub_b"}
+		var ids []string
+		for i := range n {
+			id := fmt.Sprintf("s_v%05d", i)
+			pubs[id] = "pub_a"
+			ids = append(ids, id)
+		}
+		if hiddenNewest {
+			ids = append(ids, "s_hidden")
+		} else {
+			ids = append([]string{"s_hidden"}, ids...)
+		}
+		delegatedChildren(t, db, time.Now().UTC().Add(-time.Hour), ids, pubs)
+		var reads atomic.Int64
+		srv := New(DB(countHiddenReads{DB: db, n: &reads}))
+		t.Cleanup(func() { _ = srv.Close() })
+		var doc sessionDoc
+		srv.delegatedSessions(context.Background(), "s_p", "pub_a", &doc)
+		return reads.Load(), doc
+	}
+	got, doc := read(10_000, false)
+	if got > hiddenDelegatedPages {
+		t.Errorf("10,000 visible + 1 hidden: %d hidden-id pages read, want at most %d", got, hiddenDelegatedPages)
+	}
+	if len(doc.DelegatedHoles) != 1 || doc.DelegatedHoles[0].Count != 1 || !doc.DelegatedHoles[0].CountFloor {
+		t.Errorf("10,000 visible + 1 hidden: holes %+v, want one hidden hole counting 1, a floor", doc.DelegatedHoles)
+	}
+	got, doc = read(3, true)
+	if got != 1 {
+		t.Errorf("3 visible + 1 hidden: %d hidden-id pages read, want 1", got)
+	}
+	if len(doc.DelegatedHoles) != 1 || doc.DelegatedHoles[0].Count != 1 || doc.DelegatedHoles[0].CountFloor {
+		t.Errorf("3 visible + 1 hidden: holes %+v, want one hidden hole counting 1, exact", doc.DelegatedHoles)
+	}
+}
+
+// TestHiddenDelegatedEarlyStopFloor (P9-pre-go-fix6): a walk that
+// stops early — here a level below the first that cannot be read —
+// leaves the hidden sessions below it uncounted, so a panel token's
+// hidden count is a floor: count_floor and "at least", never an exact
+// "1 delegated session".
+func TestHiddenDelegatedEarlyStopFloor(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/early.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	seedRun(t, db, "s_p-t1", "pub_a", "s_p", "", nil)
+	for _, c := range []struct{ id, pub string }{{"s_mine", "pub_a"}, {"s_other", "pub_b"}} {
+		seedRun(t, db, c.id+"-t1", c.pub, c.id, "", map[string]any{"weft.session.parent": "s_p", "weft.caller.run.id": "s_p-t1"})
+	}
+	seedRun(t, db, "s_gc-t1", "pub_b", "s_gc", "", map[string]any{"weft.session.parent": "s_mine", "weft.caller.run.id": "s_mine-t1"})
+	srv := New(DB(failDeepSessions{DB: db, root: "s_p"}))
+	t.Cleanup(func() { _ = srv.Close() })
+	var doc sessionDoc
+	srv.delegatedSessions(context.Background(), "s_p", "pub_a", &doc)
+	if len(doc.DelegatedHoles) != 1 || doc.DelegatedHoles[0].Count != 1 || !doc.DelegatedHoles[0].CountFloor ||
+		!strings.Contains(doc.DelegatedHoles[0].Reason, "at least 1") {
+		t.Errorf("an early stop: holes %+v, want one hidden hole, at least 1, a floor", doc.DelegatedHoles)
+	}
+	// The server token's walk stops the same way, with no hole.
+	var all sessionDoc
+	srv.delegatedSessions(context.Background(), "s_p", "", &all)
+	if len(all.DelegatedHoles) != 0 {
+		t.Errorf("an early stop, unscoped: holes %+v, want none", all.DelegatedHoles)
+	}
+}
+
+// cycleSessions answers the delegated reads of a forged hidden cycle:
+// s_p delegated s_h1 (pub_b), s_h1 delegated s_h2, and s_h2 claims
+// s_h1 as its child again — none in pub_a's scope.
+type cycleSessions struct {
+	obsdb.DB
+	reads *atomic.Int64
+}
+
+func (c cycleSessions) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionPage, error) {
+	if len(q.Parents) == 0 {
+		return c.DB.Sessions(ctx, q)
+	}
+	c.reads.Add(1)
+	if q.PublicID != "" {
+		return obsdb.SessionPage{}, nil
+	}
+	kids := map[string][]obsdb.SessionRow{
+		"s_p":  {{ID: "s_h1", PublicID: "pub_b", ParentSession: "s_p"}},
+		"s_h1": {{ID: "s_h2", PublicID: "pub_b", ParentSession: "s_h1"}},
+		"s_h2": {{ID: "s_h1", PublicID: "pub_b", ParentSession: "s_h2"}},
+	}
+	var page obsdb.SessionPage
+	for _, p := range q.Parents {
+		page.Sessions = append(page.Sessions, kids[p]...)
+	}
+	page.Total = len(page.Sessions)
+	if q.Limit > 0 && len(page.Sessions) > q.Limit {
+		page.Sessions = page.Sessions[:q.Limit]
+	}
+	return page, nil
+}
+
+// TestHiddenDelegatedCycle (P9-pre-go-fix6): forged lineage among
+// hidden sessions — a two-session cycle — is counted once per session:
+// 2, exact, never the ~500 the budget would let a re-count reach.
+func TestHiddenDelegatedCycle(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/cycle.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	var reads atomic.Int64
+	srv := New(DB(cycleSessions{DB: db, reads: &reads}))
+	t.Cleanup(func() { _ = srv.Close() })
+	var doc sessionDoc
+	srv.delegatedSessions(context.Background(), "s_p", "pub_a", &doc)
+	if len(doc.DelegatedHoles) != 1 || doc.DelegatedHoles[0].Count != 2 || doc.DelegatedHoles[0].CountFloor {
+		t.Errorf("a hidden cycle: holes %+v, want one hidden hole counting 2, exact", doc.DelegatedHoles)
+	}
+	if got := reads.Load(); got > 10 {
+		t.Errorf("a hidden cycle: %d delegated reads, want a handful", got)
+	}
+}
+
 // failDeepSessions fails every delegated read below root's own level.
 type failDeepSessions struct {
 	obsdb.DB

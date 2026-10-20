@@ -933,6 +933,11 @@ type delegatedSessionsFields struct {
 const (
 	delegatedCap     = 100
 	delegatedTreeCap = 500
+	// hiddenDelegatedPages bounds the pages of 500 one hiddenDelegated
+	// call reads for the hidden ids (P9-pre-go-fix6): the budget's worth
+	// and one more, the visible ones it skips past included — past it the
+	// count is a floor.
+	hiddenDelegatedPages = delegatedTreeCap/500 + 1
 )
 
 // publicResolution is GET /api/public/{public_id}: the public id is
@@ -2271,7 +2276,7 @@ walk:
 				// child's own delegated session under another public id
 				// as much as a direct one, and every session under a
 				// hidden one (P9-pre-web-fix3 F6).
-				n, front, floor := s.hiddenDelegated(ctx, id, level, hiddenFront, pub, scopedTotal, &hiddenBudget)
+				n, front, floor := s.hiddenDelegated(ctx, id, level, hiddenFront, pub, scopedTotal, &hiddenBudget, seen)
 				hidden += n
 				hiddenFront, hiddenFloor = front, hiddenFloor || floor
 			}
@@ -2302,9 +2307,14 @@ walk:
 	}
 	// Below the last visible level, the hidden sessions' own delegated
 	// sessions: counted, never read past their ids. A walk that stopped
-	// early (a failed read, the cap) leaves level set: its reason says so.
+	// early (a failed read, the cap) leaves level set: its reason says
+	// so, and the hidden sessions below it are not counted — a panel
+	// token's hidden count is then a floor (P9-pre-go-fix6).
+	if len(level) > 0 && pub != "" {
+		hiddenFloor = true
+	}
 	for len(level) == 0 && len(hiddenFront) > 0 {
-		n, front, floor := s.hiddenDelegated(ctx, id, nil, hiddenFront, pub, 0, &hiddenBudget)
+		n, front, floor := s.hiddenDelegated(ctx, id, nil, hiddenFront, pub, 0, &hiddenBudget, seen)
 		hidden += n
 		hiddenFront, hiddenFloor = front, hiddenFloor || floor
 	}
@@ -2350,11 +2360,15 @@ walk:
 // (callerLinked's rule) — one Limit 1 read — and, when some are hidden,
 // their ids (pages of 500, the ids alone: never shown), the hidden
 // parents of the next level, at most *budget over the whole walk
-// (delegatedTreeCap): past it floor, the deeper levels not counted. A
-// session under a hidden one is hidden whatever its public id. 0 for
-// an unscoped read, or when the unscoped read failed (logged; the
-// walk's own error says a failed scoped read).
-func (s *Server) hiddenDelegated(ctx context.Context, id string, level, hiddenFront []string, pub string, scopedTotal int, budget *int) (n int, front []string, floor bool) {
+// (delegatedTreeCap) and hiddenDelegatedPages pages a call: past
+// either floor, the deeper levels not counted. The paging stops once
+// every hidden one of the level is found. A session under a hidden one
+// is hidden whatever its public id. seen is the walk's own: a hidden
+// id already in it (forged or cyclic lineage — weft.session.parent is
+// ingested) is not counted again, and every new one joins it. 0 for an
+// unscoped read, or when the unscoped read failed (logged; the walk's
+// own error says a failed scoped read).
+func (s *Server) hiddenDelegated(ctx context.Context, id string, level, hiddenFront []string, pub string, scopedTotal int, budget *int, seen map[string]bool) (n int, front []string, floor bool) {
 	parents := append(slices.Clone(level), hiddenFront...)
 	if pub == "" || scopedTotal < 0 || len(parents) == 0 {
 		return 0, nil, false
@@ -2365,33 +2379,45 @@ func (s *Server) hiddenDelegated(ctx context.Context, id string, level, hiddenFr
 		slog.DebugContext(ctx, "studio: a session's unscoped delegated count could not be read", "session", id, "err", err)
 		return 0, nil, false
 	}
-	n = max(all.Total-scopedTotal, 0)
-	if n == 0 {
+	total := max(all.Total-scopedTotal, 0)
+	if total == 0 {
 		return 0, nil, false
 	}
 	underHidden := make(map[string]bool, len(hiddenFront))
 	for _, h := range hiddenFront {
 		underHidden[h] = true
 	}
+	dup := 0 // hidden ids the walk had already seen: not counted again
 	q.Limit = 500
-	for {
+	for pages := 0; ; pages++ {
+		if pages == hiddenDelegatedPages {
+			return total - dup, front, true
+		}
 		page, err := s.db.Sessions(ctx, q)
 		if err != nil {
 			slog.DebugContext(ctx, "studio: a session's hidden delegated sessions could not be read", "session", id, "err", err)
-			return n, front, true
+			return total - dup, front, true
 		}
 		for _, sr := range page.Sessions {
 			if sr.PublicID == pub && !underHidden[sr.ParentSession] {
 				continue
 			}
-			if *budget == 0 {
-				return n, front, true
+			if seen[sr.ID] {
+				dup++
+			} else {
+				if *budget == 0 {
+					return total - dup, front, true
+				}
+				*budget--
+				seen[sr.ID] = true
+				front = append(front, sr.ID)
 			}
-			*budget--
-			front = append(front, sr.ID)
+			if len(front)+dup >= total {
+				return len(front), front, false
+			}
 		}
 		if page.NextBefore == nil || len(page.Sessions) == 0 {
-			return n, front, false
+			return max(total-dup, len(front)), front, false
 		}
 		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
 	}

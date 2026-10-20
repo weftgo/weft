@@ -611,9 +611,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;
 replay a recorded real transcript with `wefttest.Replay(t, dir)` (record it
 once with `wefttest.Record`; ADR 0017) — the adapters' own parsing is proven
-by `wefttest/conformance` fixtures, not by replay; `make fuzz` runs the five
-fuzz targets (a new message part or event type adds a seed; a crasher becomes
-a committed seed).
+by `wefttest/conformance` fixtures, not by replay; `make fuzz` runs core's six
+fuzz targets and `make fuzz-thread` thread's five (a new message part or
+event type adds a seed; a crasher becomes a committed seed).
 Provider adapters (`weft/openai`, `weft/anthropic`, `weft/google` —
 packages of the framework module over the official vendor SDKs) pass the shared executable contract
 `wefttest/conformance` (ADR 0013); run it live behind `-tags live`.
@@ -748,5 +748,6 @@ ignore it.
 - Docs: `README.md` (usage), `docs/adr/` (why), this file (map),
   `docs/thread-operations.md` (running `weft/thread` in production),
   `docs/record-contract.md` (what the pipeline emits and `obsdb` reads),
-  `docs/mcp-recipe.md` (`weft mcp` from Claude Code and Cursor).
+  `docs/mcp-recipe.md` (`weft mcp` from Claude Code and Cursor),
+  `docs/testing.md` (every test kind: what, how, when).
   Update the one that applies in the same change.

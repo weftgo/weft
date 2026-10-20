@@ -1000,6 +1000,11 @@ a regression seed — the existing `FuzzRepair` seed got there that way.
 
 ### Testing
 
+[docs/testing.md](docs/testing.md) covers every kind of test weft
+runs: unit and contract tests, the offline gate, fuzz, stress, the
+nightly soak, ClickHouse, Studio and the panel, and the release
+checklist. This section is about testing *your* agents.
+
 In reach order: script the dialogue with
 `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))` —
 offline, deterministic, no key; compare bytes with `wefttest.Golden`;

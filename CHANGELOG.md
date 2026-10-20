@@ -8,6 +8,10 @@ module, ADR 0005).
 
 ## Unreleased
 
+### Added
+
+- docs: docs/testing.md — every kind of weft test in one guide (`make test`/vet/lint/fmt and `core/contract_test.go`, godoc examples, `make offline` and `WEFT_MODEL_REQUESTS=deny`, `wefttest` Script/Record/Replay and the conformance suite, the `live` tag, `make fuzz`/`fuzz-thread` and their eleven targets, `make stress` and `TestNestedRandomChains`' `POOL_CHAINS_*` knobs, the nightly `soak-thread`, ClickHouse, `studio-check`'s budgets and ledgers, `devtools-vite-check`, `mcp-check`, apidiff and the facades, the Go 1.26.0 floor, the phase gates, the arena): what each proves, the command, when it runs, measured durations, knobs, how to reproduce a failure; before-push and before-release checklists; which tests a new feature adds. Linked from AGENTS.md and README.md. AGENTS.md said `make fuzz` runs five targets; it runs core's six (and `make fuzz-thread` five more). ci.yml's studio-job comment said a 600 KiB gzip budget; the gate (Makefile `studio-check`) is 700 KiB.
+
 ### Fixed
 
 - core: the step's dispatch table no longer shares its backing array with the `ModelRequest.Tools` a model is handed. The loop dispatched from the very slice it passed down the `WrapModel` chain, with or without a `PrepareStep` chain, so a model or middleware reassigning `req.Tools[i]` changed what the step ran — another tool of the same name ran instead, and a `nil` element panicked `findTool` (under `Stream` outside the contained region, killing the process). The model now gets its own copy of the slice. Each message's `Content` slice is copied for the request too (one backing array per step, one allocation), so reassigning a part in `req.Messages[i].Content` no longer rewrites the run's transcript — under a `PrepareStep` chain too, where the model was handed the chain's own `Messages` (a message a function splices in and keeps across steps, a pinned instruction, was rewritten by a model writing into its request; `TestPrepareStepRetainedMessageSurvivesTheModel`). `ModelRequest`'s godoc names the copied slices; the bytes inside parts (`Args`, `Data`) stay shared and read-only.

@@ -14,9 +14,12 @@ import (
 // valid JSON — the common damage is a reply cut mid-object or wrapped
 // in a Markdown fence. Unterminated strings, objects, and arrays are
 // closed and fences stripped; when the result parses, it replaces the
-// original. Arguments that cannot be repaired pass through unchanged
-// and fail decoding as they would have, so the model still sees an
-// INVALID_INPUT result. Only tool-call events are touched.
+// original. Only JSON whitespace (space, tab, CR, LF) is trimmed: any
+// other rune, Unicode whitespace included, is the model's content and
+// reaches the tool byte-for-byte. Arguments that cannot be repaired
+// pass through unchanged and fail decoding as they would have, so the
+// model still sees an INVALID_INPUT result. Only tool-call events are
+// touched.
 func RepairJSON() core.ModelMiddleware {
 	return func(next core.Model) core.Model {
 		return &repairModel{next: next}
@@ -55,8 +58,16 @@ func (m *repairModel) Stream(ctx context.Context, req core.ModelRequest) iter.Se
 // the attempt — the stripped-and-closed text, handed back even when
 // it still is not valid JSON, so payload content survives byte-for-
 // byte — and the second reports whether the result is valid JSON.
+//
+// Only JSON whitespace (space, tab, CR, LF) is trimmed, around the
+// arguments and around a fence's payload: a raw NBSP, NEL, U+2028/2029,
+// U+2000–200A or U+3000 ending a truncated open string is payload
+// (0.18.0's strings.TrimSpace took it, and the tool got "prix" for
+// "prix\u00a0"). Unicode whitespace outside the document is not
+// trimmed either, so NBSP before ``` is no fence: such arguments are
+// not repaired and pass through as the model wrote them.
 func repairJSON(s string) (string, bool) {
-	s = strings.TrimSpace(s)
+	s = trimJSONSpace(s)
 	// Markdown fences: ```json ... ```, ```javascript ... ```, ``` ... ```.
 	// A language tag is letters followed by whitespace or the newline;
 	// any tag is stripped, and anything else survives — an untagged
@@ -68,8 +79,8 @@ func repairJSON(s string) (string, bool) {
 				rest = tail
 			}
 		}
-		rest = strings.TrimSuffix(strings.TrimSpace(rest), "```")
-		s = strings.TrimSpace(rest)
+		rest = strings.TrimSuffix(trimJSONSpace(rest), "```")
+		s = trimJSONSpace(rest)
 	}
 	if s == "" {
 		return "{}", true
@@ -81,6 +92,10 @@ func repairJSON(s string) (string, bool) {
 	// prefix salvage shares (internal/jsonclose).
 	return jsonclose.Close(s)
 }
+
+// trimJSONSpace trims JSON's insignificant whitespace (RFC 8259 §2:
+// space, tab, CR, LF) from both ends of s, and nothing else.
+func trimJSONSpace(s string) string { return strings.Trim(s, " \t\r\n") }
 
 // isASCIILetters reports whether s is one or more ASCII letters — the
 // shape of a fenced block's language tag (json, JSON, javascript).

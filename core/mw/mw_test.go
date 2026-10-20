@@ -353,6 +353,13 @@ func TestRepairJSON(t *testing.T) {
 		"```\n{\"a\":1}\n```":           `{"a":1}`,
 		`{"s":"say \"hi\`:               `{"s":"say \"hi\\"}`,
 		``:                              `{}`,
+		// A raw NBSP / U+2028 / U+3000 ending a cut string is payload:
+		// the tool gets it byte-for-byte (0.18.0 trimmed it away).
+		"{\"s\":\"prix\u00a0": "{\"s\":\"prix\u00a0\"}",
+		"{\"s\":\"a\u2028":    "{\"s\":\"a\u2028\"}",
+		"{\"s\":\"b\u3000":    "{\"s\":\"b\u3000\"}",
+		// ASCII whitespace around the document is still trimmed.
+		" \n{\"a\":1\t\n ": `{"a":1}`,
 	}
 	for in, want := range cases {
 		model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "t", Args: in}), wefttest.Say("ok"))

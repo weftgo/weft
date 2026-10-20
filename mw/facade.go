@@ -50,9 +50,12 @@ func Log(l *slog.Logger) weft.ModelMiddleware { return coremw.Log(l) }
 // valid JSON — the common damage is a reply cut mid-object or wrapped
 // in a Markdown fence. Unterminated strings, objects, and arrays are
 // closed and fences stripped; when the result parses, it replaces the
-// original. Arguments that cannot be repaired pass through unchanged
-// and fail decoding as they would have, so the model still sees an
-// INVALID_INPUT result. Only tool-call events are touched.
+// original. Only JSON whitespace (space, tab, CR, LF) is trimmed: any
+// other rune, Unicode whitespace included, is the model's content and
+// reaches the tool byte-for-byte. Arguments that cannot be repaired
+// pass through unchanged and fail decoding as they would have, so the
+// model still sees an INVALID_INPUT result. Only tool-call events are
+// touched.
 func RepairJSON() weft.ModelMiddleware { return coremw.RepairJSON() }
 
 // ErrRetryAfterTooLong is wrapped around a provider error whose

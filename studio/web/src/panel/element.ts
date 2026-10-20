@@ -49,6 +49,7 @@ import {
   decisionWords,
   decisionsNote,
   DONE,
+  expiryNext,
   expiryText,
   expiryTitle,
   EXPIRY_UNREAD,
@@ -879,8 +880,9 @@ export class WeftDevtools extends HTMLElement {
   private keys = false
   private body!: HTMLElement
   private last: PanelState = emptyPanelState()
-  /** The expiry clock's pending redraw (0: none). */
+  /** The expiry clock's pending redraw (0: none), due at due. */
   private tick = 0
+  private due = 0
   /** A press or an IME composition is in progress inside the dock:
    * redrawing now would take the pressed button from under the
    * pointer (no click follows) or end the composition. The redraw
@@ -2428,6 +2430,8 @@ export class WeftDevtools extends HTMLElement {
     if (this.holdTimer) clearTimeout(this.holdTimer)
     this.holdTimer = null
     clearTimeout(this.slow)
+    clearTimeout(this.tick)
+    this.tick = 0
     this.held = this.composing = false
     this.startSeq++ // a start still in flight is no longer this element's
     this.probe?.abort()
@@ -2509,6 +2513,9 @@ export class WeftDevtools extends HTMLElement {
 
   private draw(s: PanelState) {
     const root = this.body
+    // The expiry clock is re-armed by what this frame draws (expiry).
+    clearTimeout(this.tick)
+    this.tick = 0
     this.edSync(s.drawer?.key)
     // Build first, swap second: a throw while building leaves the dock
     // as it was.
@@ -5392,17 +5399,24 @@ export class WeftDevtools extends HTMLElement {
 
   /** expiry is a parked call's request expiry (UX-B-41) in Studio's
    * words and hover (lib/decisions.ts expiryText, expiryTitle); while it
-   * has not lapsed the panel redraws each second, as Studio's clock
-   * ticks. */
+   * has not lapsed the panel redraws when the words next change or it
+   * lapses (expiryNext, the soonest of the drawn calls'). Each draw
+   * clears the clock first: a frame that draws no open expiry (the
+   * lapse, another turn, the decision) leaves none pending. */
   private expiry(t: TurnView | undefined, id: string): HTMLElement[] {
     const at = t?.exp?.at.get(id)
     if (!at) return []
-    const w = expiryText(at, Date.now())
-    if (!w.lapsed)
-      this.tick ||= setTimeout(() => {
+    const now = Date.now()
+    const w = expiryText(at, now)
+    const d = expiryNext(at, now)
+    if (d && !(this.tick && this.due <= now + d)) {
+      clearTimeout(this.tick)
+      this.due = now + d
+      this.tick = setTimeout(() => {
         this.tick = 0
         this.render(this.last)
-      }, 1e3) as unknown as number
+      }, d) as unknown as number
+    }
     return [
       el("span", w.lapsed ? "weft-warn" : "weft-reason", ` · ${w.text}`, {
         title: expiryTitle(at),

@@ -12,6 +12,7 @@ import type { ContentAttrs } from "./honesty"
 import { diffPath } from "./stepdiff"
 import { dispositionName, exportPath } from "./saves"
 import { tokenScopeOf } from "./replay"
+import { marksCapped, runMarksPath } from "./decisions"
 import type { DiffDoc } from "./stepdiff"
 
 // ── DTO mirrors (S4.3) ─────────────────────────────────────────────
@@ -2348,10 +2349,8 @@ export async function fetchRunMarks(
   session: string,
   run: string
 ): Promise<{ marks: SessionMark[]; capped: boolean }> {
-  const page = await get<EntriesPage>(
-    `sessions/${encodeURIComponent(session)}/entries?run=${encodeURIComponent(run)}&limit=1000`
-  )
-  return { marks: page.entries, capped: page.total > page.entries.length }
+  const page = await get<EntriesPage>(runMarksPath(session, run))
+  return { marks: page.entries, capped: marksCapped(page) }
 }
 
 /** The run's own marks: read only when the timeline was cut. Under the

@@ -5,7 +5,7 @@
 // decided calls.
 import { describe, expect, it } from "vitest"
 
-import type { DecisionDoc } from "./api"
+import type { DecisionDoc, SessionMark } from "./api"
 import {
   decidedResult,
   decider,
@@ -13,7 +13,12 @@ import {
   decisionLine,
   decisionsNote,
   DONE,
+  expiryNext,
+  expiryText,
+  marksCapped,
   OUTCOME,
+  requestExpiries,
+  runMarksPath,
   resumedHead,
   VERB,
   withoutDecided,
@@ -285,5 +290,79 @@ describe("one verb vocabulary (UX-H-20)", () => {
     expect(Object.values(VERB)).toEqual(["approve", "deny", "resolve…"])
     for (const [d, w] of Object.entries(DONE))
       expect(appVerbWords({ state: "finished", decision: d }, "r").text).toBe(w)
+  })
+})
+
+// UX-B-41's request expiry, one rule for both surfaces (P9-pre-web-fix6).
+describe("a request expiry's rule, words and clock", () => {
+  const AT = "2026-10-01T09:00:41.000Z"
+  const at = Date.parse(AT)
+  const mark = (expiry: unknown, call = "c1"): SessionMark => ({
+    at: "2026-10-01T09:00:01Z",
+    record: "thread",
+    kind: "approval.request",
+    event: "weft.thread.approval.request",
+    lane: "approvals",
+    run_id: "r1",
+    turn: 1,
+    content_mark: "none",
+    fields: { call_id: call, expiry },
+  })
+
+  it("lapses past the stamp, never at it: thread's now.After(expiry)", () => {
+    expect(expiryText(AT, at).lapsed).toBe(false)
+    expect(expiryText(AT, at).text).toMatch(/\(in 0ms\)$/)
+    expect(expiryText(AT, at + 1).lapsed).toBe(true)
+    // The clock runs at the stamp (Studio's ticking, the panel's tick)
+    // and stops past it.
+    expect(expiryNext(AT, at)).toBe(1)
+    expect(expiryNext(AT, at + 1)).toBe(0)
+  })
+
+  it("drops an unparsable stamp in requestExpiries, for both surfaces", () => {
+    const exp = requestExpiries(
+      [
+        mark("not a time", "bad"),
+        mark("", "empty"),
+        mark(42, "num"),
+        mark(AT, "c1"),
+      ],
+      "r1"
+    )
+    expect([...exp]).toEqual([["c1", AT]])
+  })
+
+  it("schedules the next redraw for when the words next change", () => {
+    const words = (now: number) => expiryText(AT, now).text
+    const check = (r: number) => {
+      const now = at - r
+      const d = expiryNext(AT, now)
+      expect(d).toBeGreaterThan(0)
+      // From an hour on nothing changes before the tick lands; below,
+      // the clock draws once a second (Studio's cadence).
+      if (r >= 3_600_000) expect(words(now + d - 1)).toBe(words(now))
+      expect(words(now + d)).not.toBe(words(now))
+      return d
+    }
+    // h:mm: the next minute the rounded seconds show.
+    expect(check(7_000_000)).toBe(40_501)
+    expect(check(3_600_000)).toBe(501)
+    expect(words(at - 3_600_000 + 501)).toMatch(/\(in 59m59s\)$/)
+    // m:ss: the rounding edge of each second.
+    expect(check(120_000)).toBe(501)
+    // Under a minute, tenths: the whole tenth of the next second.
+    expect(check(40_000)).toBe(951)
+    expect(words(at - 40_000 + 951)).toMatch(/\(in 39\.0s\)$/)
+    expect(check(2_500)).toBe(451)
+    // The lapse instant itself, when it comes first.
+    expect(expiryNext(AT, at - 40)).toBe(41)
+  })
+
+  it("shares the run-marks read's path and cap rule", () => {
+    expect(runMarksPath("s 1", "r/1")).toBe(
+      "sessions/s%201/entries?run=r%2F1&limit=1000"
+    )
+    expect(marksCapped({ total: 2, entries: [1] })).toBe(true)
+    expect(marksCapped({ total: 1, entries: [1] })).toBe(false)
   })
 })

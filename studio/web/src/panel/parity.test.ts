@@ -28,6 +28,7 @@ import { PANEL_CSS } from "./styles"
 import { clip, NO_CONTENT } from "../lib/title"
 import type { DecisionDoc, RunDoc, RunRow } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
+import { EXPIRY_UNREAD } from "../lib/decisions"
 import {
   REQUEST_NO_INDEX_REASON,
   REQUEST_NO_RECORD_REASON,
@@ -2095,7 +2096,17 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
     content_mark: "none",
     fields: { call_id: APP_CALL.id, expiry: at },
   })
-  const serve = (at: string, studioMeta = false) =>
+  const fail = () => apiError(500, "internal", "session store unavailable")
+  /** fails: both reads answer 500 (the panel's /entries?run=, Studio's
+   * timeline). */
+  const serve = (at: string, studioMeta = false, fails = false) =>
+    fails
+      ? serveAppTurn(new FakeStudio(), { studioMeta })
+          .on(`GET sessions/${APP_SESSION}/timeline`, fail)
+          .on(`GET sessions/${APP_SESSION}/entries`, fail)
+          .install()
+      : serveOK(at, studioMeta)
+  const serveOK = (at: string, studioMeta: boolean) =>
     serveAppTurn(new FakeStudio(), { studioMeta })
       .on(`GET sessions/${APP_SESSION}/timeline`, {
         session_id: APP_SESSION,
@@ -2185,6 +2196,74 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
       expect(panel).toEqual(studio)
       expect(panel.state).toBe(state)
     })
+
+  it("a failed read draws the same not_recorded badge, no expiry (P9-pre-web-fix6)", async () => {
+    const badgeOf = (n: Element) => ({
+      hole: n.getAttribute("data-hole"),
+      title: n.getAttribute("title"),
+    })
+    serve("", false, true)
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+      "data-public-id": APP_PUB,
+    })
+    await vi.waitFor(
+      () =>
+        expect(
+          all(el, ".weft-turn").some((b) =>
+            (b.getAttribute("data-weft-run") ?? "").includes(APP_PARKED)
+          )
+        ).toBe(true),
+      { timeout: 5_000 }
+    )
+    click(
+      all(el, ".weft-turn").find((b) =>
+        (b.getAttribute("data-weft-run") ?? "").includes(APP_PARKED)
+      )
+    )
+    const pb = await vi.waitFor(
+      () => {
+        const n = $(el, `.weft-call[data-key="${APP_CALL.id}"]`)
+          ?.closest(".weft-step")
+          ?.querySelector('.weft-step-h [data-hole="not_recorded"]')
+        expect(n).toBeTruthy()
+        return n!
+      },
+      { timeout: 5_000 }
+    )
+    const panel = badgeOf(pb)
+    expect($(el, "[data-request-expiry]")).toBeNull()
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serve("", true, true)
+    renderApp(`/runs/${APP_PARKED}?view=story`)
+    const sb = await waitFor(
+      () => {
+        const n = document.querySelector(
+          '[data-parked] [data-hole="not_recorded"]'
+        )
+        expect(n).toBeTruthy()
+        return n!
+      },
+      { timeout: 8_000 }
+    )
+    const studio = badgeOf(sb)
+    expect(document.querySelector("[data-request-expiry]")).toBeNull()
+    cleanup()
+    expect(panel).toEqual(studio)
+    expect(panel.title).toBe(
+      `${EXPIRY_UNREAD.reason} — fix: ${EXPIRY_UNREAD.fix}`
+    )
+  })
 })
 
 describe("decisions on both surfaces (U13.2)", () => {

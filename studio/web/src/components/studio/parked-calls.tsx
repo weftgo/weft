@@ -25,6 +25,8 @@ import {
   decisionDetail,
   decisionLine,
   decisionsNote,
+  EXPIRY_UNREAD,
+  expiryNext,
   expiryWords,
   outcomeOf,
   requestExpiries,
@@ -470,14 +472,19 @@ function useRequestExpiries(doc: RunDoc) {
     : new Map<string, string>()
   // The run's own read capped too: an expiry past it is not read, said.
   const capped = on && cut && !!own.data?.capped
+  // A read that failed: the expiries are not known, said as the panel
+  // says it (lib/decisions.ts EXPIRY_UNREAD).
+  const unread = on && (tl.isError || (cut && own.isError))
   const [now, setNow] = useState(() => Date.now())
-  const ticking = [...exp.values()].some((e) => Date.parse(e) > now)
+  // Open until the stamp is past (thread's rule; expiryNext is 0 once
+  // expiryText reads it lapsed, the panel's clock alike).
+  const ticking = [...exp.values()].some((e) => expiryNext(e, now) > 0)
   useEffect(() => {
     if (!ticking) return
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [ticking])
-  return { exp, now, capped }
+  return { exp, now, capped, unread }
 }
 
 export function ParkedCalls({
@@ -559,6 +566,9 @@ export function ParkedCalls({
       </span>
       {expiry.capped && shown !== "resumed" ? (
         <HoleBadge hole="truncated" cause="response_cap" {...RUN_MARKS_HOLE} />
+      ) : null}
+      {expiry.unread && shown !== "resumed" ? (
+        <HoleBadge hole="not_recorded" {...EXPIRY_UNREAD} />
       ) : null}
       <ul className="mt-1 space-y-0.5">
         {pending.map((p) => (

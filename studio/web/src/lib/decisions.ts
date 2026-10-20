@@ -278,8 +278,10 @@ export function withoutDecided<
 
 /** requestExpiries is each parked call's request expiry (UX-B-41):
  * the approval.request records filed under runID whose expiry field
- * (thread.RequestExpiry, RFC 3339) is set, by call id. Empty when the
- * session's state log was not read or no request has one. */
+ * (thread.RequestExpiry, RFC 3339) is set and parses, by call id — an
+ * unparsable stamp is dropped here, for both surfaces, never drawn as
+ * a clock that cannot lapse. Empty when the session's state log was
+ * not read or no request has one. */
 export function requestExpiries(
   marks: readonly SessionMark[],
   runID: string
@@ -289,18 +291,33 @@ export function requestExpiries(
     if (m.kind !== "approval.request" || m.run_id !== runID) continue
     const call = m.fields.call_id
     const exp = m.fields.expiry
-    if (typeof call === "string" && typeof exp === "string" && exp)
+    if (
+      typeof call === "string" &&
+      typeof exp === "string" &&
+      !Number.isNaN(Date.parse(exp))
+    )
       out.set(call, exp)
   }
   return out
 }
 
-/** A parked session turn's request expiries the panel could not read
+/** The path of one run's own state-log marks, in one read (GET
+ * /entries?run=, ≤ 1,000): lib/api.ts fetchRunMarks's and the panel's
+ * request-expiry read. */
+export const runMarksPath = (session: string, run: string) =>
+  `sessions/${encodeURIComponent(session)}/entries?run=${encodeURIComponent(run)}&limit=1000`
+
+/** marksCapped: the run holds more marks than the page read (past
+ * runMarksPath's cap, RUN_MARKS_HOLE). */
+export const marksCapped = (p: { total: number; entries: unknown[] }) =>
+  p.total > p.entries.length
+
+/** A parked session turn's request expiries a surface could not read
  * (hole not_recorded): its run's state-log marks did not answer. */
 export const EXPIRY_UNREAD = {
   reason:
     "this run's state-log marks could not be read: a request expiry is not shown",
-  fix: "open the turn in Studio",
+  fix: "reopen the turn to read them again",
 }
 
 /** expiryWords is a parked call's expiry beside its "awaiting a
@@ -316,14 +333,16 @@ export function expiryWords(
   return { ...expiryText(expiry, now), title: expiryTitle(expiry) }
 }
 
-/** expiryText is expiryWords without its title: the devtools panel
- * draws the words alone (its size budget, UX-B-41). */
+/** expiryText is expiryWords' words and state without the hover, which
+ * the panel takes from expiryTitle beside them. lapsed is thread's rule
+ * (approval.go: now.After(expiry)): at the stamp itself it is still
+ * open. */
 export function expiryText(
   expiry: string,
   now: number
 ): { text: string; lapsed: boolean } {
   const at = Date.parse(expiry)
-  const lapsed = !Number.isNaN(at) && at <= now
+  const lapsed = at < now
   const hms = clockTime(expiry, false)
   return {
     text: lapsed
@@ -337,3 +356,20 @@ export function expiryText(
  * rule. */
 export const expiryTitle = (expiry: string) =>
   `the request expires ${absoluteTime(expiry)} (thread.RequestExpiry): an expired request is denied the next time the session is touched — a decide, a send, a resume — never on a timer`
+
+/** expiryNext is how long until an expiry's words next change (ms),
+ * the instant it lapses included; 0 once lapsed (no clock). What
+ * spanMs prints of the remainder r: from an hour on h:mm, the minute
+ * dropping as the rounded seconds cross one (59m59s at 3,599,499 ms) —
+ * the clock waits for it; below, m:ss and then tenths of a second,
+ * redrawn once a second as Studio's clock ticks: on the rounding edge
+ * of each second (m:ss), on its whole tenth (n.0s) under a minute. */
+export function expiryNext(expiry: string, now: number): number {
+  const r = Date.parse(expiry) - now
+  return r < 0
+    ? 0
+    : Math.min(
+        r + 1,
+        ((r + (r < 59_950 ? 950 : 500)) % (r < 3_599_500 ? 1e3 : 6e4)) + 1
+      )
+}

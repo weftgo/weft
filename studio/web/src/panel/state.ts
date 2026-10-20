@@ -27,7 +27,7 @@ import type {
 } from "../lib/api"
 import { childRun, HOLES, isLive, linkedRun } from "../lib/honesty"
 import { byStep } from "../lib/requests"
-import { requestExpiries } from "../lib/decisions"
+import { marksCapped, requestExpiries, runMarksPath } from "../lib/decisions"
 import type { StepRequests } from "../lib/requests"
 import { serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
@@ -260,9 +260,18 @@ export interface TurnView {
    * again (once per frame, not once per delta). */
   stale: boolean
   /** A parked session turn's request expiries by call (UX-B-41), read
-   * once from its session's /entries?run= as Studio reads them; hole
-   * truncated past that read's cap, not_recorded when it failed. */
-  exp?: { at: Map<string, string>; hole?: string }
+   * from its session's /entries?run= as Studio reads them (readExp);
+   * hole truncated past that read's cap, not_recorded when it failed. */
+  exp?: {
+    at: Map<string, string>
+    hole?: string
+    /** Reads started (readExp: three at most). */
+    n: number
+    /** A read is out. */
+    busy?: boolean
+    /** The answer may be early or failed: read again. */
+    again?: boolean
+  }
 }
 
 /** A run the panel follows live — the open turn, or the result pane's
@@ -1113,6 +1122,49 @@ export class PanelModel {
     return !!(this.narrowing.session ? childRun(r) : linkedRun(r))
   }
 
+  /** readExp reads a parked session turn's request expiries (its doc
+   * pending and undecided, capability "timeline"), one read out at a
+   * time. thread files the approval.request records after the run's
+   * end, so on a batched destination they can land after the read: an
+   * answer with no expiry for an awaiting call, or a failed one, is
+   * read again — with the next loadTurn and once 2 s on, three reads at
+   * most, never a loop. An answer for a view the user has left is
+   * dropped (a return reads afresh). */
+  private readExp(view: TurnView) {
+    const doc = view.doc
+    const x = view.exp
+    if (
+      !doc?.session_id ||
+      !doc.pending ||
+      doc.decided ||
+      (x && (x.busy || !x.again || x.n > 2)) ||
+      this.state.turn !== view ||
+      !this.state.meta?.capabilities.includes("timeline")
+    )
+      return
+    const id = view.id
+    const n = (x?.n ?? 0) + 1
+    view.exp = { at: new Map(), ...x, n, busy: true }
+    void panelGet<EntriesPage>(this.ep, runMarksPath(doc.session_id, id))
+      .then(
+        (p) => ({
+          at: requestExpiries(p.entries, id),
+          hole: marksCapped(p) ? "truncated" : "",
+        }),
+        () => ({ at: new Map<string, string>(), hole: "not_recorded" })
+      )
+      .then((r) => {
+        if (this.disposed || this.state.turn !== view) return
+        const again =
+          r.hole === "not_recorded" ||
+          !r.at.size ||
+          view.folded.pending.some((c) => !r.at.has(c.id))
+        view.exp = { ...r, n, again }
+        if (again && n < 3) this.after(2e3, () => this.readExp(view))
+        this.emit()
+      })
+  }
+
   /** upsertRun merges one run row by id: the live lane forwards every
    * change of a run and never dedupes ("a run row may legitimately
    * change", studio/live.go's liveDedupKey), so a later frame replaces
@@ -1437,30 +1489,7 @@ export class PanelModel {
     }
     if (doc) {
       view.doc = doc
-      const sid = doc.session_id
-      if (
-        sid &&
-        doc.pending &&
-        !doc.decided &&
-        !view.exp &&
-        this.state.meta?.capabilities.includes("timeline")
-      ) {
-        // Read once: a doc read again while this one is out asks nothing.
-        view.exp = { at: new Map() }
-        void panelGet<EntriesPage>(
-          ep,
-          `sessions/${encodeURIComponent(sid)}/entries?run=${encodeURIComponent(id)}&limit=1000`
-        )
-          .then(
-            (p) =>
-              (view.exp = {
-                at: requestExpiries(p.entries, id),
-                hole: p.total > p.entries.length ? "truncated" : "",
-              }),
-            () => (view.exp = { at: new Map(), hole: "not_recorded" })
-          )
-          .then(() => this.emit())
-      }
+      this.readExp(view)
       // The doc is the row as of now: a list loaded a moment ago may
       // still read running for a run that has since ended. The row moves
       // only ever forward: a doc read before a run frame can land after

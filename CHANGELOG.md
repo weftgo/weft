@@ -6,6 +6,13 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Fixed
+
+- core: the step's dispatch table no longer shares its backing array with the `ModelRequest.Tools` a model is handed. Under a `PrepareStep` chain the loop dispatched from the very slice it then passed down the `WrapModel` chain, so a model or middleware reassigning `req.Tools[i]` changed what the step ran — another tool of the same name ran instead, and a `nil` element panicked `findTool` (under `Stream` outside the contained region, killing the process). The model now gets its own copy of the slice; without a `PrepareStep` chain the dispatch table was already private. Each message's `Content` slice is copied for the request too (one backing array per step, one allocation), so reassigning a part in `req.Messages[i].Content` no longer rewrites the run's transcript. `ModelRequest`'s godoc names the copied slices; the bytes inside parts (`Args`, `Data`) stay shared and read-only.
+- core: `OutputDecoder` partials only grow. The prefix closer dropped an open array whose tail could not close yet — a key cut mid-string, a literal cut mid-token inside it — back to the last top-level member, so a streamed partial could go 2 items → 0 → 2 and a UI flickered. An uncloseable tail is now cut back to where it began and no further: a number keeps its longest valid prefix (`1e` → `1`), a cut literal goes and its key closes as `null`, a cut `\u` escape goes, and otherwise only the innermost member is dropped, back to the last comma or open bracket at any depth (a first top-level member still being written still reports no partial). `FuzzPartialJSON` now also asserts monotonic partials across every truncation.
+
 ## 0.18.0 — 2026-10-20
 
 ### Added

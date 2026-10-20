@@ -19,8 +19,14 @@ func TestClosedPrefix(t *testing.T) {
 		{`{"a":{"x":1},"b":"te`, `{"a":{"x":1},"b":"te"}`}, // open string closes over its content
 		{`{"a":"he`, `{"a":"he"}`},
 		{`{"a":1,"b":{"c":2`, `{"a":1,"b":{"c":2}}`},
-		{`{"a":1,"b":tru`, `{"a":1}`}, // a bare literal cut mid-token cannot close: member dropped
-		{`{"a":1,"b":1e`, `{"a":1}`},
+		{`{"a":1,"b":tru`, `{"a":1,"b":null}`}, // a bare literal cut mid-token: the token goes, the key closes as null
+		{`{"a":1,"b":1e`, `{"a":1,"b":1}`},     // a number keeps its longest valid prefix
+		{`{"a":1,"b":-`, `{"a":1,"b":null}`},
+		{`{"a":[1,2,tru`, `{"a":[1,2]}`},                                    // an open array keeps its complete elements (0.18.1)
+		{`{"a":1,"l":[{"x":1},{"x`, `{"a":1,"l":[{"x":1},{}]}`},             // a key cut mid-string: the innermost member goes
+		{`{"a":1,"l":[{"x":1},{"x":2,"y"`, `{"a":1,"l":[{"x":1},{"x":2}]}`}, // a key with no colon yet
+		{`{"a":"x\u00`, `{"a":"x"}`},                                        // a string cut inside a \u escape
+		{`{"a":"xé`, `{"a":"xé"}`},
 		{`[1,2,`, `[1,2]`},
 		{`[1,2`, `[1,2]`},
 		{`{"a":"x\\"`, `{"a":"x\\"}`}, // dangling escape closed before the quote
@@ -39,7 +45,9 @@ func TestClosedPrefix(t *testing.T) {
 // panic, and for any decodable JSON document, the closed prefix of a
 // truncation never decodes to more populated fields than the closed
 // prefix of the whole string — the decoder's filling-form promise
-// (TODO §2a.6).
+// (TODO §2a.6) — and, from one truncation to the next, never loses a
+// field or an array element the shorter one had: the decoder's
+// partials are monotonic (0.18.1), whatever the chunking.
 func FuzzPartialJSON(f *testing.F) {
 	for _, seed := range []string{
 		`{"name":"Ada","count":4}`,
@@ -47,6 +55,8 @@ func FuzzPartialJSON(f *testing.F) {
 		`{"esc":"a\"b\\c","t":1e5}`,
 		`[1,2,3]`,
 		`{"unicode":"héllo","emoji":"🎮"}`,
+		`{"destination":"Lisbon","nights":3,"legs":[{"from":"AMS","to":"LIS","flight":"KL1691"},{"from":"LIS","to":"AMS","flight":"KL1692"}]}`,
+		`{"l":[true,false,null,-1.5e+3,"é"],"n":[[1],[{"k":[]}]]}`,
 	} {
 		f.Add(seed)
 	}
@@ -70,9 +80,16 @@ func FuzzPartialJSON(f *testing.F) {
 		if err := json.Unmarshal([]byte(full), &fullDoc); err != nil {
 			t.Fatalf("closedPrefix(%q) = %q, which does not decode: %v", data, full, err)
 		}
+		var prev any
 		for i := 0; i <= len(data); i++ {
 			part := closedPrefix(data[:i])
 			if part == "" {
+				// Nothing is allowed only while nothing was had: "{" closes
+				// to {}, `{"na` to nothing (no partial yet) — the decoder
+				// keeps its last good partial across it.
+				if prev != nil && !grownFrom(prev, map[string]any{}) && !grownFrom(prev, []any{}) {
+					t.Fatalf("prefix %q of %q closes to nothing after an earlier prefix closed to %#v", data[:i], data, prev)
+				}
 				continue
 			}
 			var partDoc any
@@ -83,6 +100,10 @@ func FuzzPartialJSON(f *testing.F) {
 				t.Fatalf("prefix %q of %q decodes to more than the full closed prefix %q:\n%#v\nvs\n%#v",
 					part, data, full, partDoc, fullDoc)
 			}
+			if prev != nil && !grownFrom(prev, partDoc) {
+				t.Fatalf("prefix %q of %q shrank the partial:\n%#v\nthen\n%#v", data[:i], data, prev, partDoc)
+			}
+			prev = partDoc
 		}
 	})
 }
@@ -160,5 +181,40 @@ func subsetOf(part, whole any) bool {
 		return ok && len(p) <= len(w)
 	default:
 		return true // a scalar present in part: whole carries some value
+	}
+}
+
+// grownFrom reports whether next keeps everything prev had: every key
+// of an object (recursively grown), every element of an array (the
+// array no shorter, each element grown). Scalars may change — a string
+// or number still being written grows, a dangling key's null fills.
+// (contract_test.go's twin holds the public decoder to the same rule.)
+func grownFrom(prev, next any) bool {
+	switch p := prev.(type) {
+	case map[string]any:
+		n, ok := next.(map[string]any)
+		if !ok {
+			return false
+		}
+		for k, v := range p {
+			nv, ok := n[k]
+			if !ok || !grownFrom(v, nv) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		n, ok := next.([]any)
+		if !ok || len(n) < len(p) {
+			return false
+		}
+		for i := range p {
+			if !grownFrom(p[i], n[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return true
 	}
 }

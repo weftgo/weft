@@ -455,8 +455,8 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 
 		req := ModelRequest{
 			System:   cfg.effectiveSystem(a.system),
-			Messages: slices.Clone(res.Messages), // adapters cannot reach the run's transcript
-			Tools:    slices.Clone(tools),        // nor the agent's tool list
+			Messages: requestMessages(res.Messages), // adapters cannot reach the run's transcript
+			Tools:    slices.Clone(tools),           // nor the agent's tool list
 			// A run-level Thinking option overrides the agent's default
 			// for this run alone (the thinkingOption applies to both);
 			// so do the dual Instructions/MaxSteps/Parallelism.
@@ -474,9 +474,10 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// dropped part, re-formed argument bytes, a rewritten
 		// description — reaches the run's transcript or the agent's
 		// frozen registry. The model seam keeps the lighter slice
-		// copies: adapters hold the read-only request contract.
+		// copies (requestMessages): adapters hold the read-only request
+		// contract for the payload bytes inside parts.
 		if a.prepare != nil {
-			req.Messages = cloneMessages(req.Messages)
+			req.Messages = cloneMessages(res.Messages)
 			req.Tools = cloneTools(req.Tools)
 		}
 		// The one loop knob: PrepareStep rewrites the request before the
@@ -499,11 +500,17 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// the fetched tools, which the chain's deep copies leave
 		// untouched.
 		inputs := stepInputs{model: model, before: before, tools: tools, prepared: a.prepare != nil}
-		tools = req.Tools
 		if a.prepare != nil {
+			// The chain's tools are the step's snapshot; the model is
+			// handed a copy of the slice, so a model or middleware that
+			// reassigns an element (ModelRequest is the model's copy)
+			// never changes what this step dispatches. Without a chain
+			// tools is already private: req.Tools was cloned from it.
+			tools = req.Tools
 			if err := validateSnapshot(tools); err != nil {
 				return fail(step, err)
 			}
+			req.Tools = slices.Clone(tools)
 		}
 		// A forced choice runs against the same snapshot the step
 		// advertises and dispatches over — validated after the
@@ -893,6 +900,34 @@ func snapshotPending(pending []ToolCallPart) []ToolCallPart {
 	for i, c := range pending {
 		c.Args = cloneRaw(c.Args)
 		out[i] = c
+	}
+	return out
+}
+
+// requestMessages is the model seam's copy of the transcript: a fresh
+// Messages slice and a fresh Content slice per message — every Content
+// slice carved, capacity-capped, out of one shared backing array, so the
+// copy costs two allocations whatever the transcript's length. A model
+// or middleware that reassigns a message, or one of a message's parts,
+// writes into its own copy and never into the run's transcript
+// (ModelRequest's godoc). The part values themselves are shared: the
+// bytes behind a tool call's Args or a file's Data stay read-only.
+func requestMessages(msgs []Message) []Message {
+	if msgs == nil {
+		return nil
+	}
+	n := 0
+	for _, m := range msgs {
+		n += len(m.Content)
+	}
+	out := make([]Message, len(msgs))
+	parts := make([]Part, n)
+	for i, m := range msgs {
+		if m.Content != nil {
+			k := copy(parts, m.Content)
+			m.Content, parts = parts[:k:k], parts[k:]
+		}
+		out[i] = m
 	}
 	return out
 }

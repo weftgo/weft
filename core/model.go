@@ -150,11 +150,13 @@ type RequestParams struct {
 // instruction, the transcript so far, and the callable tools.
 //
 // Read-only: the loop builds each request with fresh copies of the
-// Messages and Tools slices, so appending to them or reassigning their
-// elements cannot reach the run or the agent. The values inside remain
-// shared — message Content parts, and ToolDef fields frozen at
-// construction — so implementations must still not modify them, and
-// must clone anything they retain beyond the call.
+// Messages and Tools slices and of each message's Content slice, so
+// appending to them or reassigning their elements — a message, a part,
+// a tool — cannot reach the run's transcript, what the step
+// dispatches, or the agent. The values inside remain shared — the
+// bytes behind a part (a tool call's Args, a file's Data), and ToolDef
+// fields frozen at construction — so implementations must still not
+// modify them, and must clone anything they retain beyond the call.
 type ModelRequest struct {
 	System   string
 	Messages []Message

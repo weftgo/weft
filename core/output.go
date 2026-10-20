@@ -163,8 +163,12 @@ func OutputOf[Out any](res *RunResult) (Out, error) {
 // job. Decode is lenient and prefix-shaped: after each delta it
 // attempts the longest closed prefix of the arguments so far (see
 // partial_json.go) and reports it when it changed and decoded — fields
-// not yet present stay zero, a garbage mid-stream prefix keeps the
-// last good partial, and errors surface only at Result, which follows
+// not yet present stay zero, partials only grow (a later partial never
+// holds fewer fields or array elements than an earlier one: a value
+// cut mid-token, an open array's element still being written, is
+// dropped back to where it began, never further), a garbage mid-stream
+// prefix keeps the last good partial, and errors surface only at
+// Result, which follows
 // the OutputOf rule (the last submit_output call with a non-error
 // result) and returns ErrNoOutput when none finished. Never
 // model-visible: the decoder reads the stream and writes nothing back.

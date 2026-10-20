@@ -10,6 +10,7 @@ import (
 	"iter"
 	"log/slog"
 	"maps"
+	"math/rand/v2"
 	"os"
 	"reflect"
 	"regexp"
@@ -6995,4 +6996,190 @@ func TestUserErrorPanicsAreNotProviderPanics(t *testing.T) {
 			t.Errorf("a user error's panic named as a provider's: %s", warns)
 		}
 	})
+}
+
+// mutatingModel is a model middleware that vandalises the request it is
+// handed — every element of Tools, every element of Messages and of each
+// message's Content — before passing it on. The request is the model's
+// copy (ModelRequest's godoc): none of it may reach what the loop
+// dispatches or the transcript it keeps.
+type mutatingModel struct {
+	next core.Model
+	tool func(*core.ToolDef) *core.ToolDef
+}
+
+func (m mutatingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	for i := range req.Tools {
+		req.Tools[i] = m.tool(req.Tools[i])
+	}
+	for i := range req.Messages {
+		for j := range req.Messages[i].Content {
+			req.Messages[i].Content[j] = core.TextPart{Text: "corrupted"}
+		}
+		req.Messages[i].Role = core.RoleUser
+	}
+	return m.next.Stream(ctx, req)
+}
+
+// The request a model (or a WrapModel middleware) is handed is its own
+// copy: replacing a Tools element — with nil, or with another tool of the
+// same name — and rewriting Messages and their Content elements change
+// neither what the step dispatches nor the run's transcript, under
+// Generate and Stream alike (0.18.1: a nil Tools element panicked the
+// dispatch, outside the contained region under Stream).
+func TestModelRequestMutationCannotReachTheRun(t *testing.T) {
+	var decoyRan atomic.Int32
+	decoy := core.Tool("lookup", "Decoy.", func(ctx context.Context, in struct{}) (string, error) {
+		decoyRan.Add(1)
+		return "decoy", nil
+	})
+	for _, tc := range []struct {
+		name string
+		tool func(*core.ToolDef) *core.ToolDef
+	}{
+		{"nil", func(*core.ToolDef) *core.ToolDef { return nil }},
+		{"decoy", func(*core.ToolDef) *core.ToolDef { return decoy }},
+	} {
+		for _, mode := range []string{"generate", "stream"} {
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				decoyRan.Store(0)
+				var ran atomic.Int32
+				lookup := core.Tool("lookup", "Look up.", func(ctx context.Context, in struct{}) (string, error) {
+					ran.Add(1)
+					return "found", nil
+				})
+				model := wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "lookup", ID: "c1"}),
+					wefttest.Say("done"),
+				)
+				agt := core.New(model, lookup, core.WrapModel(func(next core.Model) core.Model {
+					return mutatingModel{next: next, tool: tc.tool}
+				}))
+				var (
+					res *core.RunResult
+					err error
+				)
+				if mode == "generate" {
+					res, err = agt.Generate(context.Background(), core.Prompt("hello"))
+				} else {
+					run := agt.Stream(context.Background(), core.Prompt("hello"))
+					for _, e := range run.Events() {
+						if e != nil {
+							break
+						}
+					}
+					res, err = run.Wait()
+				}
+				if err != nil {
+					t.Fatalf("run failed: %v", err)
+				}
+				if ran.Load() != 1 || decoyRan.Load() != 0 {
+					t.Fatalf("lookup ran %d times, decoy %d: the model's request reached dispatch", ran.Load(), decoyRan.Load())
+				}
+				want := []core.Message{
+					{Role: core.RoleUser, Content: []core.Part{core.TextPart{Text: "hello"}}},
+					{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "lookup", Args: json.RawMessage("{}")}}},
+					{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "lookup", Content: "found"}}},
+					{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: "done"}}},
+				}
+				if !reflect.DeepEqual(res.Messages, want) {
+					t.Fatalf("transcript corrupted by the model's request:\n got %#v\nwant %#v", res.Messages, want)
+				}
+			})
+		}
+	}
+}
+
+// grownFrom reports whether next keeps everything prev had: every key
+// of an object (recursively grown), every element of an array (the
+// array no shorter, each element grown). Scalars may change — a string
+// or number still being written grows, a dangling key's null fills.
+func grownFrom(prev, next any) bool {
+	switch p := prev.(type) {
+	case map[string]any:
+		n, ok := next.(map[string]any)
+		if !ok {
+			return false
+		}
+		for k, v := range p {
+			nv, ok := n[k]
+			if !ok || !grownFrom(v, nv) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		n, ok := next.([]any)
+		if !ok || len(n) < len(p) {
+			return false
+		}
+		for i := range p {
+			if !grownFrom(p[i], n[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return true
+	}
+}
+
+// The OutputDecoder's partials grow monotonically (NewOutputDecoder's
+// godoc): a later partial never holds fewer fields or array elements
+// than an earlier one, however the arguments are chunked. 0.18.1: an
+// open array whose tail could not close yet — a key or a literal cut
+// mid-token inside it — was dropped whole, so a streamed partial went
+// 2 legs → 0 → 2 and a UI flickered.
+func TestOutputDecoderPartialsNeverShrink(t *testing.T) {
+	docs := []string{
+		// The arena's out.decoder itinerary.
+		`{"destination":"Lisbon","nights":3,"legs":[{"from":"AMS","to":"LIS","flight":"KL1691"},{"from":"LIS","to":"AMS","flight":"KL1692"}]}`,
+		`{"items":[1,2,true,false,null,-12.5e+3,"x\"y\u00e9"],"ok":true,"n":{"deep":[[1,2],[3,{"k":null}]]}}`,
+		`{"tags":["a","b","c"],"score":0.25,"nested":{"list":[{"id":1,"done":false},{"id":22,"done":true}]}}`,
+		`{"emoji":"🎮 héllo","esc":"\\\n\t","arr":[[],{},[{}]],"last":1e10}`,
+	}
+	check := func(t *testing.T, doc string, chunks []string) {
+		t.Helper()
+		dec := core.NewOutputDecoder[map[string]any]()
+		dec.Feed(core.StepStart{Index: 0})
+		var prev map[string]any
+		for i, c := range chunks {
+			p, ok := dec.Feed(core.ToolArgsDelta{Name: "submit_output", Args: c})
+			if !ok {
+				continue
+			}
+			if prev != nil && !grownFrom(prev, p) {
+				t.Fatalf("partial shrank at chunk %d (%q) of %q:\nbefore %v\nafter  %v", i, c, doc, prev, p)
+			}
+			prev = p
+		}
+		var whole map[string]any
+		if err := json.Unmarshal([]byte(doc), &whole); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(prev, whole) {
+			t.Fatalf("last partial %v, want the whole document %v", prev, whole)
+		}
+	}
+	for _, doc := range docs {
+		// Fixed widths (the arena chunked by 16 bytes), then seeded
+		// random chunkings.
+		for _, w := range []int{1, 2, 3, 5, 7, 16} {
+			var chunks []string
+			for i := 0; i < len(doc); i += w {
+				chunks = append(chunks, doc[i:min(i+w, len(doc))])
+			}
+			check(t, doc, chunks)
+		}
+		r := rand.New(rand.NewPCG(1, uint64(len(doc))))
+		for range 200 {
+			var chunks []string
+			for i := 0; i < len(doc); {
+				n := 1 + r.IntN(12)
+				chunks = append(chunks, doc[i:min(i+n, len(doc))])
+				i += n
+			}
+			check(t, doc, chunks)
+		}
+	}
 }

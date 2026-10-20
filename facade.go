@@ -1015,11 +1015,13 @@ type RequestParams = core.RequestParams
 // instruction, the transcript so far, and the callable tools.
 //
 // Read-only: the loop builds each request with fresh copies of the
-// Messages and Tools slices, so appending to them or reassigning their
-// elements cannot reach the run or the agent. The values inside remain
-// shared — message Content parts, and ToolDef fields frozen at
-// construction — so implementations must still not modify them, and
-// must clone anything they retain beyond the call.
+// Messages and Tools slices and of each message's Content slice, so
+// appending to them or reassigning their elements — a message, a part,
+// a tool — cannot reach the run's transcript, what the step
+// dispatches, or the agent. The values inside remain shared — the
+// bytes behind a part (a tool call's Args, a file's Data), and ToolDef
+// fields frozen at construction — so implementations must still not
+// modify them, and must clone anything they retain beyond the call.
 type ModelRequest = core.ModelRequest
 
 // Model is the provider seam. Implementations stream one step's output as
@@ -1155,8 +1157,12 @@ func OutputOf[Out any](res *RunResult) (Out, error) { return core.OutputOf[Out](
 // job. Decode is lenient and prefix-shaped: after each delta it
 // attempts the longest closed prefix of the arguments so far (see
 // partial_json.go) and reports it when it changed and decoded — fields
-// not yet present stay zero, a garbage mid-stream prefix keeps the
-// last good partial, and errors surface only at Result, which follows
+// not yet present stay zero, partials only grow (a later partial never
+// holds fewer fields or array elements than an earlier one: a value
+// cut mid-token, an open array's element still being written, is
+// dropped back to where it began, never further), a garbage mid-stream
+// prefix keeps the last good partial, and errors surface only at
+// Result, which follows
 // the OutputOf rule (the last submit_output call with a non-error
 // result) and returns ErrNoOutput when none finished. Never
 // model-visible: the decoder reads the stream and writes nothing back.

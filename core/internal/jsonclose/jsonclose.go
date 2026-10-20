@@ -21,30 +21,7 @@ import (
 // not valid JSON (mw's payload-preservation rule: the bytes the caller
 // sent survive byte-for-byte); valid reports whether it is.
 func Close(s string) (closed string, valid bool) {
-	var stack []byte
-	inStr, esc := false, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case inStr:
-			switch {
-			case esc:
-				esc = false
-			case c == '\\':
-				esc = true
-			case c == '"':
-				inStr = false
-			}
-		case c == '"':
-			inStr = true
-		case c == '{' || c == '[':
-			stack = append(stack, c)
-		case c == '}' || c == ']':
-			if len(stack) > 0 {
-				stack = stack[:len(stack)-1]
-			}
-		}
-	}
+	stack, inStr, esc := scan(s)
 	var b strings.Builder
 	b.WriteString(s)
 	if inStr {
@@ -67,4 +44,41 @@ func Close(s string) (closed string, valid bool) {
 		}
 	}
 	return out, json.Valid([]byte(out))
+}
+
+// OpenString reports whether s ends inside an open string — Close's
+// own reading of it, so what follows the last quote is the string's
+// content (mw.RepairJSON trims Unicode whitespace there only when it
+// is not).
+func OpenString(s string) bool {
+	_, inStr, _ := scan(s)
+	return inStr
+}
+
+// scan is the state machine: the open brackets, and whether s ends in
+// a string (and in that string's escape).
+func scan(s string) (stack []byte, inStr, esc bool) {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inStr:
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+		case c == '"':
+			inStr = true
+		case c == '{' || c == '[':
+			stack = append(stack, c)
+		case c == '}' || c == ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	return stack, inStr, esc
 }

@@ -22,6 +22,9 @@ func TestClose(t *testing.T) {
 		{`{"a":tru`, `{"a":tru}`, false},
 	}
 	for _, c := range cases {
+		if open := OpenString(c.in); open != (c.in == `{"a":"b` || c.in == `{"a":"b\`) {
+			t.Errorf("OpenString(%q) = %v", c.in, open)
+		}
 		got, valid := Close(c.in)
 		if got != c.closed || valid != c.valid {
 			t.Errorf("Close(%q) = (%q, %v), want (%q, %v)", c.in, got, valid, c.closed, c.valid)

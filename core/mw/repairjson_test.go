@@ -34,11 +34,12 @@ func TestRepairJSONFenceTag(t *testing.T) {
 	}
 }
 
-// Only JSON whitespace (space, tab, CR, LF) is trimmed around the
-// arguments: a raw NBSP, NEL, U+2028/2029, U+2000–200A or U+3000 at
-// the end of a truncated open string is payload the model wrote, and
-// the repaired arguments keep it byte-for-byte (0.18.0 trimmed any
-// Unicode whitespace, so "prix\u00a0" reached the tool as "prix").
+// Whitespace is trimmed around the arguments as 0.18.0 trimmed it,
+// except at a cut inside an open string: there only JSON whitespace
+// (space, tab, CR, LF) goes, and a raw NBSP, NEL, U+2028/2029,
+// U+2000-200A or U+3000 the model ended it with is payload the
+// repaired arguments keep byte-for-byte (0.18.0 trimmed any Unicode
+// whitespace there, so "prix\u00a0" reached the tool as "prix").
 func TestRepairJSONKeepsUnicodeWhitespace(t *testing.T) {
 	for _, ws := range []string{"\u00a0", "\u0085", "\u2028", "\u2029", "\u2000", "\u200a", "\u3000", "\u00a0\u3000"} {
 		in := `{"s":"prix` + ws
@@ -69,21 +70,23 @@ func TestRepairJSONKeepsUnicodeWhitespace(t *testing.T) {
 			t.Errorf("repair(%q) = %q, %v; want %q, true", c.in, got, ok, c.want)
 		}
 	}
-	// Unicode whitespace outside the document is not JSON whitespace
-	// either: it is not trimmed, and NBSP before ``` is no fence. Such
-	// arguments are not repaired; their bytes pass through (the loop
-	// then answers INVALID_INPUT, and the model writes them again).
-	for _, c := range []struct{ in, keep string }{
-		{"\u00a0{\"a\":1", "\u00a0{\"a\":1"},
-		{"{\"a\":1}\u3000", "{\"a\":1}\u3000"},
-		{"\u00a0```json\n{\"a\":1}\n```", "\u00a0```json"},
+	// Unicode whitespace outside the document is trimmed as 0.18.0
+	// trimmed it: in front, behind a document that closes, before a
+	// fence (NBSP before ``` opens one) and around its payload. Each
+	// want is v0.18.0's repairJSON output for the same input.
+	for _, c := range []struct{ in, want string }{
+		{"\u00a0{\"a\":1", `{"a":1}`},
+		{"\u00a0{\"a\":1}", `{"a":1}`},
+		{"\u2028\u3000{\"s\":\"x\"}", `{"s":"x"}`},
+		{"{\"a\":1}\u3000", `{"a":1}`},
+		{"{\"a\":[1,2]}\u00a0\u2028", `{"a":[1,2]}`},
+		{"\u00a0```json\n{\"a\":1}\n```", `{"a":1}`},
+		{"\u3000```\n{\"a\":1}\n```\u00a0", `{"a":1}`},
+		{"```json\n\u00a0{\"a\":1}\u3000\n```", `{"a":1}`},
+		{"\u00a0```json\n{\"s\":\"x", `{"s":"x"}`},
 	} {
-		got, ok := repairJSON(c.in)
-		if ok {
-			t.Errorf("repair(%q) = %q, true; want ok=false (Unicode whitespace is not JSON whitespace)", c.in, got)
-		}
-		if !strings.Contains(got, c.keep) {
-			t.Errorf("repair(%q) = %q; want it to keep %q", c.in, got, c.keep)
+		if got, ok := repairJSON(c.in); !ok || got != c.want {
+			t.Errorf("repair(%q) = %q, %v; want %q, true (v0.18.0's)", c.in, got, ok, c.want)
 		}
 	}
 }

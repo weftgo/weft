@@ -172,6 +172,20 @@ func (s *slot) regain() error {
 	return nil
 }
 
+// unyield marks one delegation as returned without taking the slot
+// back: a run that stops waiting to park (awaitNested) works no more
+// for now, and a later wait of the same run — a park that found
+// nothing to offer — must count its own yield afresh, or a regain
+// would read a delegation still waiting and leave the run working
+// slotless.
+func (s *slot) unyield() {
+	s.mu.Lock()
+	if s.waiting > 0 {
+		s.waiting--
+	}
+	s.mu.Unlock()
+}
+
 // lend hands s's slot straight to the run that owns to, when that run
 // is waiting slotless on its delegations: a nested resolution's
 // hand-off (ADR 0022 §7). The grandchild's work is over, and the

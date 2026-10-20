@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,16 +47,31 @@ func (m stateless) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[
 }
 
 // gauge measures how many model calls are in flight at once — the
-// work the pool's slots bound.
+// work the pool's slots bound. With a limit, the first call past it
+// captures every goroutine's stack (Stack): who was working beside it.
 type gauge struct {
 	mu        sync.Mutex
 	now, peak int
+	limit     int
+	stack     string
+}
+
+// Stack returns the goroutine dump taken at the first breach of the
+// limit; empty when there was none.
+func (g *gauge) Stack() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.stack
 }
 
 func (g *gauge) enter() {
 	g.mu.Lock()
 	g.now++
 	g.peak = max(g.peak, g.now)
+	if g.limit > 0 && g.now > g.limit && g.stack == "" {
+		buf := make([]byte, 1<<20)
+		g.stack = string(buf[:runtime.Stack(buf, true)])
+	}
 	g.mu.Unlock()
 	time.Sleep(200 * time.Microsecond) // widen the overlap a broken bound would show
 }

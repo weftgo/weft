@@ -215,7 +215,7 @@ calls and tool calls. A run that is only waiting holds no slot:
   child's resume started by the grandchild's answer — the grandchild's
   slot passes straight to the child's resume (0.18.1): it never goes
   back to the queue in between, so the resume's first model call
-  never runs beside the next delegation to take it A grandchild
+  never runs beside the next delegation to take it. A grandchild
   that holds no slot when it ends (canceled while it queued, canceled
   at its boundary) queues for one on the child's behalf before its
   answer starts the resume (0.18.1).
@@ -320,6 +320,24 @@ an expiry, a `Session.Decide` used directly — reaches the child too:
 the pool installs a notification on every parent it delegates from
 (`Session.WatchMirrors`, plumbing) and runs its pump when one lands.
 
+What makes a call a wrapper is a mirror naming it, so a child parks
+only on a boundary that offers something (0.18.1). A child whose run
+ends with nothing to offer — its boundary open only on its own sync
+delegations, their requests decided or lapsed in it before it parked
+(§H's expiry, at any level of a chain), or a sibling delegation still
+at work — does not park: it waits on those delegations as a resumed
+child does (§C), and their answers resume it, or every one parks and
+it parks on them, mirroring their requests up. The call above it is
+therefore always a wrapper when it parks: never offered, never lapsing
+as a plain call, never approved into running the delegation twice.
+And a sync grandchild resumes only while the child above it waits on
+it: a decision reaching it otherwise — the child's own expiry sweep
+while the child is parked, queued or still in the step that delegated
+— waits for that wait (whose pump arms it), and a child at rest parked
+is resumed for it when its own boundary allows (its parent is pumped),
+so a grandchild's answer never lands on a child with no run to follow
+the resume it starts.
+
 ### E. `Decide` arms; it does not wait
 
 `Pool.Decide(ctx, parent, ds...) error` records and arms, and returns.
@@ -362,7 +380,12 @@ pending).
   awaiting approval", `Via: "parent"`), nothing is resumed, the
   receipt settles `canceled`, its mirrors are denied on the parent,
   and a sync delegation's parked call resolves with
-  `SUBAGENT_CANCELED`.
+  `SUBAGENT_CANCELED` — once the parent's turn has parked it: a turn
+  whose step still runs a sibling call parks it later, and the
+  resolution waits for that on a pool goroutine, `Cancel` returning at
+  once under its own context and `Wait` waiting for the resolution
+  (0.18.1; the first fix of the race waited on `Cancel`'s caller,
+  which deadlocked a `Cancel` made from inside that sibling's handler).
 - **A child ends its own sync delegations before its session closes**
   (0.18.1). A child that is itself a parent — parked on a grandchild's
   request, or resumed and waiting on its grandchildren — and is
@@ -380,11 +403,26 @@ pending).
   for a parked child); and a canceled resume's resolution waits for
   the parent's turn to park the delegating call (§E), on the pool's
   context, rather than landing ahead of it and leaving the call parked
-  for good (0.18.1).
+  for good (0.18.1) — after `Close` too, for at most the 30 s bound
+  (`Close`'s drain waits for it; a call still not parked then is
+  resolved by `Recover` from the ledger).
 - The pool closes a child's session when its delegation settles, and
   the parked ones at `Close`; a parked child keeps one session value
   for its resume. `Close` covers the bare path too (refused after,
-  canceled and awaited during).
+  canceled and awaited during). What `Close` leaves parked is precise
+  (0.18.1): a parked child under a parent at rest — a top-level
+  session, or a pool child itself parked — stays parked for a later
+  pool (`Recover`, `Decide`); a parked sync child under a pool child
+  `Close` is canceling (running, waiting on its delegations, being
+  canceled), directly or through parked ones, is canceled at its
+  boundary with that parent and settles `canceled` in its ledger —
+  nothing could resume it under a parent that settles, and `Recover`
+  of the top session does not descend into a settled child.
+- A steer `Forward` sent to a running child runs, when it defers to a
+  follow-up turn, on a context `Cancel` and `Close` end with the run
+  (0.18.1): the follow-up never works after the run it steered gave
+  its slot up. A canceled run's follow-up is abandoned — it ends
+  without a model call, and the receipt settles as the run did.
 
 ### G. Recovery
 
@@ -412,7 +450,11 @@ its keyring and its `RequireSigned` rule. So a nested request carries
 a real expiry, mirrored verbatim; the parent's sweep denies the lapsed
 mirror (`Via: "expiry"`); the pump resumes the child, whose own sweep
 denies its request with the same stated reason, and the child's
-answer resolves the delegating call. And nobody holding the child
+answer resolves the delegating call. In a chain the lapse can come
+first at any level — in a middle child whose step still runs, before
+it has parked — and §D's rule holds the chain together: the middle
+does not park on a boundary the lapse left empty, it waits for the
+lapsed grandchild's answer. And nobody holding the child
 session can decide its parked calls through the unsigned door the
 parent closed: under `RequireSigned` the child's boundary is decided
 only by the parent's replay (or a signature under the same ring).

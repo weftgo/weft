@@ -135,11 +135,11 @@ func TestNestedReparkWaitsForTheRunningSibling(t *testing.T) {
 				}
 				return
 			}
+			// Close too: the middle is ending, not parking, and the parked
+			// grandchild is canceled at its boundary with it — under a
+			// middle that settles, nothing could resume it.
 			for _, g := range pool.Receipts(mustOpen(ctx, t, st, rc.Child)) {
-				switch {
-				case g.State == pool.Canceled:
-				case end == "Close" && g.State == pool.Parked: // Close leaves a parked one parked
-				default:
+				if g.State != pool.Canceled {
 					t.Errorf("grandchild receipt %s reads %s (%s) after the middle ended", g.ID, g.State, g.Stop)
 				}
 			}

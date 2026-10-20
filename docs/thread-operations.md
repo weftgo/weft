@@ -191,7 +191,13 @@ A shutdown sequence that leaves nothing behind:
 1. Stop accepting requests.
 2. `pool.Close(ctx)` for each pool: running children are canceled and
    settle their receipts, parked ones stay parked for the next
-   process. Session.Close does not wait for pool children.
+   process — except a sync child parked under a pool child that is
+   itself being canceled (running, waiting on its delegations), which
+   is canceled at its boundary with it: nothing could resume it under
+   a parent that settles. Close also waits, at most 30 s, for a parent
+   session's turn still running a sibling call to park the delegating
+   call of a child it canceled, then resolves it. Session.Close does
+   not wait for pool children.
 3. `s.Close(ctx)` for each open session, with a deadline you can
    afford.
 4. Exit.
@@ -431,9 +437,17 @@ not the numbers themselves.
   still runs its approved call the middle waits on, and parks when it
   ends. `Cancel` of a middle child — waiting on its grandchildren, or
   parked on one — and `Close` of a waiting one end the grandchildren
-  first (a parked one is canceled at its boundary and never resumed;
-  `Close` leaves a parked one parked) and wait for them, so both
-  ledgers end settled. The wait is bounded at 30 s: a grandchild whose
+  first (a parked one is canceled at its boundary and never resumed —
+  under `Close` too, since 0.18.1: the middle is ending, not parking)
+  and wait for them, so both ledgers end settled. Under a
+  `RequestExpiry` a request can lapse in a middle child before the
+  middle parks (its step still running another call): the middle then
+  waits for the lapsed grandchild's answer instead of parking with
+  nothing to offer, so the lead never sees the delegating call itself
+  as a decidable request (before 0.18.1 it did, and approving it ran
+  the delegation twice). `Cancel` of a parked child returns at once;
+  when the delegating call's turn has not parked it yet, the
+  resolution follows when it does — `Wait` waits for it. The wait is bounded at 30 s: a grandchild whose
   run has not ended by then — a tool handler that ignores its context
   and has no `Timeout` — is settled `canceled` by the pool in the
   middle's ledger ("its run did not end within 30s of its parent's

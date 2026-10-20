@@ -943,7 +943,10 @@ func modelRequest(req ModelRequest) ModelRequest {
 // cloneParams copies p's pointed-to values and its Stop slice, so a
 // write through the copy's pointers never reaches p's: the pointer
 // knobs share one fresh box (one allocation, none when all are nil)
-// and Stop keeps its nil-ness. RequestParams holds no other reference.
+// and Stop keeps its nil-ness. RequestParams holds no other reference
+// (TestRequestParamsFieldsAreCopied pins it, and the fields of
+// ModelRequest and Message the other copies — modelRequest,
+// requestMessages, mw's attemptRequest — follow).
 func cloneParams(p RequestParams) RequestParams {
 	if p.Temperature != nil || p.TopP != nil || p.MaxTokens != nil || p.Seed != nil {
 		box := new(struct {

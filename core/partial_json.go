@@ -34,11 +34,16 @@ import (
 //     member still being written closes to nothing, and the decoder
 //     keeps its last good partial.
 //
+// Only JSON whitespace (space, tab, CR, LF) is trimmed around the
+// document; any other rune, Unicode whitespace included, is text.
 // Garbage after the top-level value closed is dropped with it. Empty
 // when nothing closes. The closer itself is internal/jsonclose, the
 // state machine mw.RepairJSON shares.
 func closedPrefix(s string) string {
-	s = strings.TrimSpace(s)
+	// JSON whitespace only: a raw NBSP, U+2028 or U+3000 at the end
+	// of an open string is text (0.18.1-fix4: strings.TrimSpace took
+	// it, and the partial shrank by it until the next byte arrived).
+	s = strings.Trim(s, " \t\r\n")
 	if s == "" || s[0] != '{' && s[0] != '[' {
 		return ""
 	}

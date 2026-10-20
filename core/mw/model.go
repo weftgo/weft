@@ -129,7 +129,9 @@ func replay(ctx context.Context, model core.Model, req core.ModelRequest, layer 
 // attempt, the next model of the chain, or the caller's request. The
 // loop's own copy (core's modelRequest) is the same shape; the part
 // values, the bytes behind them and the ToolDefs stay shared and
-// read-only. Paid per attempt, on the Retry/Fallback path only.
+// read-only. Paid per attempt, on the Retry/Fallback path only. A
+// field added to ModelRequest, Message or RequestParams belongs here
+// too: core's TestRequestParamsFieldsAreCopied fails until it is.
 func attemptRequest(req core.ModelRequest) core.ModelRequest {
 	if req.Messages != nil {
 		n := 0

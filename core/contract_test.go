@@ -7463,19 +7463,43 @@ func TestParamsNeverWrittenThrough(t *testing.T) {
 	})
 }
 
-// RequestParams holds exactly the references cloneParams copies (two
-// float pointers, an int and an int64 pointer, a string slice): a knob
-// added to it must be added to the loop's copy too, or a write through
-// it would reach the agent's values again.
+// The model seam's request copies are written field by field: the
+// loop's modelRequest (Tools, Params), requestMessages (Messages and
+// each message's Content), cloneParams (RequestParams' pointers and
+// Stop) and mw's attemptRequest (all of them again, per Retry/Fallback
+// attempt). A field added to ModelRequest, Message or RequestParams —
+// or a reference added to a value struct ModelRequest carries — must be
+// added to every one of those copies, or a write through it would reach
+// the transcript, the agent's values or the next attempt again
+// (0.18.1). This guard pins the fields so such an addition fails here,
+// naming the copy sites.
 func TestRequestParamsFieldsAreCopied(t *testing.T) {
-	var got []string
-	rt := reflect.TypeFor[core.RequestParams]()
-	for i := range rt.NumField() {
-		got = append(got, rt.Field(i).Name+" "+rt.Field(i).Type.String())
+	const sites = "extend every copy of the request — core/loop.go's modelRequest, requestMessages and cloneParams, " +
+		"and core/mw/model.go's attemptRequest — then this list"
+	fields := func(rt reflect.Type) []string {
+		var got []string
+		for i := range rt.NumField() {
+			got = append(got, rt.Field(i).Name+" "+rt.Field(i).Type.String())
+		}
+		return got
 	}
-	want := []string{"Temperature *float64", "TopP *float64", "MaxTokens *int", "Stop []string", "Seed *int64"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("RequestParams fields = %q, want %q: extend loop.go's cloneParams (and this list)", got, want)
+	for _, tc := range []struct {
+		rt   reflect.Type
+		want []string
+	}{
+		{reflect.TypeFor[core.ModelRequest](), []string{
+			"System string", "Messages []core.Message", "Tools []*core.ToolDef", "Thinking core.ThinkingConfig",
+			"SequentialTools bool", "ToolChoice core.ToolChoiceConfig", "Params core.RequestParams"}},
+		{reflect.TypeFor[core.Message](), []string{"Role core.Role", "Content []core.Part"}},
+		{reflect.TypeFor[core.RequestParams](), []string{
+			"Temperature *float64", "TopP *float64", "MaxTokens *int", "Stop []string", "Seed *int64"}},
+		// Copied by value: they must stay free of references.
+		{reflect.TypeFor[core.ThinkingConfig](), []string{"Level core.ThinkingLevel", "Budget int64"}},
+		{reflect.TypeFor[core.ToolChoiceConfig](), []string{"Mode core.ToolChoiceMode", "Name string"}},
+	} {
+		if got := fields(tc.rt); !slices.Equal(got, tc.want) {
+			t.Errorf("%s fields = %q, want %q: %s", tc.rt, got, tc.want, sites)
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"math/rand/v2"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,6 +53,17 @@ func TestClosedPrefix(t *testing.T) {
 		{`{"n":"a\nDAD0`, `{"n":"a\nDAD0"}`},
 		{`{"a":"x\nD83D`, `{"a":"x\nD83D"}`},
 		{`{"a":"x\tD800`, `{"a":"x\tD800"}`},
+		// Raw Unicode whitespace inside an open string is text: only
+		// JSON whitespace (space, tab, CR, LF) is trimmed around the
+		// document (0.18.1-fix4: "prix\u00a0" closed to "prix", then
+		// grew back — a partial shrinking by a byte at each such cut).
+		{"{\"s\":\"prix\u00a0", "{\"s\":\"prix\u00a0\"}"},
+		{"{\"s\":\"a\u2028", "{\"s\":\"a\u2028\"}"},
+		{"{\"s\":\"a\u3000", "{\"s\":\"a\u3000\"}"},
+		{"{\"s\":\"a\u0085", "{\"s\":\"a\u0085\"}"},
+		{"{\"s\":\"a\u2009\u2029", "{\"s\":\"a\u2009\u2029\"}"},
+		{"\u00a0{\"a\":1}", ""}, // not JSON whitespace before the document: not a document
+		{" \t\r\n{\"a\":1} \n", `{"a":1}`},
 		{`{"a":1}}`, `{"a":1}`}, // garbage after the close: keep the valid prefix
 		{`not json`, ``},
 		{`12`, ``}, // scalars never carry tool args
@@ -91,6 +103,11 @@ func FuzzPartialJSON(f *testing.F) {
 		`{"p":"C:\\DBFF\\x"}`,
 		`{"n":"a\nDAD0b"}`,
 		`{"a":"x\nD83Dz"}`,
+		// Raw Unicode whitespace inside strings and at a cut is text,
+		// never trimmed (0.18.1-fix4).
+		"{\"s\":\"prix\u00a0\u00a0: 10\",\"t\":\"\u2028\"}",
+		"{\"a\":\"x\u3000\",\"b\":[\"\u2029\u0085\",\"\u200a\"]}",
+		"[\"\u00a0\u2000\u3000\"]",
 	} {
 		f.Add(seed)
 	}
@@ -285,15 +302,31 @@ func TestClosedPrefixStringsGrowByPrefix(t *testing.T) {
 		if !json.Valid([]byte(doc)) {
 			t.Fatalf("generator wrote invalid JSON %q", doc)
 		}
+		// The whole document closes to itself, and every partial is a
+		// state the whole grows from (strings by prefix, fields kept).
+		var whole any
+		if err := json.Unmarshal([]byte(doc), &whole); err != nil {
+			t.Fatal(err)
+		}
+		var full any
+		if err := json.Unmarshal([]byte(closedPrefix(doc)), &full); err != nil || !reflect.DeepEqual(full, whole) {
+			t.Fatalf("closedPrefix(%q) = %q, not the document itself", doc, closedPrefix(doc))
+		}
 		var prev any
 		for i := 0; i <= len(doc); i++ {
 			part := closedPrefix(doc[:i])
 			if part == "" {
+				if prev != nil && !grownFrom(prev, map[string]any{}) {
+					t.Fatalf("prefix %q of %q closes to nothing after %#v", doc[:i], doc, prev)
+				}
 				continue
 			}
 			var v any
 			if err := json.Unmarshal([]byte(part), &v); err != nil {
 				t.Fatalf("prefix %q of %q closes to undecodable %q", doc[:i], doc, part)
+			}
+			if !grownFrom(v, whole) {
+				t.Fatalf("prefix %q of %q closes to %#v, which the whole %#v does not grow from", doc[:i], doc, v, whole)
 			}
 			if prev != nil && !grownFrom(prev, v) {
 				t.Fatalf("prefix %q of %q took back what an earlier one had:\n%#v\nthen\n%#v", doc[:i], doc, prev, v)
@@ -339,13 +372,16 @@ func genPartialDoc(r *rand.Rand, depth int) string {
 // pairs written as escapes, lone high and low surrogates, a high one
 // doubled), a non-u escape followed by four hex characters (the
 // shape of a high surrogate escape that is not one: C:\\DBFF), raw
-// multi-byte runes and invalid UTF-8.
+// multi-byte runes, raw Unicode whitespace (NBSP, NEL, U+2028/2029,
+// U+2000–200A, U+3000 — text a trim must not take) and invalid UTF-8.
 func genPartialString(r *rand.Rand) string {
 	pieces := []string{
 		"a", "bc", `\n`, `\\`, `\"`, `\t`, `\/`, `é`, `😀`, "é", "😀", "🎮", ",", ":", "{", "]",
 		`\u00e9`, `\u0041`, `\uD83D\uDE00`, `\uDBFF\uDFFF`, `\uD83D`, `\uDE00`, `\uD83D\uD83D`,
 		`\\DBFF`, `\nDAD0`, `\tD800`, `\\uD83D`, `\\\\`, "D83D", "uDBFF",
 		"\xff", "\xe2\x82", "\xc0\xaf", "\xed\xa0\x80", "\xf0\x9f\x98",
+		// Raw Unicode whitespace: text, not JSON whitespace (0.18.1-fix4).
+		"\u00a0", "\u0085", "\u2028", "\u2029", "\u3000", "\u2000", "\u200a", " \u00a0",
 	}
 	var b strings.Builder
 	b.WriteByte('"')

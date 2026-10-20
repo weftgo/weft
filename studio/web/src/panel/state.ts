@@ -13,6 +13,7 @@
 // bounded, and a response that arrives for a view the user has left
 // is dropped.
 import type {
+  EntriesPage,
   Holed,
   Meta,
   PosEvent,
@@ -26,6 +27,7 @@ import type {
 } from "../lib/api"
 import { childRun, HOLES, isLive, linkedRun } from "../lib/honesty"
 import { byStep } from "../lib/requests"
+import { requestExpiries } from "../lib/decisions"
 import type { StepRequests } from "../lib/requests"
 import { serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
@@ -257,6 +259,10 @@ export interface TurnView {
   /** The fold changed since folded was taken: the next frame takes it
    * again (once per frame, not once per delta). */
   stale: boolean
+  /** A parked session turn's request expiries by call (UX-B-41), read
+   * once from its session's /entries?run= as Studio reads them; hole
+   * truncated past that read's cap, not_recorded when it failed. */
+  exp?: { at: Map<string, string>; hole?: string }
 }
 
 /** A run the panel follows live — the open turn, or the result pane's
@@ -1431,6 +1437,30 @@ export class PanelModel {
     }
     if (doc) {
       view.doc = doc
+      const sid = doc.session_id
+      if (
+        sid &&
+        doc.pending &&
+        !doc.decided &&
+        !view.exp &&
+        this.state.meta?.capabilities.includes("timeline")
+      ) {
+        // Read once: a doc read again while this one is out asks nothing.
+        view.exp = { at: new Map() }
+        void panelGet<EntriesPage>(
+          ep,
+          `sessions/${encodeURIComponent(sid)}/entries?run=${encodeURIComponent(id)}&limit=1000`
+        )
+          .then(
+            (p) =>
+              (view.exp = {
+                at: requestExpiries(p.entries, id),
+                hole: p.total > p.entries.length ? "truncated" : "",
+              }),
+            () => (view.exp = { at: new Map(), hole: "not_recorded" })
+          )
+          .then(() => this.emit())
+      }
       // The doc is the row as of now: a list loaded a moment ago may
       // still read running for a run that has since ended. The row moves
       // only ever forward: a doc read before a run frame can land after

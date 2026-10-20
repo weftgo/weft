@@ -1,1 +1,0 @@
-import{S as e,da as t,la as n}from"./use-capabilities-EF7mppgE.js";var r=t(n(),1);function i(t){let n=e(t);(0,r.useEffect)(()=>{typeof document<`u`&&(document.title=n)},[n])}export{i as t};

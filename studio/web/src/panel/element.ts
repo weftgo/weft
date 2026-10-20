@@ -49,8 +49,12 @@ import {
   decisionWords,
   decisionsNote,
   DONE,
+  expiryText,
+  expiryTitle,
+  EXPIRY_UNREAD,
   outcomeOf,
   REASON_HOLE,
+  RUN_MARKS_HOLE,
   resumedHead,
   VERB,
   VERB_TITLE,
@@ -875,6 +879,8 @@ export class WeftDevtools extends HTMLElement {
   private keys = false
   private body!: HTMLElement
   private last: PanelState = emptyPanelState()
+  /** The expiry clock's pending redraw (0: none). */
+  private tick = 0
   /** A press or an IME composition is in progress inside the dock:
    * redrawing now would take the pressed button from under the
    * pointer (no click follows) or end the composition. The redraw
@@ -5384,6 +5390,27 @@ export class WeftDevtools extends HTMLElement {
     return card
   }
 
+  /** expiry is a parked call's request expiry (UX-B-41) in Studio's
+   * words and hover (lib/decisions.ts expiryText, expiryTitle); while it
+   * has not lapsed the panel redraws each second, as Studio's clock
+   * ticks. */
+  private expiry(t: TurnView | undefined, id: string): HTMLElement[] {
+    const at = t?.exp?.at.get(id)
+    if (!at) return []
+    const w = expiryText(at, Date.now())
+    if (!w.lapsed)
+      this.tick ||= setTimeout(() => {
+        this.tick = 0
+        this.render(this.last)
+      }, 1e3) as unknown as number
+    return [
+      el("span", w.lapsed ? "weft-warn" : "weft-reason", ` · ${w.text}`, {
+        title: expiryTitle(at),
+        "data-request-expiry": w.lapsed ? "lapsed" : "open",
+      }),
+    ]
+  }
+
   /** turnView draws the step story (§2): the prompt, per step the
    * model text (reasoning collapsed), tool calls name(args) → result,
    * finish reason and usage with cached/reasoning splits, pending
@@ -5630,7 +5657,8 @@ export class WeftDevtools extends HTMLElement {
     const act = this.canAct(s)
     // A resume the record links decided the park for good (U13.2): each
     // call's outcome, whatever this surface may do.
-    const dec = s.turn?.id === runID ? s.turn.doc?.decided : undefined
+    const t = s.turn?.id === runID ? s.turn : undefined
+    const dec = t?.doc?.decided
     if (kind === "decide" && act && !refused && !dec) {
       const decided: Record<string, string> = {}
       for (const c of pending)
@@ -5640,7 +5668,8 @@ export class WeftDevtools extends HTMLElement {
         pending,
         decided,
         (id, d, text) => this.go(this.model?.decideApp(runID, id, d, text)),
-        (id) => this.appSaid(sent(id), runID)
+        (id) => this.appSaid(sent(id), runID),
+        t
       )
     }
     const next =
@@ -5649,6 +5678,7 @@ export class WeftDevtools extends HTMLElement {
     box.append(
       el("div", "weft-step-h", [
         el("span", "", next ? "decided" : `${AWAITING} (read-only)`),
+        ...(next ? [] : this.expHole(t)),
       ])
     )
     const body = el("div", "weft-step-b")
@@ -5679,7 +5709,10 @@ export class WeftDevtools extends HTMLElement {
           call,
           decidedCall(dec, call.id)
             ? []
-            : [el("span", "weft-badge weft-info", next ? "decided" : "parked")]
+            : [
+                el("span", "weft-badge weft-info", next ? "decided" : "parked"),
+                ...(next ? [] : this.expiry(t, call.id)),
+              ]
         )
       )
       const c = decidedCall(dec, call.id)
@@ -5835,10 +5868,13 @@ export class WeftDevtools extends HTMLElement {
     decided: Record<string, string>,
     act = (id: string, d: "approve" | "deny" | "resolve", text: string) =>
       this.go(this.model?.decide(id, d, d === "resolve" ? text : undefined)),
-    status?: (id: string) => HTMLElement | null
+    status?: (id: string) => HTMLElement | null,
+    t?: TurnView
   ): HTMLElement {
     const approvals = el("div", "weft-step")
-    approvals.append(el("div", "weft-step-h", [el("span", "", AWAITING)]))
+    approvals.append(
+      el("div", "weft-step-h", [el("span", "", AWAITING), ...this.expHole(t)])
+    )
     const abody = el("div", "weft-step-b")
     const left = pending.filter((c) => !decided[c.id]).length
     if (left < pending.length) {
@@ -5863,7 +5899,7 @@ export class WeftDevtools extends HTMLElement {
                   DONE[decided[call.id]] ?? decided[call.id]
                 ),
               ]
-            : []
+            : this.expiry(t, call.id)
         )
       )
       const said = status?.(call.id)
@@ -6005,6 +6041,23 @@ export class WeftDevtools extends HTMLElement {
       },
       root: () => this.shadow,
     })
+  }
+
+  /** expHole is the badge for expiries the panel could not read: past
+   * the run's marks read's cap (truncated), or a failed read
+   * (not_recorded). */
+  private expHole(t?: TurnView): HTMLElement[] {
+    const h = t?.exp?.hole
+    return h
+      ? [
+          badge(
+            h,
+            h === "truncated"
+              ? { cause: "response_cap", ...RUN_MARKS_HOLE }
+              : EXPIRY_UNREAD
+          ),
+        ]
+      : []
   }
 
   private resolveNow() {

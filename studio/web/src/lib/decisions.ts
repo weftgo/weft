@@ -295,28 +295,45 @@ export function requestExpiries(
   return out
 }
 
+/** A parked session turn's request expiries the panel could not read
+ * (hole not_recorded): its run's state-log marks did not answer. */
+export const EXPIRY_UNREAD = {
+  reason:
+    "this run's state-log marks could not be read: a request expiry is not shown",
+  fix: "open the turn in Studio",
+}
+
 /** expiryWords is a parked call's expiry beside its "awaiting a
  * decision": "expires 09:57:56 (in 40.0s)" before it lapses, "⏱
  * expired 09:57:56 — denied at the next touch (lazy expiry)" after —
  * thread denies an expired request when the session is next touched
  * (a Decide, a Send, a Resume), never on a timer. title: the absolute
- * stamp and that rule. */
+ * stamp and that rule (expiryTitle). */
 export function expiryWords(
   expiry: string,
   now: number
 ): { text: string; title: string; lapsed: boolean } {
+  return { ...expiryText(expiry, now), title: expiryTitle(expiry) }
+}
+
+/** expiryText is expiryWords without its title: the devtools panel
+ * draws the words alone (its size budget, UX-B-41). */
+export function expiryText(
+  expiry: string,
+  now: number
+): { text: string; lapsed: boolean } {
   const at = Date.parse(expiry)
   const lapsed = !Number.isNaN(at) && at <= now
-  const title = `the request expires ${absoluteTime(expiry)} (thread.RequestExpiry): an expired request is denied the next time the session is touched — a decide, a send, a resume — never on a timer`
-  return lapsed
-    ? {
-        text: `⏱ expired ${clockTime(expiry, false)} — denied at the next touch (lazy expiry)`,
-        title,
-        lapsed,
-      }
-    : {
-        text: `expires ${clockTime(expiry, false)} (in ${spanMs(at - now)})`,
-        title,
-        lapsed,
-      }
+  const hms = clockTime(expiry, false)
+  return {
+    text: lapsed
+      ? `⏱ expired ${hms} — denied at the next touch (lazy expiry)`
+      : `expires ${hms} (in ${spanMs(at - now)})`,
+    lapsed,
+  }
 }
+
+/** expiryTitle is the expiry's hover: the absolute stamp and the lazy
+ * rule. */
+export const expiryTitle = (expiry: string) =>
+  `the request expires ${absoluteTime(expiry)} (thread.RequestExpiry): an expired request is denied the next time the session is touched — a decide, a send, a resume — never on a timer`

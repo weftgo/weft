@@ -24,9 +24,10 @@ import {
   PLAYGROUND_OFF_FIX,
   READ_TOKEN,
 } from "../lib/honesty"
-import { FakeStudio } from "../test/fake-studio"
+import { apiError, FakeStudio } from "../test/fake-studio"
 import {
   APP_PUB,
+  APP_SESSION,
   CALL,
   PARKED,
   PLAIN,
@@ -48,6 +49,8 @@ import {
   teardown,
 } from "./testkit"
 import type { WeftDevtools } from "./element"
+import { clockTime } from "../lib/format"
+import { EXPIRY_UNREAD, expiryTitle, RUN_MARKS_HOLE } from "../lib/decisions"
 
 vi.setConfig({ testTimeout: 30_000 })
 
@@ -61,9 +64,12 @@ afterEach(() => {
 async function open(
   o: AppTurnOptions = {},
   scope = APP_PUB,
-  token = ""
+  token = "",
+  routes: (f: FakeStudio) => void = () => {}
 ): Promise<{ el: WeftDevtools; fake: FakeStudio }> {
-  const fake = serveAppTurn(new FakeStudio(), o).install()
+  const fake = serveAppTurn(new FakeStudio(), o)
+  routes(fake)
+  fake.install()
   const el = await mount({
     "data-endpoint": "http://studio.test/studio/",
     "data-open": "true",
@@ -406,5 +412,114 @@ describe("an app turn no Sessions runtime of its service acts on", () => {
     expect(line(el, "plain")).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
     expect(refusedVerbs(el)).toHaveLength(3)
     expect(fake.calls(`POST runs/${PLAIN}/approvals`)).toHaveLength(0)
+  })
+})
+
+describe("a parked call's request expiry (UX-B-41)", () => {
+  /** The parked turn's approval.request record, its expiry at. */
+  const mark = (at: string) => ({
+    at,
+    record: "thread",
+    kind: "approval.request",
+    event: "weft.thread.approval.request",
+    lane: "approvals",
+    run_id: PARKED,
+    turn: 1,
+    content_mark: "none",
+    fields: { call_id: CALL.id, expiry: at },
+  })
+  /** GET sessions/s_app/entries?run= answering the mark, total marks. */
+  const entries =
+    (at: string, total = 1) =>
+    (f: FakeStudio) =>
+      f.on(`GET sessions/${APP_SESSION}/entries`, (req) => ({
+        session_id: APP_SESSION,
+        run: req.query.get("run"),
+        entries: [mark(at)],
+        total,
+        offset: 0,
+        next_offset: total > 1 ? 1 : null,
+        holes: [],
+      }))
+  const expiry = (el: WeftDevtools) =>
+    call(el)?.querySelector<HTMLElement>("[data-request-expiry]") ?? null
+  const head = (el: WeftDevtools) =>
+    $(el, ".weft-call")?.closest(".weft-step")?.querySelector(".weft-step-h")
+
+  it("reads the run's own marks with its doc, ticks each second and lapses lazily, in lib/decisions.ts's words", async () => {
+    const at = new Date(Date.now() + 2_500).toISOString()
+    const { el, fake } = await open({}, APP_PUB, "", entries(at))
+    const first = await vi.waitFor(
+      () => {
+        const n = expiry(el)
+        expect(n?.getAttribute("data-request-expiry")).toBe("open")
+        return n!.textContent ?? ""
+      },
+      { timeout: 5_000 }
+    )
+    expect(first).toMatch(
+      new RegExp(`^ · expires ${clockTime(at, false)} \\(in \\d\\.\\ds\\)$`)
+    )
+    expect(expiry(el)?.title).toBe(expiryTitle(at))
+    const reads = () =>
+      fake
+        .calls(`GET sessions/${APP_SESSION}/entries`)
+        .map((r) => r.query.toString())
+    const read = reads().length
+    // A second later the clock has moved: the panel redrew on its own.
+    await vi.waitFor(
+      () => {
+        expect(expiry(el)?.getAttribute("data-request-expiry")).toBe("open")
+        expect(expiry(el)?.textContent).not.toBe(first)
+      },
+      { timeout: 2_000, interval: 100 }
+    )
+    await vi.waitFor(
+      () =>
+        expect(expiry(el)?.getAttribute("data-request-expiry")).toBe("lapsed"),
+      { timeout: 5_000 }
+    )
+    expect(expiry(el)?.textContent).toBe(
+      ` · ⏱ expired ${clockTime(at, false)} — denied at the next touch (lazy expiry)`
+    )
+    expect(head(el)?.querySelector("[data-hole]")).toBeNull()
+    // One read per opened turn, as its doc: the clock redraws, never asks.
+    expect(reads().length).toBe(read)
+    expect(new Set(reads())).toEqual(
+      new Set([`run=${encodeURIComponent(PARKED)}&limit=1000`])
+    )
+    await axeClean(el)
+  })
+
+  it("past the read's cap: the expiries it read, and the truncated badge", async () => {
+    const at = new Date(Date.now() + 60_000).toISOString()
+    const { el } = await open({}, APP_PUB, "", entries(at, 1001))
+    await vi.waitFor(() => expect(expiry(el)).toBeTruthy(), {
+      timeout: 5_000,
+    })
+    const b = head(el)?.querySelector<HTMLElement>('[data-hole="truncated"]')
+    expect(b?.title).toContain(RUN_MARKS_HOLE.reason)
+    await axeClean(el)
+  })
+
+  it("a failed read: no expiry, the not_recorded badge with its words", async () => {
+    const { el } = await open({}, APP_PUB, "", (f) =>
+      f.on(`GET sessions/${APP_SESSION}/entries`, () =>
+        apiError(500, "internal", "session store unavailable")
+      )
+    )
+    const b = await vi.waitFor(
+      () => {
+        const n = head(el)?.querySelector<HTMLElement>(
+          '[data-hole="not_recorded"]'
+        )
+        expect(n).toBeTruthy()
+        return n!
+      },
+      { timeout: 5_000 }
+    )
+    expect(b.title).toBe(`${EXPIRY_UNREAD.reason} — fix: ${EXPIRY_UNREAD.fix}`)
+    expect(expiry(el)).toBeNull()
+    await axeClean(el)
   })
 })

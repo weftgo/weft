@@ -131,6 +131,7 @@ import {
   PLAIN as APP_PLAIN,
   RESUMED as APP_RESUMED,
   RUNTIMES_500 as APP_RUNTIMES_500,
+  APP_SESSION,
   parkedRow as appParkedRow,
   resumedRow as appResumedRow,
   runtimeRow as appRuntime,
@@ -2079,6 +2080,113 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
 // (studio/testdata/api/decisions.golden.json — thread_approvals' t1,
 // agent-7's deny), read the same on both surfaces: lib/decisions.ts's
 // words, the turn tag the link.
+describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
+  // The parked turn's approval.request record: Studio's card reads it
+  // from the session's timeline, the panel from the run's own marks
+  // (/entries?run=) — the same record, the same lib/decisions.ts words.
+  const mark = (at: string) => ({
+    at,
+    record: "thread",
+    kind: "approval.request",
+    event: "weft.thread.approval.request",
+    lane: "approvals",
+    run_id: APP_PARKED,
+    turn: 1,
+    content_mark: "none",
+    fields: { call_id: APP_CALL.id, expiry: at },
+  })
+  const serve = (at: string, studioMeta = false) =>
+    serveAppTurn(new FakeStudio(), { studioMeta })
+      .on(`GET sessions/${APP_SESSION}/timeline`, {
+        session_id: APP_SESSION,
+        agent: "approvals-example",
+        status: "succeeded",
+        turns: [],
+        marks: [mark(at)],
+        lanes: [],
+        marks_total: 1,
+        holes: [],
+      })
+      .on(`GET sessions/${APP_SESSION}/entries`, {
+        session_id: APP_SESSION,
+        run: APP_PARKED,
+        entries: [mark(at)],
+        total: 1,
+        offset: 0,
+        next_offset: null,
+        holes: [],
+      })
+      .install()
+  const words = (n: Element) => ({
+    state: n.getAttribute("data-request-expiry"),
+    // The countdown is each surface's own clock: its figure is not compared.
+    text: (n.textContent ?? "").replace(/\(in [^)]*\)/, "(in …)"),
+    title: n.getAttribute("title"),
+  })
+  for (const [state, ms] of [
+    ["lapsed", -5_000],
+    ["open", 60_000],
+  ] as const)
+    it(`a ${state} request reads alike`, async () => {
+      const at = new Date(Date.now() + ms).toISOString()
+      serve(at)
+      const el = await mount({
+        "data-endpoint": "http://studio.test/studio/",
+        "data-open": "true",
+        "data-public-id": APP_PUB,
+      })
+      await vi.waitFor(
+        () =>
+          expect(
+            all(el, ".weft-turn").some((b) =>
+              (b.getAttribute("data-weft-run") ?? "").includes(APP_PARKED)
+            )
+          ).toBe(true),
+        { timeout: 5_000 }
+      )
+      click(
+        all(el, ".weft-turn").find((b) =>
+          (b.getAttribute("data-weft-run") ?? "").includes(APP_PARKED)
+        )
+      )
+      const pn = await vi.waitFor(
+        () => {
+          const n = $(
+            el,
+            `.weft-call[data-key="${APP_CALL.id}"] [data-request-expiry]`
+          )
+          expect(n).toBeTruthy()
+          return n!
+        },
+        { timeout: 5_000 }
+      )
+      const panel = words(pn)
+      el.remove()
+      await settle()
+      cleanup()
+      document.body.innerHTML = ""
+
+      stubBrowser()
+      vi.stubGlobal("scrollTo", vi.fn())
+      StudioEventSource.reset()
+      vi.stubGlobal("EventSource", StudioEventSource)
+      setStudioToken("")
+      serve(at, true)
+      renderApp(`/runs/${APP_PARKED}?view=story`)
+      const sn = await waitFor(() => {
+        const n = document.querySelector(
+          `[data-pending-call="${APP_CALL.id}"] [data-request-expiry]`
+        )
+        expect(n).toBeTruthy()
+        return n!
+      })
+      const studio = words(sn)
+      cleanup()
+      expect(panel).toEqual(studio)
+      expect(panel.state).toBe(state)
+    })
+})
+
 describe("decisions on both surfaces (U13.2)", () => {
   const DONE_LINE = "✋ denied · agent-7 · 'need a photo of the damage' → t2"
   // The parked call's row in the panel's approvals block (the resumed

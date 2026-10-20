@@ -1126,8 +1126,8 @@ export class PanelModel {
    * pending and undecided, capability "timeline"), one read out at a
    * time. thread files the approval.request records after the run's
    * end, so on a batched destination they can land after the read: an
-   * answer with no expiry for an awaiting call, or a failed one, is
-   * read again — with the next loadTurn and once 2 s on, three reads at
+   * answer missing an awaiting call's approval.request record (one with
+   * no expiry is final), or a failed one, is read again — with the next loadTurn and once 2 s on, three reads at
    * most, never a loop. An answer for a view the user has left is
    * dropped (a return reads afresh). */
   private readExp(view: TurnView) {
@@ -1150,17 +1150,29 @@ export class PanelModel {
         (p) => ({
           at: requestExpiries(p.entries, id),
           hole: marksCapped(p) ? "truncated" : "",
+          // A pending call with no approval.request record yet: early.
+          // Every record there, an expiry or none, is the final answer.
+          again: view.folded.pending.some(
+            (c) =>
+              !p.entries.some(
+                (m) =>
+                  m.kind === "approval.request" && m.fields.call_id === c.id
+              )
+          ),
         }),
-        () => ({ at: new Map<string, string>(), hole: "not_recorded" })
+        // Failed: what an earlier read answered is kept, its words
+        // drawn; the badge only when none did (Studio's rule).
+        () => {
+          const { at, hole } = view.exp!
+          return hole == null || hole === "not_recorded"
+            ? { at: new Map<string, string>(), hole: "not_recorded", again: true }
+            : { at, hole, again: true }
+        }
       )
       .then((r) => {
         if (this.disposed || this.state.turn !== view) return
-        const again =
-          r.hole === "not_recorded" ||
-          !r.at.size ||
-          view.folded.pending.some((c) => !r.at.has(c.id))
-        view.exp = { ...r, n, again }
-        if (again && n < 3) this.after(2e3, () => this.readExp(view))
+        view.exp = { ...r, n }
+        if (r.again && n < 3) this.after(2e3, () => this.readExp(view))
         this.emit()
       })
   }

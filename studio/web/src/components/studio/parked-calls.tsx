@@ -472,9 +472,11 @@ function useRequestExpiries(doc: RunDoc) {
     : new Map<string, string>()
   // The run's own read capped too: an expiry past it is not read, said.
   const capped = on && cut && !!own.data?.capped
-  // A read that failed: the expiries are not known, said as the panel
-  // says it (lib/decisions.ts EXPIRY_UNREAD).
-  const unread = on && (tl.isError || (cut && own.isError))
+  // A read that failed with nothing held: the expiries are not known,
+  // said as the panel says it (lib/decisions.ts EXPIRY_UNREAD). A
+  // failed refetch keeps the earlier answer's words, no badge.
+  const unread =
+    on && ((tl.isError && !tl.data) || (cut && own.isError && !own.data))
   const [now, setNow] = useState(() => Date.now())
   // Open until the stamp is past (thread's rule; expiryNext is 0 once
   // expiryText reads it lapsed, the panel's clock alike).

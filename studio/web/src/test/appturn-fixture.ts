@@ -51,6 +51,13 @@ export const CALL = {
   name: "deploy",
   args: { env: "prod" },
 }
+/** The parked turn's second call under AppTurnOptions.twoCalls. */
+export const CALL2 = {
+  type: "tool_call",
+  id: "call_deploy_2",
+  name: "deploy",
+  args: { env: "staging" },
+}
 const T0 = "2026-10-01T09:00:00Z"
 
 /** The parked turn's row: the app's (no weft.playground), a turn of a
@@ -120,7 +127,7 @@ export function noPubRow(): RunRow {
   return parkedRow({ id: NOPUB, session_id: "s_nopub", public_id: "" })
 }
 
-function events(id: string, pending: boolean) {
+function events(id: string, pending: boolean, calls: object[] = [CALL]) {
   const evs = [
     {
       type: "run_start",
@@ -141,13 +148,13 @@ function events(id: string, pending: boolean) {
       run_id: id,
       usage: { input_tokens: 10, output_tokens: 5 },
       steps: 1,
-      ...(pending ? { pending: [CALL] } : {}),
+      ...(pending ? { pending: calls } : {}),
     },
   ]
   return evs.map((event, pos) => ({ pos, time: T0, event }))
 }
 
-function transcript() {
+function transcript(calls: object[] = [CALL]) {
   return {
     batches: [
       {
@@ -162,7 +169,7 @@ function transcript() {
         index: 1,
         step: 0,
         input: false,
-        messages: [{ role: "assistant", content: [CALL] }],
+        messages: [{ role: "assistant", content: calls }],
       },
     ],
   }
@@ -237,6 +244,8 @@ export interface AppTurnOptions {
   /** A Studio without Playground(true): the golden meta's capabilities
    * (no playground) and its capabilities_off, Go's words. */
   noPlayground?: boolean
+  /** The parked turn parks two calls: CALL and CALL2. */
+  twoCalls?: boolean
 }
 
 /** The 500 a failed runtimes read answers in these tests. */
@@ -270,8 +279,11 @@ export function serveAppTurn(
   // Resumed by a verb here, or (o.resumed, read on every request) by another surface.
   let resumedHere = false
   const resumed = () => resumedHere || !!o.resumed
+  const calls = o.twoCalls ? [CALL, CALL2] : [CALL]
   const parked = parkedRow(
-    o.running ? { status: "running", pending: 0, finished: "" } : {}
+    o.running
+      ? { status: "running", pending: 0, finished: "" }
+      : { pending: calls.length }
   )
   // Newest first, as GET /api/runs lists them.
   const rows = () =>
@@ -332,9 +344,9 @@ export function serveAppTurn(
     .on(`GET runs/${PARKED}`, () => doc(parked))
     .on(
       `GET runs/${PARKED}/events`,
-      pagedEvents(events(PARKED, !o.running), { done: !o.running })
+      pagedEvents(events(PARKED, !o.running, calls), { done: !o.running })
     )
-    .on(`GET runs/${PARKED}/transcript`, transcript())
+    .on(`GET runs/${PARKED}/transcript`, transcript(calls))
     .on(`GET runs/${PARKED}/spans`, { spans: [] })
     .on(`GET runs/${RESUMED}`, doc(resumedRow()))
     .on(`GET runs/${RESUMED}/events`, pagedEvents(events(RESUMED, false)))

@@ -21,6 +21,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "../lib/api"
+import { queryClient } from "../lib/query"
 import { ROLE } from "../lib/palette"
 import { AWAITING, STATUS, statusOf } from "../lib/status"
 import { statusClass } from "../lib/status-class"
@@ -2263,6 +2264,58 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
     expect(panel.title).toBe(
       `${EXPIRY_UNREAD.reason} — fix: ${EXPIRY_UNREAD.fix}`
     )
+  })
+
+  // P9-pre-web-fix7: the badge only when nothing is held — the panel's
+  // rule (appturn.test.ts "a failed re-read keeps …").
+  it("Studio: a failed refetch keeps the words it read, no badge", async () => {
+    const at = new Date(Date.now() + 60_000).toISOString()
+    let down = false
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serveAppTurn(new FakeStudio(), { studioMeta: true })
+      .on(`GET sessions/${APP_SESSION}/timeline`, () =>
+        down
+          ? fail()
+          : {
+              session_id: APP_SESSION,
+              agent: "approvals-example",
+              status: "succeeded",
+              turns: [],
+              marks: [mark(at)],
+              lanes: [],
+              marks_total: 1,
+              holes: [],
+            }
+      )
+      .install()
+    renderApp(`/runs/${APP_PARKED}?view=story`)
+    const sel = `[data-pending-call="${APP_CALL.id}"] [data-request-expiry]`
+    await waitFor(() =>
+      expect(
+        document.querySelector(sel)?.getAttribute("data-request-expiry")
+      ).toBe("open")
+    )
+    down = true
+    const key = ["session-timeline", APP_SESSION]
+    await queryClient.refetchQueries({ queryKey: key, exact: true })
+    await waitFor(
+      () =>
+        expect(
+          queryClient.getQueryState(key)?.status,
+          "the refetch failed"
+        ).toBe("error"),
+      { timeout: 8_000 }
+    )
+    await settle()
+    expect(
+      document.querySelector(sel)?.getAttribute("data-request-expiry")
+    ).toBe("open")
+    expect(document.querySelector('[data-parked] [data-hole]')).toBeNull()
+    cleanup()
   })
 })
 

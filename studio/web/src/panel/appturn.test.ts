@@ -29,6 +29,7 @@ import {
   APP_PUB,
   APP_SESSION,
   CALL,
+  CALL2,
   PARKED,
   PLAIN,
   REJECTED,
@@ -623,13 +624,41 @@ describe("a parked call's request expiry (UX-B-41)", () => {
     )
   })
 
-  it("a request with no expiry: no words, no clock, three reads at most", async () => {
+  it("a request with no expiry: no words, no clock, one read (its record is the final answer)", async () => {
     const { el, fake } = await open(
       {},
       APP_PUB,
       "",
       answers(page([{ ...mark(""), fields: { call_id: CALL.id } }]))
     )
+    await answered(el)
+    const n = reads(fake)
+    await new Promise((r) => setTimeout(r, 2_500))
+    expect(reads(fake)).toBe(n)
+    expect(exp(el)?.n).toBe(1)
+    expect(expiry(el)).toBeNull()
+    expect(head(el)?.querySelector("[data-hole]")).toBeNull()
+    expect(tick(el)).toBe(0)
+  })
+
+  it("a failed re-read keeps the expiries read before: the countdown stays, no badge", async () => {
+    // Read 1: CALL's record with its expiry, CALL2's not yet stored —
+    // read again; reads 2 and 3 fail.
+    const at = new Date(Date.now() + 60_000).toISOString()
+    let down = false
+    const { el } = await open(
+      { twoCalls: true },
+      APP_PUB,
+      "",
+      serving(() => (down ? fail() : page([mark(at)])))
+    )
+    await answered(el)
+    await vi.waitFor(
+      () =>
+        expect(expiry(el)?.getAttribute("data-request-expiry")).toBe("open"),
+      { timeout: 5_000 }
+    )
+    down = true
     await vi.waitFor(
       () => {
         expect(exp(el)?.n).toBe(3)
@@ -637,13 +666,11 @@ describe("a parked call's request expiry (UX-B-41)", () => {
       },
       { timeout: 8_000 }
     )
-    const n = reads(fake)
-    await new Promise((r) => setTimeout(r, 2_500))
-    expect(reads(fake)).toBe(n)
-    expect(exp(el)?.n).toBe(3)
-    expect(expiry(el)).toBeNull()
+    expect(expiry(el)?.getAttribute("data-request-expiry")).toBe("open")
+    expect(
+      $(el, `.weft-call[data-key="${CALL2.id}"] [data-request-expiry]`)
+    ).toBeNull()
     expect(head(el)?.querySelector("[data-hole]")).toBeNull()
-    expect(tick(el)).toBe(0)
   })
 
   it("the clock stops at the lapse, on a turn change, on close and on disconnect", async () => {

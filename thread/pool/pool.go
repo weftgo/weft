@@ -164,7 +164,10 @@ const DefaultMaxDepth = 8
 // them all, and a pool skips — no error, no log, in its pumps (Decide,
 // DecideSigned, the watch) and in Recover — every receipt whose child
 // another pool watching that parent holds: a live delegation, a
-// Register, or the wrap the child was made under. A pool watches a
+// Register, or the wrap the child was made under. A closed pool still
+// holds the children its Close is ending (their settlements are its
+// to record), never one it left parked; a receipt that settled while
+// a pump read it is skipped too. A pool watches a
 // parent from its first delegation, Decide, DecideSigned or Recover on
 // it; after a restart, Recover every pool — an earlier Recover reports
 // a parked child of a pool not yet watching with ErrNoAgent, and
@@ -231,6 +234,10 @@ type Pool struct {
 	// turn — the window a Forward used to become the child session's
 	// first turn in.
 	testHookStarting func(*delegate)
+	// testHookStarted, when set (by this package's tests only), runs
+	// in run between the start's return and the sent mark — the window
+	// a Forward used to be refused in while the child's turn ran.
+	testHookStarted func(*delegate)
 }
 
 // An Option configures a Pool at New.
@@ -549,7 +556,12 @@ func (p *Pool) Wait(ctx context.Context, parent *thread.Session, receiptID strin
 // A child parked at an approval under a parent at rest — a session of
 // the application's, or a pool child that is itself parked — is not
 // canceled: its session is closed, its receipt stays parked, and a
-// later pool resumes it (Recover, Decide). A sync child parked under a
+// later pool resumes it (Recover, Decide). A child Close finds still
+// parking — its run at the boundary, the phase not yet parked — on a
+// boundary the parent's verdicts already complete (a Decide made in
+// that window, whose resume the park itself would have armed) is
+// canceled at its boundary, as a resume already queued would be. A
+// sync child parked under a
 // pool child that Close is canceling — running, waiting on its own
 // delegations, being canceled — directly or through parked children
 // between them, is canceled at its boundary with that parent (as
@@ -996,7 +1008,29 @@ func (p *Pool) run(ctx context.Context, d *delegate, r runHandle, start func(con
 		p.testHookStarting(d)
 	}
 
+	// The start call in flight: a Forward from here waits for it rather
+	// than refuse — once the start's Send returns, its turn is in the
+	// child's session and may be running already, before this
+	// goroutine runs again to mark it sent.
+	starting := make(chan struct{})
+	p.mu.Lock()
+	if d.idle == r.idle {
+		d.starting = starting
+	}
+	p.mu.Unlock()
 	turn, err := start(runCtx)
+	if p.testHookStarted != nil {
+		p.testHookStarted(d)
+	}
+	p.mu.Lock()
+	if d.idle == r.idle && err == nil && turn != nil {
+		d.sent = true
+	}
+	if d.starting == starting {
+		d.starting = nil
+	}
+	p.mu.Unlock()
+	close(starting)
 	if err == nil && turn == nil && r.resume && p.nestedBoundary(d) {
 		// Nothing to resume here: the decision went on down to a
 		// grandchild, whose resolution resumes this child.
@@ -1116,7 +1150,7 @@ type runHandle struct {
 func (d *delegate) begin(cancel context.CancelFunc, t *ticket) runHandle {
 	r := runHandle{ticket: t, cancel: cancel, idle: make(chan struct{}),
 		nest: &nestWait{wake: make(chan struct{}, 1)}}
-	d.cancel, d.idle, d.canceled, d.nest, d.sent = cancel, r.idle, false, r.nest, false
+	d.cancel, d.idle, d.canceled, d.nest, d.sent, d.starting = cancel, r.idle, false, r.nest, false, nil
 	return r
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"log/slog"
 	"runtime"
 	"strconv"
 	"strings"
@@ -34,7 +35,7 @@ func twoLevel(t *testing.T, p *pool.Pool, paymentsReply string) (lead *core.Agen
 // payments agent of the test's own; g, when set, counts the finance
 // child's model calls in flight, and sfx tells the wrap names of
 // several chains on one pool apart.
-func overPayments(p *pool.Pool, payments *core.Agent, g *gauge, sfx string) *core.Agent {
+func overPayments(p *pool.Pool, payments *core.Agent, g *gauge, sfx string, opts ...core.Option) *core.Agent {
 	var fm core.Model = wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "pay" + sfx, ID: "fp",
 			Args: wefttest.Args(struct{ Prompt string }{"refund B-7"})}),
@@ -43,12 +44,12 @@ func overPayments(p *pool.Pool, payments *core.Agent, g *gauge, sfx string) *cor
 	if g != nil {
 		fm = counted{fm, g}
 	}
-	finance := core.New(fm, p.MustWrap("pay"+sfx, "the payments desk", payments))
+	finance := core.New(fm, append([]core.Option{p.MustWrap("pay"+sfx, "the payments desk", payments)}, opts...)...)
 	return core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "finance" + sfx, ID: "cf",
 			Args: wefttest.Args(struct{ Prompt string }{"settle B-7"})}),
 		wefttest.Say("lead: all done"),
-	), p.MustWrap("finance"+sfx, "the finance desk", finance))
+	), append([]core.Option{p.MustWrap("finance"+sfx, "the finance desk", finance)}, opts...)...)
 }
 
 // parkTwoLevel runs the lead's first turn to its park and returns the
@@ -474,7 +475,7 @@ func TestNestedThreeLevelRepark(t *testing.T) {
 
 // blockingPayments is a grandchild whose approved refund blocks until
 // its context ends, saying when it started.
-func blockingPayments(started chan<- struct{}) *core.Agent {
+func blockingPayments(started chan<- struct{}, opts ...core.Option) *core.Agent {
 	tool := core.Tool("refund", "", func(ctx context.Context, in struct{ OrderID string }) (string, error) {
 		select {
 		case started <- struct{}{}:
@@ -486,7 +487,7 @@ func blockingPayments(started chan<- struct{}) *core.Agent {
 	return core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"B-7"}`}),
 		wefttest.Say("payments: never"),
-	), tool)
+	), append([]core.Option{tool}, opts...)...)
 }
 
 // Cancel or Close of the middle child while its resume waits on the
@@ -635,10 +636,19 @@ func TestNestedRestartMidApprovedCallRunsItAgain(t *testing.T) {
 		t.Fatalf("jsonl.Open: %v", err)
 	}
 	// The old process: its approved refund starts and never returns
-	// while the test runs — the process is gone mid-call.
+	// while the test runs — the process is gone mid-call. It is not
+	// gone in fact: restart releases its leases, and when its
+	// goroutines are canceled at the end every write they still try
+	// lands on sessions the new process holds — refused by the
+	// one-writer rule (ErrLocked, or ErrStale for a Session whose view
+	// fell behind), loudly. Its agents log to the test, so those ERROR
+	// lines are checked here, not printed as if this process had lost
+	// a resolution.
 	old := pool.New(3)
+	dead := &deadLogs{}
+	deadLog := core.Logger(slog.New(dead))
 	started := make(chan struct{}, 1)
-	s, err := thread.Create(ctx, st, overPayments(old, blockingPayments(started), nil, ""))
+	s, err := thread.Create(ctx, st, overPayments(old, blockingPayments(started, deadLog), nil, "", deadLog))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -651,7 +661,12 @@ func TestNestedRestartMidApprovedCallRunsItAgain(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the approved refund never ran")
 	}
-	defer func() { _ = old.Close(ctx) }() // after the assertions: the dead process's goroutines
+	oldClosed := false
+	defer func() { // a failed assertion: the dead process's goroutines still go
+		if !oldClosed {
+			_ = old.Close(ctx)
+		}
+	}()
 
 	p2 := pool.New(3)
 	defer func() { _ = p2.Close(ctx) }()
@@ -678,4 +693,50 @@ func TestNestedRestartMidApprovedCallRunsItAgain(t *testing.T) {
 	if got := ran.snapshot(); len(got) != 1 || !got[0] {
 		t.Errorf("post-restart refund runs = %v, want the approved call run again", got)
 	}
+	// The dead process's goroutines end now. What they still try to
+	// write is refused by the one-writer rule, and none of it reaches
+	// the sessions the new process holds.
+	oldClosed = true
+	if err := old.Close(ctx); err != nil {
+		t.Errorf("old Close: %v", err)
+	}
+	for _, l := range dead.snapshot() {
+		if strings.HasPrefix(l, "ERROR ") && !strings.Contains(l, thread.ErrLocked.Error()) &&
+			!strings.Contains(l, thread.ErrStale.Error()) {
+			t.Errorf("the dead process logged %q, want only writes the one-writer rule refused", l)
+		}
+	}
+	if rc := pool.Receipts(open)[0]; rc.State != pool.Done || rc.Stop != "finance: settled after the restart" {
+		t.Errorf("finance receipt after the dead process's writes = %+v", rc)
+	}
+}
+
+// deadLogs records a process's log lines with their err attribute:
+// what TestNestedRestartMidApprovedCallRunsItAgain's old process says
+// once its goroutines are canceled.
+type deadLogs struct {
+	mu  sync.Mutex
+	got []string
+}
+
+func (l *deadLogs) Enabled(context.Context, slog.Level) bool { return true }
+func (l *deadLogs) Handle(_ context.Context, rec slog.Record) error {
+	line := rec.Level.String() + " " + rec.Message
+	rec.Attrs(func(a slog.Attr) bool {
+		if a.Key == "err" {
+			line += " err=" + a.Value.String()
+		}
+		return true
+	})
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.got = append(l.got, line)
+	return nil
+}
+func (l *deadLogs) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *deadLogs) WithGroup(string) slog.Handler      { return l }
+func (l *deadLogs) snapshot() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.got...)
 }

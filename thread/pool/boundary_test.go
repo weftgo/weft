@@ -535,6 +535,14 @@ func TestCloseResolvesACanceledResumeOnceTheParentParks(t *testing.T) {
 	s, _ := thread.Create(ctx, thread.Memory(), lead)
 	t1, _ := s.Send(ctx, core.User("go"))
 	rc := awaitParked(t, s, 1)[0]
+	// The receipt reads parked before the child's park is done: wait
+	// for it at rest, so the decision's pump arms the resume this test
+	// is about. (Decided inside the park, then closed, the first run
+	// ends canceled at its boundary instead —
+	// TestCloseWhileParkingOnADecidedBoundary.)
+	if _, err := p.Wait(ctx, s, rc.ID); err != nil {
+		t.Fatal(err)
+	}
 	// Approve the child's request: its resume waits for the lead's turn
 	// to park la, and Close cancels it there.
 	if err := p.Decide(ctx, s, thread.Approve(s.Pending()[0].CallID)); err != nil {

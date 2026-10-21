@@ -43,6 +43,12 @@ type delegate struct {
 	// phase whose turn is sent — a steer in that window would be the
 	// session's first turn, the task's prompt queued behind it.
 	sent bool
+	// starting is closed when the run's start returns — its turn sent
+	// (sent set at that moment) or none; nil outside the start call.
+	// A Forward finding the phase running with no turn sent waits on
+	// it: the turn may be in the child's session, already working,
+	// while the start's caller has not yet been scheduled to mark it.
+	starting chan struct{}
 	// cancel cancels the run in flight; nil at rest.
 	cancel context.CancelFunc
 	// canceled records that Cancel or Close asked for the run's end.
@@ -671,10 +677,28 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 	if p.testHookParking != nil {
 		p.testHookParking(d)
 	}
+	// A Close that ran while this child was parking found it running;
+	// a decision recorded before the phase reads parked met a pump that
+	// left it to this park's re-read, and Decide had returned with the
+	// child as good as queued. When the parent's verdicts already
+	// complete the boundary, Close cancels that resume, as it cancels a
+	// queued one, rather than leave the child parked on a decided
+	// boundary nothing will arm. Read with no lock held (it reads the
+	// parent), once Close is seen.
 	p.mu.Lock()
+	closedNow := p.closed
+	p.mu.Unlock()
+	decided := closedNow && p.boundaryDecided(ctx, d)
+	p.mu.Lock()
+	if !closedNow && p.closed {
+		p.mu.Unlock()
+		decided = p.boundaryDecided(ctx, d)
+		p.mu.Lock()
+	}
 	d.parks++
 	gen := d.parks
-	if d.canceled && (!p.closed || p.parentEndingLocked(d)) {
+	if d.canceled && (!p.closed || p.parentEndingLocked(d)) ||
+		p.closed && decided && !p.heldByLiveParentLocked(d) {
 		// Cancel asked for the run's end and the run came to its
 		// boundary instead (its context was canceled too late to stop
 		// it): the cancel stands — the boundary is closed at once, as
@@ -682,7 +706,9 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 		// settles canceled. A first run's delegating call has not
 		// parked: it returns SUBAGENT_CANCELED, and nothing resolves.
 		// Close's cancel stands the same way under a parent that is
-		// ending: nothing could resume the child under it.
+		// ending: nothing could resume the child under it — and on a
+		// boundary already decided, whose resume Close would have
+		// canceled had the decision's pump found it parked.
 		d.phase = phaseSettling
 		d.concluded = make(chan struct{})
 		p.mu.Unlock()
@@ -752,6 +778,18 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 	// before this arm, which gen then refuses.
 	p.rearm(ctx, d, gen)
 	return nil
+}
+
+// boundaryDecided reports whether the parent's verdicts complete the
+// boundary the child is parking at — every pending call holds one. A
+// read error reads undecided.
+func (p *Pool) boundaryDecided(ctx context.Context, d *delegate) bool {
+	mirrors, err := d.parent.MirroredRequests(ctx)
+	if err != nil {
+		return false
+	}
+	_, ready, _ := readiness(d.child.ID(), d.child.Pending(), heldMirrors(mirrors))
+	return ready
 }
 
 // rearm reads the parent's verdicts for a child that has just come to
@@ -1298,8 +1336,18 @@ func (p *Pool) delegateFor(ctx context.Context, parent *thread.Session, rc Recei
 		if p.settledWhileResolving(rc.Child, look) {
 			return nil, errSettled
 		}
-		if errors.Is(err, ErrNoAgent) && p.foreign(parent, rc.Child, name) {
-			return nil, errForeign
+		if errors.Is(err, ErrNoAgent) {
+			if p.foreign(parent, rc.Child, name) {
+				return nil, errForeign
+			}
+			// Another pool's child whose delegation settled since the
+			// ledger read above, its pool closed since: a closed pool
+			// answers for nothing in foreign, and the child is over —
+			// nothing this pool could not resume. Only the ledger
+			// tells; read it again.
+			if receiptSettled(parent, rc.ID) {
+				return nil, errSettled
+			}
 		}
 		return nil, err
 	}
@@ -1478,15 +1526,18 @@ func (p *Pool) foreign(parent *thread.Session, childID, name string) bool {
 
 // canResume reports whether the pool, open, holds what resumes
 // childID: a live delegate, a registration, or the wrap it was made
-// under.
+// under. A closed pool still answers for a child it is ending — Close
+// canceled its run (queued, running or settling), and the settlement
+// is that pool's to record, moments later — never for one it left
+// parked: nothing resumes that child there any more.
 func (p *Pool) canResume(childID, name string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if d, ok := p.byChild[childID]; ok {
+		return !p.closed || d.phase != phaseParked
+	}
 	if p.closed {
 		return false
-	}
-	if _, ok := p.byChild[childID]; ok {
-		return true
 	}
 	if _, ok := p.sessionAgents[childID]; ok {
 		return true
@@ -1669,7 +1720,10 @@ func (p *Pool) cancelParked(ctx context.Context, d *delegate) error {
 // session — the first turn's prompt, or a resume — refuses as the
 // state it is leaving (accepted before the first turn, parked before
 // a resume); the refusal changes nothing and a retry a moment later
-// steers the run.
+// steers the run. Once that send is under way, Forward waits for it to
+// return (ctx bounds the wait) and steers the turn it sent: the turn
+// may be working in the child's session already, before the pool has
+// marked it sent.
 func (p *Pool) Forward(ctx context.Context, parent *thread.Session, receiptID string, msg core.Message) (*thread.Turn, error) {
 	if parent == nil {
 		return nil, fmt.Errorf("thread/pool: Forward with no parent session")
@@ -1677,6 +1731,19 @@ func (p *Pool) Forward(ctx context.Context, parent *thread.Session, receiptID st
 	p.mu.Lock()
 	d, ok := p.delegates[receiptID]
 	ok = ok && d.parent.ID() == parent.ID() // a receipt is its own session's
+	for ok && d.phase == phaseRunning && !d.sent && d.starting != nil {
+		// The start is in flight — its Send may have returned, the turn
+		// running in the child's session, its caller not yet marking it
+		// sent. Wait for the start to return, then read again.
+		starting := d.starting
+		p.mu.Unlock()
+		select {
+		case <-starting:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		p.mu.Lock()
+	}
 	running := ok && d.phase == phaseRunning && d.sent
 	if ok && d.phase == phaseRunning && !d.sent {
 		// The run is starting: its turn is not in the child's session

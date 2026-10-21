@@ -80,6 +80,14 @@ func TestDecideOnExpiredRequestIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	parked, call := parkTurn(t, s, ctx)
+	// The parked turn's Wait returns before the runner's epilogue looks
+	// at the boundary — its pickup sweeps expiry too (RequestExpiry):
+	// the request lapses with the session idle, so Decide is the first
+	// to see it. An Advance ahead of the epilogue had the runner deny it
+	// first, and Decide read ErrNotPending (make stress, GOMAXPROCS=2).
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
 	pend := s.Pending()[0]
 	clock.Advance(pend.Expiry.Sub(clock.Now()) + time.Millisecond) // strictly past it
 
@@ -132,6 +140,9 @@ func TestSendOverExpiredBoundaryResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, call := parkTurn(t, s, ctx)
+	if err := s.WaitIdle(ctx); err != nil { // the request lapses with the session idle (the runner's epilogue sweeps too)
+		t.Fatal(err)
+	}
 	clock.Advance(s.Pending()[0].Expiry.Sub(clock.Now()) + time.Millisecond) // strictly past it
 
 	follow, err := s.Send(ctx, core.User("anything else?"))

@@ -391,7 +391,9 @@ not the numbers themselves.
   skips the receipts whose child another pool watching that parent
   holds — a live delegation, a `Register`, or the wrap it was made
   under — with no error and no log, in its pumps and its `Recover`.
-  After a restart a pool watches the parent from its first `Recover`
+  A closed pool still holds the children its `Close` is ending (their
+  settlements are its to record), never one it left parked; a receipt
+  that settled while a pump read it is skipped too. After a restart a pool watches the parent from its first `Recover`
   or `Decide` on it: call every pool's `Recover`; the first one
   reports a parked child of a pool not yet attached with `ErrNoAgent`
   and leaves it for its own pool's. Cancel and Forward a receipt

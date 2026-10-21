@@ -95,3 +95,65 @@ func TestForwardInTheStartWindowIsRefused(t *testing.T) {
 		t.Errorf("Close: %v", err)
 	}
 }
+
+// A Forward landing after the child's first Send returned — its turn
+// in the child's session and working — but before the pool marked it
+// sent (testHookStarted stands in for the scheduler that has not yet
+// run the start's caller again) steers that turn: it waits for the
+// mark, then the steer is delivered. Before the fix it was refused as
+// accepted though the child's model was running
+// (TestForwardRequiresRunning and
+// TestForwardedSteerDoesNotOutliveACanceledRun under make stress).
+func TestForwardAfterTheStartReturnedSteers(t *testing.T) {
+	ctx := context.Background()
+	p := New(1)
+	s, err := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script(wefttest.Say("lead"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := make(chan struct{})
+	type result struct {
+		turn *thread.Turn
+		err  error
+	}
+	got := make(chan result, 1)
+	early := false
+	p.testHookStarted = func(d *delegate) {
+		fwd := make(chan result, 1)
+		go func() {
+			turn, err := p.Forward(ctx, s, d.receipt, core.User("hurry"))
+			fwd <- result{turn, err}
+		}()
+		// The Forward waits for the sent mark, which comes after this
+		// hook returns: an answer while the hook holds is the refusal.
+		select {
+		case r := <-fwd:
+			early = true
+			got <- r
+		case <-time.After(100 * time.Millisecond):
+			go func() { got <- <-fwd }()
+		}
+	}
+	rc, err := p.Submit(ctx, s, core.New(stubModel{gate: gate}), "the task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r result
+	select {
+	case r = <-got:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Forward never returned")
+	}
+	if early || r.err != nil || r.turn == nil {
+		t.Fatalf("Forward after the start returned: early %v, turn %v, err %v; want it to wait and steer", early, r.turn != nil, r.err)
+	}
+	close(gate)
+	wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if rc, err := p.Wait(wctx, s, rc.ID); err != nil || rc.State != Done {
+		t.Fatalf("Wait: %+v %v; want done", rc, err)
+	}
+	if err := p.Close(wctx); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+}

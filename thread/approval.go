@@ -316,8 +316,13 @@ func Quorum(n int) SessionOption { return quorumOption(n) }
 // with the stated reason the next time the session looks at the
 // boundary: a Decide, a Resume, a Send, or the runner's own pickup
 // (ADR 0021 §5). Nothing fires on a timer: an idle session denies an
-// expired request when it is next touched. Values <= 0 (the default)
-// mean requests never expire.
+// expired request when it is next touched. ErrExpired answers the
+// path that finds the lapse; once one has denied it, the call is no
+// longer pending, and a later Decide, DecideSigned or Request for it
+// fails with ErrNotPending, as for any decided call. The runner's
+// pickup runs right after a parked turn's Wait returns, so a request
+// that lapses in that moment can be denied before the caller's next
+// call. Values <= 0 (the default) mean requests never expire.
 func RequestExpiry(d time.Duration) SessionOption { return requestExpiryOption(d) }
 
 // approvalNow is the one clock every approval path reads — request

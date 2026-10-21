@@ -308,6 +308,14 @@ func TestApprovalsExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := parkSend(t, s, ctx)
+	// The runner's epilogue looks at the boundary after the parked
+	// turn's Wait returns (its pickup sweeps expiry, and resumes what
+	// that settles): the request lapses with the session idle, so the
+	// Resume below is the path that sees it, not a resume the runner
+	// already ran (TestDecideOnExpiredRequestIsRefused's window).
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
 	pend := s.Pending()[0]
 	if pend.Expiry.IsZero() {
 		t.Fatal("RequestExpiry gave the request no expiry")

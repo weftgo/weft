@@ -6,6 +6,12 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Fixed
+
+- thread/pool: `Cancel` of a child that is parking — its approval requests already mirrored on the parent's `Pending` and its receipt already reading `parked`, the pool not yet at rest with it — now keeps the parked-child promise: the settlement is recorded before `Cancel` returns. The pool took such a child for a running one: `Cancel` asked the (already ended) run to stop and returned at once, the receipt still `parked`, and the park settled it `canceled` a moment later (`TestCancelParkedChildBesideARunningSibling` on CI: "receipt when Cancel returned = {… State:parked …}, want canceled"). `Cancel` now waits for the park to finish (its ctx bounds the wait); the park reads the cancel, closes the boundary and settles `canceled`, as before. `Cancel`'s godoc and docs/thread-operations.md say so. `TestCancelWhileParkingSettlesBeforeReturning`.
+
 ## 0.18.1 — 2026-10-21
 
 ### Added

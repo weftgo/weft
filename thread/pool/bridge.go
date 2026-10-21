@@ -61,6 +61,14 @@ type delegate struct {
 	cancel context.CancelFunc
 	// canceled records that Cancel or Close asked for the run's end.
 	canceled bool
+	// parking is made when the run's park begins mirroring its
+	// requests and closed once the park has come to rest — the phase
+	// parked, or the delegation concluded (a canceled run's boundary
+	// closed and settled canceled, an unmirrored park failed); nil
+	// outside that window. In it the parent reads the child parked
+	// (Pending, the ledger) while the phase still reads running: a
+	// Cancel there waits for it, to keep a parked child's promise.
+	parking chan struct{}
 	// idle is closed when the run in flight comes to rest; nil at
 	// rest. Wait watches it.
 	idle chan struct{}
@@ -669,6 +677,11 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 		// decidable call — so the run goes on instead (run).
 		return errNothingOffered
 	}
+	parking := make(chan struct{})
+	p.mu.Lock()
+	d.parking = parking
+	p.mu.Unlock()
+	defer p.endParking(d, parking)
 	if err := p.mirror(ctx, d); err != nil {
 		um := &unmirroredError{err}
 		p.conclude(ctx, d, Failed, um.Error(), d.unmirroredText(err), true)
@@ -739,6 +752,7 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 	if d.wrapper != "" {
 		d.resolve = true
 	}
+	p.endParkingLocked(d, parking)
 	// A Close that ran while this child was parking took it for a
 	// running one — canceled its context, left its session open — and
 	// its census of parked children is done. Close what Close would
@@ -786,6 +800,23 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 	// before this arm, which gen then refuses.
 	p.rearm(ctx, d, gen)
 	return nil
+}
+
+// endParking closes a park's parking window (see delegate.parking):
+// the park has come to rest. Idempotent per window; a later park's
+// window is left alone.
+func (p *Pool) endParking(d *delegate, parking chan struct{}) {
+	p.mu.Lock()
+	p.endParkingLocked(d, parking)
+	p.mu.Unlock()
+}
+
+// endParkingLocked is endParking for a caller holding p.mu.
+func (p *Pool) endParkingLocked(d *delegate, parking chan struct{}) {
+	if d.parking == parking {
+		close(parking)
+		d.parking = nil
+	}
 }
 
 // boundaryDecided reports whether the parent's verdicts complete the

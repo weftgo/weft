@@ -419,7 +419,11 @@ func (p *Pool) Submit(ctx context.Context, parent *thread.Session, agent *core.A
 //     sibling call): that resolution waits on a pool goroutine, so
 //     Cancel returns without waiting for the parent's step — and may
 //     be called from inside it, a sibling tool's handler — while Wait
-//     waits for the resolution.
+//     waits for the resolution. A child still parking — its requests
+//     mirrored, its receipt perhaps reading parked, the pool not yet at
+//     rest with it — is canceled the same way: Cancel waits for the
+//     park to finish (ctx bounds the wait), the park closes the
+//     boundary, and the settlement is recorded before Cancel returns.
 //   - unsettled in the ledger with no child of this pool running for
 //     it — a previous process's: it is recovered first (see Recover)
 //     and then canceled if recovery left it parked.
@@ -456,9 +460,33 @@ func (p *Pool) Cancel(ctx context.Context, parent *thread.Session, receiptID str
 			switch d.phase {
 			case phaseQueued, phaseRunning:
 				stop := d.stopLocked()
+				parking := d.parking
 				p.mu.Unlock()
 				stop()
-				return nil
+				if parking == nil {
+					return nil
+				}
+				// The run is parking: its requests are mirrored on the
+				// parent, its receipt may read parked — to the caller a
+				// parked child. The park reads the cancel and closes the
+				// boundary, settling canceled, before its window ends;
+				// wait for that, then read how it rests.
+				select {
+				case <-parking:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				p.mu.Lock()
+				again := !p.closed && p.delegates[receiptID] == d && d.phase == phaseParked
+				p.mu.Unlock()
+				if !again {
+					// Settled, or parked by a closed pool's park, which
+					// leaves its children parked as Close does.
+					return nil
+				}
+				// It parked after all — a boundary the cancel could not
+				// close: cancel it parked, as a Cancel arriving now would.
+				continue
 			case phaseParked:
 				// Settling from here: a Wait or a second Cancel waits
 				// for the conclusion, not the ledger's parked.

@@ -468,7 +468,11 @@ not the numbers themselves.
   tools a `Timeout`. A middle child's async children (`Submit`, an
   `Async` wrap) are not ended with it. A `Cancel` of a running child
   that reaches an approval first settles it `canceled` at that
-  boundary instead of parking it.
+  boundary instead of parking it; one made while the child is
+  parking (its request already on the parent's `Pending`, its receipt
+  reading `parked`) waits for the park, so the receipt reads
+  `canceled` when `Cancel` returns, as for a parked child (before
+  0.18.2 it returned at once, the receipt still `parked`).
 - **Do not let the parent's decision chain approve a delegating
   call.** A grant or a live `Approver` that matches a pool wrap's tool
   re-runs the delegation when it parks (see `Pool.Decide`'s godoc for

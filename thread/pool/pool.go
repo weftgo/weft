@@ -998,6 +998,9 @@ func (p *Pool) run(ctx context.Context, d *delegate, r runHandle, start func(con
 	// context and slot.
 	p.mu.Lock()
 	r.nest.ctx, r.nest.slot = runCtx, sl
+	if d.idle == r.idle {
+		d.resuming = r.resume // read by a Forward in the start window
+	}
 	p.mu.Unlock()
 	// Running before the turn flies: the mark must never trail the run
 	// it names — a Forward arriving the moment the model began would

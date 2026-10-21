@@ -157,3 +157,78 @@ func TestForwardAfterTheStartReturnedSteers(t *testing.T) {
 		t.Errorf("Close: %v", err)
 	}
 }
+
+// After a restart, the delegate a new pool rebuilds for a parked child
+// (delegateFor: parked, no park of its own counted) is resuming when a
+// decision arms it: a Forward in that resume's start window is refused
+// as parked, the state it is leaving. On v0.18.0 it read accepted, the
+// refusal picked by the delegate's park count.
+func TestForwardInARestartedResumesStartWindowReadsParked(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	s, err := thread.Create(ctx, st, core.New(wefttest.Script(wefttest.Say("lead"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refund := func() *core.ToolDef {
+		return core.Tool("refund", "", func(context.Context, struct{ OrderID string }) (string, error) {
+			return "refunded", nil
+		}, core.RequireApproval())
+	}
+	p1 := New(1)
+	rc, err := p1.Submit(ctx, s, core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c1", Args: `{"order_id":"1"}`}),
+	), refund()), "the task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(s.Pending()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(s.Pending()) != 1 {
+		t.Fatalf("parent pending %+v; want the child's refund mirrored", s.Pending())
+	}
+	// The restart: the old process lets go, a new pool knows the child.
+	if err := p1.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	open, err := thread.Open(ctx, st, s.ID(), core.New(wefttest.Script(wefttest.Say("lead"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2 := New(1)
+	var fwdTurn *thread.Turn
+	var fwdErr error
+	starts := 0
+	p2.testHookStarting = func(d *delegate) {
+		starts++
+		if starts == 1 {
+			fwdTurn, fwdErr = p2.Forward(ctx, open, d.receipt, core.User("hurry"))
+		}
+	}
+	if err := p2.Register(rc.Child, core.New(wefttest.Script(wefttest.Say("done")), refund())); err != nil {
+		t.Fatal(err)
+	}
+	if len(open.Pending()) != 1 {
+		t.Fatalf("pending after the restart %+v", open.Pending())
+	}
+	if err := p2.Decide(ctx, open, thread.Approve(open.Pending()[0].CallID)); err != nil {
+		t.Fatal(err)
+	}
+	wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if r, err := p2.Wait(wctx, open, rc.ID); err != nil || r.State != Done {
+		t.Fatalf("Wait: %+v %v; want done", r, err)
+	}
+	var se *StateError
+	if starts < 1 || fwdTurn != nil || !errors.As(fwdErr, &se) || se.State != Parked {
+		t.Errorf("Forward in the restarted resume's start window (%d starts): turn %v, err %v; want a *StateError reading parked", starts, fwdTurn != nil, fwdErr)
+	}
+	if err := p2.Close(wctx); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+}

@@ -364,6 +364,8 @@ func (s *Session) WatchMirrors(owner any, fn func(log *slog.Logger)) {
 // asks it to tell another pool's child from one it cannot resume —
 // several pools may delegate from one parent, and each one's pump
 // walks every receipt the parent's ledger holds.
+//
+// Pool plumbing (thread/pool); applications never call it.
 func (s *Session) MirrorWatchers() []any {
 	s.mu.Lock()
 	defer s.mu.Unlock()

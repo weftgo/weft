@@ -176,7 +176,8 @@ var chainsModeNames = [...]string{"close", "cancel", "restart", "decide"}
 // 3–42 ms on one iteration in six (inherited down every chain), a
 // Forward to a running receipt now and then, and on one iteration in
 // three a Forward into a run's start window (between its running mark
-// and its turn, where it must be refused as accepted or parked) — are
+// and its turn, where it must be refused as accepted before a first
+// run, parked before a resume) — are
 // driven to their end
 // by deciding whatever the leads offer (a quarter denied). In some
 // iterations something ends or interrupts them half-way: the pool's
@@ -243,17 +244,24 @@ func TestNestedRandomChains(t *testing.T) {
 		// the child's turn not yet sent. It must be refused — a steer
 		// there would be the child session's first turn (or land on the
 		// boundary a resume is leaving), the delegation hung behind it.
-		var forwardAtStart func(p *pool.Pool, parent *thread.Session, receipt string)
+		// The refusal reads the state the run is leaving: accepted
+		// before a first run, parked before a resume — a restarted
+		// pool's resume of a child it rebuilt too.
+		var forwardAtStart func(p *pool.Pool, parent *thread.Session, receipt string, resume bool)
 		if os.Getenv("POOL_CHAINS_NOFORWARD") == "" && rint(3) == 0 {
-			forwardAtStart = func(p *pool.Pool, parent *thread.Session, receipt string) {
+			forwardAtStart = func(p *pool.Pool, parent *thread.Session, receipt string, resume bool) {
 				if rint(3) != 0 {
 					return
 				}
+				want := pool.Accepted
+				if resume {
+					want = pool.Parked
+				}
 				turn, err := p.Forward(ctx, parent, receipt, core.User("hurry"))
 				var se *pool.StateError
-				if turn != nil || !errors.As(err, &se) || (se.State != pool.Accepted && se.State != pool.Parked) {
-					t.Errorf("iter %d: Forward in %s's start window: turn %v, err %v; want a refusal reading accepted or parked",
-						it, receipt, turn != nil, err)
+				if turn != nil || !errors.As(err, &se) || se.State != want {
+					t.Errorf("iter %d: Forward in %s's start window (resume %v): turn %v, err %v; want a refusal reading %s",
+						it, receipt, resume, turn != nil, err, want)
 				}
 				atStart.Add(1)
 			}

@@ -329,16 +329,22 @@ run. It was not timed end to end here.
 
 This test builds random delegation chains: depth 2–4, fan-out 1–3, one
 or two chains on a pool of one or two, `Submit` children beside them,
-an occasional request expiry, and `Forward`s to running receipts. It
-drives them to the end by deciding whatever the leads offer, a quarter
+an occasional request expiry, and `Forward`s to running receipts. On
+one iteration in three it also sends `Forward`s into a run's start
+window (the running mark down, the child's turn not yet sent, on the
+second pool after a restart too), and each must be refused with a
+`*StateError` reading the state the run is leaving: `accepted` before a
+first run, `parked` before a resume. It drives them to the end by deciding whatever the leads offer, a quarter
 of them denied. Some iterations are interrupted halfway, by a `Close`
 racing a `Decide`, a `Cancel` racing a `Decide` on the same lead, or a
 restart followed by `Recover` on a second pool. Every iteration must
 keep the pool's promises: every `Wait` returns, the bound holds, every
 receipt ends terminal, no call is delegated twice, and no goroutine
-leaks. **Measured:** the default 30 iterations under `-race` took about 2 s
-(the log's last line read `modes: close 3, cancel 4, restart 5, decide
-18; expiry 3, async 23, forward 22; 30 of 30 iterations passed`). To
+leaks. **Measured:** the default 30 iterations under `-race` took about 5 s
+(the log's last line read `modes: close 2, cancel 5, restart 1, decide
+22; expiry 4, async 25, forward 25 (96 at a start); 30 of 30 iterations
+passed` — `forward` counts the iterations that sent a `Forward`, the
+figure in brackets the start-window `Forward`s). To
 search for a flake, raise `POOL_CHAINS_ITERS` and add `-count`.
 
 | Knob | Effect |

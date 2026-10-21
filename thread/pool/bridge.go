@@ -49,6 +49,14 @@ type delegate struct {
 	// it: the turn may be in the child's session, already working,
 	// while the start's caller has not yet been scheduled to mark it.
 	starting chan struct{}
+	// resuming records that the run in flight is a resume a decision
+	// armed, not the delegation's first run: set with the nest hold,
+	// before the phase reads running. A Forward in the start window is
+	// refused as the state the run is leaving — parked before a resume,
+	// accepted before the first turn. Not the park count: a delegate a
+	// new pool rebuilt after a restart (delegateFor) counts no park of
+	// its own, yet its first run is a resume.
+	resuming bool
 	// cancel cancels the run in flight; nil at rest.
 	cancel context.CancelFunc
 	// canceled records that Cancel or Close asked for the run's end.
@@ -1750,7 +1758,7 @@ func (p *Pool) Forward(ctx context.Context, parent *thread.Session, receiptID st
 		// yet. Refused as the state it is leaving — accepted before the
 		// first turn, parked before a resume's — retryable at once.
 		state := Accepted
-		if d.parks > 0 {
+		if d.resuming {
 			state = Parked
 		}
 		p.mu.Unlock()

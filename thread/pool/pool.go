@@ -238,6 +238,21 @@ type Pool struct {
 	// in run between the start's return and the sent mark — the window
 	// a Forward used to be refused in while the child's turn ran.
 	testHookStarted func(*delegate)
+	// testHookRecorded, when set (by this package's tests only), runs
+	// in run between the running receipt and the running mark — the
+	// window a Forward read the ledger's running receipt in, the phase
+	// still queued, and was refused as running.
+	testHookRecorded func(*delegate)
+	// testHookSettling, when set (by this package's tests only), runs
+	// in settle between the settled phase and the settlement receipt —
+	// the window a Forward read the ledger a step behind in.
+	testHookSettling func(*delegate)
+	// testHookLedgerRead, when set (by this package's tests only), runs
+	// in Forward between letting the pool lock go and reading the
+	// ledger for a receipt no running child serves — the window a
+	// resume armed meanwhile moved a parked child's ledger to running
+	// in, when a live delegate's refusal was still read from it.
+	testHookLedgerRead func(receipt string)
 }
 
 // An Option configures a Pool at New.
@@ -1020,6 +1035,9 @@ func (p *Pool) run(ctx context.Context, d *delegate, r runHandle, start func(con
 		p.conclude(ledger, d, Failed, stop, d.failureText(stop), true)
 		return outcome{err: fmt.Errorf("thread/pool: running receipt: %w", err)}
 	}
+	if p.testHookRecorded != nil {
+		p.testHookRecorded(d)
+	}
 	// The hold a grandchild's resolution lands on is ready before the
 	// phase reads running: a grandchild is resumed only while this run
 	// waits on it (arm), and its resolution then finds the run's
@@ -1182,6 +1200,7 @@ func (d *delegate) begin(cancel context.CancelFunc, t *ticket) runHandle {
 	r := runHandle{ticket: t, cancel: cancel, idle: make(chan struct{}),
 		nest: &nestWait{wake: make(chan struct{}, 1)}}
 	d.cancel, d.idle, d.canceled, d.nest, d.sent, d.starting = cancel, r.idle, false, r.nest, false, nil
+	d.resuming = false // a first run until arm says otherwise
 	return r
 }
 
@@ -1353,10 +1372,14 @@ func (p *Pool) settle(ctx context.Context, d *delegate, state State, stop string
 	}
 	d.settled = true
 	d.phase = phaseSettled
+	d.settledAs = state // a Forward reads it until the ledger does
 	if d.concluded == nil {
 		d.concluded = make(chan struct{})
 	}
 	p.mu.Unlock()
+	if p.testHookSettling != nil {
+		p.testHookSettling(d)
+	}
 	// From here the caller retires the delegate — unless settle dies
 	// on the way (a panicking storage): then nobody would, the run's
 	// recover finding the delegate settled, and every waiter on the

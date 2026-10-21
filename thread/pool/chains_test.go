@@ -177,7 +177,10 @@ var chainsModeNames = [...]string{"close", "cancel", "restart", "decide"}
 // Forward to a running receipt now and then, and on one iteration in
 // three a Forward into a run's start window (between its running mark
 // and its turn, where it must be refused as accepted before a first
-// run, parked before a resume) — are
+// run, parked before a resume), and on one iteration in three a
+// Forward retried at every Submit receipt from its creation until it
+// steers (every refusal reading accepted or parked — or the child's
+// settlement, when it settled first — never running) — are
 // driven to their end
 // by deciding whatever the leads offer (a quarter denied). In some
 // iterations something ends or interrupts them half-way: the pool's
@@ -200,7 +203,8 @@ var chainsModeNames = [...]string{"close", "cancel", "restart", "decide"}
 // decisions' timing still varies run to run); POOL_CHAINS_MODE one
 // mode for every iteration (close, cancel, restart, decide);
 // POOL_CHAINS_EXPIRY=1 an expiry on every iteration, =0 on none;
-// POOL_CHAINS_NOFORWARD=1 no Forward; POOL_CHAINS_NOASYNC=1 no Submit
+// POOL_CHAINS_NOFORWARD=1 no Forward; POOL_CHAINS_FORWARD_RETRY=1 the
+// retried Forward on every iteration, =0 on none; POOL_CHAINS_NOASYNC=1 no Submit
 // children; POOL_CHAINS_NOCANCEL=1 turns the cancel iterations into
 // plain ones.
 func TestNestedRandomChains(t *testing.T) {
@@ -227,10 +231,12 @@ func TestNestedRandomChains(t *testing.T) {
 	var modes [len(chainsModeNames)]int
 	var withExpiry, withAsync, withForward, passed int
 	var atStart atomic.Int64 // Forwards into a start window, every one refused
+	var withRetry int
+	var retriesLanded atomic.Int64 // retried Forwards that steered
 	defer func() {
-		t.Logf("modes: close %d, cancel %d, restart %d, decide %d; expiry %d, async %d, forward %d (%d at a start); %d of %d iterations passed",
+		t.Logf("modes: close %d, cancel %d, restart %d, decide %d; expiry %d, async %d, forward %d (%d at a start, retried on %d iterations, %d steered); %d of %d iterations passed",
 			modes[chainsClose], modes[chainsCancel], modes[chainsRestart], modes[chainsDecide],
-			withExpiry, withAsync, withForward, atStart.Load(), passed, iters)
+			withExpiry, withAsync, withForward, atStart.Load(), withRetry, retriesLanded.Load(), passed, iters)
 	}()
 	for it := range iters {
 		ctx := context.Background()
@@ -266,6 +272,62 @@ func TestNestedRandomChains(t *testing.T) {
 				atStart.Add(1)
 			}
 			pool.OnStarting(p, forwardAtStart)
+		}
+		// Forward retried from the moment a Submit receipt exists until
+		// it steers (the arena's pool18.restart shape): every refusal
+		// reads the state the child is in — accepted or parked while its
+		// turn is not in flight (a resume's start window too), its
+		// settlement once it has settled before any steer landed —
+		// never running. Stopped before the pool closes: a Forward
+		// overlapping a Close is not judged.
+		var retryStop atomic.Bool
+		var retries sync.WaitGroup
+		var retryOn bool
+		switch os.Getenv("POOL_CHAINS_FORWARD_RETRY") {
+		case "1":
+			retryOn = true
+		case "0":
+		default:
+			retryOn = os.Getenv("POOL_CHAINS_NOFORWARD") == "" && rint(3) == 0
+		}
+		forwardRetry := func(p *pool.Pool, s *thread.Session, receipt string) {
+			retries.Add(1)
+			go func() {
+				defer retries.Done()
+				for !retryStop.Load() {
+					turn, err := p.Forward(ctx, s, receipt, core.User("hurry"))
+					if retryStop.Load() {
+						return // the call may have overlapped a Close
+					}
+					if err == nil {
+						if turn == nil {
+							t.Errorf("iter %d: Forward to %s steered with no turn", it, receipt)
+						}
+						retriesLanded.Add(1)
+						return
+					}
+					var se *pool.StateError
+					switch {
+					case errors.As(err, &se) && !se.Orphan && (se.State == pool.Accepted || se.State == pool.Parked):
+						runtime.Gosched()
+						continue
+					case errors.As(err, &se) && !se.Orphan && se.State != pool.Running:
+						return // settled before a steer landed
+					case errors.As(err, &se), errors.Is(err, pool.ErrUnknownReceipt):
+						t.Errorf("iter %d: Forward retried to %s: %v; want a refusal reading accepted or parked, or a steer", it, receipt, err)
+						return
+					default:
+						return // the run ending under the steer (its session closing): not this gate's
+					}
+				}
+			}()
+		}
+		stopRetries := func() {
+			retryStop.Store(true)
+			retries.Wait()
+		}
+		if retryOn {
+			withRetry++
 		}
 		expiry := time.Duration(0)
 		switch os.Getenv("POOL_CHAINS_EXPIRY") {
@@ -332,6 +394,9 @@ func TestNestedRandomChains(t *testing.T) {
 					}
 					ch.async[rc.ID] = reparks
 					async = true
+					if retryOn {
+						forwardRetry(p, s, rc.ID)
+					}
 				}
 			}
 			chains = append(chains, ch)
@@ -407,6 +472,7 @@ func TestNestedRandomChains(t *testing.T) {
 						time.Sleep(time.Duration(rint(500)) * time.Microsecond)
 						_ = p.Decide(ctx, c.s, ds...)
 					}()
+					stopRetries()
 					within(t, 40*time.Second, "Close", func() {
 						if err := p.Close(ctx); err != nil {
 							t.Errorf("%s: Close: %v", where(), err)
@@ -437,6 +503,7 @@ func TestNestedRandomChains(t *testing.T) {
 					}
 					time.Sleep(time.Duration(rint(2000)) * time.Microsecond)
 					bg.Wait()
+					stopRetries()
 					within(t, 40*time.Second, "Close before the restart", func() {
 						if err := p.Close(ctx); err != nil {
 							t.Errorf("%s: Close: %v", where(), err)
@@ -464,6 +531,16 @@ func TestNestedRandomChains(t *testing.T) {
 							t.Logf("%s: Recover: %v", where(), err)
 						}
 						cc.s, cc.t1 = s2, nil
+					}
+					if retryOn { // the restarted pool's async children, retried again
+						retryStop.Store(false)
+						for _, cc := range chains {
+							for _, r := range pool.Receipts(cc.s) {
+								if _, ok := cc.async[r.ID]; ok && !r.Settled() {
+									forwardRetry(p2, cc.s, r.ID)
+								}
+							}
+						}
 					}
 					if peak := g.Peak(); peak > max {
 						t.Errorf("%s: model calls in flight peaked at %d on a pool of %d before the restart", where(), peak, max)
@@ -523,6 +600,7 @@ func TestNestedRandomChains(t *testing.T) {
 		if peak := g.Peak(); peak > max {
 			t.Errorf("%s: model calls in flight peaked at %d on a pool of %d (restarted %v)\n%s", where(), peak, max, restarted, g.Stack())
 		}
+		stopRetries()
 		within(t, 40*time.Second, "Close", func() { _ = p.Close(ctx) })
 		for _, c := range chains {
 			var bad []string

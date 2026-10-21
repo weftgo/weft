@@ -57,6 +57,11 @@ type delegate struct {
 	// new pool rebuilt after a restart (delegateFor) counts no park of
 	// its own, yet its first run is a resume.
 	resuming bool
+	// settledAs is the state the delegation settles to, set with the
+	// settled phase — before the settlement receipt is written, so a
+	// Forward in between names the settlement, not the ledger's last
+	// (running) entry.
+	settledAs State
 	// cancel cancels the run in flight; nil at rest.
 	cancel context.CancelFunc
 	// canceled records that Cancel or Close asked for the run's end.
@@ -1244,6 +1249,7 @@ func (p *Pool) arm(d *delegate, gen uint64, replay []thread.ApprovalDecisionEntr
 	ctx, cancel := context.WithCancel(p.ctx)
 	r := d.begin(cancel, nil)
 	r.resume = true
+	d.resuming = true // a Forward while it queues reads parked, the state it leaves
 	p.wg.Add(1)
 	p.mu.Unlock()
 	go func() {
@@ -1762,7 +1768,13 @@ func (p *Pool) cancelParked(ctx context.Context, d *delegate) error {
 // steers the run. Once that send is under way, Forward waits for it to
 // return (ctx bounds the wait) and steers the turn it sent: the turn
 // may be working in the child's session already, before the pool has
-// marked it sent.
+// marked it sent. A refusal of a child this pool runs never reads
+// running (only an Orphan's can, the ledger of an earlier process):
+// the state is the pool's own view of the child at the moment Forward
+// read it, not a ledger read a step ahead of it (a run's running
+// receipt is written as it takes its slot; a parked child resumed by a
+// decision just then) or behind it (a child that is settling names the
+// state it settles to).
 func (p *Pool) Forward(ctx context.Context, parent *thread.Session, receiptID string, msg core.Message) (*thread.Turn, error) {
 	if parent == nil {
 		return nil, fmt.Errorf("thread/pool: Forward with no parent session")
@@ -1784,13 +1796,29 @@ func (p *Pool) Forward(ctx context.Context, parent *thread.Session, receiptID st
 		p.mu.Lock()
 	}
 	running := ok && d.phase == phaseRunning && d.sent
-	if ok && d.phase == phaseRunning && !d.sent {
-		// The run is starting: its turn is not in the child's session
-		// yet. Refused as the state it is leaving — accepted before the
-		// first turn, parked before a resume's — retryable at once.
+	if ok && (d.phase == phaseQueued || d.phase == phaseRunning && !d.sent) {
+		// Queued, or starting: the run's turn is not in the child's
+		// session yet. Refused as the state the run is leaving —
+		// accepted before the first turn, parked before a resume's —
+		// retryable at once. Read from the delegate, never the ledger:
+		// the running receipt is written before the running mark, so a
+		// queued phase can meet a ledger that reads running already.
 		state := Accepted
 		if d.resuming {
 			state = Parked
+		}
+		p.mu.Unlock()
+		return nil, &StateError{Receipt: receiptID, State: state}
+	}
+	if ok && !running {
+		// At rest, or settling: refused as the state the pool holds the
+		// child in, read under the same lock as the phase — never the
+		// ledger, which a resume armed the moment the lock is let go
+		// can move on to running, and which reads a settling child a
+		// step behind.
+		state := Parked // parked, or a parked child a Cancel is settling
+		if d.phase == phaseSettled && d.settledAs != "" {
+			state = d.settledAs // the settlement receipt is being written
 		}
 		p.mu.Unlock()
 		return nil, &StateError{Receipt: receiptID, State: state}
@@ -1812,6 +1840,9 @@ func (p *Pool) Forward(ctx context.Context, parent *thread.Session, receiptID st
 	p.mu.Unlock()
 	if running {
 		return d.child.Send(sctx, msg, thread.As(thread.Steer))
+	}
+	if p.testHookLedgerRead != nil {
+		p.testHookLedgerRead(receiptID)
 	}
 	rc, found := lookup(parent, receiptID)
 	if !found {

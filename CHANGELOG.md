@@ -6,6 +6,12 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Fixed
+
+- thread/pool: a `Forward` landing between a run's running receipt and its running mark — the run holding its slot, the ledger reading `running`, the pool's phase still queued — is refused as the state the run is leaving, `accepted` before a first run and `parked` before a resume, as `Forward`'s godoc says; v0.18.2 fell through to the ledger and refused with a `*StateError` reading `running` ("receipt … is running, not running"), so a caller retrying only on `accepted` gave up before its steer landed (the arena's `pool18.restart` under full-suite load: its child then never saw the steer and its gated model looped on, `Wait` timing out — the hang was the scenario's, no delegation was left unsettled). A `Forward` while the child settles — the settled phase down, the settlement receipt not yet written — names the state it settles to instead of the ledger's `running`; one to a parked child is refused as `parked` even when a decision resumes it at that moment (the refusal was read from the ledger after the pool's lock was let go, the resume's running receipt already there). A refusal of a child this pool runs is now the state read under the pool's lock with its phase, the ledger read only for a receipt no child of this pool serves; `Forward`'s godoc says such a refusal never reads `running`. `TestForwardBetweenTheRunningReceiptAndTheMarkReadsTheStateItLeaves`, `TestForwardWhileSettlingReadsTheSettlement`, `TestForwardToAParkedChildResumingMeanwhileReadsParked`, `TestForwardWhileParkingNeverReadsRunning`, `TestForwardRetriedFromTheReceiptSteers` (the arena's shape, failing on its first iteration on v0.18.2; `POOL_FORWARD_RETRY_ITERS`); `TestNestedRandomChains` retries a `Forward` at every `Submit` receipt from its creation until it steers on one iteration in three, before and after a restart (`POOL_CHAINS_FORWARD_RETRY`).
+
 ## 0.18.2 — 2026-10-21
 
 ### Fixed

@@ -4,6 +4,7 @@
 // step 1 — served to the panel's fake Studio, so both surfaces are
 // tested on one shape.
 import type { AgentView } from "./client"
+import type { RunRow } from "../lib/api"
 import { golden } from "../test/fake-studio"
 import { baseRoutes, META, page, runRow, T0, transcript } from "./testkit"
 import type { Route } from "./testkit"
@@ -22,7 +23,8 @@ export const childRow = runRow({
   session_id: "",
   steps: 1,
 })
-export const runRowOf = () => runRow({ id: RUN, steps: 4 })
+export const runRowOf = (over: Partial<RunRow> = {}) =>
+  runRow({ id: RUN, steps: 4, ...over })
 
 const call = (
   index: number,
@@ -182,10 +184,15 @@ export const REPLAY_META = {
 /** The fake Studio's routes for the fixture: the run, its records, its
  * child, the runtime and the command that finishes as pg_new. */
 export function replayRoutes(
-  opts: { agents?: AgentView[]; compactions?: unknown[] } = {}
+  opts: {
+    agents?: AgentView[]
+    compactions?: unknown[]
+    /** The source row's fields (U18.2: its agent, its build). */
+    row?: Partial<RunRow>
+  } = {}
 ): Record<string, Route> {
   const r = baseRoutes()
-  const row = runRowOf()
+  const row = runRowOf(opts.row)
   r["runs?public_id=pub_orders&limit=50"] = {
     total: 1,
     runs: [row],

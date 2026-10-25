@@ -57,6 +57,7 @@ import {
   postApproval,
   postSteer,
   fetchCommand,
+  isRequestRow,
   postPlaygroundRun,
   runQuery,
   runsQuery,
@@ -117,11 +118,22 @@ import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
 import {
   ExperimentForm,
+  MissLine,
+  TargetCheckBlock,
   useEngineContext,
   StepPicker,
   useSourceEditFields,
 } from "@/components/studio/experiment-form"
-import { EditList } from "@/components/studio/transcript-editor"
+import { EditList, usePreview } from "@/components/studio/transcript-editor"
+import {
+  agentOptions,
+  exhaustedOf,
+  missOf,
+  optionValue,
+  outcomeWord,
+  recordedToolsOf,
+  targetCheck,
+} from "@/lib/target"
 import { mayReadExperiments } from "@/components/studio/no-experiments"
 import { editsProblem, wireEdits } from "@/lib/edits"
 import { Button } from "@/components/ui/button"
@@ -712,10 +724,15 @@ function Playground({ caps }: { caps: string[] }) {
     ? {}
     : pickTarget(all, {
         runtime: runtimeChoice || undefined,
-        agent: agentChoice || sourceRow?.agent || undefined,
+        // A source that names no agent asks ("": UX-C-02), never the
+        // first registered one.
+        agent: agentChoice || (sourceRow ? sourceRow.agent : undefined),
       })
   const runtime = target.runtime
   const agent = target.agent
+  // The reader's escapes from the target check (lib/target.ts).
+  const [crossOk, setCrossOk] = useState(false)
+  const [buildOk, setBuildOk] = useState(false)
   // The source row decides the agent: hold the verbs until it is read.
   const resolving = Boolean(sourceRunID) && !agentChoice && source.isFetching
 
@@ -1013,24 +1030,76 @@ function Playground({ caps }: { caps: string[] }) {
   } catch {
     // held by labProblems / the tool-set refusal
   }
-  const choice = engineChoice(
-    factsOf({
-      source: !!src,
-      overrides: sentOverrides,
-      defaults: agent?.defaults,
-      edits: src && fromStep > 0 ? editDrafts.length : 0,
-      input: fromStep === 0 ? variant.input : "",
-      sourceInput: ectx.sourceInput,
-      fork: variant.thread === "fork",
-      fromStep,
-      steps: ectx.steps,
-      own,
-      costs: src ? ectx.costs : [],
-      costWhy: ectx.costWhy,
-    })
-  )
-  const engineRefused = engineHeld(choice, variant.engine)
+  const facts = factsOf({
+    source: !!src,
+    overrides: sentOverrides,
+    defaults: agent?.defaults,
+    edits: src && fromStep > 0 ? editDrafts.length : 0,
+    input: fromStep === 0 ? variant.input : "",
+    sourceInput: ectx.sourceInput,
+    fork: variant.thread === "fork",
+    fromStep,
+    steps: ectx.steps,
+    own,
+    costs: src ? ectx.costs : [],
+    costWhy: ectx.costWhy,
+  })
+  const unkeyed = engineChoice(facts)
   const engineCtx = { own, steps: ectx.steps, sourceInput: ectx.sourceInput }
+  // The active variant's preview (capability preview): the scripted key
+  // check before Run, and the tool names the source step recorded —
+  // the build check's facts, as the replay drawer reads them.
+  let previewBody = ""
+  if (
+    caps.includes("preview") &&
+    src &&
+    agent &&
+    runtime &&
+    variant.thread !== "fork"
+  ) {
+    try {
+      previewBody = JSON.stringify(
+        buildRunBody({
+          runtime: runtime.id,
+          agent,
+          variant: { ...variant, engine: variant.engine ?? unkeyed.default },
+          sourceRunID: src,
+          fromStep,
+          input: variant.input,
+          edits: editDrafts,
+          publicID: sourceRow?.public_id,
+          ...engineCtx,
+        })
+      )
+    } catch {
+      // the form's own refusal is said where Run's error goes
+    }
+  }
+  const preview = usePreview(previewBody)
+  const keyMatch = preview.doc?.scripted_key_match
+  const choice = keyMatch ? engineChoice({ ...facts, keyMatch }) : unkeyed
+  const engineRefused = engineHeld(choice, variant.engine)
+  // The source step's catalog (its request record) stands in when no
+  // preview answers.
+  const stepReq = ectx.step?.request
+  const recordedTools = recordedToolsOf(
+    preview.doc,
+    stepReq && isRequestRow(stepReq) && stepReq.tools ? stepReq.tools : null
+  )
+  const check = targetCheck({
+    source: src ? sourceRow?.agent : undefined,
+    agent: target.mismatch ? undefined : agent,
+    missing: target.mismatch,
+    recordedHash: sourceRow?.manifest_hash,
+    recordedTools,
+    keyMatch,
+    crossOk,
+    buildOk,
+  })
+  const picker =
+    check.kind === "unnamed" ||
+    check.kind === "unregistered" ||
+    check.kind === "cross_agent"
 
   /** decide answers one parked call of a variant's run with the
    * approval verbs (ADR 0007) — the panel's controls, rendered here
@@ -1075,7 +1144,8 @@ function Playground({ caps }: { caps: string[] }) {
       body = buildRunBody({
         runtime: runtime.id,
         agent,
-        variant,
+        // The engine Run names (the preview's key check included).
+        variant: { ...variant, engine: engineOf(choice, variant.engine) },
         sourceRunID,
         fromStep,
         input: variant.input,
@@ -1087,6 +1157,7 @@ function Playground({ caps }: { caps: string[] }) {
       setError(e instanceof Error ? e.message : String(e))
       return
     }
+    if (check.kind === "cross_agent") body.cross_agent = true
     setBusy(true)
     try {
       const out = await postPlaygroundRun(body)
@@ -1122,7 +1193,8 @@ function Playground({ caps }: { caps: string[] }) {
     onSaved?: () => void
   ) => {
     setError("")
-    if (!runtime || !agent || busy) return
+    // The target check holds the matrix as it holds Run (UX-C-03).
+    if (!runtime || !agent || busy || check.held) return
     if (!validExperimentID(experimentID)) {
       setError(
         `experiment id ${experimentID} breaks the rule [A-Za-z0-9._:-]{1,128}`
@@ -1160,7 +1232,8 @@ function Playground({ caps }: { caps: string[] }) {
               }),
               // The cell's address rides its command id: the
               // experiment page places the run by it (plan F5).
-              cellCommandID(v.key, i.key, v.sideEffects)
+              cellCommandID(v.key, i.key, v.sideEffects),
+              check.kind === "cross_agent"
             ),
           })
       // The whole command (F5.1): the modes per variant, the step and
@@ -1253,7 +1326,7 @@ function Playground({ caps }: { caps: string[] }) {
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-2 text-xs text-muted-foreground">
         <span>Playground ·</span>
-        {choosing ? (
+        {choosing || target.unnamed ? (
           <span data-pick-agent-head>{PICK_AGENT_HEAD}</span>
         ) : runtime && agent ? (
           <>
@@ -1295,15 +1368,6 @@ function Playground({ caps }: { caps: string[] }) {
                 : "no runtime connected — runtime.Install(...) in your app opens the link"}
           </span>
         )}
-        {target.mismatch && (
-          <span className="text-destructive" role="alert">
-            · no connected runtime registers agent {target.mismatch}
-            {sourceRow?.agent === target.mismatch
-              ? " (the source run's)"
-              : ""}{" "}
-            — this would run {agent?.name ?? "nothing"} instead
-          </span>
-        )}
         {meta.data?.debug_scope && (
           <span className="text-faint">
             · breakpoints &amp; steer act on{" "}
@@ -1342,6 +1406,34 @@ function Playground({ caps }: { caps: string[] }) {
                   >
                     {restored.text}
                   </p>
+                ) : null}
+                {check.kind ? (
+                  <section className="space-y-1 text-xs" data-target-check>
+                    <TargetCheckBlock
+                      check={check}
+                      options={agentOptions(all, recordedTools)}
+                      picker={picker}
+                      picked={
+                        agent && runtime
+                          ? optionValue({
+                              runtime: runtime.id,
+                              agent: agent.name,
+                            })
+                          : undefined
+                      }
+                      onPick={(o) => {
+                        setRuntimeChoice(o.runtime)
+                        setAgentChoice(o.agent)
+                        setCrossOk(false)
+                        write({ runtime: o.runtime, agent: o.agent })
+                      }}
+                      onEscape={() =>
+                        check.kind === "build"
+                          ? setBuildOk(true)
+                          : setCrossOk(true)
+                      }
+                    />
+                  </section>
                 ) : null}
                 {choosing ? (
                   <PickTarget
@@ -1516,6 +1608,7 @@ function Playground({ caps }: { caps: string[] }) {
                       !agent ||
                       busy ||
                       resolving ||
+                      !!check.held ||
                       orphans.length > 0 ||
                       !!heldEdits ||
                       !!engineRefused ||
@@ -1582,6 +1675,17 @@ function Playground({ caps }: { caps: string[] }) {
                           decide={(runID, callID, decision, text) =>
                             decide(v.key, runID, callID, decision, text)
                           }
+                          onLive={() => {
+                            const i = variants.findIndex((x) => x.key === v.key)
+                            if (i < 0) return
+                            setActive(i)
+                            setVariants((cur) =>
+                              cur.map((x) =>
+                                x.key === v.key ? { ...x, engine: "live" } : x
+                              )
+                            )
+                            if (i === 0) write({ engine: "live" })
+                          }}
                         />
                       ))}
                     </div>
@@ -1602,7 +1706,7 @@ function Playground({ caps }: { caps: string[] }) {
                   savedID={matrixID}
                   fromStep={sourceRunID ? fromStep : 0}
                   runMatrix={runMatrix}
-                  busy={busy || resolving || !runtime || !agent}
+                  busy={busy || resolving || !runtime || !agent || !!check.held}
                   mayRun={mayRun}
                   issuing={busy}
                   cells={cells}
@@ -1702,9 +1806,11 @@ function PickTarget({
  * mints one). */
 function withCommandID(
   body: PlaygroundRunBody,
-  id: string | undefined
+  id: string | undefined,
+  crossAgent = false
 ): PlaygroundRunBody {
-  return id ? { ...body, command_id: id } : body
+  const b = crossAgent ? { ...body, cross_agent: true } : body
+  return id ? { ...b, command_id: id } : b
 }
 
 /** runLabel shortens a run id for the variant card's header. */
@@ -1825,6 +1931,7 @@ function ResultCard({
   mayRun,
   live,
   decide,
+  onLive,
 }: {
   experiment: Experiment
   onUpdate: Dispatch<SetStateAction<Experiment | null>>
@@ -1846,6 +1953,9 @@ function ResultCard({
     decision: "approve" | "deny" | "resolve",
     text: string
   ) => Promise<void>
+  /** "run again on live" after a scripted miss: the variant on live
+   * (its Run then names the estimate), never a retry by itself. */
+  onLive?: () => void
 }) {
   const [transcriptText, setTranscriptText] = useState<string | null>(null)
   const [steerText, setSteerText] = useState("")
@@ -1931,7 +2041,9 @@ function ResultCard({
               : "text-muted-foreground"
           }
         >
-          {stateLabel(experiment)}
+          {/* The head reads the run's status (lib/status.ts), never
+              the command's ack state (U18.2). */}
+          {outcomeWord(experiment.state, experiment.status)}
         </span>
         {experiment.runID && (
           <Link
@@ -1977,9 +2089,16 @@ function ResultCard({
         </button>
       </div>
       <div className="space-y-2 p-3 text-xs">
-        {experiment.error && (
+        {experiment.state === "finished" &&
+        (missOf(experiment) || exhaustedOf(experiment)) ? (
+          <MissLine
+            text={missOf(experiment) || exhaustedOf(experiment)}
+            again={!!missOf(experiment)}
+            onLive={onLive}
+          />
+        ) : experiment.error ? (
           <p className="text-destructive">{experiment.error}</p>
-        )}
+        ) : null}
         {stream.error && (
           <p className="text-destructive">event stream: {stream.error}</p>
         )}

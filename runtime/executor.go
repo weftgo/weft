@@ -80,13 +80,13 @@ func (l *link) validateWithin(ctx context.Context, cmd *command) (string, bool) 
 		// change (tools off, thinking, edited messages) misses instead
 		// and fails the step with "no recorded turn".
 		if cmd.Overrides.Instructions != "" {
-			return "scripted engine with an instructions override would silently replay the old answer (WEFT-PLAYGROUND §5.5)", false
+			return "scripted cannot try a changed system prompt: the recorded answers ignore the prompt, so it would replay the old answer — run on live, or drop the prompt change", false
 		}
 		if cmd.Overrides.Model != "" {
-			return "scripted engine with a model override would silently replay the old answer (WEFT-PLAYGROUND §5.5)", false
+			return "scripted cannot try another model: it replays the answers the source's own model recorded — run on live, or drop the model override", false
 		}
 		if !hasSource {
-			return "the scripted engine replays a source run's recorded turns: a source run is required", false
+			return "scripted replays a recorded run's answers: pick a source run, or run on live", false
 		}
 		if len(cmd.TranscriptEdits) > 0 {
 			// An edit changes what the model saw at from_step, and the
@@ -1623,7 +1623,7 @@ func cutAt(steps []core.Message, stepOf []int, fromStep int) int {
 // transcript — Studio's copy (studio/playground.go) words it
 // identically, and its preview shows it as a warning.
 func scriptedEdits(fromStep int) string {
-	return fmt.Sprintf("the scripted engine would replay the recorded turn %d, which answered a different prompt: transcript edits need engine live", fromStep)
+	return fmt.Sprintf("your edit changes step %d's request, and scripted holds only the recorded answer to the original — run on live, or drop the edit", fromStep)
 }
 
 // inputPastStepZero is the refusal of an input beside from_step > 0 —
@@ -1649,7 +1649,7 @@ func toolSchemas(agent *core.Agent) map[string]json.RawMessage {
 // source never answered — Studio's copy (studio/playground.go) words it
 // identically.
 func scriptedAtCount(n int) string {
-	return fmt.Sprintf("the scripted engine has no recorded turn for step %d: the source never answered it (use engine live)", n)
+	return fmt.Sprintf("scripted has no recorded answer for step %d: the source never answered it — run on live, or replay from an earlier step", n)
 }
 
 // endsInAnsweredCalls reports whether a run's own messages end in a

@@ -752,7 +752,7 @@ func TestReplayFromTheStepCountAnswersTheCalls(t *testing.T) {
 			t.Run("scripted", func(t *testing.T) {
 				cmd := command{CommandID: "cmd_scripted", Agent: "failing", Engine: "scripted",
 					Source: &sourceSpec{RunID: "r_fail", FromStep: 3}}
-				const want = "the scripted engine has no recorded turn for step 3: the source never answered it (use engine live)"
+				const want = "scripted has no recorded answer for step 3: the source never answered it — run on live, or replay from an earlier step"
 				if reason, ok := l.validate(ctx, &cmd); ok || reason != want {
 					t.Errorf("scripted at the step count = %v %q, want refused: %q", ok, reason, want)
 				}

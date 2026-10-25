@@ -22,7 +22,8 @@ import (
 // TestRuntimesGoldenMatchesARealRuntime: testdata/api/runtimes.golden.json
 // is the GET /api/runtimes shape the web client builds the option lab
 // on (plan F3: each agent's resolver flag and run defaults; U18.1:
-// each agent's manifest hash and the Studio URL the link dialled). This
+// each agent's manifest hash and the Studio URL the link dialled;
+// U18.2: each agent's model_provider). This
 // connects a real weft/runtime — run defaults set, a ModelResolver
 // installed — to a real Studio and reads the route: every field the
 // golden pins must exist in the real answer with the same JSON type.

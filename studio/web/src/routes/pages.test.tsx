@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "@/lib/api"
 import { CAPS_UNREAD } from "@/lib/honesty"
 import { queryClient } from "@/lib/query"
+import { TARGET_WORDS } from "@/lib/target"
 import type {
   RunDoc,
   RunRow,
@@ -724,6 +725,69 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     expect(studio.calls("POST playground/runs")[0].body).toMatchObject({
       engine: "scripted",
     })
+  })
+
+  // U18.2 (UX-C-03, UX-C-02): the playground holds Run and Run matrix
+  // on the target as the replay drawer does — never a stand-in.
+  it("a source agent nobody registers holds Run and Run matrix; a pick of another agent is held until 'replay as … anyway', which sends cross_agent (U18.2)", async () => {
+    studio
+      .on("GET runs/r_ok", { ...source, agent: "billing" })
+      .on("POST playground/runs", command("cmd_1", "queued"))
+      .on("GET playground/commands/cmd_1", command("cmd_1", "queued"))
+    renderApp("/playground?run=r_ok")
+    const held = await waitFor(() => {
+      const el = document.querySelector('[data-target-held="unregistered"]')
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(held.textContent).toBe(TARGET_WORDS.unregistered("billing"))
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
+    expect(runButton).toHaveProperty("disabled", true)
+    expect(screen.getByRole("button", { name: "Run matrix" })).toHaveProperty(
+      "disabled",
+      true
+    )
+    fireEvent.click(
+      document.querySelector<HTMLElement>('[data-target-option="orders"]')!
+    )
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-target-held="cross_agent"]')?.textContent
+      ).toBe(TARGET_WORDS.cross("billing", "orders"))
+    )
+    expect(runButton).toHaveProperty("disabled", true)
+    fireEvent.click(
+      document.querySelector<HTMLElement>('[data-target-escape="cross_agent"]')!
+    )
+    await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
+    fireEvent.click(runButton)
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(1)
+    )
+    expect(studio.calls("POST playground/runs")[0].body).toMatchObject({
+      agent: "orders",
+      cross_agent: true,
+    })
+  })
+
+  it("a source that names no agent asks for one: Run held, nothing posted until a pick (U18.2)", async () => {
+    studio.on("GET runs/r_ok", { ...source, agent: "" })
+    renderApp("/playground?run=r_ok")
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-target-held="unnamed"]')?.textContent
+      ).toContain(TARGET_WORDS.unnamed([]).split(" (")[0])
+    )
+    expect(document.querySelector("[data-pick-agent-head]")).toBeTruthy()
+    expect(studio.calls("POST playground/runs")).toHaveLength(0)
+    fireEvent.click(
+      document.querySelector<HTMLElement>('[data-target-option="orders"]')!
+    )
+    await waitFor(() =>
+      expect(document.querySelector("[data-target-held]")).toBeNull()
+    )
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
+    await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
   })
 
   it("carries the whole hand-off into the command — and runs the source run's agent", async () => {

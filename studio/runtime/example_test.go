@@ -65,3 +65,14 @@ func ExampleScriptedMissReason() {
 	// Output:
 	// scripted has no recorded answer for step 0: the request sets a thinking level the recording does not hold — re-run on engine live
 }
+
+// ExampleAgentRegistration_ManifestModelProvider reads the provider of
+// a registered agent's own model: "wefttest" says engine live calls the
+// app's test script, not a provider (GET /api/runtimes' model_provider,
+// UX-C-09).
+func ExampleAgentRegistration_ManifestModelProvider() {
+	a := runtime.AgentRegistration{Name: "director",
+		Manifest: `{"weft":1,"agents":[{"name":"director","model":{"provider":"wefttest","name":"script"}}]}`}
+	fmt.Println(a.ManifestModelProvider(), a.ManifestModelName())
+	// Output: wefttest script
+}

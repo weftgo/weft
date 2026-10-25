@@ -33,6 +33,7 @@ import { serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 import { tokenScope } from "./config"
 import { isHoleRef } from "../lib/api"
+import { recordedToolsOf } from "../lib/target"
 import { promptNotRecorded, promptNotServed, promptReadError } from "./badges"
 import { rerun as rerunDraft } from "../lib/replay"
 import type { ReplayDraft } from "../lib/replay"
@@ -65,6 +66,7 @@ import type {
   CommandStatus,
   PanelEndpoint,
   PanelLiveHandle,
+  AgentView,
   RuntimeView,
 } from "./client"
 import {
@@ -623,6 +625,10 @@ const quiet = () => {}
  * subscription per scope; one per watched turn. Its methods' order is
  * arranged for gzip's window, as element.ts's are (P9-trim3).
  */
+/** toolsOn is an agent's tools, every one on (the drawer's start). */
+const toolsOn = (a?: AgentView): Record<string, boolean> =>
+  Object.fromEntries((a?.tools ?? []).map((t) => [t.name, true]))
+
 export class PanelModel {
   state: PanelState = emptyPanelState()
 
@@ -1752,6 +1758,7 @@ export class PanelModel {
     }
     if (
       !d ||
+      !d.agent ||
       d.thread === "fork" ||
       !(this.state.meta?.capabilities.includes("preview") ?? false)
     ) {
@@ -2101,21 +2108,22 @@ export class PanelModel {
     this.state.runtimes = runtimes
     this.state.rtRead = true
     this.state.rtErr = ""
-    const rt = pickRuntime(runtimes, agentName)
-    const agent = rt?.agents.find((a) => a.name === agentName)
-    if (!rt || !agent) {
-      // The verb cannot run; say why instead of a button that does
-      // nothing (a child's agent the app does not register: A10).
+    if (!runtimes.some((r) => r.agents.length)) {
+      // Nothing to replay it on: say why instead of a button that does
+      // nothing.
       this.setExperimentError(
-        `no connected runtime registers the agent "${agentName}"${runId !== under ? ` (run ${runId})` : ""} — experiments run in your app (weft/runtime)`,
+        "no connected runtime registers an agent (weft/runtime)",
         under
       )
       return
     }
-    const tools: Record<string, boolean> = {}
-    for (const t of agent.tools) tools[t.name] = true
+    // A source that names no agent, or one no runtime registers, opens
+    // the drawer on no agent: it asks (lib/target.ts), never a stand-in.
+    const rt = agentName ? pickRuntime(runtimes, agentName) : null
+    const agent = rt?.agents.find((a) => a.name === agentName)
+    const tools = toolsOn(agent)
     // The rule that is parking this runtime's runs, whoever set it.
-    this.state.breakpoints = Array.isArray(rt.breakpoints)
+    this.state.breakpoints = Array.isArray(rt?.breakpoints)
       ? [...rt.breakpoints]
       : []
     // A child replayed from its row before it was ever opened: its
@@ -2139,7 +2147,7 @@ export class PanelModel {
       step === 0 && turn && turn.id === runId
         ? turnPromptOf(turn.transcript)
         : ""
-    const registered = agent.instructions ?? ""
+    const registered = agent?.instructions ?? ""
     let instructions = replay?.instructions ?? registered
     let promptFrom: ExperimentDraft["promptFrom"]
     let promptHole: ExperimentDraft["promptHole"]
@@ -2191,9 +2199,17 @@ export class PanelModel {
       ...(row ? { own: row.model } : {}),
       sideEffects: "",
       thread: replay?.thread ?? "ephemeral",
-      runtimeId: rt.id,
+      runtimeId: agent ? rt!.id : "",
+      // The target check's facts (U18.2): the source's agent, build and
+      // the tools its step was offered.
+      sourceAgent: row?.agent ?? opts.agent,
+      recordedHash: row?.manifest_hash,
+      recordedTools: recordedToolsOf(
+        null,
+        src?.requests?.steps.get(step)?.rows.at(-1)?.tools
+      ),
       // The option lab's greyed defaults (plan F3), as registered.
-      ...(agent.defaults ? { defaults: agent.defaults } : {}),
+      ...(agent?.defaults ? { defaults: agent.defaults } : {}),
       under,
       key: ++this.drawerKey,
       ...(replay ? { verb: replay.verb } : {}),
@@ -2205,6 +2221,31 @@ export class PanelModel {
     this.readCost()
     this.schedulePreview()
     this.emit()
+  }
+
+  /** pickTarget is the drawer's target pick (U18.2): the agent the
+   * source names none of, or one no runtime registers — its tools,
+   * registered prompt and defaults, as openExperiment reads them. */
+  pickTarget(runtimeId: string, name: string) {
+    const d = this.state.drawer
+    const a = this.state.runtimes
+      .find((r) => r.id === runtimeId)
+      ?.agents.find((x) => x.name === name)
+    if (!d || !a) return
+    const registered = a.instructions ?? ""
+    this.setDraft({
+      agent: name,
+      runtimeId,
+      tools: toolsOn(a),
+      registeredInstructions: registered,
+      instructions:
+        d.instructions === d.registeredInstructions
+          ? registered
+          : d.instructions,
+      defaults: a.defaults,
+      lab: undefined,
+      crossOk: false,
+    })
   }
 
   /** readCost reads the source's step-route docs from from_step to
@@ -2229,8 +2270,7 @@ export class PanelModel {
               this.ep,
               `runs/${encodeURIComponent(d.runId)}/steps/${n}`
             ).catch((e: unknown) => {
-              if (n == step)
-                d.costWhy = `step unreadable: ${messageOf(e)}`
+              if (n == step) d.costWhy = `step unreadable: ${messageOf(e)}`
               return null
             })
       )
@@ -2714,6 +2754,8 @@ export class PanelModel {
       () => this.left(res),
       async (st) => {
         res.state = st.state
+        res.status = st.status
+        res.reason = st.reason
         res.error = st.error ?? null
         if (st.run_id && st.run_id !== res.runID)
           this.followExperiment(res, st.run_id)

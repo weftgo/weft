@@ -58,6 +58,7 @@ import { HOLES } from "@/lib/honesty"
 import { runLink } from "@/lib/links"
 import { resetNotices } from "@/lib/notify"
 import { BREAKPOINTS_MOVED, DRAWER_ORDER } from "@/lib/drawer-spec"
+import { TARGET_WORDS } from "@/lib/target"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -611,9 +612,13 @@ describe("a child row replays the child as its own run (A10)", () => {
     expect(d.getByText(new RegExp(`${CHILD} · researcher`))).toBeTruthy()
     await waitFor(() =>
       expect(
-        drawer()!.querySelector("[data-replay-blocked]")?.textContent
-      ).toBe("agent researcher is not registered on runtime rt_1")
+        drawer()!.querySelector('[data-target-held="unregistered"]')
+          ?.textContent
+      ).toBe(TARGET_WORDS.unregistered("researcher"))
     )
+    // The picker asks for the agent instead (U18.2): Studio never
+    // takes a stand-in.
+    expect(drawer()!.querySelector("[data-target-picker]")).toBeTruthy()
     expect(
       d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
     ).toBe(true)
@@ -1657,8 +1662,15 @@ describe("the option lab (plan F3, Studio's drawer)", () => {
   // The registration as GET /api/runtimes serves it (the golden): a
   // resolver and the option-lab defaults.
   const lab = golden<{ runtimes: RuntimeView[] }>("runtimes").runtimes[0]
+  // No manifest hash: the golden's is not the fixture run's build, and
+  // the build check (U18.2) is not what these cases are about.
   const withAgent = (a: Partial<AgentView>) => ({
-    runtimes: [{ ...lab, agents: [{ ...lab.agents[0], ...a }] }],
+    runtimes: [
+      {
+        ...lab,
+        agents: [{ ...lab.agents[0], manifest_hash: undefined, ...a }],
+      },
+    ],
   })
 
   async function openLab(runtimes: object = withAgent({})) {

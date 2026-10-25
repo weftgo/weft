@@ -1,0 +1,7 @@
+{
+  "edits": "your edit changes step 1's request, and scripted holds only the recorded answer to the original — run on live, or drop the edit",
+  "model": "scripted cannot try another model: it replays the answers the source's own model recorded — run on live, or drop the model override",
+  "no source": "scripted replays a recorded run's answers: pick a source run, or run on live",
+  "past end": "scripted has no recorded answer for step 2: the source never answered it — run on live, or replay from an earlier step",
+  "prompt": "scripted cannot try a changed system prompt: the recorded answers ignore the prompt, so it would replay the old answer — run on live, or drop the prompt change"
+}

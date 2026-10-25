@@ -24,6 +24,7 @@ import { buildRunBody, draftProblem } from "./playground"
 import { catalogAt } from "./element"
 import { HOLES } from "../lib/honesty"
 import type { ExperimentDraft } from "./playground"
+import { TARGET_WORDS } from "../lib/target"
 import {
   $,
   all,
@@ -497,7 +498,7 @@ describe("a child replays as its own run (A10)", () => {
     await settle()
   }
 
-  it("the child row's verb names the child and its agent; an agent no runtime registers is said, nothing posted", async () => {
+  it("the child row's verb names the child and its agent; an agent no runtime registers is said, Run held, nothing posted", async () => {
     const studio = fakeStudio(replayRoutes(), REPLAY_META)
     const el = await mount()
     const v = verbIn(el, callBox(el, "c2"), "rerun")!
@@ -506,10 +507,13 @@ describe("a child replays as its own run (A10)", () => {
     )
     click(v)
     await settle()
-    expect($(el, ".weft-drawer")).toBeNull()
-    expect(text(el, ".weft-xres")).toContain(
-      `no connected runtime registers the agent "researcher" (run ${CHILD})`
+    // U18.2: the drawer opens and asks for the agent (lib/target.ts),
+    // never a stand-in; Run is held.
+    expect(text(el, '[data-target-held="unregistered"]')).toBe(
+      TARGET_WORDS.unregistered("researcher")
     )
+    expect(all(el, "[data-target-option]").length).toBeGreaterThan(0)
+    expect($(el, ".weft-run-btn")!.hasAttribute("disabled")).toBe(true)
     expect(studio.posts("playground/runs")).toHaveLength(0)
   })
 

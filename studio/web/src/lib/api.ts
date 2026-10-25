@@ -2459,6 +2459,8 @@ export interface AgentDefaults {
   seed?: number
   stop?: string[]
   tool_choice: ToolChoiceWire
+  /** U18.1-fix: the thinking budget in tokens (absent for none). */
+  thinking_budget?: number
 }
 
 export interface AgentView {
@@ -2466,6 +2468,10 @@ export interface AgentView {
   /** U18.1: the registered agent's weft.manifest.hash (compare a run's
    * manifest_hash). Absent on a Studio older than the field. */
   manifest_hash?: string
+  /** U18.2: the agent's own model's provider ("wefttest": its live
+   * engine is a test script, UX-C-09). Absent when the manifest names
+   * none, or on an older Studio. */
+  model_provider?: string
   models: string[]
   /** The runtime holds a runtime.ModelResolver: a model name outside
    * `models` may be proposed (the runtime decides before its ack).
@@ -2558,6 +2564,9 @@ export interface PlaygroundRunBody {
   /** The caller's at-most-once id ([A-Za-z0-9._:-]{1,128}; a reuse is
    * 409): the matrix names each cell's (lib/form-state.ts). */
   command_id?: string
+  /** U18.1: replay a source recorded by another agent as this one (the
+   * reader said "replay as <agent> anyway", lib/target.ts). */
+  cross_agent?: boolean
 }
 
 /** post one JSON document (the playground's write verbs). */

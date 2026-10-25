@@ -268,7 +268,7 @@ func TestFromStepAtTheStepCount(t *testing.T) {
 	for from, want := range map[int]int{2: http.StatusBadRequest, 1: http.StatusAccepted} {
 		code, out := pt.post(t, fmt.Sprintf(`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_failed","from_step":%d},`+
 			`"engine":"scripted","side_effects":"substitute","thread":"ephemeral"}`, from))
-		if code != want || (want == http.StatusBadRequest && !strings.Contains(out, "the scripted engine has no recorded turn for step 2: the source never answered it (use engine live)")) {
+		if code != want || (want == http.StatusBadRequest && !strings.Contains(out, "scripted has no recorded answer for step 2: the source never answered it — run on live, or replay from an earlier step")) {
 			t.Errorf("scripted from_step %d = %d %s, want %d", from, code, strings.TrimSpace(out), want)
 		}
 	}

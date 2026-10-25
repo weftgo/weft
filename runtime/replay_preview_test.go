@@ -250,7 +250,7 @@ func TestOneSentenceOnBothSides(t *testing.T) {
 			"insert step 5 is past from_step 2: an insert lands at a step boundary 0..2"},
 		{"scripted, from_step 2, an edit", previewBody{Engine: "scripted", Source: &sourceSpec{RunID: "r_os", FromStep: 2},
 			TranscriptEdits: []transcriptEdit{{Kind: "insert", Step: 2, Content: "x"}}},
-			"the scripted engine would replay the recorded turn 2, which answered a different prompt: transcript edits need engine live"},
+			"your edit changes step 2's request, and scripted holds only the recorded answer to the original — run on live, or drop the edit"},
 		{"fork, a bad edit", previewBody{Thread: "fork", Input: &in,
 			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: badEdit}, badInsert},
 		{"from_step -1, an edit", previewBody{Source: &sourceSpec{RunID: "r_os", FromStep: -1},
@@ -270,13 +270,13 @@ func TestOneSentenceOnBothSides(t *testing.T) {
 			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: badEdit}, badInsert},
 		{"scripted, a valid edit, an unknown thread mode", previewBody{Engine: "scripted", Thread: "branch",
 			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: []transcriptEdit{{Kind: "insert", Step: 2, Content: "x"}}},
-			"the scripted engine would replay the recorded turn 2, which answered a different prompt: transcript edits need engine live"},
+			"your edit changes step 2's request, and scripted holds only the recorded answer to the original — run on live, or drop the edit"},
 		{"scripted, an instructions override, no edit", previewBody{Engine: "scripted", Overrides: overrides{Instructions: "x"},
 			Source: &sourceSpec{RunID: "r_os", FromStep: 1}},
-			"scripted engine with an instructions override would silently replay the old answer (WEFT-PLAYGROUND §5.5)"},
+			"scripted cannot try a changed system prompt: the recorded answers ignore the prompt, so it would replay the old answer — run on live, or drop the prompt change"},
 		{"scripted, a model override, no edit", previewBody{Engine: "scripted", Overrides: overrides{Model: "m"},
 			Source: &sourceSpec{RunID: "r_os", FromStep: 1}},
-			"scripted engine with a model override would silently replay the old answer (WEFT-PLAYGROUND §5.5)"},
+			"scripted cannot try another model: it replays the answers the source's own model recorded — run on live, or drop the model override"},
 	} {
 		c.body.Agent, c.body.Runtime = "orders", l.id
 		if code, msg := postStudio(t, ts.URL, "/api/playground/runs", c.body); code != http.StatusBadRequest || msg != c.want {

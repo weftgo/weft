@@ -255,7 +255,7 @@ func TestPreviewRoute(t *testing.T) {
 	// The scripted engine: a 400 on the run route, a warning here.
 	scripted := `{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_pv","from_step":2},` +
 		`"transcript_edits":[{"kind":"insert","step":2,"content":"x"}],"engine":"scripted"}`
-	const trap = "the scripted engine would replay the recorded turn 2, which answered a different prompt: transcript edits need engine live"
+	const trap = "your edit changes step 2's request, and scripted holds only the recorded answer to the original — run on live, or drop the edit"
 	if code, out := previewPost(t, pt, "/api/playground/runs", "", scripted); code != http.StatusBadRequest || !strings.Contains(out, trap) {
 		t.Errorf("scripted run with edits = %d %s, want 400 %q", code, out, trap)
 	}

@@ -257,17 +257,30 @@ func (a AgentRegistration) ManifestToolSchemas() (schemas map[string]json.RawMes
 
 // ManifestModelName returns the agent's own model name.
 func (a AgentRegistration) ManifestModelName() string {
+	_, name := a.manifestModel()
+	return name
+}
+
+// ManifestModelProvider returns the agent's own model provider (its
+// ModelInfo.Provider: "wefttest" for a wefttest script).
+func (a AgentRegistration) ManifestModelProvider() string {
+	provider, _ := a.manifestModel()
+	return provider
+}
+
+func (a AgentRegistration) manifestModel() (provider, name string) {
 	var doc struct {
 		Agents []struct {
 			Model struct {
-				Name string `json:"name"`
+				Provider string `json:"provider"`
+				Name     string `json:"name"`
 			} `json:"model"`
 		} `json:"agents"`
 	}
 	if err := json.Unmarshal([]byte(a.Manifest), &doc); err != nil || len(doc.Agents) == 0 {
-		return ""
+		return "", ""
 	}
-	return doc.Agents[0].Model.Name
+	return doc.Agents[0].Model.Provider, doc.Agents[0].Model.Name
 }
 
 // ManifestInstructions returns the agent's registered system prompt —
@@ -580,9 +593,13 @@ type AgentView struct {
 	// recorded run's manifest_hash is compared with to say whether the
 	// run was recorded by this build of the agent (UX-C-06). "" when
 	// the registration carried no manifest.
-	ManifestHash string   `json:"manifest_hash"`
-	Models       []string `json:"models"`
-	Resolver     bool     `json:"resolver"`
+	ManifestHash string `json:"manifest_hash"`
+	// ModelProvider is the agent's own model's provider as its manifest
+	// names it ("" when it names none): "wefttest" says engine live
+	// calls the app's test script, not a provider (UX-C-09).
+	ModelProvider string   `json:"model_provider,omitempty"`
+	Models        []string `json:"models"`
+	Resolver      bool     `json:"resolver"`
 	// Defaults are the agent's run defaults as its runtime registered
 	// them; nil (absent on the wire) for a runtime older than the
 	// option lab, which registers none — a client greys the new knobs
@@ -1746,7 +1763,7 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 		}
 		for _, a := range c.reg.Agents {
 			av := AgentView{Name: a.Name, ManifestHash: a.Hash(), Models: a.Models, Resolver: a.Resolver,
-				Instructions: a.ManifestInstructions()}
+				Instructions: a.ManifestInstructions(), ModelProvider: a.ManifestModelProvider()}
 			// A current runtime always registers its defaults (tool
 			// choice mode at least "auto"); one older than the option lab
 			// sends none, and the view says so by carrying none — never

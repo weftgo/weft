@@ -28,6 +28,8 @@ import { statusClass } from "../lib/status-class"
 import { PANEL_CSS } from "./styles"
 import { clip, NO_CONTENT } from "../lib/title"
 import type { DecisionDoc, RunDoc, RunRow } from "../lib/api"
+import type { AgentView } from "./client"
+import { TARGET_WORDS } from "../lib/target"
 import { UNRUN_CALL_REASON } from "../lib/events"
 import { EXPIRY_UNREAD } from "../lib/decisions"
 import {
@@ -4854,8 +4856,13 @@ describe("the engine per command on both drawers (U17)", () => {
     target: string
     run: string
     order: string[]
+    /** U18.2: the build line, and whether Run is held. */
+    build: string | null
+    held: boolean
   }
   const read = (root: ParentNode, run: string): Read => ({
+    build: root.querySelector("[data-target-build]")?.textContent ?? null,
+    held: root.querySelector(run)!.hasAttribute("disabled"),
     engine: root
       .querySelector("[data-drawer-section=engine]")!
       .getAttribute("data-engine"),
@@ -4875,10 +4882,15 @@ describe("the engine per command on both drawers (U17)", () => {
     | { model: string }
     | { toolChoice: string }
 
+  /** U18.2's fixture: the source row's fields, the registered agent,
+   * and whether the reader takes the target check's escape. */
+  type Fx = { row?: Partial<RunRow>; agent?: AgentView; escape?: boolean }
+
   async function studioSide(
     draft: ReplayDraft,
     c?: Change,
-    pv?: PreviewDoc
+    pv?: PreviewDoc,
+    fx: Fx = {}
   ): Promise<Read> {
     stubBrowser()
     const fake = new FakeStudio()
@@ -4889,7 +4901,7 @@ describe("the engine per command on both drawers (U17)", () => {
         capabilities: ["playground", "steps", ...(pv ? ["preview"] : [])],
       })
       .on(`GET runs/${RK.RUN}`, {
-        ...RK.runRowOf(),
+        ...RK.runRowOf(fx.row),
         children: [],
         holes: [],
         compactions: [],
@@ -4899,7 +4911,7 @@ describe("the engine per command on both drawers (U17)", () => {
       .on(`GET runs/${RK.RUN}/steps/1`, cost(1))
       .on(`GET runs/${RK.RUN}/steps/2`, cost(2))
       .on(`GET runs/${RK.RUN}/steps/3`, cost(3))
-      .on("GET runtimes", { runtimes: [RK.runtimeOf([agent])] })
+      .on("GET runtimes", { runtimes: [RK.runtimeOf([fx.agent ?? agent])] })
       .install()
     const { container } = await renderWithRouter(
       createElement(ReplayDrawer, {
@@ -4936,6 +4948,12 @@ describe("the engine per command on both drawers (U17)", () => {
     if (c && "toolChoice" in c)
       await choose(await field('[aria-label="tool choice"]'), c.toolChoice)
     if (pv) await field("[data-preview-system]")
+    if (fx.escape) {
+      fireEvent.click(await field("[data-target-escape]"))
+      await waitFor(() =>
+        expect(container.querySelector("[data-target-escape]")).toBeNull()
+      )
+    }
     const out = read(container, "[data-run-engine]")
     cleanup()
     return out
@@ -4944,12 +4962,15 @@ describe("the engine per command on both drawers (U17)", () => {
   async function panelSide(
     draft: ReplayDraft,
     c?: Change,
-    pv?: PreviewDoc
+    pv?: PreviewDoc,
+    fx: Fx = {}
   ): Promise<Read> {
-    const routes: Record<string, unknown> = { ...RK.replayRoutes() }
+    const routes: Record<string, unknown> = {
+      ...RK.replayRoutes({ row: fx.row }),
+    }
     if (pv) routes["POST playground/preview"] = pv
     for (const n of [0, 1, 2, 3]) routes[`runs/${RK.RUN}/steps/${n}`] = cost(n)
-    routes.runtimes = { runtimes: [RK.runtimeOf([agent])] }
+    routes.runtimes = { runtimes: [RK.runtimeOf([fx.agent ?? agent])] }
     panelStudio(routes, {
       ...RK.REPLAY_META,
       capabilities: [
@@ -4978,6 +4999,11 @@ describe("the engine per command on both drawers (U17)", () => {
       await type('[aria-label="model name the app resolves"]', c.model)
     if (c && "toolChoice" in c)
       await type('select[aria-label="tool choice"]', c.toolChoice, "change")
+    if (fx.escape) {
+      ;($(el, "[data-target-escape]") as HTMLElement).click()
+      // The draft's preview is asked again (Run waits on it).
+      await settle(pv ? 400 : 60)
+    }
     const out = read(el.shadowRoot!, ".weft-drawer [data-run-engine]")
     el.remove()
     return out
@@ -4986,10 +5012,11 @@ describe("the engine per command on both drawers (U17)", () => {
   const bothDrawers = async (
     draft: () => ReplayDraft,
     c?: Change,
-    pv?: PreviewDoc
+    pv?: PreviewDoc,
+    fx?: Fx
   ) => {
-    const studio = await studioSide(draft(), c, pv)
-    const panel = await panelSide(draft(), c, pv)
+    const studio = await studioSide(draft(), c, pv, fx)
+    const panel = await panelSide(draft(), c, pv, fx)
     expect(panel).toEqual(studio)
     return studio
   }
@@ -5057,4 +5084,56 @@ describe("the engine per command on both drawers (U17)", () => {
       expect(r.engine).toBe("live")
       expect(r.scripted).toContain(why)
     })
+
+  // U18.2 (UX-C-06, UX-D-03): the seeded researcher's shape — a run
+  // recorded by a build whose tools held search_docs, replayed against
+  // today's registration of the same agent, whose tools hold
+  // web_search. Both drawers say the build, the tools and the scripted
+  // miss before Run, and hold Run until the reader takes today's build.
+  it("another build of the same agent: the build line, the tools and the miss on both, Run held until today's build is taken (U18.2)", async () => {
+    const message =
+      "scripted has no recorded answer for step 2: the tool list differs from the recording — re-run on engine live"
+    const base = golden<PreviewDoc>("playground-preview")
+    const pv: PreviewDoc = {
+      ...base,
+      was_sent: {
+        ...base.was_sent,
+        tools: [{ name: "lookup_order" }, { name: "search_docs" }],
+      },
+      scripted_key_match: { ok: false, because: ["tools"], step: 2, message },
+    }
+    const fx: Fx = {
+      row: { manifest_hash: "9b5997a3".padEnd(64, "0") },
+      agent: {
+        ...agent,
+        manifest_hash: "a59ce89e".padEnd(64, "1"),
+        tools: [
+          { name: "lookup_order", side_effects: "never", allow: false },
+          { name: "web_search", side_effects: "safe", allow: false },
+        ],
+      },
+    }
+    const r = await bothDrawers(() => replayFromStep(2), undefined, pv, fx)
+    expect(r.build).toBe(
+      `! ${TARGET_WORDS.build("acme-support", "9b5997a3", "a59ce89e")} · tools differ: search_docs → web_search · scripted will miss at step 2`
+    )
+    expect(r.held).toBe(true)
+    expect(r.engine).toBe("live")
+    const taken = await bothDrawers(() => replayFromStep(2), undefined, pv, {
+      ...fx,
+      escape: true,
+    })
+    expect(taken.held).toBe(false)
+    expect(taken.build).toBe(r.build)
+  })
+
+  it("the same build: no build line, Run free on both (U18.2)", async () => {
+    const h = "a59ce89e".padEnd(64, "1")
+    const r = await bothDrawers(() => replayFromStep(2), undefined, undefined, {
+      row: { manifest_hash: h },
+      agent: { ...agent, manifest_hash: h },
+    })
+    expect(r.build).toBeNull()
+    expect(r.held).toBe(false)
+  })
 })

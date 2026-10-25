@@ -19,6 +19,9 @@ export interface Experiment {
   status?: CommandStatus["status"]
   runID: string
   error: string | null
+  /** U18.1: the error read — a scripted miss's server sentence
+   * (lib/target.ts's missOf). */
+  reason?: CommandStatus["reason"]
   label: string
   row: RunRow | null
   /** The decisions sent on a parked run's calls. The runtime resumes a
@@ -151,6 +154,7 @@ export function useCommandTracking(
               status: st.status,
               runID: st.run_id || cur.runID,
               error: st.error,
+              reason: st.reason,
             }
           : cur
       )

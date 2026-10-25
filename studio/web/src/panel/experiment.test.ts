@@ -842,7 +842,7 @@ describe("the drawer", () => {
     const { el } = await openDrawer(routes)
     expect($(el, ".weft-drawer")).toBeNull()
     expect(text(el, ".weft-xres")).toContain(
-      'no connected runtime registers the agent "acme-support"'
+      "no connected runtime registers an agent"
     )
   })
 

@@ -193,11 +193,13 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
     ? ""
     : runtimes.isPending
       ? "reading the connected runtimes…"
-      : !target.runtime || !target.agent
-        ? "no runtime connected — runtime.Install(...) in your app opens the link"
-        : target.mismatch
-          ? `no connected runtime registers agent ${target.mismatch}`
-          : ""
+      : "unnamed" in target && target.unnamed
+        ? "the experiment names no agent: open it in the playground and pick one"
+        : !target.runtime || !target.agent
+          ? "no runtime connected — runtime.Install(...) in your app opens the link"
+          : target.mismatch
+            ? `no connected runtime registers agent ${target.mismatch}`
+            : ""
 
   // Follow the re-runs' commands until they settle; each settle reads
   // the experiment again (its runs join under the same id).

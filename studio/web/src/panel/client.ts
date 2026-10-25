@@ -25,6 +25,7 @@ import type {
 import { asTranscript } from "../lib/api"
 import { diffPath } from "../lib/stepdiff"
 import type { DiffDoc } from "../lib/stepdiff"
+import type { CommandReason } from "../lib/target"
 import type { LiveGrant, LiveRecord, LiveRun, LiveSelector } from "../lib/live"
 import {
   grantSpent,
@@ -491,6 +492,10 @@ export interface ToolView {
 }
 export interface AgentView {
   name: string
+  /** U18.1/U18.2: the registered build's manifest hash and its own
+   * model's provider (lib/target.ts's build check, UX-C-09's note). */
+  manifest_hash?: string
+  model_provider?: string
   models: string[]
   /** The app holds a runtime.ModelResolver (plan F3): any model name
    * may be proposed; the runtime decides before its ack. */
@@ -554,6 +559,9 @@ export interface CommandStatus {
    * finishes succeeded under the still-parked run's id. */
   status?: "succeeded" | "failed"
   error: string | null
+  /** U18.1: a scripted miss's source step, key components and the
+   * server's sentence (lib/target.ts's missOf). */
+  reason?: CommandReason
   created: string
   updated: string
 }

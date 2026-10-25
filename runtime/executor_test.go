@@ -457,17 +457,17 @@ func TestValidate(t *testing.T) {
 		{"unknown model", func(c *command) { c.Overrides.Model = "gpt-9" }, "not on this runtime's allow-list"},
 		{"raised max_steps", func(c *command) { c.Overrides.Options = map[string]float64{"max_steps": 9} }, "raises the agent's cap"},
 		{"raised parallelism", func(c *command) { c.Overrides.Options = map[string]float64{"parallelism": 8} }, "raises the agent's cap"},
-		{"scripted without a source", func(c *command) { c.Engine = "scripted" }, "source run is required"},
+		{"scripted without a source", func(c *command) { c.Engine = "scripted" }, "pick a source run"},
 		{"scripted with an instructions override", func(c *command) {
 			c.Engine = "scripted"
 			c.Source = &sourceSpec{RunID: "s_x", FromStep: 0}
 			c.Overrides.Instructions = "new prompt"
-		}, "silently replay"},
+		}, "would replay the old answer"},
 		{"scripted with a model override", func(c *command) {
 			c.Engine = "scripted"
 			c.Source = &sourceSpec{RunID: "s_x", FromStep: 0}
 			c.Overrides.Model = "glm-5.3-flash"
-		}, "silently replay"},
+		}, "cannot try another model"},
 		// fork-without-threads is asserted below on its own link (this
 		// one carries storage for the from_step case).
 		{"thread fork with from_step", func(c *command) {
@@ -887,8 +887,8 @@ func TestModelResolver(t *testing.T) {
 	}
 	scripted := mk("anthropic/claude-haiku-4-5")
 	scripted.Engine, scripted.Source = "scripted", &sourceSpec{RunID: "s_x"}
-	if reason, ok := l.validate(context.Background(), scripted); ok || !strings.Contains(reason, "silently replay") {
-		t.Errorf("scripted + resolved model: reason = %q ok = %v, want the §5.5 refusal", reason, ok)
+	if reason, ok := l.validate(context.Background(), scripted); ok || !strings.Contains(reason, "cannot try another model") {
+		t.Errorf("scripted + resolved model: reason = %q ok = %v, want the model refusal", reason, ok)
 	}
 	if !l.reg.registration("rt").Agents[0].Resolver {
 		t.Error("registration resolver = false with a ModelResolver")

@@ -1091,8 +1091,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 277,189 B raw / 93,052 B gzip
-(90.9 KiB, the bundle of the ledger's row "U19-fix"; 13,444 B — 13.1 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 280,952 B raw / 94,445 B gzip
+(92.2 KiB, the bundle of the ledger's row "U18.2 target checks"; 12,051 B — 11.8 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -2511,6 +2511,25 @@ scripted command's `GET /api/playground/commands/{id}` carries `reason`
 `error`: the step is the source run's own, the message the sentence both
 surfaces render — from the finished ack's typed `reason` when the
 runtime sent one, else read from `error` (`studio/runtime.ReasonOf`).
+
+**The target check before Run (U18.2).** Studio's replay drawer, the
+playground and the panel's drawer read these facts through one rule
+(`web/src/lib/target.ts`): a source naming no agent, or one no
+connected runtime registers, holds Run with an agent picker (the
+agents whose tools match the recorded catalog first) and posts
+nothing until a pick; another agent picked holds Run until "replay as
+<agent> anyway", which sends `cross_agent: true`; a run recorded by
+another build of the same agent reads "recorded by
+researcher@9b5997a3 · registered now researcher@a59ce89e · tools
+differ: search_docs → web_search · scripted will miss at step 2" and,
+when the tools differ, holds Run until "replay on today's build
+anyway". After Run a failed scripted command shows `reason.message`
+with "run again on live" (the form switched to live, never re-posted),
+under a head that reads the run's status. Each agent's
+`model_provider` (`/api/runtimes`) says when live is a `wefttest`
+script. The scripted refusals of `POST /api/playground/runs` say what
+differs and the two ways on ("run on live, or drop the prompt
+change"), never a doc section.
 
 **Wire: the scripted miss.** A finished ack may carry `reason`
 `{kind: "scripted_miss", step, components}` (step −1: the source

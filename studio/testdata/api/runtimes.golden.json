@@ -17,6 +17,7 @@
         {
           "name": "acme-support",
           "manifest_hash": "3f1c9a0d6b2e4f5a8c7d9e0b1a2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4",
+          "model_provider": "wefttest",
           "models": ["glm-5.3-flash"],
           "resolver": true,
           "defaults": {

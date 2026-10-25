@@ -177,7 +177,7 @@ func TestReplayWithEditedRequest(t *testing.T) {
 					c.TranscriptEdits = []transcriptEdit{{Step: 0, CallID: "c1", Args: json.RawMessage(`{}`)}}
 				}, `an edit with args needs kind "tool_args"`},
 				{"scripted with edits", func(c *command) { c.Engine = "scripted" },
-					"the scripted engine would replay the recorded turn 2, which answered a different prompt: transcript edits need engine live"},
+					"your edit changes step 2's request, and scripted holds only the recorded answer to the original — run on live, or drop the edit"},
 				{"input beside from_step", func(c *command) {
 					in := "where is order 7?"
 					c.Input, c.TranscriptEdits = &in, nil

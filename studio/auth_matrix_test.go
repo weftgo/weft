@@ -1167,6 +1167,11 @@ func TestAuthMatrix(t *testing.T) {
 		if !strings.Contains(string(b), `"manifest_hash":"`) {
 			t.Errorf("GET /api/runtimes as %s: no agent manifest_hash: %s", id.name, b)
 		}
+		// U18.2: the agent's model provider (UX-C-09: "wefttest" says
+		// live calls a test script) names no content: every identity's.
+		if !strings.Contains(string(b), `"model_provider":"p"`) {
+			t.Errorf("GET /api/runtimes as %s: no agent model_provider: %s", id.name, b)
+		}
 	}
 
 	// U18.1: a failed scripted command's reason (the server's sentence

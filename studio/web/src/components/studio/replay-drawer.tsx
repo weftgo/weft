@@ -69,6 +69,16 @@ import type {
   SideEffectsMode,
   ToolVerdict,
 } from "@/lib/replay"
+import {
+  agentOptions,
+  exhaustedOf,
+  missOf,
+  optionValue,
+  scriptNote,
+  outcomeWord,
+  recordedToolsOf,
+  targetCheck,
+} from "@/lib/target"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import {
   queued,
@@ -81,6 +91,8 @@ import { quietCommand } from "@/lib/notify"
 import {
   ChangeFields,
   EngineRadios,
+  MissLine,
+  TargetCheckBlock,
   useEngineContext,
   ModeFields,
   OptionLab,
@@ -400,12 +412,20 @@ function ReplayForm({
   const runtimes = useQuery(runtimesQuery())
   const source = useQuery({ ...runQuery(runID), staleTime: 30_000 })
   const sourceRow = source.data?.id === runID ? source.data : undefined
-  const wantAgent = request.agent || sourceRow?.agent || undefined
+  // The source's agent: undefined while unread, "" when it names none.
+  const sourceAgent = sourceRow ? sourceRow.agent : undefined
+  // The reader's pick of the target (U18.2): asked for when the source
+  // names no agent, or one no connected runtime registers.
+  const [pick, setPick] = useState<{ runtime: string; agent: string }>()
+  const [crossOk, setCrossOk] = useState(false)
+  const [buildOk, setBuildOk] = useState(false)
+  const wantAgent = pick?.agent || request.agent || sourceAgent
   const all = runtimes.data?.runtimes ?? []
-  const target = pickTarget(all, { agent: wantAgent })
-  // The drawer never experiments on a stand-in: a mismatch holds Run.
-  const runtime = target.runtime
-  const agent = target.mismatch ? undefined : target.agent
+  const target = pickTarget(all, { runtime: pick?.runtime, agent: wantAgent })
+  // The drawer never experiments on a stand-in: a mismatch, or a
+  // source that names no agent, holds Run until the reader picks one.
+  const runtime = target.unnamed ? undefined : target.runtime
+  const agent = target.mismatch || target.unnamed ? undefined : target.agent
   const registered = agent?.instructions ?? ""
 
   const [fromStep, setFromStep] = useState(draft.fromStep)
@@ -481,6 +501,7 @@ function ReplayForm({
   })
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const runButton = useRef<HTMLButtonElement>(null)
   const [experiment, setExperiment] = useState<Experiment | null>(null)
   useCommandTracking(experiment, setExperiment)
 
@@ -669,6 +690,24 @@ function ReplayForm({
   })
   const engine = engineOf(choice, picked)
   const engineRefused = engineHeld(choice, picked)
+  // The target check (U18.2, lib/target.ts): an unnamed or
+  // unregistered source agent, another agent picked, another build.
+  const recordedTools = recordedToolsOf(preview.doc, catalog.tools)
+  const check = targetCheck({
+    source: sourceAgent,
+    agent,
+    missing: target.mismatch,
+    recordedHash: sourceRow?.manifest_hash,
+    recordedTools,
+    keyMatch: preview.doc?.scripted_key_match,
+    crossOk,
+    buildOk,
+  })
+  const picker =
+    !!pick ||
+    check.kind === "unnamed" ||
+    check.kind === "unregistered" ||
+    check.kind === "cross_agent"
   // An edit inside the view from_step's request carried is refused by
   // the server (ADR 0029 decision 4): said here first, in its words,
   // from transcript?step's compacted_at.
@@ -714,6 +753,7 @@ function ReplayForm({
       setError(e instanceof Error ? e.message : String(e))
       return
     }
+    if (check.kind === "cross_agent") body.cross_agent = true
     setBusy(true)
     try {
       const out = await postPlaygroundRun(body)
@@ -740,9 +780,8 @@ function ReplayForm({
     blocked = `the runtimes could not be read: ${runtimes.error.message}`
   else if (all.length === 0)
     blocked = "no runtime connected · start the app with WEFT_ENV=dev"
-  else if (target.mismatch)
-    blocked = `agent ${target.mismatch} is not registered on runtime ${runtime?.id ?? "?"}`
-  else if (!wantAgent && source.isPending) blocked = "reading the source run…"
+  else if (wantAgent === undefined && source.isPending)
+    blocked = "reading the source run…"
   // What holds Run, the command in flight aside: "send again" on a
   // rejected or lost command is held by the same rules.
   const held =
@@ -750,6 +789,7 @@ function ReplayForm({
     !runtime ||
     !agent ||
     busy ||
+    Boolean(check.held) ||
     refused.length > 0 ||
     orphans.length > 0 ||
     // The option lab's refusals (plan F3), said on their knobs.
@@ -812,17 +852,28 @@ function ReplayForm({
         <section className="space-y-1" data-drawer-section="target">
           <div className="eyebrow">{DRAWER_TITLES.target}</div>
           <p className="font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground">
-            {targetLine(
-              wantAgent ?? "?",
-              target.mismatch ? undefined : runtime
-            )}
+            {targetLine(wantAgent || "?", agent ? runtime : undefined)}
           </p>
+          <TargetCheckBlock
+            check={check}
+            options={agentOptions(all, recordedTools)}
+            picker={picker}
+            picked={pick ? optionValue(pick) : undefined}
+            onPick={(o) => {
+              setPick({ runtime: o.runtime, agent: o.agent })
+              setCrossOk(false)
+            }}
+            onEscape={() =>
+              check.kind === "build" ? setBuildOk(true) : setCrossOk(true)
+            }
+          />
         </section>
         <EngineRadios
           choice={choice}
           engine={engine}
           refused={engineRefused}
           onPick={setPicked}
+          note={scriptNote(agent)}
         />
         <section className="space-y-3" data-drawer-section="changes">
           <div className="eyebrow">{DRAWER_TITLES.changes}</div>
@@ -988,6 +1039,7 @@ function ReplayForm({
           data-sticky-run
         >
           <Button
+            ref={runButton}
             onClick={() => void run()}
             disabled={held || Boolean(experiment && !settled(experiment.state))}
             data-run-engine={engine}
@@ -1020,6 +1072,10 @@ function ReplayForm({
             agent={agent?.name}
             runtime={runtime?.id}
             onAgain={held ? undefined : () => void run()}
+            onLive={() => {
+              setPicked("live")
+              runButton.current?.focus()
+            }}
           />
         ) : null}
       </div>
@@ -1086,6 +1142,7 @@ function ReplayOutcome({
   agent,
   runtime,
   onAgain,
+  onLive,
 }: {
   experiment: Experiment
   sourceRunID: string
@@ -1095,14 +1152,19 @@ function ReplayOutcome({
   /** Re-issue the form as a new command (UX-C-31); absent while the
    * form's own rules hold Run. */
   onAgain?: () => void
+  /** "run again on live" after a scripted miss: the form on live. */
+  onLive?: () => void
 }) {
   const e = experiment
   const { has } = useCapabilities()
   // The drawer shows this command's outcome: its finish toast would
   // cover it (UX-C-32), so the notice is not raised while it is open.
   useEffect(() => quietCommand(e.commandID), [e.commandID])
-  const label =
-    e.state === "finished" && e.status ? `${e.state} · ${e.status}` : e.state
+  // The head reads the run's status (lib/status.ts), never the
+  // command's ack state: a failed replay reads failed (UX-D-03).
+  const label = outcomeWord(e.state, e.status)
+  const miss = e.state === "finished" ? missOf(e) : ""
+  const gone = e.state === "finished" ? exhaustedOf(e) : ""
   return (
     <div
       className="space-y-1 rounded-md border px-3 py-2 text-xs"
@@ -1136,6 +1198,8 @@ function ReplayOutcome({
             send again
           </button>
         </p>
+      ) : miss || gone ? (
+        <MissLine text={miss || gone} again={!!miss} onLive={onLive} />
       ) : e.error ? (
         <p className="text-status-bad">{e.error}</p>
       ) : null}

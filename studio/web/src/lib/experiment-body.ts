@@ -78,12 +78,20 @@ export function toolsOffFor(
  * honoured when it exists. Only when nothing was asked for (or nobody
  * registers it) does the first registered agent stand in, and
  * `mismatch` then names the agent that could not be found, so the page
- * says so instead of silently experimenting on a different agent.
+ * says so instead of silently experimenting on a different agent. An
+ * agent asked for as "" — a source run that names none (UX-C-02) — is
+ * no stand-in at all: `unnamed`, and the page asks (lib/target.ts).
  */
 export function pickTarget(
   runtimes: RuntimeView[],
   want: { runtime?: string; agent?: string }
-): { runtime?: RuntimeView; agent?: AgentView; mismatch?: string } {
+): {
+  runtime?: RuntimeView
+  agent?: AgentView
+  mismatch?: string
+  unnamed?: boolean
+} {
+  if (want.agent === "") return { unnamed: true }
   const named = want.runtime
     ? runtimes.find((r) => r.id === want.runtime)
     : undefined

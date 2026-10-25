@@ -182,7 +182,14 @@ import {
   replayBounds,
 } from "../lib/experiment-body"
 import type { LabFields } from "../lib/experiment-body"
-import { engineFor, foldedWords, labOf, turnPromptOf } from "./playground"
+import {
+  engineFor,
+  foldedWords,
+  labOf,
+  targetFor,
+  turnPromptOf,
+} from "./playground"
+import { agentOptions, missOf, outcomeWord, TARGET_WORDS } from "../lib/target"
 import {
   BREAKPOINTS_MOVED,
   DRAWER_TITLES,
@@ -3519,7 +3526,37 @@ export class WeftDevtools extends HTMLElement {
       root.append(x)
       return x
     }
-    sec("target").append(targetLine(d.agent, rt))
+    // The target and its check (U18.2, lib/target.ts): the build line,
+    // why Run is held, the picker, the one escape.
+    const tc = targetFor(d, s.runtimes, s.preview?.doc)
+    const tg = sec("target")
+    tg.append(targetLine(d.agent || "?", agent && rt))
+    for (const [t, k] of [
+      [tc.build && `! ${tc.build}`, "build"],
+      [tc.kind != "build" && tc.held, "held"],
+    ] as const)
+      if (t)
+        tg.append(
+          el("div", `weft-note${tc.held ? " weft-warn" : ""}`, t, {
+            [`data-target-${k}`]: tc.kind,
+          })
+        )
+    const pick = (t: string, k: string, v: string, f: () => void) => {
+      const b = el("button", "weft-btn", t, { [`data-target-${k}`]: v })
+      on(b, "click", f)
+      tg.append(b)
+    }
+    if (/^(un|cr)/.test(tc.kind))
+      for (const o of agentOptions(s.runtimes, d.recordedTools))
+        pick(o.label, "option", o.agent, () =>
+          this.model?.pickTarget(o.runtime, o.agent)
+        )
+    if (tc.escape)
+      pick(tc.escape, "escape", tc.kind, () =>
+        this.model?.setDraft(
+          tc.kind == "build" ? { buildOk: true } : { crossOk: true }
+        )
+      )
     // The engine (lib/engine.ts): two radios, one line each; scripted
     // disabled with its reason when it cannot answer; a pick is never
     // switched behind the user — it is held, said inline.
@@ -3991,6 +4028,7 @@ export class WeftDevtools extends HTMLElement {
       "data-drawer-section": "run",
     })
     const held =
+      tc.held ||
       engHeld ||
       refused ||
       unplaced ||
@@ -5126,7 +5164,12 @@ export class WeftDevtools extends HTMLElement {
       el(
         "span",
         "",
-        [r.label, r.engine ?? (r.row && engineWord(r.row)), r.state]
+        // The run's status word (lib/status.ts), never the ack's state.
+        [
+          r.label,
+          r.engine ?? (r.row && engineWord(r.row)),
+          outcomeWord(r.state, r.status),
+        ]
           .filter(Boolean)
           .join(" · ")
       ),
@@ -5251,7 +5294,22 @@ export class WeftDevtools extends HTMLElement {
     head.append(discard)
     card.append(head)
     const body = el("div", "weft-step-b")
-    if (r.error) body.append(el("div", "weft-note weft-warn", r.error))
+    // A scripted miss: the server's sentence and "run again on live" —
+    // the drawer back on live with its estimate, never a retry.
+    const miss = r.state == "finished" && missOf(r)
+    if (miss) {
+      const m = el("div", "weft-note weft-warn", miss, {
+        "data-weft-miss": "",
+      })
+      if (s.drawer) {
+        const b = el("button", "weft-btn", TARGET_WORDS.again, {
+          "data-weft-live-again": "",
+        })
+        on(b, "click", () => this.model?.setDraft({ engine: "live" }))
+        m.append(" ", b)
+      }
+      body.append(m)
+    } else if (r.error) body.append(el("div", "weft-note weft-warn", r.error))
     // The link back (plan F1): the new run, the source step it replays.
     if (r.runID) {
       const src = r.sourceRunID

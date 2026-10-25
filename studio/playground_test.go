@@ -322,9 +322,9 @@ func TestPlaygroundRunValidation(t *testing.T) {
 		// The body carries an instructions override, so scripted hits
 		// §5.5's guard first; the source-run requirement is pinned in
 		// TestScriptedEngineEndToEnd.
-		{"scripted with an instructions override", mutate(`"engine": "live"`, `"engine": "scripted"`), http.StatusBadRequest, "silently replay"},
-		{"scripted with instructions", mutate(`"engine": "live"`, `"engine": "scripted", "source": {"run_id": "s_1-t1", "from_step": 0}`), http.StatusBadRequest, "silently replay"},
-		{"scripted with a model", mutate(`"engine": "live"`, `"engine": "scripted", "source": {"run_id": "s_1-t1", "from_step": 0}, "overrides": {"model": "glm-5.3-flash"}`), http.StatusBadRequest, "silently replay"},
+		{"scripted with an instructions override", mutate(`"engine": "live"`, `"engine": "scripted"`), http.StatusBadRequest, "would replay the old answer"},
+		{"scripted with instructions", mutate(`"engine": "live"`, `"engine": "scripted", "source": {"run_id": "s_1-t1", "from_step": 0}`), http.StatusBadRequest, "would replay the old answer"},
+		{"scripted with a model", mutate(`"engine": "live"`, `"engine": "scripted", "source": {"run_id": "s_1-t1", "from_step": 0}, "overrides": {"model": "glm-5.3-flash"}`), http.StatusBadRequest, "would replay the old answer"},
 		{"thread fork without a source", mutate(`"thread": "ephemeral"`, `"thread": "fork"`), http.StatusBadRequest, "a source run is required"},
 		{"thread fork without an input", mutate(
 			`"input": "where is my order #4411?",`,

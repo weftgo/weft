@@ -25,6 +25,8 @@ import type { LiveRecord } from "../lib/live"
 import type { ReplayDraft, ReplayVerb } from "../lib/replay"
 import { REPLAY_WORDS } from "../lib/replay"
 import type { HoleMark } from "../lib/honesty"
+import { targetCheck } from "../lib/target"
+import type { CommandReason, TargetCheck } from "../lib/target"
 import type { DiffDoc } from "../lib/stepdiff"
 import type { CommandStatus, RuntimeView } from "./client"
 import { stringify } from "./render"
@@ -70,8 +72,17 @@ export interface ExperimentDraft {
   costWhy?: string
   sideEffects: "" | "substitute" | "park" | "allow"
   thread: "ephemeral" | "fork"
-  /** The connected runtime the command goes to. */
+  /** The connected runtime the command goes to ("" until picked: the
+   * source names no registered agent, U18.2). */
   runtimeId: string
+  /** The target check's facts (lib/target.ts): the source run's agent
+   * ("" unnamed), its manifest hash, the tools its step recorded, and
+   * the escapes the reader took. */
+  sourceAgent?: string
+  recordedHash?: string
+  recordedTools?: string[] | null
+  crossOk?: boolean
+  buildOk?: boolean
   /** The option lab's knobs (plan F3; absent: every knob at the
    * agent's default) and the defaults it greys, as registered. */
   lab?: LabFields
@@ -111,6 +122,10 @@ export interface ExperimentResult {
   label: string
   /** The engine its command ran on. */
   engine?: string
+  /** The finished run's status and a scripted miss's reason (the
+   * command row's): the head's word, the miss line. */
+  status?: CommandStatus["status"]
+  reason?: CommandReason
   /** The turn the experiment hangs off: the pane draws under it. */
   sourceRunID: string
   /** The source turn's words (the diff base), taken when the command
@@ -339,7 +354,34 @@ export function buildRunBody(
   if (draft.step > 0 && draft.edits.length)
     body.transcript_edits = wireEdits(draft.edits)
   if (publicId) body.public_id = publicId
+  // Held until the reader said "replay as <agent> anyway" (targetFor).
+  if (draft.sourceAgent && draft.agent !== draft.sourceAgent)
+    body.cross_agent = true
   return body
+}
+
+/** targetFor is the drawer's target check (lib/target.ts) over the
+ * draft and the runtimes read when it opened. */
+export function targetFor(
+  d: ExperimentDraft,
+  runtimes: RuntimeView[],
+  pv?: PreviewDoc
+): TargetCheck {
+  const agent = d.agent
+    ? runtimes
+        .find((r) => r.id === d.runtimeId)
+        ?.agents.find((a) => a.name === d.agent)
+    : undefined
+  return targetCheck({
+    source: d.sourceAgent,
+    agent,
+    missing: agent ? "" : d.agent,
+    recordedHash: d.recordedHash,
+    recordedTools: pv?.was_sent.tools?.map((t) => t.name) ?? d.recordedTools,
+    keyMatch: pv?.scripted_key_match,
+    crossOk: d.crossOk,
+    buildOk: d.buildOk,
+  })
 }
 
 /** pickRuntime names the runtime a drawer opens against: the one

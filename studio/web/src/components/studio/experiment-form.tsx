@@ -17,7 +17,7 @@ import {
   transcriptQuery,
 } from "@/lib/api"
 import { turnPrompt } from "@/lib/events"
-import type { AgentView, ModelInfo, RuntimeView } from "@/lib/api"
+import type { AgentView, ModelInfo, RuntimeView, StepDoc } from "@/lib/api"
 import { EDIT_FIELD, kindOf } from "@/lib/edits"
 import {
   engineHeld,
@@ -60,6 +60,8 @@ import type {
   VariantFields,
 } from "@/lib/experiment-body"
 import { BREAKPOINT_WORDS } from "@/lib/settings"
+import { optionValue, TARGET_PICK, TARGET_WORDS } from "@/lib/target"
+import type { AgentOption, TargetCheck } from "@/lib/target"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
 import { SelectField } from "@/components/ui/select-field"
@@ -784,11 +786,14 @@ export function EngineRadios({
   engine,
   refused,
   onPick,
+  note,
 }: {
   choice: EngineChoice
   engine: Engine
   refused: string
   onPick: (e: Engine) => void
+  /** UX-C-09: what live calls here when it is not a provider. */
+  note?: string
 }) {
   const off = !choice.scripted.enabled
   return (
@@ -839,12 +844,130 @@ export function EngineRadios({
           {ENGINE_WORDS.live(choice.live.model, choice.live.estimate)}
         </span>
       </label>
+      {note ? (
+        <p className="text-[11px] text-faint" data-engine-script>
+          {note}
+        </p>
+      ) : null}
       {refused ? (
         <p className="text-xs text-status-bad" role="alert" data-engine-refused>
           {refused}
         </p>
       ) : null}
     </fieldset>
+  )
+}
+
+/**
+ * TargetCheckBlock is the target's check under its line (U18.2,
+ * lib/target.ts): the build line, why Run is held, the agent picker
+ * when the source names no agent or one nobody registers (the agents
+ * whose tools match the recording first), and the one escape a click
+ * takes — "replay as <agent> anyway", "replay on today's build
+ * anyway". The replay drawer and the playground draw the same block.
+ */
+export function TargetCheckBlock({
+  check,
+  options,
+  picker,
+  picked,
+  onPick,
+  onEscape,
+}: {
+  check: TargetCheck
+  options: AgentOption[]
+  /** Draw the picker (the source names no registered agent, or a pick
+   * was made). */
+  picker: boolean
+  picked?: string
+  onPick: (o: AgentOption) => void
+  onEscape: () => void
+}) {
+  return (
+    <>
+      {check.build ? (
+        <p
+          className={`text-[11px] [overflow-wrap:anywhere] ${check.held ? "text-status-bad" : "text-faint"}`}
+          role={check.held ? "alert" : undefined}
+          data-target-build
+        >
+          ! {check.build}
+        </p>
+      ) : null}
+      {check.held && check.kind !== "build" ? (
+        <p
+          className="text-xs text-status-bad"
+          role="alert"
+          data-target-held={check.kind}
+        >
+          {check.held}
+        </p>
+      ) : null}
+      {picker && options.length ? (
+        <div className="space-y-0.5" data-target-picker>
+          <span className="text-[11px] text-faint">{TARGET_PICK}</span>
+          <ul className="flex flex-wrap gap-1.5">
+            {options.map((o) => (
+              <li key={optionValue(o)}>
+                <button
+                  type="button"
+                  className="rounded border px-2 py-0.5 text-xs hover:bg-muted aria-pressed:border-foreground"
+                  aria-pressed={picked === optionValue(o)}
+                  data-target-option={o.agent}
+                  title={`runtime ${o.runtime}`}
+                  onClick={() => onPick(o)}
+                >
+                  {o.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {check.escape ? (
+        <button
+          type="button"
+          className="text-xs text-thread-ink hover:underline"
+          data-target-escape={check.kind}
+          onClick={onEscape}
+        >
+          {check.escape}
+        </button>
+      ) : null}
+    </>
+  )
+}
+
+/** MissLine is a finished command's miss after Run (U18.2): the
+ * server's sentence and, for a scripted miss, "run again on live" — a
+ * choice that puts the same command on live with its estimate, never
+ * a retry by itself. */
+export function MissLine({
+  text,
+  again,
+  onLive,
+}: {
+  text: string
+  again: boolean
+  onLive?: () => void
+}) {
+  return (
+    <p className="text-status-bad" data-replay-miss>
+      {text}
+      {again && onLive ? (
+        <>
+          {" "}
+          <button
+            type="button"
+            className="text-thread-ink hover:underline"
+            data-replay-live-again
+            onClick={onLive}
+          >
+            {TARGET_WORDS.again}
+          </button>
+        </>
+      ) : null}
+    </p>
   )
 }
 
@@ -1007,6 +1130,8 @@ export function useEngineContext(
   sourceInput?: string
   costs: (StepCost | null)[] | null
   costWhy: string
+  /** from_step's step doc (its request's catalog: the recorded tools). */
+  step?: StepDoc
 } {
   const { stepCount } = useSourceSteps(runID)
   const at = stepsOf(fromStep, fork ? undefined : stepCount)
@@ -1021,6 +1146,7 @@ export function useEngineContext(
   const first = qs.at(0)
   return {
     steps: stepCount,
+    step: at[0] >= 0 ? first?.data : undefined,
     sourceInput: tr.data
       ? (turnPrompt(tr.data.batches) ?? undefined)
       : undefined,

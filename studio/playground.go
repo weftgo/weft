@@ -464,20 +464,20 @@ func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview,
 		// "no recorded turn" — except a transcript edit, refused here
 		// in weft/runtime's words (executor.go's scriptedEdits).
 		if req.Overrides.Instructions != "" {
-			if e := trap("scripted engine with an instructions override would silently replay the old answer (WEFT-PLAYGROUND §5.5)"); e != nil {
+			if e := trap("scripted cannot try a changed system prompt: the recorded answers ignore the prompt, so it would replay the old answer — run on live, or drop the prompt change"); e != nil {
 				return nil, e
 			}
 		}
 		if req.Overrides.Model != "" {
-			if e := trap("scripted engine with a model override would silently replay the old answer (WEFT-PLAYGROUND §5.5)"); e != nil {
+			if e := trap("scripted cannot try another model: it replays the answers the source's own model recorded — run on live, or drop the model override"); e != nil {
 				return nil, e
 			}
 		}
 		if req.Source == nil || req.Source.RunID == "" {
-			return nil, refuse("the scripted engine replays a source run's recorded turns: a source run is required")
+			return nil, refuse("scripted replays a recorded run's answers: pick a source run, or run on live")
 		}
 		if len(req.TranscriptEdits) > 0 {
-			if e := trap(fmt.Sprintf("the scripted engine would replay the recorded turn %d, which answered a different prompt: transcript edits need engine live", req.Source.FromStep)); e != nil {
+			if e := trap(fmt.Sprintf("your edit changes step %d's request, and scripted holds only the recorded answer to the original — run on live, or drop the edit", req.Source.FromStep)); e != nil {
 				return nil, e
 			}
 		}
@@ -488,7 +488,7 @@ func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview,
 		if n := req.Source.FromStep; n > 0 {
 			if batches, terr := s.db.TranscriptBatches(ctx, req.Source.RunID); terr == nil {
 				if steps, serr := runSteps(batches); serr == nil && stepCount(steps) == n {
-					if e := trap(fmt.Sprintf("the scripted engine has no recorded turn for step %d: the source never answered it (use engine live)", n)); e != nil {
+					if e := trap(fmt.Sprintf("scripted has no recorded answer for step %d: the source never answered it — run on live, or replay from an earlier step", n)); e != nil {
 						return nil, e
 					}
 				}

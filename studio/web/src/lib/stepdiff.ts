@@ -123,12 +123,15 @@ export interface DiffRowDoc {
   differs?: string[]
 }
 
-/** The response's lineage alignment: which side replays the other,
- * from which source step (studio/diff.go's diffAlign). */
+/** The response's lineage alignment (studio/diff.go's diffAlign): the
+ * common source run whose ordinals the rows are, the source ordinal
+ * each side's step 0 is, and which side replays the other ("both":
+ * two replays of a third run). */
 export interface DiffAlign {
-  replay: "a" | "b"
-  from_step: number
-  forked_from: string
+  replay: "a" | "b" | "both"
+  source: string
+  a_from: number
+  b_from: number
 }
 
 /** GET /api/diff?a=&b= (capability "diff"). */
@@ -197,18 +200,26 @@ export const CELL_REASONS: Record<CellState, string> = {
   differs: "0 tokens on a side: not counted",
 }
 
-/** A row's state as one word: kept (not re-run), same, or changed. */
-export type RowState = "kept" | "same" | "changed"
+/** A row's state as one word: kept (not re-run), missing (one run has
+ * no such step), same, or changed. */
+export type RowState = "kept" | "missing" | "same" | "changed"
 
 export const ROW_WORDS: Record<RowState, string> = {
   kept: "kept",
+  missing: "missing",
   same: "same",
   changed: "changed",
 }
 
-/** rowState reads a row: kept, changed (the server's flag), else same. */
-export function rowState(row: Pick<DiffRowDoc, "kept" | "changed">): RowState {
-  return row.kept ? "kept" : row.changed ? "changed" : "same"
+/** rowState reads a row from its cells: kept or missing when every
+ * cell is, else changed (the server's flag) or same. */
+export function rowState(
+  cells: Record<DiffColumn, CellState>,
+  changed: boolean
+): RowState {
+  for (const s of ["kept", "missing"] as const)
+    if (DIFF_COLUMNS.every((c) => cells[c] === s)) return s
+  return changed ? "changed" : "same"
 }
 
 /** The cost cell's reason when the server marked a side's usage not
@@ -434,7 +445,7 @@ export function stepDiffView(doc: DiffDoc): StepDiffView {
         // A8, or a side with no step: null) the row's when it is there.
         aStep: r.a_step ?? (r.a ? r.step : null),
         bStep: r.b_step ?? (r.b ? r.step : null),
-        state: rowState(r),
+        state: rowState(cells, r.changed),
         changed: r.changed,
         cells,
         changedColumns: DIFF_COLUMNS.filter((c) => cells[c] === "changed").map(
@@ -587,7 +598,7 @@ export function nWayView(docs: DiffDoc[]): NWayView {
         : {
             run_id: v.b.run_id,
             step: null,
-            state: "same",
+            state: rowState(ALL_MISSING(), false),
             changed: false,
             cells: ALL_MISSING(),
             changedColumns: [],

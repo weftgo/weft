@@ -52,6 +52,7 @@ const STATE_TONE: Record<CellState, string> = {
 
 const ROW_TONE: Record<RowState, string> = {
   kept: "text-faint",
+  missing: "text-muted-foreground",
   same: "text-faint",
   changed: "text-status-bad",
 }

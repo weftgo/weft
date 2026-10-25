@@ -29,9 +29,10 @@ type diffDocT struct {
 		Status string `json:"status"`
 	}
 	Aligned *struct {
-		Replay     string `json:"replay"`
-		FromStep   int    `json:"from_step"`
-		ForkedFrom string `json:"forked_from"`
+		Replay string `json:"replay"`
+		Source string `json:"source"`
+		AFrom  int    `json:"a_from"`
+		BFrom  int    `json:"b_from"`
 	} `json:"aligned"`
 	Steps []struct {
 		Step    int        `json:"step"`
@@ -863,7 +864,8 @@ func TestDiffAlignsAReplayOnItsSource(t *testing.T) {
 
 	check := func(d diffDocT, replay string) {
 		t.Helper()
-		if d.Aligned == nil || d.Aligned.Replay != replay || d.Aligned.FromStep != 1 || d.Aligned.ForkedFrom != "r_src#1" {
+		from := map[string][2]int{"a": {1, 0}, "b": {0, 1}}[replay]
+		if d.Aligned == nil || d.Aligned.Replay != replay || d.Aligned.Source != "r_src" || d.Aligned.AFrom != from[0] || d.Aligned.BFrom != from[1] {
 			t.Fatalf("aligned = %+v, want replay %s from step 1", d.Aligned, replay)
 		}
 		if len(d.Steps) != 2 || len(d.Summary.ChangedSteps) != 0 || d.Summary.FirstChanged != nil || d.Summary.Kept != 1 {
@@ -903,7 +905,7 @@ func TestDiffAlignsAReplayOnItsSource(t *testing.T) {
 	}
 }
 
-func TestForkedStep(t *testing.T) {
+func TestParseForkedFrom(t *testing.T) {
 	for _, c := range []struct {
 		ff, src string
 		n       int
@@ -912,16 +914,134 @@ func TestForkedStep(t *testing.T) {
 		{"r#1", "r", 1, true},
 		{"a#b#2", "a#b", 2, true},
 		{"r#0", "r", 0, true},
-		{"r#x", "r", 0, false},
-		{"r#-1", "r", 0, false},
-		{"r", "r", 0, false},
-		{"q#1", "r", 0, false},
-		{"", "r", 0, false},
-		{"r#100000", "r", 0, false},
+		{"r#x", "", 0, false},
+		{"r#-1", "", 0, false},
+		{"r", "", 0, false},
+		{"#1", "", 0, false},
+		{"", "", 0, false},
 	} {
-		n, ok := forkedStep(c.ff, c.src)
-		if n != c.n || ok != c.ok {
-			t.Errorf("forkedStep(%q, %q) = %d %v, want %d %v", c.ff, c.src, n, ok, c.n, c.ok)
+		src, n, ok := parseForkedFrom(c.ff)
+		if src != c.src || n != c.n || ok != c.ok {
+			t.Errorf("parseForkedFrom(%q) = %q %d %v, want %q %d %v", c.ff, src, n, ok, c.src, c.n, c.ok)
 		}
+	}
+}
+
+// ordersPrefix is recordDiffRun's transcript through step n−1 (its
+// input, then each lookup_order call and its result): the kept prefix a
+// replay from step n carries.
+func ordersPrefix(n int) []core.Message {
+	out := []core.Message{core.User("look up orders 0 to 3")}
+	for k := range n {
+		id := strconv.Itoa(k)
+		out = append(out,
+			core.Message{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c" + id, Name: "lookup_order", Args: []byte(`{"order_id":"` + id + `"}`)}}},
+			core.Message{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c" + id, Name: "lookup_order", Content: "order " + id + " shipped"}}})
+	}
+	return out
+}
+
+// recordFork records a scripted replay of recordDiffRun's agent as
+// weft/runtime would: forked_from ff, the prefix as its input, turns
+// answered at zero usage.
+func recordFork(t *testing.T, url, runID, ff string, prefix []core.Message, turns ...wefttest.Turn) {
+	t.Helper()
+	withPipeline(t, url, true, func(prov []core.Option) {
+		lookup := core.Tool("lookup_order", "Look up an order.", func(_ context.Context, in diffOrderIn) (string, error) {
+			return "order " + in.OrderID + " shipped", nil
+		})
+		for i := range turns {
+			turns[i] = turns[i].WithUsage(core.Usage{})
+		}
+		agent := core.New(wefttest.Script(turns...),
+			append([]core.Option{core.Name("orders"), core.Instructions("You are a support agent."), lookup}, prov...)...)
+		meta := map[string]string{"weft.playground": "true", "weft.forked_from": ff}
+		if _, err := agent.Generate(context.Background(), core.RunID(runID), core.Messages(prefix...), core.Metadata(meta)); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// recordChain records a three-step source r3 (lookups 0 and 1, then the
+// reply) and: p1, a replay of r3 from step 1; x2, a replay of p1 from
+// its step 1 (r3's step 2); s2, a replay of r3 from step 2 (p1's
+// sibling). Every replay is identical to the source where it re-ran.
+func recordChain(t *testing.T, ts *httptest.Server) {
+	t.Helper()
+	recordDiffRun(t, ts.URL, "r3", "unused", 2, nil)
+	call1 := wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1"}`, ID: "c1"})
+	recordFork(t, ts.URL, "p1", "r3#1", ordersPrefix(1), call1, wefttest.Say("all looked up"))
+	recordFork(t, ts.URL, "x2", "p1#1", ordersPrefix(2), wefttest.Say("all looked up"))
+	recordFork(t, ts.URL, "s2", "r3#2", ordersPrefix(2), wefttest.Say("all looked up"))
+	waitRun(t, ts, "r3", 3, "")
+	waitRun(t, ts, "p1", 2, "")
+	waitRun(t, ts, "x2", 1, "")
+	waitRun(t, ts, "s2", 1, "")
+}
+
+// rowWords reads a diff's rows as "step:kept|same|changed".
+func rowWords(d diffDocT) []string {
+	out := []string{}
+	for _, r := range d.Steps {
+		w := "same"
+		switch {
+		case r.Kept:
+			w = "kept"
+		case r.Changed:
+			w = "changed"
+		}
+		out = append(out, strconv.Itoa(r.Step)+":"+w)
+	}
+	return out
+}
+
+// TestDiffFollowsTheForkChain (U19-fix 2, 4): a replay of a replay
+// against the root aligns on the root's ordinals through both links
+// (offsets summed: x2's step 0 is r3's step 2); two replays of one
+// source from different steps align on it (offset by their difference),
+// the steps before the smaller one no row, the one between kept.
+func TestDiffFollowsTheForkChain(t *testing.T) {
+	ts, _ := requestsServer(t)
+	recordChain(t, ts)
+
+	d, _ := getDiff(t, ts, "r3", "x2", "")
+	if d.Aligned == nil || d.Aligned.Source != "r3" || d.Aligned.Replay != "b" || d.Aligned.AFrom != 0 || d.Aligned.BFrom != 2 ||
+		!slices.Equal(rowWords(d), []string{"0:kept", "1:kept", "2:same"}) || d.Summary.Kept != 2 {
+		t.Errorf("r3 vs x2 = aligned %+v rows %v kept %d, want r3's ordinals, 0 and 1 kept, 2 the same", d.Aligned, rowWords(d), d.Summary.Kept)
+	}
+	if r := d.Steps[2]; r.AStep == nil || *r.AStep != 2 || r.BStep == nil || *r.BStep != 0 {
+		t.Errorf("r3 vs x2 step 2 = a_step %v b_step %v, want 2 and 0", r.AStep, r.BStep)
+	}
+	// The direct parent too: x2 is p1's from step 1.
+	d, _ = getDiff(t, ts, "p1", "x2", "")
+	if d.Aligned == nil || d.Aligned.Source != "p1" || d.Aligned.BFrom != 1 || !slices.Equal(rowWords(d), []string{"0:kept", "1:same"}) {
+		t.Errorf("p1 vs x2 = %+v %v", d.Aligned, rowWords(d))
+	}
+	// Siblings: p1 (from 1) and s2 (from 2), both r3's.
+	d, _ = getDiff(t, ts, "p1", "s2", "")
+	if d.Aligned == nil || d.Aligned.Source != "r3" || d.Aligned.Replay != "both" || d.Aligned.AFrom != 1 || d.Aligned.BFrom != 2 ||
+		!slices.Equal(rowWords(d), []string{"1:kept", "2:same"}) {
+		t.Errorf("p1 vs s2 = aligned %+v rows %v, want r3's ordinals from 1: 1 kept by s2, 2 the same", d.Aligned, rowWords(d))
+	}
+	if r := d.Steps[1]; *r.AStep != 1 || *r.BStep != 0 {
+		t.Errorf("p1 vs s2 step 2 = a_step %d b_step %d, want 1 and 0", *r.AStep, *r.BStep)
+	}
+}
+
+// TestDiffFromStepPastTheSource (U19-fix 3): a forked_from naming a
+// step past the source's last is no alignment — no phantom kept rows —
+// and a gap hole says why.
+func TestDiffFromStepPastTheSource(t *testing.T) {
+	ts, _ := requestsServer(t)
+	recordDiffRun(t, ts.URL, "r_two", "unused", 1, nil)
+	recordFork(t, ts.URL, "pg_far", "r_two#5", ordersPrefix(1), wefttest.Say("all looked up"))
+	waitRun(t, ts, "r_two", 2, "")
+	waitRun(t, ts, "pg_far", 1, "")
+	d, _ := getDiff(t, ts, "r_two", "pg_far", "")
+	if d.Aligned != nil || d.Summary.Kept != 0 || len(d.Steps) != 2 {
+		t.Errorf("past diff = aligned %+v kept %d rows %d, want own ordinals, 2 rows, nothing kept", d.Aligned, d.Summary.Kept, len(d.Steps))
+	}
+	if len(d.Holes) != 1 || d.Holes[0].Hole != "gap" || !strings.Contains(d.Holes[0].Reason, "names step 5 of r_two, which recorded 2") {
+		t.Errorf("past diff holes = %+v, want the gap naming step 5", d.Holes)
 	}
 }

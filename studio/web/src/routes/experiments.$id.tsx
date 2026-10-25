@@ -18,6 +18,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import {
+  diffQuery,
   experimentQuery,
   fetchCommand,
   postPlaygroundRun,
@@ -28,11 +29,12 @@ import {
 import { turnPrompt } from "@/lib/events"
 import { useSourceSteps } from "@/components/studio/experiment-form"
 import type { CommandStatus, ExperimentRow, RunRow } from "@/lib/api"
-import { absoluteTime, relativeTime } from "@/lib/format"
+import { absoluteTime, duration, relativeTime } from "@/lib/format"
 import { formatUSD, sumCost } from "@/lib/cost"
 import { pickTarget } from "@/lib/experiment-body"
 import {
   REPLAY_WORDS,
+  VS_CHIP_CELLS,
   answerLine,
   counted,
   forkSource,
@@ -40,6 +42,7 @@ import {
   matrixSize,
   usageTitle,
   usageWords,
+  vsSourceWords,
 } from "@/lib/experiments"
 import { runEngineWords } from "@/lib/engine"
 import {
@@ -522,6 +525,9 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
               <th scope="col" className="px-3 py-2 font-normal">
                 input
               </th>
+              <th scope="col" className="px-3 py-2 font-normal">
+                source
+              </th>
               {exp.variants.map((v) => (
                 <th
                   key={v.key}
@@ -538,7 +544,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
             </tr>
           </thead>
           <tbody>
-            {exp.inputs.map((i) => (
+            {exp.inputs.map((i, ii) => (
               <tr key={i.key} className="border-b last:border-b-0">
                 <th
                   scope="row"
@@ -553,7 +559,14 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                         : "—"}
                   </span>
                 </th>
-                {exp.variants.map((v) => {
+                <SourceCell
+                  runs={exp.variants.flatMap((v) => {
+                    const r = latest(v.key, i.key)
+                    return r ? [r] : []
+                  })}
+                  fallback={i.source_run_id ?? exp.source_run_id}
+                />
+                {exp.variants.map((v, vi) => {
                   const key = cellKey(v.key, i.key)
                   const run = latest(v.key, i.key)
                   const all = placed.cells.get(key) ?? []
@@ -602,7 +615,19 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                             >
                               {idTail(run.id)}
                             </Link>
-                            <VsSource run={run} />
+                            <span
+                              className="font-mono text-muted-foreground"
+                              title={REPLAY_WORDS.latencyHint}
+                              data-cell-latency
+                            >
+                              {duration(run.started, run.finished)}
+                            </span>
+                            <VsSource
+                              run={run}
+                              read={
+                                ii * exp.variants.length + vi < VS_CHIP_CELLS
+                              }
+                            />
                             {all.length > 1 ? (
                               <span
                                 className="text-faint"
@@ -725,19 +750,81 @@ function CellAnswer({ run }: { run: RunRow }) {
   )
 }
 
-/** VsSource is a cell's compare against the run it replays (its
- * forked_from), aligned on the source's steps (A8). */
-function VsSource({ run }: { run: RunRow }) {
+/** VsSource is a cell's chip against the run it replays (its
+ * forked_from), aligned on the source's steps (A8): "same as source" or
+ * "changed at step N", from one GET /api/diff read — made for the
+ * grid's first VS_CHIP_CELLS cells only, once the run settled; any
+ * other cell links to the compare and says why it was not read. */
+function VsSource({ run, read }: { run: RunRow; read: boolean }) {
   const src = forkSource(run)
+  const settledRun = run.status !== "running" && !run.settling
+  const d = useQuery({
+    ...diffQuery(src?.runID ?? "", run.id),
+    enabled: !!src && read && settledRun,
+  })
   if (!src) return null
+  const words = d.data ? vsSourceWords(d.data) : undefined
   return (
     <Link
-      {...compareLink(src.runID, [run.id], src.fromStep || undefined)}
-      className="text-muted-foreground hover:underline"
-      data-cell-compare
+      {...compareLink(
+        src.runID,
+        [run.id],
+        d.data?.summary.first_changed ?? (src.fromStep || undefined)
+      )}
+      className={`hover:underline ${words && d.data?.summary.first_changed != null ? "text-status-bad" : "text-muted-foreground"}`}
+      title={
+        !read
+          ? REPLAY_WORDS.vsNotRead(VS_CHIP_CELLS)
+          : d.isError
+            ? d.error.message
+            : undefined
+      }
+      data-cell-compare={words ?? ""}
     >
-      {REPLAY_WORDS.compare}
+      {words ?? REPLAY_WORDS.compare}
     </Link>
+  )
+}
+
+/** SourceCell is a grid row's source column (UX-C-16): the run its
+ * cells replay (their forked_from, else the input's) and the step. */
+function SourceCell({ runs, fallback }: { runs: RunRow[]; fallback?: string }) {
+  const srcs = [
+    ...new Map(
+      runs
+        .map(forkSource)
+        .filter((x) => !!x)
+        .map((x) => [`${x.runID}#${x.fromStep}`, x])
+    ).values(),
+  ]
+  const one = srcs.length
+    ? srcs
+    : fallback
+      ? [{ runID: fallback, fromStep: 0 }]
+      : []
+  return (
+    <td className="px-3 py-2 align-top font-mono" data-cell-source>
+      {one.length ? (
+        one.map((x) => (
+          <div key={`${x.runID}#${x.fromStep}`}>
+            <Link
+              {...runLink(x.runID)}
+              className="hover:underline"
+              title={x.runID}
+              aria-label={x.runID}
+            >
+              {idTail(x.runID)}
+            </Link>
+            <span className="text-faint">
+              {" "}
+              · {REPLAY_WORDS.fromStep(x.fromStep)}
+            </span>
+          </div>
+        ))
+      ) : (
+        <span className="text-faint">{REPLAY_WORDS.noSource}</span>
+      )}
+    </td>
   )
 }
 

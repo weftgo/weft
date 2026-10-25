@@ -367,7 +367,7 @@ func (s *Server) exportFixtures(w http.ResponseWriter, r *http.Request, id strin
 	if kept != nil {
 		// The composed set (UX-C-30): the header names it, and a scripted
 		// replay's skeleton names the model its fixtures are stamped with.
-		w.Header().Set(keptPrefixHeader, fmt.Sprintf("%s#%d", kept.source, kept.steps))
+		w.Header().Set(keptPrefixHeader, kept.header())
 		if m := set.steps[kept.steps-1].model; det.Provider == scriptedEngineModel.Provider && det.Model == scriptedEngineModel.Name && m.Name != "" {
 			model = m.Name
 			if m.Provider != "" {

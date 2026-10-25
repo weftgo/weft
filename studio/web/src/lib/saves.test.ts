@@ -172,15 +172,19 @@ describe("proposalOf: keep as prompt proposes the instructions", () => {
 // it kept; the server names it (Weft-Kept-Prefix) and the toast says so.
 describe("a replay's composed save as test", () => {
   it("reads the header and says which steps are the source's", () => {
-    expect(keptPrefixOf("r#a#1")).toEqual({ source: "r#a", steps: 1 })
-    for (const bad of [null, "", "r", "r#0", "#2", "r#x"])
+    expect(keptPrefixOf("r#a#1")).toEqual({ sources: ["r#a"], steps: 1 })
+    expect(keptPrefixOf("r3#1,p1#0")).toEqual({
+      sources: ["r3", "p1"],
+      steps: 1,
+    })
+    for (const bad of [null, "", "r", "r#0", "#2", "r#x", "r#1,"])
       expect(keptPrefixOf(bad)).toBeUndefined()
     expect(
       saveWords({
         kind: "save-test",
         ok: true,
         file: "orders_replay_test.zip",
-        kept: { source: "r_src", steps: 1 },
+        kept: { sources: ["r_src"], steps: 1 },
       }).title
     ).toBe(
       "saved orders_replay_test.zip (steps 0–0 from the source r_src, 1 on from the replay) — unzip into a package directory and go test"

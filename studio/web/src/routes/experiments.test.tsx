@@ -997,6 +997,27 @@ describe("/experiments/{id}'s grid cell", () => {
     expect(
       c.querySelector("[data-cell-compare]")?.getAttribute("href")
     ).toContain("/compare")
+    expect(c.querySelector("[data-cell-latency]")?.textContent).not.toBe("")
+  })
+
+  it("the vs-source chip and the source column (U19-fix): same as source, changed at step N, the row's source run and step", async () => {
+    studio.on("GET diff", (req) =>
+      req.query.get("b") === "pg_a1" ? golden("diff-replay") : golden("diff")
+    )
+    renderApp("/experiments/exp_tone")
+    await waitFor(() =>
+      expect(
+        cell("A×1").querySelector("[data-cell-compare]")?.textContent
+      ).toBe(REPLAY_WORDS.same)
+    )
+    await waitFor(() =>
+      expect(
+        cell("A×2").querySelector("[data-cell-compare]")?.textContent
+      ).toBe(REPLAY_WORDS.changedAt(3))
+    )
+    const src = document.querySelector("[data-cell-source]")!
+    expect(src.textContent).toContain("r_ok")
+    expect(src.textContent).toContain(REPLAY_WORDS.fromStep(1))
   })
 
   it("an experiment id runs carry with no saved definition reads as its runs, unsaved", async () => {

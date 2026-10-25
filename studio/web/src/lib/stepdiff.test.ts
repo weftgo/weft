@@ -223,8 +223,9 @@ describe("diff-replay.golden.json (A8: a scripted replay of a two-step run from 
   it("reads kept · same: step 0 the source's, not re-run; step 1 the same, usage not counted", () => {
     expect(doc.aligned).toEqual({
       replay: "b",
-      from_step: 1,
-      forked_from: "r_src#1",
+      source: "r_src",
+      a_from: 0,
+      b_from: 1,
     })
     expect(v.rows.map((r) => r.state)).toEqual(["kept", "same"])
     expect(v.rows.map((r) => ROW_WORDS[r.state])).toEqual(["kept", "same"])
@@ -272,5 +273,21 @@ describe("diff-replay.golden.json (A8: a scripted replay of a two-step run from 
     ])
     expect(w.rows[3].bStep).toBe(3)
     expect(nWayView([old]).aligned).toBe(false)
+  })
+})
+
+describe("nWayView: a compared run absent at an ordinal (U19-fix 5)", () => {
+  it("reads missing, from its cells — never same", () => {
+    const one = golden("diff")
+    const short: DiffDoc = {
+      ...one,
+      b: { ...one.b, run_id: `${one.b.run_id}-short` },
+      steps: one.steps.slice(0, 3),
+    }
+    const n = nWayView([one, short])
+    const last = n.rows.find((r) => r.step === 4)!
+    expect(last.others[1].state).toBe("missing")
+    expect(ROW_WORDS[last.others[1].state]).toBe("missing")
+    expect(last.others[0].state).toBe("same")
   })
 })

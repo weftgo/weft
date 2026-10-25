@@ -836,6 +836,30 @@ func TestUnzipTreeGuards(t *testing.T) {
 			t.Errorf("%q: the target was created (%v)", names, err)
 		}
 	}
+	// A symlinked testdata or testdata/<T> is refused, its target untouched.
+	for _, link := range []string{"testdata", "testdata/T"} {
+		pkg := filepath.Join(t.TempDir(), "pkg")
+		elsewhere := t.TempDir()
+		stale := filepath.Join(elsewhere, "keep.json")
+		if err := os.WriteFile(stale, []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(pkg, link)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(elsewhere, filepath.Join(pkg, link)); err != nil {
+			t.Skip("no symlinks here:", err)
+		}
+		if _, err := unzipTree(layout("a_test.go", "testdata/T/00001-a.json"), pkg, true); err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Errorf("symlinked %s: err %v, want the refusal", link, err)
+		}
+		if _, err := os.Stat(stale); err != nil {
+			t.Errorf("symlinked %s: the link's target lost its file: %v", link, err)
+		}
+		if entries, _ := os.ReadDir(elsewhere); len(entries) != 1 {
+			t.Errorf("symlinked %s: the link's target holds %d entries, want its 1", link, len(entries))
+		}
+	}
 	dir := filepath.Join(t.TempDir(), "pkg")
 	tree, err := unzipTree(layout("a_test.go", "testdata/T/00001-a.json"), dir, false)
 	if err != nil || tree.test != "a_test.go" || tree.testdata != "testdata/T/" || tree.fixtures != 1 {

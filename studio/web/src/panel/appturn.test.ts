@@ -444,7 +444,7 @@ describe("a parked call's request expiry (UX-B-41)", () => {
         holes: [],
       }))
   const expiry = (el: WeftDevtools) =>
-    call(el)?.querySelector<HTMLElement>("[data-request-expiry]") ?? null
+    call(el).querySelector<HTMLElement>("[data-request-expiry]") ?? null
   const head = (el: WeftDevtools) =>
     $(el, ".weft-call")?.closest(".weft-step")?.querySelector(".weft-step-h")
 
@@ -455,7 +455,7 @@ describe("a parked call's request expiry (UX-B-41)", () => {
       () => {
         const n = expiry(el)
         expect(n?.getAttribute("data-request-expiry")).toBe("open")
-        return n!.textContent ?? ""
+        return n!.textContent
       },
       { timeout: 5_000 }
     )
@@ -535,11 +535,11 @@ describe("a parked call's request expiry (UX-B-41)", () => {
         model: { state: { turn?: { id: string; exp?: unknown } } }
       }
     ).model.state.turn
-  const page = (entries: object[]) => ({
+  const page = (list: object[]) => ({
     session_id: APP_SESSION,
     run: PARKED,
-    entries,
-    total: entries.length,
+    entries: list,
+    total: list.length,
     offset: 0,
     next_offset: null,
     holes: [],

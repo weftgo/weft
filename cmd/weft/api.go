@@ -533,7 +533,9 @@ type exportTree struct {
 // without force; with it the test file is replaced and the fixture
 // directory's *.json removed first (as wefttest.Record replaces a
 // test's fixtures: a stale one would answer in place of
-// ErrNoFixture). Nothing is followed through a symlink.
+// ErrNoFixture). Nothing is followed through a symlink: a symlinked
+// testdata or testdata/<test> is refused before any write, and a
+// symlink at a file path is removed, never written through.
 func unzipTree(body []byte, dir string, force bool) (exportTree, error) {
 	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
 	if err != nil {
@@ -580,6 +582,15 @@ func unzipTree(body []byte, dir string, force bool) (exportTree, error) {
 	tree = exportTree{test: testZip.Name, testdata: "testdata/" + testDir + "/", fixtures: len(fx)}
 	fixDir := filepath.Join(dir, "testdata", testDir)
 	testPath := filepath.Join(dir, testZip.Name)
+	// Nothing under dir is followed through a symlink: testdata and
+	// testdata/<test> must be real directories (or absent), else the
+	// fixtures would land — and stale *.json be removed — wherever the
+	// link points.
+	for _, p := range []string{filepath.Join(dir, "testdata"), fixDir} {
+		if fi, err := os.Lstat(p); err == nil && (fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir()) {
+			return exportTree{}, fmt.Errorf("%s is a symlink or not a directory: the export writes only into real directories under %s", p, dir)
+		}
+	}
 	if !force {
 		if _, err := os.Lstat(testPath); err == nil {
 			return exportTree{}, fmt.Errorf("%s exists: --force writes over it", testPath)

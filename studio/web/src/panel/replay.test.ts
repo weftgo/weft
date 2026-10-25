@@ -638,7 +638,7 @@ describe("one body for one draft (the panel's buildRunBody against Studio's)", (
 })
 
 describe("F1.3 review fixes", () => {
-  const runBtn = (el: WeftDevtools) =>
+  const runButton = (el: WeftDevtools) =>
     all(el, ".weft-drawer button").find((b) =>
       b.classList.contains("weft-run-btn")
     ) as HTMLButtonElement
@@ -664,7 +664,7 @@ describe("F1.3 review fixes", () => {
     await settle()
     expect(studio.gets(`runs/${CHILD}/requests`)).toHaveLength(1)
     expect(verdict(el, "search_kb")).toBe("runs")
-    expect(runBtn(el).disabled).toBe(false)
+    expect(runButton(el).disabled).toBe(false)
   })
 
   it("1: Run is held while the step's catalog is still being read", async () => {
@@ -672,7 +672,7 @@ describe("F1.3 review fixes", () => {
     const el = await mount()
     click(verbIn(el, '[data-weft-step="2"] > .weft-step-h', "from_step"))
     await settle()
-    expect(runBtn(el).disabled).toBe(false)
+    expect(runButton(el).disabled).toBe(false)
     // The record being read again (a reload): the verdicts are unread.
     const model = (
       el as unknown as {
@@ -687,12 +687,12 @@ describe("F1.3 review fixes", () => {
     model.setDraft({})
     await settle()
     expect(text(el, "[data-weft-ack]")).toContain("reading the step's catalog…")
-    expect(runBtn(el).disabled).toBe(true)
+    expect(runButton(el).disabled).toBe(true)
     model.state.turn.requests = kept
     model.setDraft({})
     await settle()
     expect(verdict(el, "refund")).toBe("substituted")
-    expect(runBtn(el).disabled).toBe(false)
+    expect(runButton(el).disabled).toBe(false)
   })
 
   it("2: a missing request row is said by why: a step that never ran, past the read pages, a live run", () => {
@@ -770,7 +770,7 @@ describe("F1.3 review fixes", () => {
       )
     )
     await settle()
-    click(runBtn(el))
+    click(runButton(el))
     await settle(60)
     const href = all(el, ".weft-xres a")
       .find((a) => a.textContent === "compare in Studio")!
@@ -814,7 +814,7 @@ describe("F1.3 review fixes", () => {
     ) as HTMLTextAreaElement
     input.value = "   "
     input.dispatchEvent(new Event("input", { bubbles: true }))
-    expect(runBtn(el).disabled).toBe(true)
+    expect(runButton(el).disabled).toBe(true)
     const model = (
       el as unknown as { model: { state: { drawer: ExperimentDraft } } }
     ).model

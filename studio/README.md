@@ -1091,8 +1091,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 277,116 B raw / 93,028 B gzip
-(90.8 KiB, the bundle of the ledger's row "U19 compare aligned"; 13,468 B — 13.2 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 277,189 B raw / 93,052 B gzip
+(90.9 KiB, the bundle of the ledger's row "U19-fix"; 13,444 B — 13.1 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1558,7 +1558,16 @@ reads as its runs (`GET /api/experiments/{id}` answers `unsaved: true`,
 no variants or inputs), never a 404. `/experiments/{id}` draws the
 variants × inputs grid, each cell its latest run: its outcome, its
 answer's first line, its tokens, its cost, the engine it ran on, the
-id's tail, and a compare against its source (UX-C-16). From there you can re-run one cell or all
+id's tail, its wall time, a source column (the run its row's cells
+replay and the step), and a chip against its source — "same as source"
+or "changed at step N" — read lazily: one `GET /api/diff` per cell, the
+grid's first 24 cells once their run settled; a later cell links to the
+compare and says it was not read (UX-C-16). What these pages cost the
+server: the replays tab is one `/api/runs` page walk plus one run read
+per source group (its prompt and model, what a replay's changes are
+against), and the grid one transcript read per settled cell (its answer
+line) plus those diff reads — N+1-shaped, bounded by the walk's 2,000
+runs and the grid's size. From there you can re-run one cell or all
 of them under the same experiment id, compare two cells on the compare page,
 or "clone into the form", which reopens the playground on a draft holding the
 matrix's form — exactly, in any browser: the experiment saves the whole
@@ -1720,18 +1729,26 @@ changed step.
 badges from the same goldens (`studio/testdata/api/diff*.golden.json`).
 
 A replay is compared on its **source's** step ordinals (A8, UX-C-04):
-a replay numbers its own steps from 0, so when one side's
-`weft.forked_from` names the other (`<source>#<n>`) the response's
-`aligned` says so (`replay` `a` or `b`, `from_step`, `forked_from`),
-its step k is the row of the source's step n+k, and the source's steps
-before n are rows with `kept: true` — not re-run: the replay side null,
-nothing compared, never a change (`summary.kept` counts them). Each row
+a replay numbers its own steps from 0, so the server follows each
+side's `weft.forked_from` chain (`<parent>#<n>`, a replay of a replay
+included, offsets summed, at most 8 links; a panel token's read stops
+at the sides' own `forked_from`) to the nearest run both share, and the
+response's `aligned` says so (`source`, `a_from` / `b_from` — the
+source ordinal each side's step 0 is — and `replay` `a`, `b`, or `both`
+for two replays of a third run, maybe from different steps). A side's
+step k is the row of the source's step `from`+k; a source step one side
+holds and the other kept (before that side's `from`) is a row with
+`kept: true` — not re-run: that side null, nothing compared, never a
+change (`summary.kept` counts them); steps neither side ran are no row.
+A `forked_from` naming a step past the last of the source side's
+steps is no alignment: the rows are by own ordinals and a `gap` hole
+names the step. Each row
 names both sides' own ordinals (`a_step`, `b_step`; null where a side
 has no step), and a link to a side's step carries its own. A usage that
 differs where a side billed no tokens at all (the scripted engine's
 0→0, UX-D-15) is in the row's `differs`, not `changes`: the cell reads
 "differs · not counted", the numbers kept. Each compared run's row reads
-one word — kept · same · changed — so an identical scripted replay from
+one word — kept · missing · same · changed — so an identical scripted replay from
 step 1 reads "kept · same" (`diff-replay.golden.json`). The replay
 drawer's compare is read right after its command finished, before
 Studio may hold the run row: a 404 there is retried three times a
@@ -2693,14 +2710,19 @@ view; results keyed by (step, call id); steered steps replayed through a
 generated `wefttest.NewSteers` source; a step the recorded run rewrote
 replays its recorded messages (replayed, not re-derived); a step whose request carried a compaction view is keyed on it
 and noted `compacted_at`; a replay from step n > 0 (`weft.forked_from`)
-recorded only its fresh steps, so its zip composes the source's
-fixtures for steps 0 to n−1 with its own renumbered after them (a
-scripted replay's stamped with the source's model), says so in the
-skeleton's header and the `Weft-Kept-Prefix: <source>#<n>` response
-header (the toast's "steps 0–0 from the source …"), and is a 409 naming
-why when the source cannot give them (UX-C-30); an agentless run's
+recorded only its fresh steps, so its zip composes its parent's
+fixtures — the parent's own composed set when it is a replay too,
+followed up the chain (at most 8 links, a loop refused) — for every
+step it kept (a replay from step 0 of a replay still keeps its
+parent's), its own renumbered after them (a scripted replay's stamped
+with the source's model), says so in the skeleton's header and the
+`Weft-Kept-Prefix` response header (the chain from the root,
+`<root>#<k>,<replay>#<m>`: k steps from the root, then m from that
+replay; the toast's "steps 0–0 from the source …"), and is a 409 naming
+why when the chain cannot give them (UX-C-30); an agentless run's
 test file is `run_replay_test.go`. `weft export <id> --wefttest <pkg>`
-writes this zip's tree byte for byte (UX-S5a-07). The run block's children carry their `holes`
+writes this zip's tree byte for byte (UX-S5a-07), refusing a
+symlinked `testdata` or `testdata/<test>`. The run block's children carry their `holes`
 as `runs/{id}` serves them. A read-scoped panel token gets `json` and
 `jsonl` with the request block `{badge: "hidden", …}` and each
 compaction view's `messages` null under the same badge; `otlp` and

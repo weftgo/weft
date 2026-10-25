@@ -317,13 +317,17 @@ func (k replaySkeleton) render() ([]byte, error) {
 	p("// Recorded on: %s\n", k.recorded.UTC().Format("2006-01-02"))
 	p("// Steps:       %d\n", n)
 	if k.kept != nil {
-		last := "step"
-		if n-k.kept.steps > 1 {
-			last = "steps"
+		from := 0
+		for _, l := range k.kept.links {
+			if l.steps == 0 {
+				continue
+			}
+			p("// Kept:        steps %d–%d are %s's fixtures (not re-run by this replay)\n", from, from+l.steps-1, commentText(l.source, 80))
+			from += l.steps
 		}
-		p("// Replay of:   %s from step %d — steps 0–%d are the source's fixtures (kept, not re-run),\n", commentText(k.kept.source, 80), k.kept.steps, k.kept.steps-1)
-		p("//              the replay's own %s after them, so the test replays the turn from its start.\n", last)
+		p("//              — the replay's own steps after them, so the test replays the turn from its start.\n")
 	}
+
 	for _, o := range overrides {
 		if c := o.compacted; c != nil {
 			p("// Step %d replays from the compacted view (compaction %d, made at step %d: seq [%d, %d) replaced by %d entries, hash %s).\n",

@@ -12,6 +12,8 @@ import { producedTexts } from "./events"
 import { plural, tokens } from "./format"
 import type { ExperimentRow, PageCursor, RunRow, SessionRow } from "./api"
 import type { TranscriptBatch } from "./events"
+import { stepDiffView } from "./stepdiff"
+import type { DiffDoc } from "./stepdiff"
 
 /** The run an experiment was forked from, and the step it continued
  * at: forked_from is "<run id>#<from_step>". A run id may itself hold
@@ -256,7 +258,27 @@ export const REPLAY_WORDS = {
     "no saved definition: these runs carry the experiment id, but no matrix was saved under it",
   cut: (n: number) =>
     `the newest ${n} playground runs: older ones are not listed`,
+  latencyHint: "the run's wall time, start to finish",
+  same: "same as source",
+  sameRecorded: "same where both recorded",
+  changedAt: (n: number) => `changed at step ${n}`,
+  vsNotRead: (n: number) =>
+    `not read: the grid reads the compare of its first ${n} cells; open the compare`,
 } as const
+
+/** How many grid cells read their vs-source chip: one GET /api/diff
+ * each, the grid's first cells (inputs × variants order). */
+export const VS_CHIP_CELLS = 24
+
+/** vsSourceWords is a cell's chip from its diff against the source
+ * (aligned on the source's ordinals, A8): "changed at step N" at the
+ * first change, else "same as source" — "same where both recorded"
+ * when some cells were not comparable. */
+export function vsSourceWords(doc: DiffDoc): string {
+  const v = stepDiffView(doc)
+  if (v.markers.length) return REPLAY_WORDS.changedAt(v.markers[0])
+  return v.unknown ? REPLAY_WORDS.sameRecorded : REPLAY_WORDS.same
+}
 
 /** replayChanges is what a replay changed against its source, as
  * chips: the transcript edits its weft.edits names, a prompt whose

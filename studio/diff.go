@@ -2,8 +2,10 @@ package studio
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -67,14 +69,19 @@ const (
 	diffMissing     = "missing"
 )
 
-// diffAlign is the response's alignment when one side replays the
-// other (weft.forked_from "<source>#<from_step>"): Replay names the
-// side that is the replay ("a" or "b"), FromStep the source ordinal
-// its step 0 is. null when the two align by their own ordinals.
+// diffAlign is the response's alignment when the two runs share a
+// lineage (weft.forked_from "<source>#<from_step>", followed up the
+// chain — a replay of a replay included): Source is the common run
+// whose ordinals the rows are, AFrom and BFrom the source ordinal each
+// side's step 0 is (0 for the source itself), Replay the side that
+// replays the other ("a" or "b"), or "both" for two replays of a third
+// run (siblings, maybe from different steps). null when the two align
+// by their own ordinals.
 type diffAlign struct {
-	Replay     string `json:"replay"`
-	FromStep   int    `json:"from_step"`
-	ForkedFrom string `json:"forked_from"`
+	Replay string `json:"replay"`
+	Source string `json:"source"`
+	AFrom  int    `json:"a_from"`
+	BFrom  int    `json:"b_from"`
 }
 
 // diffDoc is GET /api/diff.
@@ -210,16 +217,44 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 		reason, fix := obsdb.HoleNoteFor(obsdb.HoleTruncated, obsdb.CauseResponseCap)
 		doc.Holes = []stepHole{{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap), Reason: reason, Fix: fix}}
 	}
-	// The lineage offset: the replay side's step k is the source's
-	// step off+k (offA for a, offB for b; at most one is non-zero).
+	// The lineage offsets: side a's step k is the common source's step
+	// offA+k, b's offB+k (forkChain, lineageOffsets). Rows are the
+	// source's ordinals from the smaller offset on: the steps before it
+	// neither side ran.
 	offA, offB := 0, 0
 	if b != a {
-		if n, ok := forkedStep(rb.forkedFrom, a); ok {
-			offB = n
-			doc.Aligned = &diffAlign{Replay: "b", FromStep: n, ForkedFrom: rb.forkedFrom}
-		} else if n, ok := forkedStep(ra.forkedFrom, b); ok {
-			offA = n
-			doc.Aligned = &diffAlign{Replay: "a", FromStep: n, ForkedFrom: ra.forkedFrom}
+		depth := maxForkDepth
+		if idFrom(r).panel != nil {
+			depth = 1 // a panel token reads no ancestor row beyond the sides' own forked_from
+		}
+		ca := s.forkChain(r.Context(), a, ra.forkedFrom, depth)
+		cb := s.forkChain(r.Context(), b, rb.forkedFrom, depth)
+		if src, oa, ob, ok := lineageOffsets(ca, cb); ok {
+			// A source side that is one of the two must hold the steps the
+			// replay names: a from_step past its last is no alignment (a
+			// malformed or stale forked_from), said by a hole.
+			past := ""
+			switch {
+			case src == a && !ra.truncated && ob > len(ra.sides):
+				past = fmt.Sprintf("%s's forked_from names step %d of %s, which recorded %d", b, ob, a, len(ra.sides))
+			case src == b && !rb.truncated && oa > len(rb.sides):
+				past = fmt.Sprintf("%s's forked_from names step %d of %s, which recorded %d", a, oa, b, len(rb.sides))
+			}
+			if past != "" {
+				doc.Holes = append(doc.Holes, stepHole{Hole: string(obsdb.HoleGap),
+					Reason: past + ": the two are aligned by their own ordinals",
+					Fix:    "compare the replay with the run it was taken from"})
+			} else {
+				offA, offB = oa, ob
+				replay := "both"
+				switch src {
+				case a:
+					replay = "b"
+				case b:
+					replay = "a"
+				}
+				doc.Aligned = &diffAlign{Replay: replay, Source: src, AFrom: oa, BFrom: ob}
+			}
 		}
 	}
 	at := func(sides []*diffSide, off, n int) (*diffSide, *int) {
@@ -229,14 +264,17 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 		}
 		return sides[k], &k
 	}
-	for n := range max(len(ra.sides)+offA, len(rb.sides)+offB) {
+	for n := min(offA, offB); n < max(len(ra.sides)+offA, len(rb.sides)+offB); n++ {
 		row := diffRow{Step: n, Changes: []string{}, Unknown: []string{}, Differs: []string{}}
 		row.A, row.AStep = at(ra.sides, offA, n)
 		row.B, row.BStep = at(rb.sides, offB, n)
 		switch {
-		case n < offA && row.A == nil || n < offB && row.B == nil:
-			// A source step before the replay's from_step: kept, not
-			// re-run — nothing to compare, never a change.
+		case row.A == nil && row.B == nil:
+			continue // neither side has a step here: no row
+		case row.A == nil && n < offA || row.B == nil && n < offB:
+			// A source step before that side's from_step, the other side
+			// holding it: kept by the replay, not re-run — nothing to
+			// compare, never a change.
 			row.Kept = true
 			doc.Summary.Kept++
 		case row.A == nil || row.B == nil:
@@ -265,15 +303,56 @@ type diffRunSteps struct {
 	forkedFrom string // the run row's weft.forked_from
 }
 
-// forkedStep reads a weft.forked_from value "<run id>#<from_step>": the
-// step when it names source (a run id may itself hold a "#", so the
-// step is what follows the last one) and is a step ordinal.
-func forkedStep(forkedFrom, source string) (int, bool) {
-	src, n, ok := parseForkedFrom(forkedFrom)
-	if !ok || src != source || n > maxDiffSteps {
-		return 0, false
+// maxForkDepth bounds a forked_from chain's walk: a replay of a replay
+// of … is followed this many links up, no further.
+const maxForkDepth = 8
+
+// forkLink is one run of a forked_from chain and the offset at which
+// the chain's first run's step 0 sits in that run's ordinals.
+type forkLink struct {
+	id  string
+	off int
+}
+
+// forkChain is run id's lineage, itself first (offset 0): each
+// weft.forked_from "<parent>#<n>" adds n to the offset, read up to
+// depth links (each a run row read, the first from ff), stopping at a
+// cycle, an unknown run, a malformed value or an offset past the diff's
+// step cap.
+func (s *Server) forkChain(ctx context.Context, id, ff string, depth int) []forkLink {
+	chain := []forkLink{{id: id}}
+	seen := map[string]bool{id: true}
+	off := 0
+	for range depth {
+		parent, n, ok := parseForkedFrom(ff)
+		if !ok || seen[parent] || off+n > maxDiffSteps {
+			break
+		}
+		off += n
+		seen[parent] = true
+		chain = append(chain, forkLink{id: parent, off: off})
+		det, err := s.db.Run(ctx, parent)
+		if err != nil {
+			break
+		}
+		ff = det.ForkedFrom
 	}
-	return n, true
+	return chain
+}
+
+// lineageOffsets finds the nearest run both chains hold and each side's
+// offset into it.
+func lineageOffsets(a, b []forkLink) (source string, offA, offB int, ok bool) {
+	inB := map[string]int{}
+	for _, l := range b {
+		inB[l.id] = l.off
+	}
+	for _, l := range a {
+		if ob, found := inB[l.id]; found {
+			return l.id, l.off, ob, true
+		}
+	}
+	return "", 0, 0, false
 }
 
 // diffSteps assembles every step of run id (up to maxDiffSteps) and

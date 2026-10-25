@@ -9,6 +9,7 @@ import (
 	goparser "go/parser"
 	gotoken "go/token"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -241,9 +242,37 @@ func TestSaveAsTestPasses(t *testing.T) {
 		repFiles["testdata/TestReplay_pg_replay/"+repFx[0]] != srcFiles["testdata/TestReplay_r_src/"+srcFx[0]] {
 		t.Errorf("replay fixtures = %v (source %v), want the source's 00001 verbatim, then the replay's own as 00002", repFx, srcFx)
 	}
-	if s := repFiles["orders_replay_test.go"]; !strings.Contains(s, "// Replay of:   \"r_src\" from step 1 — steps 0–0 are the source's fixtures") ||
+	if s := repFiles["orders_replay_test.go"]; !strings.Contains(s, "// Kept:        steps 0–0 are \"r_src\"'s fixtures") ||
 		!strings.Contains(s, `weft.Prompt("look up orders 0 to 3")`) {
 		t.Errorf("the replay's skeleton does not replay from the source's start:\n%s", s)
+	}
+
+	// U19-fix 1: a replay of a replay composes the whole chain — x2
+	// (p1's from its step 1, p1 r3's from step 1) is r3's step 0, p1's
+	// step 0, then its own; x0 (p1's from step 0) still keeps r3's step
+	// 0 through p1. Both generated tests pass under go test.
+	recordChain(t, ts)
+	call1 := wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1"}`, ID: "c1"})
+	recordFork(t, ts.URL, "x0", "p1#0", ordersPrefix(1), call1, wefttest.Say("all looked up"))
+	waitRun(t, ts, "x0", 2, "")
+	for id, want := range map[string]struct {
+		header string
+		files  int
+	}{"x2": {"r3#1,p1#1", 3}, "x0": {"r3#1,p1#0", 3}} {
+		resp, body := exportGet(t, ts, "/api/runs/"+id+"/export?format=wefttest", func(string) bool { return true })
+		if h := resp.Header.Get(keptPrefixHeader); h != want.header {
+			t.Errorf("%s %s = %q, want %q", id, keptPrefixHeader, h, want.header)
+		}
+		files := unzipTo(t, body, filepath.Join(mod, id))
+		n := 0
+		for name := range files {
+			if strings.HasPrefix(name, "testdata/") {
+				n++
+			}
+		}
+		if n != want.files {
+			t.Errorf("%s fixtures = %d, want %d (the whole turn)", id, n, want.files)
+		}
 	}
 
 	goTest := func(pkgs ...string) (string, error) {
@@ -255,12 +284,12 @@ func TestSaveAsTestPasses(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
-	out, err := goTest("./fx", "./req", "./dup", "./steer", "./replay")
+	out, err := goTest("./fx", "./req", "./dup", "./steer", "./replay", "./x2", "./x0")
 	if err != nil {
 		t.Fatalf("go test on the extracted skeletons: %v\n%s", err, out)
 	}
-	if strings.Count(out, "ok  \tsavetest.example/") != 5 {
-		t.Errorf("go test ran %q, want the five packages ok", out)
+	if strings.Count(out, "ok  \tsavetest.example/") != 7 {
+		t.Errorf("go test ran %q, want the seven packages ok", out)
 	}
 	if out, err := goTest("./neg"); err == nil || !strings.Contains(out, "no replay fixture for this request") {
 		t.Errorf("a changed prompt's replay = %v\n%s\nwant a failure naming the missing fixture", err, out)
@@ -445,5 +474,29 @@ func TestReplayPackageKeyword(t *testing.T) {
 	f, err := goparser.ParseFile(gotoken.NewFileSet(), "x_test.go", src, goparser.PackageClauseOnly)
 	if err != nil || f.Name.Name != "replay_select_test" {
 		t.Errorf("package = %v, %v", f, err)
+	}
+}
+
+// TestSaveAsTestForkCycle: a forked_from chain that loops is a 409
+// naming it, never an endless walk or a partial test.
+func TestSaveAsTestForkCycle(t *testing.T) {
+	ts, _ := requestsServer(t)
+	recordFork(t, ts.URL, "cyc_a", "cyc_b#1", ordersPrefix(1), wefttest.Say("all looked up"))
+	recordFork(t, ts.URL, "cyc_b", "cyc_a#1", ordersPrefix(1), wefttest.Say("all looked up"))
+	waitRun(t, ts, "cyc_a", 1, "")
+	waitRun(t, ts, "cyc_b", 1, "")
+	resp, err := http.Get(ts.URL + "/api/runs/cyc_a/export?format=wefttest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(b), "loops back to cyc_a") {
+		t.Errorf("cycle export = %d %s, want the 409 naming the loop", resp.StatusCode, b)
+	}
+	// The diff walks the same chain and stops: the two align on each
+	// other (cyc_b is cyc_a's parent), no endless walk.
+	if d, _ := getDiff(t, ts, "cyc_a", "cyc_b", ""); len(d.Steps) == 0 {
+		t.Errorf("cycle diff = %+v", d)
 	}
 }

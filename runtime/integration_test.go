@@ -2364,8 +2364,8 @@ func TestScriptedReplayFromStepOneIsKeptSame(t *testing.T) {
 	}
 	var d struct {
 		Aligned *struct {
-			Replay   string `json:"replay"`
-			FromStep int    `json:"from_step"`
+			Replay string `json:"replay"`
+			BFrom  int    `json:"b_from"`
 		} `json:"aligned"`
 		Steps []struct {
 			Step    int      `json:"step"`
@@ -2395,7 +2395,7 @@ func TestScriptedReplayFromStepOneIsKeptSame(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if d.Aligned == nil || d.Aligned.Replay != "b" || d.Aligned.FromStep != 1 || len(d.Summary.ChangedSteps) != 0 {
+	if d.Aligned == nil || d.Aligned.Replay != "b" || d.Aligned.BFrom != 1 || len(d.Summary.ChangedSteps) != 0 {
 		t.Fatalf("diff = %s, want aligned on the source from step 1, nothing changed", body)
 	}
 	k, s := d.Steps[0], d.Steps[1]

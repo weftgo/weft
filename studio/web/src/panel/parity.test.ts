@@ -2116,7 +2116,7 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
   const fail = () => apiError(500, "internal", "session store unavailable")
   /** fails: both reads answer 500 (the panel's /entries?run=, Studio's
    * timeline). */
-  const serve = (at: string, studioMeta = false, fails = false) =>
+  const serveTurn = (at: string, studioMeta = false, fails = false) =>
     fails
       ? serveAppTurn(new FakeStudio(), { studioMeta })
           .on(`GET sessions/${APP_SESSION}/timeline`, fail)
@@ -2145,10 +2145,10 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
         holes: [],
       })
       .install()
-  const words = (n: Element) => ({
+  const expiryWords = (n: Element) => ({
     state: n.getAttribute("data-request-expiry"),
     // The countdown is each surface's own clock: its figure is not compared.
-    text: (n.textContent ?? "").replace(/\(in [^)]*\)/, "(in …)"),
+    text: n.textContent.replace(/\(in [^)]*\)/, "(in …)"),
     title: n.getAttribute("title"),
   })
   for (const [state, ms] of [
@@ -2157,7 +2157,7 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
   ] as const)
     it(`a ${state} request reads alike`, async () => {
       const at = new Date(Date.now() + ms).toISOString()
-      serve(at)
+      serveTurn(at)
       const el = await mount({
         "data-endpoint": "http://studio.test/studio/",
         "data-open": "true",
@@ -2188,7 +2188,7 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
         },
         { timeout: 5_000 }
       )
-      const panel = words(pn)
+      const panel = expiryWords(pn)
       el.remove()
       await settle()
       cleanup()
@@ -2199,7 +2199,7 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
       StudioEventSource.reset()
       vi.stubGlobal("EventSource", StudioEventSource)
       setStudioToken("")
-      serve(at, true)
+      serveTurn(at, true)
       renderApp(`/runs/${APP_PARKED}?view=story`)
       const sn = await waitFor(() => {
         const n = document.querySelector(
@@ -2208,7 +2208,7 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
         expect(n).toBeTruthy()
         return n!
       })
-      const studio = words(sn)
+      const studio = expiryWords(sn)
       cleanup()
       expect(panel).toEqual(studio)
       expect(panel.state).toBe(state)
@@ -2219,7 +2219,7 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
       hole: n.getAttribute("data-hole"),
       title: n.getAttribute("title"),
     })
-    serve("", false, true)
+    serveTurn("", false, true)
     const el = await mount({
       "data-endpoint": "http://studio.test/studio/",
       "data-open": "true",
@@ -2261,7 +2261,7 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
     StudioEventSource.reset()
     vi.stubGlobal("EventSource", StudioEventSource)
     setStudioToken("")
-    serve("", true, true)
+    serveTurn("", true, true)
     renderApp(`/runs/${APP_PARKED}?view=story`)
     const sb = await waitFor(
       () => {
@@ -4950,7 +4950,7 @@ describe("the engine per command on both drawers (U17)", () => {
     if (pv) routes["POST playground/preview"] = pv
     for (const n of [0, 1, 2, 3]) routes[`runs/${RK.RUN}/steps/${n}`] = cost(n)
     routes.runtimes = { runtimes: [RK.runtimeOf([agent])] }
-    panelStudio(routes as Parameters<typeof panelStudio>[0], {
+    panelStudio(routes, {
       ...RK.REPLAY_META,
       capabilities: [
         ...RK.REPLAY_META.capabilities,
@@ -4983,7 +4983,7 @@ describe("the engine per command on both drawers (U17)", () => {
     return out
   }
 
-  const both = async (
+  const bothDrawers = async (
     draft: () => ReplayDraft,
     c?: Change,
     pv?: PreviewDoc
@@ -4996,7 +4996,7 @@ describe("the engine per command on both drawers (U17)", () => {
   const T = ": the recording answered the original"
 
   it("a plain replay: scripted on both, the same lines and target, every later step priced, Run 'Run on scripted · 0 tokens'", async () => {
-    const r = await both(() => replayFromStep(2))
+    const r = await bothDrawers(() => replayFromStep(2))
     expect(r.engine).toBe("scripted")
     expect(r.run).toBe("Run on scripted · 0 tokens")
     expect(r.target).toBe(
@@ -5009,7 +5009,7 @@ describe("the engine per command on both drawers (U17)", () => {
   })
 
   it("edit this result: an edit — live on both, scripted disabled with the same reason, Run names the model and the sum", async () => {
-    const r = await both(() => editResultAndReplay(1, "c2"), {
+    const r = await bothDrawers(() => editResultAndReplay(1, "c2"), {
       edit: "policy: no refunds",
     })
     expect(r.engine).toBe("live")
@@ -5020,7 +5020,7 @@ describe("the engine per command on both drawers (U17)", () => {
   it("the preview's key check misses: scripted disabled on both, in the server's own sentence (U18.1)", async () => {
     const message =
       "scripted has no recorded answer for step 2: the tool list differs from the recording — re-run on engine live"
-    const r = await both(() => replayFromStep(2), undefined, {
+    const r = await bothDrawers(() => replayFromStep(2), undefined, {
       ...golden<PreviewDoc>("playground-preview"),
       scripted_key_match: { ok: false, because: ["tools"], step: 2, message },
     })
@@ -5052,8 +5052,8 @@ describe("the engine per command on both drawers (U17)", () => {
     ],
   ] as const)
     it(`${name} equal to the source's or the agent's own is no change on both; another is live on both`, async () => {
-      expect((await both(draft, same)).engine).toBe("scripted")
-      const r = await both(draft, other)
+      expect((await bothDrawers(draft, same)).engine).toBe("scripted")
+      const r = await bothDrawers(draft, other)
       expect(r.engine).toBe("live")
       expect(r.scripted).toContain(why)
     })

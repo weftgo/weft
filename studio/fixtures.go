@@ -570,7 +570,7 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if kept != nil {
-		w.Header().Set(keptPrefixHeader, fmt.Sprintf("%s#%d", kept.source, kept.steps))
+		w.Header().Set(keptPrefixHeader, kept.header())
 	}
 	writeJSON(w, r, http.StatusOK, struct {
 		RunID string        `json:"run_id"`
@@ -579,18 +579,33 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 	}{RunID: req.RunID, Agent: row.Agent, Files: set.files})
 }
 
-// fixturesOrConflict builds the run's fixtures, or answers the refusal
-// itself: 409 in the error shape with the hole that explains it —
-// stripped for a content-off run's missing transcript, the builder's
+// fixtureRefusal is a refused fixture build, said when answered: the
+// derived 400, or a 409 with its badge.
+type fixtureRefusal struct {
+	derived bool
+	msg     string
+	badge   badgeFields
+}
+
+func (f *fixtureRefusal) write(w http.ResponseWriter, r *http.Request) {
+	if f.derived {
+		refuseDerived(w, r, f.msg)
+		return
+	}
+	conflict(w, r, f.msg, f.badge)
+}
+
+// fixtureSetOf builds the run's fixtures, or says the refusal (written
+// by its caller): 409 in the error shape with the hole that explains it
+// — stripped for a content-off run's missing transcript, the builder's
 // gap or derived otherwise. A run with a transcript but no recorded
 // answer (it failed before any step answered) is 409 without a badge:
 // nothing is missing, there is nothing to replay. A derived run (built
 // from stock spans) is refused 400 with derivedBadge: the request
 // cannot be met by any run of that kind, not by this run's state.
-func fixturesOrConflict(w http.ResponseWriter, r *http.Request, src fixtureSource) (*fixtureSet, bool) {
+func fixtureSetOf(src fixtureSource) (*fixtureSet, *fixtureRefusal) {
 	if src.derived {
-		refuseDerived(w, r, "the run is derived from stock spans: it recorded no transcript, so there is nothing to replay (wefttest fixtures need weft's records, docs/record-contract.md)")
-		return nil, false
+		return nil, &fixtureRefusal{derived: true, msg: "the run is derived from stock spans: it recorded no transcript, so there is nothing to replay (wefttest fixtures need weft's records, docs/record-contract.md)"}
 	}
 	set, err := buildFixtures(src)
 	var fe *fixtureError
@@ -600,104 +615,161 @@ func fixturesOrConflict(w http.ResponseWriter, r *http.Request, src fixtureSourc
 		if fe == errNoTranscript && requestsStripped(src.requests) {
 			b = badgeOf(obsdb.HoleStripped)
 		}
-		conflict(w, r, fe.msg, b)
-		return nil, false
+		return nil, &fixtureRefusal{msg: fe.msg, badge: b}
 	case err != nil:
-		conflict(w, r, "the run's transcript cannot be fixtured: "+err.Error(), badgeOf(obsdb.HoleDerived))
-		return nil, false
+		return nil, &fixtureRefusal{msg: "the run's transcript cannot be fixtured: " + err.Error(), badge: badgeOf(obsdb.HoleDerived)}
 	case len(set.files) == 0:
-		conflict(w, r, "the run recorded no assistant turns to fixture", badgeFields{})
-		return nil, false
+		return nil, &fixtureRefusal{msg: "the run recorded no assistant turns to fixture"}
 	}
-	return set, true
+	return set, nil
 }
 
 // scriptedEngineModel is weft/runtime's scripted engine's ModelInfo
 // (runtime/scripted.go).
 var scriptedEngineModel = core.ModelInfo{Provider: "weft/runtime", Name: "scripted"}
 
-// keptPrefix is a replay's composed fixtures (UX-C-30): the source run
-// whose fixtures answer steps 0 to steps−1, the replay's own after them.
-type keptPrefix struct {
+// keptLink is one run of a composed set's chain: its fixtures answer
+// steps steps of the turn, after the links before it.
+type keptLink struct {
 	source string
 	steps  int
 }
 
+// keptPrefix is a replay's composed fixtures (UX-C-30): the chain from
+// the root whose fixtures answer steps 0 to steps−1, the replay's own
+// after them.
+type keptPrefix struct {
+	links []keptLink
+	steps int
+}
+
+// header is the Weft-Kept-Prefix value: the chain from the root,
+// "<run>#<steps>" per link, comma-joined.
+func (k *keptPrefix) header() string {
+	parts := make([]string, len(k.links))
+	for i, l := range k.links {
+		parts[i] = fmt.Sprintf("%s#%d", l.source, l.steps)
+	}
+	return strings.Join(parts, ",")
+}
+
 // keptPrefixHeader names the composition on the wefttest export's
-// response: "<source run>#<from_step>" when the zip's first from_step
-// fixtures are the source's (the replay did not re-run them), absent
-// otherwise. Studio's "save as test" toast reads it.
+// response: the chain of runs whose fixtures the zip's first steps are
+// ("<root>#<k>,<replay>#<m>": k steps from the root, then m from that
+// replay, …; the replay did not re-run them), absent otherwise.
+// Studio's "save as test" toast reads it.
 const keptPrefixHeader = "Weft-Kept-Prefix"
 
 // runFixtureSet is the fixtures save-as-test and the fixture route
 // serve for run det (src its loaded source), or the refusal answered.
-// A replay from step n > 0 (weft.forked_from "<source>#<n>") recorded
-// only its fresh steps — its input record is the kept prefix — so a
-// test of it alone could not replay the turn from its start: its
-// fixtures are composed with the source's for steps 0 to n−1 (the
-// steps it kept, not re-run), its own renumbered after them, and a
-// scripted replay's own stamped with the source's model. A source that
-// cannot be read, or that did not record an answer for each kept step,
-// is a 409 that says so — never a partial test.
+// A replay (weft.forked_from "<parent>#<n>") recorded only its fresh
+// steps — its input record is the kept prefix — so a test of it alone
+// could not replay the turn from its start: its fixtures are composed
+// with the parent's — the parent's own composed set when it is a
+// replay too, followed up the chain (maxForkDepth links, a cycle
+// refused) — for every step the replay kept (the parent's kept steps
+// plus n; a replay from step 0 of a replay still keeps its parent's),
+// its own renumbered after them, a scripted replay's stamped with the
+// model of the step before them. A parent that cannot give the kept
+// steps is a 409 that says so — never a partial test.
 func (s *Server) runFixtureSet(w http.ResponseWriter, r *http.Request, det obsdb.RunDetail, src fixtureSource) (*fixtureSet, *keptPrefix, bool) {
-	source, n, forked := parseForkedFrom(det.ForkedFrom)
-	if !forked || n == 0 || src.derived {
-		set, ok := fixturesOrConflict(w, r, src)
-		return set, nil, ok
-	}
-	refuse := func(why string, b badgeFields) (*fixtureSet, *keptPrefix, bool) {
-		conflict(w, r, fmt.Sprintf("run %s replays run %s from step %d, and %s: a test of the replay alone cannot replay the turn from its start", det.ID, source, n, why), b)
+	set, kept, ref, err := s.composeFixtures(r.Context(), det, src, map[string]bool{})
+	switch {
+	case err != nil:
+		dbError(w, r, "run", det.ID, err)
+		return nil, nil, false
+	case ref != nil:
+		ref.write(w, r)
 		return nil, nil, false
 	}
-	ssrc, err := s.loadFixtureSource(r.Context(), source, src.tools)
+	return set, kept, true
+}
+
+func (s *Server) composeFixtures(ctx context.Context, det obsdb.RunDetail, src fixtureSource, seen map[string]bool) (*fixtureSet, *keptPrefix, *fixtureRefusal, error) {
+	seen[det.ID] = true
+	parent, n, forked := parseForkedFrom(det.ForkedFrom)
+	own := func() (*fixtureSet, *keptPrefix, *fixtureRefusal, error) {
+		set, ref := fixtureSetOf(src)
+		return set, nil, ref, nil
+	}
+	if !forked || src.derived {
+		return own()
+	}
+	refuse := func(why string, b badgeFields) (*fixtureSet, *keptPrefix, *fixtureRefusal, error) {
+		return nil, nil, &fixtureRefusal{msg: fmt.Sprintf("run %s replays run %s from step %d, and %s: a test of the replay alone cannot replay the turn from its start", det.ID, parent, n, why), badge: b}, nil
+	}
+	if seen[parent] {
+		return refuse("the forked_from chain loops back to "+parent, badgeOf(obsdb.HoleGap))
+	}
+	if len(seen) > maxForkDepth {
+		return refuse(fmt.Sprintf("the forked_from chain is longer than %d runs", maxForkDepth), badgeOf(obsdb.HoleGap))
+	}
+	pdet, err := s.db.Run(ctx, parent)
 	if errors.Is(err, obsdb.ErrNotFound) {
-		return refuse(fmt.Sprintf("%s is not in this Studio (its kept steps 0–%d have no fixtures)", source, n-1), badgeOf(obsdb.HoleGap))
+		if n == 0 {
+			return own() // nothing kept that the parent alone knows of
+		}
+		return refuse(fmt.Sprintf("%s is not in this Studio (its kept steps 0–%d have no fixtures)", parent, n-1), badgeOf(obsdb.HoleGap))
 	}
 	if err != nil {
-		dbError(w, r, "run", source, err)
-		return nil, nil, false
+		return nil, nil, nil, err
 	}
-	if ssrc.derived {
-		return refuse(source+" is derived from stock spans (no transcript to fixture its kept steps)", derivedBadge())
+	psrc, err := s.loadFixtureSource(ctx, parent, src.tools)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	sset, err := buildFixtures(ssrc)
-	var fe *fixtureError
-	switch {
-	case errors.As(err, &fe):
-		return refuse(fmt.Sprintf("the source's fixtures cannot be built: %s", fe.msg), badgeOf(fe.hole))
-	case err != nil:
-		return refuse("the source's fixtures cannot be built: "+err.Error(), badgeOf(obsdb.HoleDerived))
+	if psrc.derived {
+		if n == 0 {
+			return own()
+		}
+		return refuse(parent+" is derived from stock spans (no transcript to fixture its kept steps)", derivedBadge())
 	}
-	kept := 0
-	for kept < len(sset.steps) && sset.steps[kept].step == kept && kept < n {
-		kept++
+	pset, pkept, pref, err := s.composeFixtures(ctx, pdet, psrc, seen)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	if kept < n {
-		return refuse(fmt.Sprintf("%s recorded an answer for %d of the %d steps the replay kept", source, kept, n), badgeOf(obsdb.HoleGap))
+	if pref != nil {
+		return refuse("the parent's fixtures cannot be built: "+pref.msg, pref.badge)
+	}
+	var links []keptLink
+	total := n
+	if pkept != nil {
+		links, total = append(links, pkept.links...), pkept.steps+n
+	}
+	if total == 0 {
+		return own()
+	}
+	links = append(links, keptLink{source: parent, steps: n})
+	have := 0
+	for have < len(pset.steps) && pset.steps[have].step == have && have < total {
+		have++
+	}
+	if have < total {
+		return refuse(fmt.Sprintf("the turn through %s answered %d of the %d steps the replay kept", parent, have, total), badgeOf(obsdb.HoleGap))
 	}
 	if src.stampModel == nil && det.Provider == scriptedEngineModel.Provider && det.Model == scriptedEngineModel.Name {
-		m := sset.steps[n-1].model
+		m := pset.steps[total-1].model
 		src.stampModel = &m
 	}
-	set, ok := fixturesOrConflict(w, r, src)
-	if !ok {
-		return nil, nil, false
+	set, ref := fixtureSetOf(src)
+	if ref != nil {
+		return nil, nil, ref, nil
 	}
-	out := &fixtureSet{system: sset.system, last: set.last}
-	for i := range n {
-		out.files = append(out.files, sset.files[i])
-		out.steps = append(out.steps, sset.steps[i])
+	out := &fixtureSet{system: pset.system, last: set.last}
+	for i := range total {
+		out.files = append(out.files, pset.files[i])
+		out.steps = append(out.steps, pset.steps[i])
 	}
 	for i, f := range set.files {
 		// <seq>-<key>.json: the sequence continues after the kept steps,
 		// the key stays the replay's.
-		f.Name = fmt.Sprintf("%05d", n+i+1) + f.Name[5:]
+		f.Name = fmt.Sprintf("%05d", total+i+1) + f.Name[5:]
 		out.files = append(out.files, f)
 		st := set.steps[i]
-		st.step += n
+		st.step += total
 		out.steps = append(out.steps, st)
 	}
-	return out, &keptPrefix{source: source, steps: n}, true
+	return out, &keptPrefix{links: links, steps: total}, nil, nil
 }
 
 // parseForkedFrom reads weft.forked_from "<run id>#<from_step>": the

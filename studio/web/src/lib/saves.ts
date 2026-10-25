@@ -108,11 +108,12 @@ export const PROPOSAL_NEEDS_DEV = "a proposal needs the dev token"
 export const PROPOSAL_POINTER =
   "the durable path is WEFT-PROMPT.md P3: a propose command over the runtime link"
 
-/** A replay's save-as-test zip composed with its source (UX-C-30): the
- * source run whose fixtures answer steps 0 to steps − 1, the steps it
- * kept (studio/fixtures.go's Weft-Kept-Prefix, "<source>#<from_step>"). */
+/** A replay's save-as-test zip composed with its sources (UX-C-30):
+ * the chain from the root whose fixtures answer steps 0 to steps − 1,
+ * the steps it kept (studio/fixtures.go's Weft-Kept-Prefix,
+ * "<root>#<k>,<replay>#<m>": k steps from the root, then m from it). */
 export interface KeptPrefix {
-  source: string
+  sources: string[]
   steps: number
 }
 
@@ -121,16 +122,27 @@ export const KEPT_PREFIX_HEADER = "Weft-Kept-Prefix"
 /** keptPrefixOf reads the header; undefined when absent or malformed. */
 export function keptPrefixOf(h: string | null): KeptPrefix | undefined {
   if (!h) return undefined
-  const i = h.lastIndexOf("#")
-  const steps = Number(h.slice(i + 1))
-  if (i <= 0 || !Number.isInteger(steps) || steps < 1) return undefined
-  return { source: h.slice(0, i), steps }
+  const sources: string[] = []
+  let steps = 0
+  for (const link of h.split(",")) {
+    const i = link.lastIndexOf("#")
+    const n = Number(link.slice(i + 1))
+    if (i <= 0 || !Number.isInteger(n) || n < 0) return undefined
+    sources.push(link.slice(0, i))
+    steps += n
+  }
+  return steps ? { sources, steps } : undefined
 }
 
 /** keptWords says what a composed zip holds: "steps 0–0 from the
- * source r_1, the rest from the replay". */
+ * source r_1, 1 on from the replay" (a chain: "from the sources r_1 →
+ * pg_2"). */
 export function keptWords(k: KeptPrefix): string {
-  return `steps 0–${k.steps - 1} from the source ${k.source}, ${k.steps} on from the replay`
+  const from =
+    k.sources.length > 1
+      ? `the sources ${k.sources.join(" → ")}`
+      : `the source ${k.sources[0]}`
+  return `steps 0–${k.steps - 1} from ${from}, ${k.steps} on from the replay`
 }
 
 /** One save's outcome, in words both surfaces say. */

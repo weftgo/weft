@@ -11,8 +11,9 @@
   },
   "aligned": {
     "replay": "b",
-    "from_step": 1,
-    "forked_from": "r_src#1"
+    "source": "r_src",
+    "a_from": 0,
+    "b_from": 1
   },
   "steps": [
     {

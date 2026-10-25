@@ -33,7 +33,10 @@
 // always wins (the reader does not look), WEFT_DISCOVERY=off turns the
 // read off and the write too (Off: weft studio / weft dev write no
 // file), and runtime.Studio(url, tok) / otel.Studio(url, tok) name a
-// Studio in code (otel.Studio also switches the read off). The core
+// Studio in code. weft/otel skips the read when the pipeline names an
+// otel.Studio or an otel.Local, or under otel.NoDiscovery / NoEnv;
+// weft/runtime skips it when the installed pipeline has a Local and no
+// Studio (the README's "When weft/otel reads the file"). The core
 // never imports this package.
 package discovery
 

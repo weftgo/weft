@@ -18,6 +18,7 @@ import (
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/internal/discovery"
 	"github.com/weftgo/weft/obsdb/sqlite"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // TestMain points the discovery rung at an empty directory of this
@@ -451,5 +452,92 @@ func TestDiscoveryLocalPlusStudio(t *testing.T) {
 	}
 	if n := discovered.hits(); n != 0 {
 		t.Errorf("the discovered Studio got %d requests", n)
+	}
+}
+
+// TestDiscoveryWeftDevShape (I1-fix): the `weft dev` app — an explicit
+// Local, WEFT_STUDIO_URL naming the command's Studio, and a discovery
+// file naming a different one — has two destinations: the Local and
+// the env Studio, which StudioEndpoint reports; the file's Studio gets
+// nothing.
+func TestDiscoveryWeftDevShape(t *testing.T) {
+	clearDestinationEnv(t)
+	dev, other := newCountingSink(t), newCountingSink(t)
+	runtimeDirDiscoveryFile(t, other.URL, "other-token")
+	t.Setenv("WEFT_STUDIO_URL", dev.URL)
+	t.Setenv("WEFT_STUDIO_TOKEN", "dev-token")
+	path := filepath.Join(t.TempDir(), "local.db")
+
+	p, err := Start(testCtx(t), NoGlobal(), Heartbeat(0), Local(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(p.dests); n != 2 {
+		t.Errorf("%d destinations, want Local + the env Studio", n)
+	}
+	if u, tok := p.StudioEndpoint(); u != dev.URL || tok != "dev-token" {
+		t.Errorf("StudioEndpoint = %q, %q; want the env's %q, dev-token", u, tok, dev.URL)
+	}
+	id := generateOne(t, p)
+	if err := p.Shutdown(testCtx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if !localHasRun(t, path, id) {
+		t.Errorf("the Local store has no spans for run %s", id)
+	}
+	if dev.hits() == 0 {
+		t.Error("the WEFT_STUDIO_URL Studio got nothing")
+	}
+	if n := other.hits(); n != 0 {
+		t.Errorf("the discovery file's Studio got %d requests", n)
+	}
+}
+
+// TestDiscoveryNoDiscoveryExporters (I1-fix): an Exporters destination
+// does not switch the discovery read off — without NoDiscovery the
+// pipeline joins the file's Studio as well (and sends it the run);
+// with it the run reaches the exporter alone.
+func TestDiscoveryNoDiscoveryExporters(t *testing.T) {
+	clearDestinationEnv(t)
+	studio := newCountingSink(t)
+	runtimeDirDiscoveryFile(t, studio.URL, "disc-token")
+
+	for _, tc := range []struct {
+		name      string
+		opts      []Option
+		dests     int
+		toStudio  bool
+		studioURL string
+	}{
+		{"without NoDiscovery", nil, 2, true, studio.URL},
+		{"NoDiscovery", []Option{NoDiscovery()}, 1, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spans := tracetest.NewInMemoryExporter()
+			before := studio.hits()
+			p, err := Start(testCtx(t), append([]Option{NoGlobal(), Heartbeat(0), Exporters(spans, nil)}, tc.opts...)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := len(p.dests); n != tc.dests {
+				t.Errorf("%d destinations, want %d", n, tc.dests)
+			}
+			if u, _ := p.StudioEndpoint(); u != tc.studioURL {
+				t.Errorf("StudioEndpoint = %q, want %q", u, tc.studioURL)
+			}
+			generateOne(t, p)
+			if err := p.ForceFlush(testCtx(t)); err != nil {
+				t.Fatal(err)
+			}
+			if len(spans.GetSpans()) == 0 {
+				t.Error("the exporter got no spans")
+			}
+			if err := p.Shutdown(testCtx(t)); err != nil {
+				t.Fatal(err)
+			}
+			if got := studio.hits() > before; got != tc.toStudio {
+				t.Errorf("the discovered Studio got requests: %v, want %v", got, tc.toStudio)
+			}
+		})
 	}
 }

@@ -454,7 +454,9 @@ needs no file.
 
 **When weft/otel reads the file** (the one rule; explicit > environment
 > file): only when the pipeline names neither an `otel.Studio` nor an
-`otel.Local` destination in code, `WEFT_STUDIO_URL` is unset, and
+`otel.Local` destination in code (an `otel.OTLP`, `otel.Datadog`,
+`otel.Langfuse` or `otel.Exporters` destination does not switch it off
+— add `otel.NoDiscovery()`), `WEFT_STUDIO_URL` is unset, and
 neither `otel.NoDiscovery()` (this pipeline), `WEFT_DISCOVERY=off`
 (the process) nor `otel.NoEnv()` is set. A pipeline that names its
 store writes only to what it names plus the environment's destinations
@@ -464,7 +466,11 @@ otel.Studio(url, tok))`. `otel.NoDiscovery()` skips the file alone and
 keeps `WEFT_STUDIO_URL`, `OTEL_*` and the `WEFT_ENV` gate;
 `otel.NoGlobal()` does not stop the read. `runtime.Install` reads the
 file on its own, when it has no `runtime.Studio` / `runtime.Local` and
-the pipeline reports no Studio.
+the installed pipeline has neither a Studio nor a Local: beside a
+Local-only pipeline it opens no link and WARNs once (the link would
+register with a Studio its runs never reach) — `runtime.Local(srv)`
+dials the embedded Studio, `runtime.Studio(url, tok)` with
+`otel.Studio(url, tok)` a running one.
 
 Setup A's handler serves `GET <base>/panel-config.json` —
 `{"endpoint", "version", "capabilities"}` — to a loopback (or

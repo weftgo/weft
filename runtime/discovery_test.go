@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/internal/discovery"
+	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio"
 )
 
@@ -141,5 +142,75 @@ func TestInstallJoinsDiscoveredStudio(t *testing.T) {
 	}
 	if len(info) != 1 || !strings.Contains(info[0], ts.URL) {
 		t.Errorf("join lines %q, want exactly one naming %s", info, ts.URL)
+	}
+}
+
+// TestInstallLocalPipelineSkipsDiscovery (I1-fix, issue 001): the
+// installed pipeline records into a Local store and names no Studio —
+// weft/otel did not join the discovered Studio, so the link does not
+// register with it either (a Studio that would start runs whose spans
+// never reach it). One WARN names runtime.Local / runtime.Studio, no
+// join is claimed.
+func TestInstallLocalPipelineSkipsDiscovery(t *testing.T) {
+	t.Setenv("WEFT_ENV", "dev")
+	t.Setenv("WEFT_STUDIO_URL", "")
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	const tok = "disc-token"
+	srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "studio.db")), studio.Playground(true),
+		studio.Token(tok), studio.Base("/"))
+	defer func() { _ = srv.Close() }()
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	dir := t.TempDir()
+	old := discovery.Dirs
+	discovery.Dirs = func() []string { return []string{dir} }
+	t.Cleanup(func() { discovery.Dirs = old })
+	b, _ := json.Marshal(discovery.Info{URL: ts.URL, Token: tok, PID: os.Getpid(), Started: time.Now(), Version: "v0"})
+	if err := os.WriteFile(filepath.Join(dir, discovery.FileName), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs lockedBuf
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	stopOtel := otel.Install(otel.Local(filepath.Join(t.TempDir(), "app.db")), otel.Heartbeat(0))
+	defer stopOtel()
+	if otel.LocalDB() == nil {
+		t.Fatal("no Local store installed: the test proves nothing")
+	}
+	stop := Install(Agents(testAgent("local-agent")))
+	time.Sleep(200 * time.Millisecond)
+	stop()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runtimes", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out struct {
+		Runtimes []json.RawMessage `json:"runtimes"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if len(out.Runtimes) != 0 {
+		t.Errorf("a runtime registered with the discovered Studio: %d", len(out.Runtimes))
+	}
+	if strings.Contains(logs.String(), "joined") {
+		t.Errorf("a join was claimed: %s", logs.String())
+	}
+	var warns []string
+	for _, l := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(l, "level=WARN") && strings.Contains(l, "weft/runtime:") {
+			warns = append(warns, l)
+		}
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0], "runtime.Local(srv)") || !strings.Contains(warns[0], "runtime.Studio(url, token)") {
+		t.Errorf("runtime WARN lines %q, want exactly one naming runtime.Local(srv) and runtime.Studio(url, token)", warns)
 	}
 }

@@ -40,7 +40,11 @@ type config struct {
 // own Studio destination — otel.StudioEndpoint() — then, when that is
 // empty, to the discovery file a running `weft studio` / `weft dev`
 // wrote (unless WEFT_STUDIO_URL is set or WEFT_DISCOVERY=off; a stale
-// file is never trusted), and opens nothing when there is none.
+// file is never trusted), and opens nothing when there is none. A
+// pipeline with a Local destination and no Studio (otel.LocalDB() set,
+// otel.StudioEndpoint() empty) skips the file: the link would register
+// with a Studio its runs never reach, so Install opens nothing and
+// WARNs once, naming Local(srv) and Studio(url, token).
 func Studio(url, token string) Option {
 	return func(c *config) { c.studioURL, c.studioToken = url, token }
 }
@@ -282,11 +286,22 @@ func Install(opts ...Option) (shutdown func()) {
 		// this package; this is the one place the two meet.
 		url, token = otel.StudioEndpoint()
 	}
+	if c.local == nil && url == "" && otel.LocalDB() != nil {
+		// The pipeline records into a Local store and names no Studio
+		// (issue 001): weft/otel did not join the file's Studio, so the
+		// link must not either — a Studio that starts runs whose spans
+		// never reach it. One WARN; no link.
+		slog.Warn("weft/runtime: the pipeline records locally (otel.Local) and names no Studio: no link opened",
+			"hint", "runtime.Local(srv) dials the embedded Studio; runtime.Studio(url, token) with otel.Studio(url, token) a running one")
+		return func() {}
+	}
 	if c.local == nil && url == "" {
 		// The discovery rung (plan B3): the file `weft studio` / `weft
 		// dev` writes names the running Studio — never read when
 		// WEFT_STUDIO_URL is set or WEFT_DISCOVERY=off, never trusted
-		// when stale. One INFO line says which Studio this joined.
+		// when stale, never when the installed pipeline has a Local
+		// destination and no Studio (above). One INFO line says which
+		// Studio this joined.
 		if info, path, ok := discovery.Lookup(os.Getenv, slog.Default()); ok {
 			url, token = info.URL, info.Token
 			slog.Info("weft/runtime: joined the running Studio", "url", info.URL, "pid", info.PID, "file", path,

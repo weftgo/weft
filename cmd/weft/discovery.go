@@ -14,8 +14,10 @@ import (
 // The discovery file (plan B3, internal/discovery): `weft studio` and
 // `weft dev` write studio.json once the listener is bound — the real
 // port in it — and remove it on a clean exit; otel.Install and
-// runtime.Install read it when WEFT_STUDIO_URL is unset, so an app
-// joins the running Studio with no configuration. A reuse writes
+// runtime.Install read it when WEFT_STUDIO_URL is unset and the
+// pipeline names no otel.Studio or otel.Local (the README's "When
+// weft/otel reads the file"), so an app joins the running Studio with
+// no configuration. A reuse writes
 // nothing: the running Studio owns the file. Under WEFT_DISCOVERY=off
 // (discovery.Off) neither command writes one, and the start says so in
 // one line.

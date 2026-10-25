@@ -56,7 +56,8 @@
 // gracefully; a second live Studio's exit puts the first's file back.
 // The writer drops a .gitignore ("*") into ./.weft when it has none.
 // otel.Install and runtime.Install read the file when WEFT_STUDIO_URL
-// is unset (and no otel.Studio is named), trusting it only when its url
+// is unset and the pipeline names no otel.Studio or otel.Local (the
+// README's "When weft/otel reads the file"), trusting it only when its url
 // is loopback, it is fresh and, on unix, it is 0600 and the reader's,
 // so an app joins this Studio with no configuration (WEFT_DISCOVERY=off
 // turns the read off). The playground is on (studio.Playground):

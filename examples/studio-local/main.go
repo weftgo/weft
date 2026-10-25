@@ -43,15 +43,17 @@
 //	weft dev -- go run ./examples/studio-local
 //
 // weft dev sets WEFT_STUDIO_URL, WEFT_STUDIO_TOKEN, WEFT_DB and
-// WEFT_ENV=dev; with WEFT_STUDIO_URL set — or, run bare beside a
-// `weft studio`, with the Studio its discovery file names — the demo
-// listens on 127.0.0.1:8080 (that Studio holds 7331), the pipeline
-// exports to that Studio besides the local sink, and the runtime link
-// registers there instead of with the embedded server: serve reads
-// otel.StudioEndpoint() after Install. The
-// app then writes the shared WEFT_DB twice, through its local sink and
-// through Studio's ingest: harmless, the sqlite writer is INSERT OR
-// IGNORE. -addr still overrides 8080.
+// WEFT_ENV=dev; with WEFT_STUDIO_URL set the demo listens on
+// 127.0.0.1:8080 (that Studio holds 7331), the pipeline exports to that
+// Studio besides the local sink, and the runtime link registers there
+// instead of with the embedded server: serve reads
+// otel.StudioEndpoint() after Install. The app then writes the shared
+// WEFT_DB twice, through its local sink and through Studio's ingest:
+// harmless, the sqlite writer is INSERT OR IGNORE. Run bare beside a
+// `weft studio` (no WEFT_STUDIO_URL), the demo stays its own setup A:
+// otel.Local switches the discovery file off, so nothing joins that
+// Studio (README "When weft/otel reads the file") — only the port
+// moves to 8080, because 7331 is taken. -addr still overrides 8080.
 package main
 
 import (
@@ -61,8 +63,10 @@ import (
 	"io"
 	"iter"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -151,8 +155,8 @@ document.addEventListener("DOMContentLoaded", () => {
 func main() {
 	// 7331 is Studio's one default port, and this listener is the
 	// app's own; beside a Studio that already holds it (weft dev sets
-	// WEFT_STUDIO_URL, or a running weft studio's discovery file names
-	// it) the app takes 8080. -addr always wins.
+	// WEFT_STUDIO_URL, or a running weft studio has the port) the app
+	// takes 8080. -addr always wins.
 	addr := flag.String("addr", "127.0.0.1:7331", "listen address (default 127.0.0.1:7331; 127.0.0.1:8080 beside a running Studio)")
 	flag.Parse()
 	explicit := false
@@ -207,13 +211,10 @@ func serve(addr string, explicitAddr bool) error {
 	// included) reach Studio under the span they were logged in.
 	defer otel.Install(otel.Local(""), otel.Slog())()
 
-	// Beside a running Studio — WEFT_STUDIO_URL, or the one the
-	// pipeline joined through the discovery file — that Studio holds
-	// 7331: this app's own listener takes 8080.
+	// Under weft dev the pipeline also exports to the Studio
+	// WEFT_STUDIO_URL names (the explicit Local keeps the discovery
+	// file out: run bare, nothing joins a running weft studio).
 	studioURL, studioToken := otel.StudioEndpoint()
-	if studioURL != "" && !explicitAddr {
-		addr = "127.0.0.1:8080"
-	}
 
 	agent := demoAgent()
 
@@ -256,9 +257,37 @@ func serve(addr string, explicitAddr bool) error {
 		_, _ = fmt.Fprint(w, page)
 	})
 
+	ln, addr, err := listen(addr, explicitAddr)
+	if err != nil {
+		return err
+	}
 	log.Printf("studio-local: studio at http://%s/studio/ (live at /studio/live), panel at http://%s/", addr, addr)
 	log.Printf("studio-local: try: curl -s -XPOST %s/run -d 'where is order 42?'", addr)
-	return http.ListenAndServe(addr, mux)
+	return http.Serve(ln, mux)
+}
+
+// demoFallbackAddr is the app's listener beside a running Studio (a
+// variable for the tests).
+var demoFallbackAddr = "127.0.0.1:8080"
+
+// listen binds the demo's own listener. Beside a running Studio —
+// WEFT_STUDIO_URL set (weft dev), or a `weft studio` already holding
+// the default 7331 — it takes 8080 instead; an -addr the user gave is
+// bound as given, or fails.
+func listen(addr string, explicitAddr bool) (net.Listener, string, error) {
+	if !explicitAddr && os.Getenv("WEFT_STUDIO_URL") != "" {
+		addr = demoFallbackAddr
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil && !explicitAddr && addr != demoFallbackAddr {
+		log.Printf("studio-local: %s is taken (a running Studio?): listening on %s", addr, demoFallbackAddr)
+		addr = demoFallbackAddr
+		ln, err = net.Listen("tcp", addr)
+	}
+	if err != nil {
+		return nil, addr, err
+	}
+	return ln, addr, nil
 }
 
 // lookupOrder is the demo's one tool: safe to re-run (a read), so the

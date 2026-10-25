@@ -40,8 +40,21 @@ async function close(trigger: HTMLElement) {
   })
 }
 
-/** choose picks the option whose value is `value`. */
+/** choose picks the option whose value is `value`; on a radio group
+ * (the engine's, data-value on its fieldset) it clicks that radio. */
 export async function choose(trigger: HTMLElement, value: string) {
+  if (trigger.tagName === "FIELDSET") {
+    const r = trigger.querySelector<HTMLInputElement>(
+      `input[type="radio"][value="${value}"]`
+    )
+    if (!r) throw new Error(`no option ${JSON.stringify(value)} in the group`)
+    if (r.disabled)
+      throw new Error(`option ${JSON.stringify(value)} is disabled`)
+    await act(async () => {
+      fireEvent.click(r)
+    })
+    return
+  }
   await open(trigger)
   const opt = listed(trigger).find(
     (o) => o.getAttribute("data-value") === value

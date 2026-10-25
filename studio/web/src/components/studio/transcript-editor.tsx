@@ -28,8 +28,14 @@ import {
 } from "@/lib/edits"
 import type { ReplayEdit, UserMessage } from "@/lib/edits"
 import type { TranscriptBatch } from "@/lib/events"
-import { PREVIEW_SILENT, PREVIEW_TIMEOUT_MS, previewView } from "@/lib/preview"
-import type { PreviewDoc } from "@/lib/preview"
+import {
+  PREVIEW_SILENT,
+  PREVIEW_TIMEOUT_MS,
+  previewGroups,
+  previewView,
+  sameLine,
+} from "@/lib/preview"
+import type { PreviewDoc, PreviewRow } from "@/lib/preview"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Button } from "@/components/ui/button"
 
@@ -392,14 +398,17 @@ export function usePreview(body: string): PreviewState {
 export function PreviewPane({
   state,
   fromStep,
+  head = `will be sent · step ${fromStep}'s request`,
 }: {
   state: PreviewState
   fromStep: number
+  /** The heading (the replay drawer's numbered one, lib/drawer-spec.ts). */
+  head?: string
 }) {
   const v = state.doc ? previewView(state.doc) : null
   return (
     <div className="space-y-1.5 rounded-md border px-3 py-2" data-preview>
-      <div className="eyebrow">will be sent · step {fromStep}'s request</div>
+      <div className="eyebrow">{head}</div>
       {state.pending && v ? (
         <p className="text-[11px] text-faint" data-preview-pending>
           reading it again for the changed command…
@@ -442,33 +451,27 @@ export function PreviewPane({
           ) : null}
           {v.rows ? (
             <ol className="space-y-0.5 text-xs" aria-label="messages">
-              {v.rows.map((r, i) => (
-                <li key={i} className="flex gap-2" data-preview-op={r.op}>
-                  <span
-                    className={`w-14 shrink-0 font-mono text-[10px] ${OP_TONE[r.op]}`}
-                  >
-                    {r.op}
-                  </span>
-                  <span className="w-14 shrink-0 font-mono text-[10px] text-faint">
-                    {r.role}
-                  </span>
-                  <span className="min-w-0 flex-1 break-words">
-                    {r.was ? (
-                      <span
-                        className="block text-muted-foreground line-through"
-                        data-preview-was
+              {previewGroups(v.rows).map((g, i) =>
+                g[0].op === "same" ? (
+                  <li key={i}>
+                    <details>
+                      <summary
+                        className="cursor-pointer font-mono text-[10px] text-faint"
+                        data-preview-same={g.length}
                       >
-                        {r.was}
-                      </span>
-                    ) : null}
-                    {r.will ? (
-                      <span className="block" data-preview-will>
-                        {r.will}
-                      </span>
-                    ) : null}
-                  </span>
-                </li>
-              ))}
+                        {sameLine(g.length)}
+                      </summary>
+                      <ol className="space-y-0.5">
+                        {g.map((r, j) => (
+                          <PreviewRowItem key={j} r={r} />
+                        ))}
+                      </ol>
+                    </details>
+                  </li>
+                ) : (
+                  <PreviewRowItem key={i} r={g[0]} />
+                )
+              )}
             </ol>
           ) : null}
           {v.warnings.map((w, i) => (
@@ -488,6 +491,35 @@ export function PreviewPane({
         </>
       )}
     </div>
+  )
+}
+
+/** PreviewRowItem is one aligned message: its op, role, and was / will. */
+function PreviewRowItem({ r }: { r: PreviewRow }) {
+  return (
+    <li className="flex gap-2" data-preview-op={r.op}>
+      <span className={`w-14 shrink-0 font-mono text-[10px] ${OP_TONE[r.op]}`}>
+        {r.op}
+      </span>
+      <span className="w-14 shrink-0 font-mono text-[10px] text-faint">
+        {r.role}
+      </span>
+      <span className="min-w-0 flex-1 break-words">
+        {r.was ? (
+          <span
+            className="block text-muted-foreground line-through"
+            data-preview-was
+          >
+            {r.was}
+          </span>
+        ) : null}
+        {r.will ? (
+          <span className="block" data-preview-will>
+            {r.will}
+          </span>
+        ) : null}
+      </span>
+    </li>
   )
 }
 

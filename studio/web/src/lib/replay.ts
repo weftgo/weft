@@ -487,3 +487,14 @@ export function replayOffWhy(
   if (running) return REPLAY_OFF.running
   return undefined
 }
+
+/** The replay vocabulary (UX-D-14), both surfaces: a run made by the
+ * drawer is a "replay" — its chip and header line "replay of t7 ·
+ * step 0", its result head "Replay 2 of t7 · scripted · finished"
+ * (the name, the engine, the state). */
+export const REPLAY_WORDS = {
+  of: (src: string, step?: number | string) =>
+    `replay of ${src}${step !== undefined && step !== "" ? ` · step ${step}` : ""}`,
+  /** A replay's name: the n-th of its source turn. */
+  head: (n: number, src: string) => `Replay ${n} of ${src}`,
+} as const

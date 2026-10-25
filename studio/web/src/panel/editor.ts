@@ -14,7 +14,8 @@ import {
 } from "../lib/edits"
 import type { ReplayEdit } from "../lib/edits"
 import type { TranscriptBatch } from "../lib/events"
-import { previewView } from "../lib/preview"
+import { previewGroups, previewView, sameLine } from "../lib/preview"
+import { sendHead } from "../lib/drawer-spec"
 import type { PreviewDoc } from "../lib/preview"
 import { badge } from "./badges"
 import { el, on } from "./render"
@@ -108,11 +109,15 @@ export function editList(
 }
 
 /** previewBlock draws the preview (Studio's PreviewPane, row for row). */
-export function previewBlock(p: PanelPreview, fromStep: number): HTMLElement {
+export function previewBlock(
+  p: PanelPreview,
+  fromStep: number,
+  open?: Set<string>
+): HTMLElement {
   const box = el(
     "div",
     "weft-ack",
-    [el("div", "weft-name", `will be sent · step ${fromStep}'s request`)],
+    [el("div", "weft-name", sendHead(fromStep))],
     { "data-weft-preview": "", "data-key": "preview" }
   )
   if (p.error)
@@ -159,23 +164,42 @@ export function previewBlock(p: PanelPreview, fromStep: number): HTMLElement {
     const list = el("ol", "weft-verdicts", "", {
       "aria-label": "messages",
     })
-    for (const r of v.rows) {
-      const li = el(
-        "li",
-        `weft-op-${r.op}`,
-        [el("span", "weft-v", r.op), el("span", "weft-name", r.role)],
-        { "data-weft-preview-op": r.op }
+    // Runs of "same" rows folded (UX-D-36), the changes open; a fold
+    // the user opened stays open (the main view's openKeys).
+    previewGroups(v.rows).forEach((g, i) => {
+      const rows = g.map((r) => {
+        const li = el(
+          "li",
+          `weft-op-${r.op}`,
+          [el("span", "weft-v", r.op), el("span", "weft-name", r.role)],
+          { "data-weft-preview-op": r.op }
+        )
+        if (r.was)
+          li.append(
+            el("s", "weft-reason", r.was, { "data-weft-preview-was": "" })
+          )
+        if (r.will)
+          li.append(
+            el("span", "weft-reason", r.will, { "data-weft-preview-will": "" })
+          )
+        return li
+      })
+      if (g[0].op != "same") return list.append(...rows)
+      const k = `pv${i}`
+      const d = el(
+        "details",
+        "",
+        [
+          el("summary", "weft-reason", sameLine(g.length), {
+            "data-weft-preview-same": String(g.length),
+          }),
+          el("ol", "weft-verdicts", rows),
+        ],
+        { "data-weft-open": k }
       )
-      if (r.was)
-        li.append(
-          el("s", "weft-reason", r.was, { "data-weft-preview-was": "" })
-        )
-      if (r.will)
-        li.append(
-          el("span", "weft-reason", r.will, { "data-weft-preview-will": "" })
-        )
-      list.append(li)
-    }
+      if (open?.has(k)) d.setAttribute("open", "")
+      list.append(el("li", "", [d]))
+    })
     box.append(list)
   }
   for (const w of v.warnings)

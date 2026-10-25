@@ -391,6 +391,11 @@ describe("the preview (will be sent)", () => {
       "changed",
       "added",
     ])
+    // One heading for section 2 (lib/drawer-spec.ts's), inside the pane.
+    expect(drawer()!.textContent.match(/will be sent/g)).toHaveLength(1)
+    expect(pane.querySelector(".eyebrow")!.textContent).toBe(
+      "2 will be sent · step 2's request"
+    )
     const first = pane.querySelector('[data-preview-op="changed"]')!
     expect(first.querySelector("[data-preview-was]")!.textContent).toBe(
       "where are orders 42 and 43?"

@@ -463,10 +463,13 @@ describe("G2: page state as search keys", () => {
     ).toBe(
       "playground?run=r_1&step=2&agent=orders&runtime=rt_1&engine=scripted"
     )
-    // Step 0 and the live engine are the defaults: never written.
+    // Step 0 is the default: never written; an engine is a pick (U17),
+    // live included — absent is the per-command choice.
     expect(playgroundSearch({ run: "r_1", step: 0, engine: "live" })).toEqual({
       run: "r_1",
+      engine: "live",
     })
+    expect(playgroundSearch({ run: "r_1", step: 0 })).toEqual({ run: "r_1" })
     expect(playgroundSearch({}, "exp_1")).toEqual({ experiment: "exp_1" })
     expect(playgroundStateLink({ run: "r_1" })).not.toHaveProperty("hash")
   })

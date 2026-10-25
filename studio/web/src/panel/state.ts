@@ -80,6 +80,8 @@ import {
 import type { ExperimentDraft, ExperimentResult, TurnWords } from "./playground"
 import type { PanelPreview } from "./editor"
 import { replayBounds } from "../lib/experiment-body"
+import { stepsOf } from "../lib/engine"
+import type { StepCost } from "../lib/engine"
 import type { CompactedNote } from "../lib/experiment-body"
 import { PREVIEW_SILENT, PREVIEW_TIMEOUT_MS } from "../lib/preview"
 import { studioIsTooNew } from "./version"
@@ -2186,9 +2188,7 @@ export class PanelModel {
       steps: src?.transcript
         ? replayBounds(src.transcript.batches).stepCount
         : undefined,
-      ownModel: [row?.model.provider, row?.model.name]
-        .filter(Boolean)
-        .join("/"),
+      ...(row ? { own: row.model } : {}),
       sideEffects: "",
       thread: replay?.thread ?? "ephemeral",
       runtimeId: rt.id,
@@ -2207,31 +2207,39 @@ export class PanelModel {
     this.emit()
   }
 
-  /** readCost reads the source step's step-route doc for the live
-   * engine's estimate (lib/engine.ts): its cost block and usage. */
+  /** readCost reads the source's step-route docs from from_step to
+   * its last step (stepDocs' bound) for the live engine's estimate
+   * (lib/engine.ts): each step's cost block and usage. */
   private readCost() {
     const d = this.state.drawer
     if (!d) return
     const { key, step } = d
-    const put = (cost: ExperimentDraft["cost"], costWhy: string) => {
-      const n = this.state.drawer
-      if (this.disposed || !n || n.key !== key || n.step !== step) return
-      this.state.drawer = { ...n, cost, costWhy }
-      this.emit()
-    }
-    d.cost = null
+    d.costs = null
     if (!this.state.meta?.capabilities.includes("steps")) {
       d.costWhy = "no step route"
       return
     }
-    d.costWhy = "reading the step…"
-    void panelGet<NonNullable<ExperimentDraft["cost"]>>(
-      this.ep,
-      `runs/${encodeURIComponent(d.runId)}/steps/${step}`
-    ).then(
-      (doc) => put(doc, ""),
-      (e: unknown) => put(null, `the step is unreadable: ${messageOf(e)}`)
-    )
+    d.costWhy = "reading…"
+    const at = stepsOf(step, d.steps)
+    void Promise.all(
+      at.map((n) =>
+        n < 0
+          ? null
+          : panelGet<StepCost>(
+              this.ep,
+              `runs/${encodeURIComponent(d.runId)}/steps/${n}`
+            ).catch((e: unknown) => {
+              if (n == step)
+                d.costWhy = `step unreadable: ${messageOf(e)}`
+              return null
+            })
+      )
+    ).then((costs) => {
+      const n = this.state.drawer
+      if (this.disposed || !n || n.key !== key || n.step !== step) return
+      this.state.drawer = { ...n, costs, costWhy: d.costWhy }
+      this.emit()
+    })
   }
 
   /** setDraft patches the drawer's editable fields. still leaves the
@@ -2485,12 +2493,10 @@ export class PanelModel {
     }
     this.posting = true
     const seq = this.loadSeq
+    const body = buildRunBody(draft, this.publicId, this.state.preview?.doc)
     let out: { command_id: string; state: string }
     try {
-      out = await postPlaygroundRun(
-        this.ep,
-        buildRunBody(draft, this.publicId, this.state.preview?.doc)
-      )
+      out = await postPlaygroundRun(this.ep, body)
     } catch (err) {
       if (!this.disposed && seq === this.loadSeq)
         this.setExperimentError(messageOf(err), draft.under ?? draft.runId)
@@ -2520,6 +2526,7 @@ export class PanelModel {
     res.under = draft.under ?? draft.runId
     res.fromStep = draft.thread === "fork" ? 0 : draft.step
     res.commandID = out.command_id
+    res.engine = body.engine as string
     res.thread = draft.thread
     res.state = "queued"
     this.state.result = res

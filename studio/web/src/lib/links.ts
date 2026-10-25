@@ -658,7 +658,8 @@ export function playgroundSearch(
   if (step) search.step = step
   if (state.agent) search.agent = state.agent
   if (state.runtime) search.runtime = state.runtime
-  if (state.engine === "scripted") search.engine = "scripted"
+  // An engine the reader picked (U17); absent: the per-command choice.
+  if (state.engine) search.engine = state.engine
   return search
 }
 

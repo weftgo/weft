@@ -669,7 +669,7 @@ describe("the playground card's keep as prompt (F6.2 review)", () => {
   }
   const runA = async () => {
     renderApp("/playground?run=r_ok")
-    const run = await screen.findByRole("button", { name: "Run A" })
+    const run = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(run).toHaveProperty("disabled", false))
     fireEvent.click(run)
     return waitFor(() => {

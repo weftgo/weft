@@ -286,7 +286,7 @@ describe("the turn chips (the run row's attrs)", () => {
       forked_from: "s_01-t3#1",
       experiment_id: "exp_1",
     })
-    expect(exp[0][0]).toBe("experiment of t3")
+    expect(exp[0][0]).toBe("replay of t3 · step 1")
     expect(exp[0][1]).toContain("weft.forked_from = s_01-t3#1")
     expect(exp[0][1]).toContain("weft.experiment.id exp_1")
     expect(chips({ playground: true, experiment_id: "exp_2" })[0]).toEqual([
@@ -343,7 +343,7 @@ describe("the turn chips (the run row's attrs)", () => {
     await vi.waitFor(() => expect(all(el, "[data-weft-chip]").length).toBe(3))
     const of = (kind: string) => $(el, `[data-weft-chip="${kind}"]`)!
     expect(of("scripted").textContent).toBe("scripted · 0 tokens")
-    expect(of("experiment").textContent).toBe("experiment of t3")
+    expect(of("experiment").textContent).toBe("replay of t3 · step 0")
     expect(of("fork").textContent).toBe("fork of s_01#e_3")
     expect(of("experiment").closest('[data-key="pg_1"]')).toBeTruthy()
   })

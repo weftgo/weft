@@ -183,9 +183,21 @@ import {
 } from "../lib/experiment-body"
 import type { LabFields } from "../lib/experiment-body"
 import { engineFor, foldedWords, labOf, turnPromptOf } from "./playground"
-import { BREAKPOINTS_MOVED, DRAWER_TITLES } from "../lib/drawer-spec"
+import {
+  BREAKPOINTS_MOVED,
+  DRAWER_TITLES,
+  SIDE_EFFECT_TOOL,
+  SIDE_EFFECT_WORDS,
+  targetLine,
+} from "../lib/drawer-spec"
 import type { DrawerSection } from "../lib/drawer-spec"
-import { ENGINE_WORDS, engineHeld, noEdit, runLabel } from "../lib/engine"
+import {
+  ENGINE_WORDS,
+  engineHeld,
+  modelLabel,
+  noEdit,
+  runLabel,
+} from "../lib/engine"
 import { editList, marksBlock, previewBlock } from "./editor"
 import {
   ackCatalogHole,
@@ -3507,9 +3519,7 @@ export class WeftDevtools extends HTMLElement {
       root.append(x)
       return x
     }
-    sec("target").append(
-      `${d.agent} on ${rt?.service || d.runtimeId} (${d.runtimeId})`
-    )
+    sec("target").append(targetLine(d.agent, rt))
     // The engine (lib/engine.ts): two radios, one line each; scripted
     // disabled with its reason when it cannot answer; a pick is never
     // switched behind the user — it is held, said inline.
@@ -3517,6 +3527,8 @@ export class WeftDevtools extends HTMLElement {
     const eng = d.engine ?? ch.default
     const engRow = sec("engine")
     engRow.setAttribute("data-engine", eng)
+    engRow.setAttribute("role", "radiogroup")
+    engRow.setAttribute("aria-label", DRAWER_TITLES.engine)
     const off = !ch.scripted.enabled
     for (const [v, words, why] of [
       [
@@ -3676,8 +3688,7 @@ export class WeftDevtools extends HTMLElement {
         if (t.side_effects === "never" || !t.side_effects) {
           lab.append(
             el("span", "weft-badge weft-warn-badge", "⚠", {
-              title:
-                "side-effect tool (ReplayPolicy never): its calls substitute or park — never re-fire silently; only side effects: allow runs it for real, and only if the app opted it in",
+              title: SIDE_EFFECT_TOOL,
             })
           )
         }
@@ -3694,7 +3705,7 @@ export class WeftDevtools extends HTMLElement {
     const own = s.turn?.doc?.model.name ?? ""
     option(modelSel, `model: ${own || "—"}`, { value: "" })
     for (const m of agent?.models ?? [])
-      if (m !== own) option(modelSel, m, { value: m })
+      if (m !== own) option(modelSel, modelLabel(m, d.own), { value: m })
     // The free text as typed (modelFree); the model sent is its trim.
     const typed =
       d.modelFree ??
@@ -3889,7 +3900,11 @@ export class WeftDevtools extends HTMLElement {
     }
 
     // What the replay's first step will send (plan F2): its 400 holds Run.
-    if (s.preview) sec("send").append(previewBlock(s.preview, d.step))
+    if (s.preview) {
+      const pb = previewBlock(s.preview, d.step, this.openKeys)
+      pb.setAttribute("data-drawer-section", "send")
+      root.append(pb)
+    }
     // The ack preview (plan F1, ack-before-execute): what each tool's
     // calls would do, and which prefix is kept — redrawn with the draft.
     const refused = this.ack(s, d, src, agent, sec("tools"))
@@ -3900,7 +3915,6 @@ export class WeftDevtools extends HTMLElement {
       this.openKeys.has("adv") ||
       d.thread == "fork" ||
       (d.sideEffects && d.sideEffects != "substitute") ||
-      labOf(d).problems.length ||
       Object.keys(labOf(d).overrides).length
     )
       body.setAttribute("open", "")
@@ -3913,24 +3927,12 @@ export class WeftDevtools extends HTMLElement {
     const seSel = el("select", "weft-input", "", {
       "aria-label": "side effects",
     }) as HTMLSelectElement
-    option(seSel, "side effects: substitute", {
-      title:
-        "a side-effect call the source recorded is answered from the record; any other call parks for you",
-      value: "",
-    })
-    option(seSel, "park", {
-      title:
-        "every side-effect call parks for you; nothing is answered from the record",
-      value: "park",
-    })
-    option(
-      seSel,
-      "allow — runs the tools this app opted in (AllowSideEffects) for real",
-      {
-        title: "refused unless every tool left on is opted in or ReplaySafe",
-        value: "allow",
-      }
-    )
+    // Studio's words (lib/drawer-spec.ts); what each does per tool is
+    // section 3's verdicts.
+    for (const [v, w] of Object.entries(SIDE_EFFECT_WORDS))
+      option(seSel, v == "substitute" ? `side effects: ${w}` : w, {
+        value: v == "substitute" ? "" : v,
+      })
     seSel.value = d.sideEffects === "substitute" ? "" : d.sideEffects
     on(seSel, "change", (_, n) =>
       this.model?.setDraft({
@@ -3949,8 +3951,6 @@ export class WeftDevtools extends HTMLElement {
     option(thrSel, "thread: ephemeral", { value: "ephemeral" })
     option(thrSel, "fork (new session)", { value: "fork" })
     thrSel.value = d.thread
-    thrSel.title =
-      "fork continues the conversation in a new session (needs an input)"
     on(thrSel, "change", (_, n) => {
       const thread = (n as HTMLSelectElement).value as ExperimentDraft["thread"]
       // A fork continues the conversation: it starts at step 0; back to
@@ -3987,7 +3987,6 @@ export class WeftDevtools extends HTMLElement {
         )
       )
     const run = el("button", "weft-run-btn", runLabel(ch, d.engine), {
-      title: "POST /api/playground/runs — the runtime in your app executes it",
       "data-run-engine": eng,
       "data-drawer-section": "run",
     })
@@ -4379,12 +4378,7 @@ export class WeftDevtools extends HTMLElement {
         lab: { ...(this.model.state.drawer?.lab ?? emptyLab()), ...p },
       })
     const { problems } = labOf(d)
-    const box = el(
-      "div",
-      "weft-field weft-lab",
-      [el("span", "", "options · empty keeps the agent's default")],
-      { "data-weft-lab": "" }
-    )
+    const box = el("div", "weft-field weft-lab", "", { "data-weft-lab": "" })
     if (old)
       box.append(
         el(
@@ -5111,7 +5105,7 @@ export class WeftDevtools extends HTMLElement {
     })
   }
 
-  /** experimentResult is §3's Result pane: the label (`t3·x1`), the
+  /** experimentResult is §3's Result pane: the name (`Replay 1 of t3`), the
    * stream in place, the inline diff against the source turn, and —
    * when the run parked — the approval controls (approve / deny /
    * resolve, the runtime-started run's own verbs). */
@@ -5121,7 +5115,6 @@ export class WeftDevtools extends HTMLElement {
     const card = el("div", "weft-step weft-xres")
     const usage = r.row?.usage
     const stats = [
-      r.state,
       usage
         ? `${tokens(usage.input_tokens)}→${tokens(usage.output_tokens)} tok`
         : "",
@@ -5130,7 +5123,13 @@ export class WeftDevtools extends HTMLElement {
       .filter(Boolean)
       .join(" · ")
     const head = el("div", "weft-step-h", [
-      el("span", "", `Result · ${r.label}`),
+      el(
+        "span",
+        "",
+        [r.label, r.engine ?? (r.row && engineWord(r.row)), r.state]
+          .filter(Boolean)
+          .join(" · ")
+      ),
       el("span", "", stats),
       el("span", "weft-grow"),
     ])
@@ -5259,7 +5258,7 @@ export class WeftDevtools extends HTMLElement {
       const line = el(
         "div",
         "weft-row2",
-        [el("span", "", `${shortId(r.runID)} · replay of`)],
+        [el("span", "", `${shortId(r.runID)} · replay of`), " "],
         {
           "data-weft-replay-of": `${src}#${r.fromStep}`,
           "data-key": "replay-of",
@@ -7424,10 +7423,10 @@ export function renderTimeline(
   return box
 }
 
-/** sourceLabel takes the turn part back out of a `t3·x1` label (the
+/** sourceLabel takes the turn back out of a `Replay 1 of t3` label (the
  * diff header reads "diff vs t3"). */
 function sourceLabel(label: string): string {
-  return label.split("·")[0] || label
+  return label.split(" of ")[1] || label
 }
 
 function argsText(call: FoldedToolCall): string {

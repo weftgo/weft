@@ -104,6 +104,7 @@ import type { TurnEnd } from "@/lib/timeline"
 import { EndChip } from "@/components/studio/session-timeline"
 import { useBusyEnd } from "@/components/studio/busy-end"
 import { useCompactionStarts } from "@/components/studio/compaction-marker"
+import { REPLAY_WORDS } from "@/lib/replay"
 import { ForkOfLine } from "@/components/studio/fork-of"
 import { isPlainShortcut } from "@/lib/keys"
 import type { ToolFactsMap } from "@/lib/error-kind"
@@ -437,7 +438,7 @@ export function ReplayOf({
         className="text-thread-ink hover:underline"
         title="the source run and the step this replay continued from"
       >
-        replay of {src.runID} from step {src.fromStep}
+        {REPLAY_WORDS.of(src.runID, src.fromStep)}
       </Link>
       {doc.experiment_id ? (
         <Link

@@ -23,7 +23,10 @@ import {
   postPlaygroundRun,
   runtimesQuery,
   studioToken,
+  transcriptQuery,
 } from "@/lib/api"
+import { turnPrompt } from "@/lib/events"
+import { useSourceSteps } from "@/components/studio/experiment-form"
 import type { CommandStatus, ExperimentRow, RunRow } from "@/lib/api"
 import { absoluteTime, relativeTime } from "@/lib/format"
 import { formatUSD, sumCost } from "@/lib/cost"
@@ -139,6 +142,11 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
   // controls are drawn: a runtime's coming or going re-gates them.
   useRuntimesNeeded(mayRun)
   const runtimes = useQuery({ ...runtimesQuery(), enabled: mayRun })
+  // A cell re-run with no saved engine takes its own choice (U17):
+  // the source's step count and own input are what it reads.
+  const srcRun = exp?.source_run_id ?? ""
+  const srcSteps = useSourceSteps(srcRun)
+  const srcT = useQuery({ ...transcriptQuery(srcRun), enabled: !!srcRun })
 
   // This browser's record of the matrix as it ran, when there is one.
   const [kept, setKept] = useState<FormState | null | undefined>(undefined)
@@ -303,6 +311,10 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
           const body = cellBody(exp, form.form, k.variant, k.input, {
             runtime: target.runtime.id,
             publicID,
+            steps: srcSteps.stepCount,
+            sourceInput: srcT.data
+              ? (turnPrompt(srcT.data.batches) ?? undefined)
+              : undefined,
           })
           const out = await postPlaygroundRun(body)
           setIssued((cur) => ({

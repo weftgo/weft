@@ -6,15 +6,26 @@
 // server sends one) not a miss — else `live`. The scripted option is
 // never taken away silently: when it cannot answer it is disabled with
 // its reason, and a user who picked it is held with that reason inline.
-// Live carries what it will call and an estimate: the source step's
-// recorded usage at its model's price (the step route's cost block,
-// studio/pricing.go — the one price table), or "cost unknown" with the
-// reason, never $0 for an unknown. Plain TypeScript: Studio's replay
-// drawer and the panel's drawer read the same choice and the same
-// words (parity.test.ts).
-import type { CostFields, Usage } from "./api"
-import { costView } from "./cost"
+// Live carries what it will call and an estimate: the source's
+// recorded usage from from_step to its last step at its model's price
+// (each step route's cost block, studio/pricing.go — the one price
+// table), or "cost unknown" with the reason, never $0 for an unknown.
+// The facts come from the command itself (factsOf): what the body
+// sends is what changes the key, so an override the body leaves out —
+// a prompt, model or tool choice equal to the agent's own — is no
+// change. Plain TypeScript: Studio's replay drawer, its playground and
+// the panel's drawer read the same choice and the same words
+// (parity.test.ts).
+import type {
+  AgentDefaults,
+  CostFields,
+  ModelInfo,
+  PlaygroundRunBody,
+  Usage,
+} from "./api"
+import { costView, formatUSD } from "./cost"
 import { tokens } from "./format"
+import type { PreviewDoc } from "./preview"
 
 export type Engine = "live" | "scripted"
 
@@ -41,18 +52,25 @@ export interface EngineFacts {
   steps?: number
   /** The preview's scripted key check (U18.1), when the server sends
    * one: absent is unknown and disables nothing. */
-  keyMatch?: { ok: boolean; because?: string[] } | null
-  /** The preview's per-step scripted hit, when sent. */
-  hit?: boolean | null
+  keyMatch?: {
+    ok: boolean
+    because?: string[]
+    step?: number | null
+    /** The server's one sentence for the first miss. */
+    message?: string
+  } | null
   /** The agent's own model as the source recorded it
    * ("provider/name"). */
   ownModel?: string
-  /** The source step's step-route doc (its cost block and usage), or
-   * null when it is not there. */
-  cost?: (CostFields & { usage?: Usage }) | null
+  /** The source's step-route docs from from_step to its last step
+   * (index 0 is from_step; null: not read), or null when none is. */
+  costs?: (StepCost | null)[] | null
   /** Why there is no cost doc (not read yet, no step route, …). */
   costWhy?: string
 }
+
+/** One step's cost block and usage (the step route's). */
+export type StepCost = CostFields & { usage?: Usage }
 
 export interface EngineChoice {
   /** The engine the command runs on unless the user picks the other. */
@@ -60,9 +78,10 @@ export interface EngineChoice {
   scripted: { enabled: boolean; reason: string }
   live: {
     model: string
-    /** "~1.2k tok ≈ $0.0004", or "cost unknown: <why>". */
+    /** "~1.2k tok ≈ $0.0004 for steps 1–2", or "cost unknown: <why>". */
     estimate: string
-    /** The figure ("$0.0004") when known, else "". */
+    /** Run's figure: "≈ $0.0004", "≥ $0.0004" when later steps are not
+     * read, else "". */
     usd: string
   }
 }
@@ -100,31 +119,47 @@ function scriptedBlock(f: EngineFacts): string {
             ? "a new input"
             : f.keyed.length
               ? `${f.keyed.join(", ")} changed`
-              : f.keyMatch?.ok === false
-                ? `the key misses${f.keyMatch.because?.length ? ` (${f.keyMatch.because.join("; ")})` : ""}`
-                : ""
+              : ""
   if (what) return what + ENGINE_WORDS.changed
-  return f.hit === false ? "no recorded answer for this request" : ""
+  // The preview's key check (U18.1): the server's own sentence.
+  const k = f.keyMatch
+  return k?.ok === false
+    ? k.message || `no recorded answer for step ${k.step ?? n}`
+    : ""
 }
 
-/** liveEstimate is the live engine's cost line: the source step's
- * recorded usage at its model's price — never $0 for an unknown. */
+/** liveEstimate is the live engine's cost line: the source's usage
+ * from from_step on at its model's price — never $0 for an unknown. */
 function liveEstimate(f: EngineFacts): { estimate: string; usd: string } {
-  const u = f.cost?.usage
-  const n = u ? u.input_tokens + u.output_tokens : 0
-  const v = f.cost && costView(f.cost)
-  const why = f.model
-    ? `the step was priced on ${f.ownModel || ENGINE_WORDS.ownModel}`
-    : !v
-      ? f.costWhy || "the step is not read"
-      : !n
-        ? "the step recorded no usage"
-        : v.known
-          ? ""
-          : v.title
-  return why
-    ? { estimate: `${ENGINE_WORDS.unknown}: ${why}`, usd: "" }
-    : { estimate: `~${tokens(n)} tok ≈ ${v!.text}`, usd: v!.text }
+  const n = f.fromStep
+  const docs = f.costs ?? []
+  let usd = 0
+  let tok = 0
+  let k = 0
+  let why = f.model
+    ? `the steps were priced on ${f.ownModel || ENGINE_WORDS.ownModel}`
+    : !docs.length && f.costs
+      ? `the source never answered step ${n}`
+      : docs[0]
+        ? ""
+        : f.costWhy || "not read"
+  for (const d of why ? [] : docs) {
+    if (!d) break
+    const v = costView(d)
+    const t = d.usage ? d.usage.input_tokens + d.usage.output_tokens : 0
+    why = !t ? `step ${n + k} recorded no usage` : v.known ? "" : v.title
+    if (why) break
+    usd += v.usd ?? 0
+    tok += t
+    k++
+  }
+  if (why) return { estimate: `${ENGINE_WORDS.unknown}: ${why}`, usd: "" }
+  const all = k === docs.length
+  const text = formatUSD(usd)
+  return {
+    estimate: `~${tokens(tok)} tok ≈ ${text} for ${k > 1 ? `steps ${n}–${n + k - 1}` : `step ${n}`}${all ? "" : " · later steps also run live"}`,
+    usd: `${all ? "≈" : "≥"} ${text}`,
+  }
 }
 
 /** engineChoice is the rule (see the header). */
@@ -152,10 +187,12 @@ export const engineHeld = (c: EngineChoice, picked?: Engine): string =>
     ? ENGINE_WORDS.refused(c.scripted.reason)
     : ""
 
-/** runLabel is Run's label: it names the engine. */
-export function runLabel(c: EngineChoice, picked?: Engine): string {
-  if (engineOf(c, picked) === "scripted") return "Run on scripted · 0 tokens"
-  return `Run live on ${c.live.model} · ${c.live.usd ? `≈ ${c.live.usd}` : ENGINE_WORDS.unknown}`
+/** runLabel is Run's label: it names the engine (and, on the
+ * playground, the variant: "Run A on scripted · 0 tokens"). */
+export function runLabel(c: EngineChoice, picked?: Engine, name = ""): string {
+  const run = name ? `Run ${name}` : "Run"
+  if (engineOf(c, picked) === "scripted") return `${run} on scripted · 0 tokens`
+  return `${run} live on ${c.live.model} · ${c.live.usd || ENGINE_WORDS.unknown}`
 }
 
 /** noEdit says a field's value is no edit: empty, or the recording
@@ -163,15 +200,79 @@ export function runLabel(c: EngineChoice, picked?: Engine): string {
 export const noEdit = (value: string, recorded: string | undefined): boolean =>
   value === "" || value === recorded
 
-/** keyedKnobs names the knobs set that the replay key holds. */
-export function keyedKnobs(k: {
-  tools?: boolean
-  thinking?: string
-  toolChoice?: string
-}): string[] {
-  const out: string[] = []
-  if (k.tools) out.push("tools")
-  if (k.thinking) out.push("thinking")
-  if (k.toolChoice) out.push("tool choice")
-  return out
+/** The most steps the estimate reads (each its own step-route read). */
+export const COST_STEPS = 20
+
+/** stepsOf is the steps the estimate reads, from from_step on: up to
+ * the source's step count (unknown: from_step alone), at most
+ * COST_STEPS — a -1 last marks the steps left unread (the estimate then
+ * says "later steps also run live"). */
+export function stepsOf(from: number, steps?: number): number[] {
+  const n = steps === undefined ? 1 : Math.max(0, steps - from)
+  const at = Array.from({ length: Math.min(n, COST_STEPS) }, (_, i) => from + i)
+  return steps === undefined || n > COST_STEPS ? [...at, -1] : at
+}
+
+type Overrides = NonNullable<PlaygroundRunBody["overrides"]>
+
+/** sameModel says a model override names the agent's own model as the
+ * source recorded it (its name, or provider/name): no override — the
+ * body leaves it out (lib/experiment-body.ts's overridesOf, the
+ * panel's buildRunBody). */
+export const sameModel = (m: string, own?: ModelInfo): boolean =>
+  !!own && (m === own.name || m === `${own.provider}/${own.name}`)
+
+/** modelLabel is a model choice's label (UX-D-04): a model the source
+ * never ran on is a live call, said beside it. */
+export const modelLabel = (m: string, own?: ModelInfo): string =>
+  sameModel(m, own) ? m : `${m} · live call`
+
+/** factsOf is the one reading of a command both drawers make: the
+ * overrides the body sends (overridesOf's and labOverrides' equality —
+ * a knob equal to the agent's default is not sent, so it is no
+ * change), the real edits, the input against the source's, and the
+ * preview's key check. */
+export function factsOf(p: {
+  /** A source run (default true: the drawers always have one). */
+  source?: boolean
+  overrides: Overrides
+  defaults?: AgentDefaults
+  edits: number
+  /** The input the body sends (step 0); the source's own. */
+  input: string
+  sourceInput?: string
+  fork: boolean
+  fromStep: number
+  steps?: number
+  own?: ModelInfo
+  costs?: (StepCost | null)[] | null
+  costWhy?: string
+  preview?: PreviewDoc
+}): EngineFacts {
+  const o = p.overrides
+  const keyed: string[] = []
+  if (o.tools_enabled?.length || o.only_tools?.length) keyed.push("tools")
+  if (o.thinking && o.thinking !== p.defaults?.thinking) keyed.push("thinking")
+  if (o.tool_choice) keyed.push("tool choice")
+  // Parallelism 1 is SequentialTools, which the key holds.
+  if (o.options?.parallelism === 1)
+    keyed.push("parallelism 1 (sequential tools)")
+  return {
+    source: p.source ?? true,
+    edits: p.fork ? 0 : p.edits,
+    prompt: !!o.instructions,
+    model: o.model ?? "",
+    input:
+      p.fromStep === 0 && !!p.input.trim() && !noEdit(p.input, p.sourceInput),
+    fork: p.fork,
+    keyed,
+    fromStep: p.fromStep,
+    steps: p.fork ? undefined : p.steps,
+    keyMatch: p.preview?.scripted_key_match,
+    ownModel: p.own
+      ? [p.own.provider, p.own.name].filter(Boolean).join("/")
+      : undefined,
+    costs: p.costs,
+    costWhy: p.costWhy,
+  }
 }

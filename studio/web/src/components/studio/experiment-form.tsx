@@ -5,13 +5,34 @@
 // the run page's replay drawer renders the same form (plan F1), so the
 // two never drift. The step picker lists a source run's steps for
 // either.
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import type { Dispatch, ReactNode, SetStateAction } from "react"
 
-import { ApiError, putBreakpoints, runQuery, transcriptQuery } from "@/lib/api"
-import type { AgentView, RuntimeView } from "@/lib/api"
+import {
+  ApiError,
+  putBreakpoints,
+  runQuery,
+  stepQuery,
+  transcriptQuery,
+} from "@/lib/api"
+import { turnPrompt } from "@/lib/events"
+import type { AgentView, ModelInfo, RuntimeView } from "@/lib/api"
 import { EDIT_FIELD, kindOf } from "@/lib/edits"
+import {
+  engineHeld,
+  engineOf,
+  ENGINE_WORDS,
+  modelLabel,
+  noEdit,
+  stepsOf,
+} from "@/lib/engine"
+import type { Engine, EngineChoice, StepCost } from "@/lib/engine"
+import {
+  DRAWER_TITLES,
+  SIDE_EFFECT_TOOL,
+  SIDE_EFFECT_WORDS,
+} from "@/lib/drawer-spec"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import { bytes } from "@/lib/summarize"
 import {
@@ -61,6 +82,12 @@ type FormProps = {
   /** Drawn above the system prompt box: where its text came from when
    * that is not what the caller asked for (a hole, badged). */
   promptNote?: ReactNode
+  /** The source's own model: the others are labelled live calls. */
+  own?: ModelInfo
+  /** The engine choice for this variant's Run (lib/engine.ts): drawn as
+   * EngineRadios — the per-command rule, the user's pick in
+   * variant.engine. */
+  choice?: EngineChoice
 }
 
 /** ExperimentForm is the playground's per-variant form, every knob in
@@ -72,7 +99,15 @@ export function ExperimentForm(props: FormProps) {
   return (
     <>
       <ChangeFields {...props} input={false} />
-      <ModeFields variant={variant} patch={patch} engine />
+      {props.choice ? (
+        <EngineRadios
+          choice={props.choice}
+          engine={engineOf(props.choice, variant.engine)}
+          refused={engineHeld(props.choice, variant.engine)}
+          onPick={(engine) => patch({ engine })}
+        />
+      ) : null}
+      <ModeFields variant={variant} patch={patch} />
       {agent ? (
         <OptionLab variant={variant} patch={patch} agent={agent} />
       ) : null}
@@ -114,6 +149,7 @@ export function ChangeFields({
   editDrafts,
   setEditDrafts,
   promptNote,
+  own,
   input = true,
 }: FormProps & { input?: boolean }) {
   return (
@@ -164,15 +200,13 @@ export function ChangeFields({
               />
               {t.name}
               {(t.side_effects === "never" || !t.side_effects) && (
-                <span title="side-effect tool (ReplayPolicy never): substitute or park, never re-fire silently — only side effects: allow runs it for real, and only if the app opted it in">
-                  ⚠
-                </span>
+                <span title={SIDE_EFFECT_TOOL}>⚠</span>
               )}
             </label>
           ))}
         </div>
       ) : null}
-      <ModelField variant={variant} patch={patch} agent={agent} />
+      <ModelField variant={variant} patch={patch} agent={agent} own={own} />
       {input && fromStep === 0 && (
         <InputField variant={variant} patch={patch} />
       )}
@@ -198,33 +232,14 @@ function InputField({ variant, patch }: Pick<FormProps, "variant" | "patch">) {
   )
 }
 
-/** ModeFields is the run's modes: the engine select (the playground's;
- * the replay drawer draws EngineChoice's radios instead), side effects
- * and thread. */
+/** ModeFields is the run's modes: side effects and thread (the engine
+ * is EngineRadios). */
 export function ModeFields({
   variant,
   patch,
-  engine = false,
-}: Pick<FormProps, "variant" | "patch"> & { engine?: boolean }) {
+}: Pick<FormProps, "variant" | "patch">) {
   return (
     <div className="flex flex-wrap gap-2">
-      {engine ? (
-        <div className="block min-w-0 flex-1 space-y-1">
-          <SelectField
-            caption="Engine"
-            label="Engine"
-            className="w-full"
-            value={variant.engine}
-            onValueChange={(v) =>
-              patch({ engine: v as VariantFields["engine"] })
-            }
-            options={[
-              { value: "live", label: "live (calls the model)" },
-              { value: "scripted", label: "scripted · 0 tokens" },
-            ]}
-          />
-        </div>
-      ) : null}
       <div className="block min-w-0 flex-1 space-y-1">
         <SelectField
           caption="Side effects"
@@ -239,20 +254,19 @@ export function ModeFields({
               value: "substitute",
               title:
                 "a side-effect call the source recorded is answered from the record; any other call parks",
-              label: "substitute — recorded results, else park",
+              label: SIDE_EFFECT_WORDS.substitute,
             },
             {
               value: "park",
               title:
                 "every side-effect call parks; nothing is answered from the record",
-              label: "park — every side-effect call waits",
+              label: SIDE_EFFECT_WORDS.park,
             },
             {
               value: "allow",
               title:
                 "refused unless every tool left on is opted in or ReplaySafe",
-              label:
-                "allow — runs the tools this app opted in (AllowSideEffects) for real",
+              label: SIDE_EFFECT_WORDS.allow,
             },
           ]}
         />
@@ -285,10 +299,12 @@ function ModelField({
   variant,
   patch,
   agent,
+  own,
 }: {
   variant: VariantFields
   patch: (p: Partial<VariantFields>) => void
   agent?: AgentView
+  own?: ModelInfo
 }) {
   const models = agent?.models ?? []
   // The free text is its own state: what was typed stays as typed (a
@@ -322,7 +338,7 @@ function ModelField({
           }}
           options={[
             { value: "", label: "(the agent's own)" },
-            ...models.map((m) => ({ value: m, label: m })),
+            ...models.map((m) => ({ value: m, label: modelLabel(m, own) })),
           ]}
         />
       </div>
@@ -625,7 +641,10 @@ export function TranscriptEdits({
   const set = (f: EditField, v: string) => {
     setDrafts((cur) => {
       const i = cur.findIndex(at(f))
-      if (v === "") return i >= 0 ? cur.filter((_, j) => j !== i) : cur
+      // The recording itself is no edit (U17): the draft goes, so the
+      // implied from_step and the Story's marks forget it too.
+      if (noEdit(v, f.placeholder))
+        return i >= 0 ? cur.filter((_, j) => j !== i) : cur
       const draft: EditDraft = f.callID
         ? { step: f.step, callID: f.callID, toolResult: v }
         : { step: f.step, content: v }
@@ -693,27 +712,139 @@ export function TranscriptEdits({
               onChange={(v) => set(f, v)}
             />
           )
-        const content = draftOf(f)?.content
         return (
-          <label key={`${f.step}:reply`} className="block space-y-1 text-xs">
-            <span className="flex items-center gap-1 text-faint">
-              step {f.step} · reply
-              {content !== undefined ? <EditedChip /> : null}
-            </span>
-            <RecordedLine text={f.placeholder} />
-            <textarea
-              rows={2}
-              className="w-full rounded border bg-transparent px-2 py-1"
-              aria-label={`edit the reply at step ${f.step}`}
-              data-edit-reply={f.step}
-              placeholder={EDIT_FIELD.empty}
-              value={content ?? ""}
-              onChange={(e) => set(f, e.target.value)}
-            />
-          </label>
+          <ReplyField
+            key={`${f.step}:reply`}
+            field={f}
+            value={draftOf(f)?.content}
+            onChange={(v) => set(f, v)}
+          />
         )
       })}
     </div>
+  )
+}
+
+/** useFieldText is a kept field's text as typed: the draft's, else
+ * what the user typed that is no draft — the recording itself ("start
+ * from recorded", or typed back), whose draft was dropped. A draft
+ * dropped from elsewhere (the drawer's list, a reset) empties it. */
+function useFieldText(
+  value: string | undefined,
+  recorded: string
+): [string, (v: string) => void] {
+  const [text, setText] = useState(value ?? "")
+  useEffect(() => {
+    if (value !== undefined) setText(value)
+    else setText((t) => (t === recorded ? t : ""))
+  }, [value, recorded])
+  return [text, setText]
+}
+
+/** ReplyField is one kept call-free reply's editor. */
+function ReplyField({
+  field: f,
+  value,
+  onChange,
+}: {
+  field: EditField
+  value: string | undefined
+  onChange: (v: string) => void
+}) {
+  const [text, setText] = useFieldText(value, f.placeholder)
+  return (
+    <label className="block space-y-1 text-xs">
+      <span className="flex items-center gap-1 text-faint">
+        step {f.step} · reply
+        {value !== undefined ? <EditedChip /> : null}
+      </span>
+      <RecordedLine text={f.placeholder} />
+      <textarea
+        rows={2}
+        className="w-full rounded border bg-transparent px-2 py-1"
+        aria-label={`edit the reply at step ${f.step}`}
+        data-edit-reply={f.step}
+        placeholder={EDIT_FIELD.empty}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value)
+          onChange(e.target.value)
+        }}
+      />
+    </label>
+  )
+}
+
+/** EngineRadios is the engine block (U17; UX-C-01, UX-C-05): two
+ * radios, one line each — scripted's at 0 tokens, live's naming the
+ * model and the estimate; scripted disabled with its reason when it
+ * cannot answer, and the refusal said inline while it is the pick. */
+export function EngineRadios({
+  choice,
+  engine,
+  refused,
+  onPick,
+}: {
+  choice: EngineChoice
+  engine: Engine
+  refused: string
+  onPick: (e: Engine) => void
+}) {
+  const off = !choice.scripted.enabled
+  return (
+    <fieldset
+      className="space-y-1"
+      aria-label="Engine"
+      data-drawer-section="engine"
+      data-engine={engine}
+      data-value={engine}
+    >
+      <legend className="eyebrow">{DRAWER_TITLES.engine}</legend>
+      <label
+        className={`flex items-baseline gap-2 text-xs ${off ? "text-faint" : ""}`}
+        data-engine-option="scripted"
+        data-disabled={off ? "" : undefined}
+      >
+        <input
+          type="radio"
+          name="replay-engine"
+          value="scripted"
+          checked={engine === "scripted"}
+          disabled={off}
+          // A click is a pick, the checked option's too (it then stays
+          // put whatever changes); a disabled option is no pick.
+          onChange={() => {}}
+          onClick={() => !off && onPick("scripted")}
+        />
+        <span>
+          {ENGINE_WORDS.scripted}
+          <span className="block text-[11px] text-faint" data-engine-why>
+            {off ? choice.scripted.reason : ENGINE_WORDS.scriptedFor}
+          </span>
+        </span>
+      </label>
+      <label
+        className="flex items-baseline gap-2 text-xs"
+        data-engine-option="live"
+      >
+        <input
+          type="radio"
+          name="replay-engine"
+          value="live"
+          checked={engine === "live"}
+          onChange={() => {}}
+          onClick={() => onPick("live")}
+        />
+        <span data-engine-live>
+          {ENGINE_WORDS.live(choice.live.model, choice.live.estimate)}
+        </span>
+      </label>
+      {refused ? (
+        <p className="text-xs text-status-bad" role="alert" data-engine-refused>
+          {refused}
+        </p>
+      ) : null}
+    </fieldset>
   )
 }
 
@@ -766,7 +897,11 @@ function ResultField({
   onChange: (v: string) => void
 }) {
   const recorded = f.placeholder
-  const shown = value ?? ""
+  const [shown, setShown] = useFieldText(value, recorded)
+  const put = (v: string) => {
+    setShown(v)
+    onChange(v)
+  }
   const lines = (shown || recorded).split("\n").length
   return (
     <div
@@ -789,11 +924,11 @@ function ResultField({
           data-edit-call={f.callID}
           placeholder={EDIT_FIELD.empty}
           value={shown}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => put(e.target.value)}
         />
       </label>
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-faint">
-        {value === recorded && value ? (
+        {shown && shown === recorded ? (
           <span data-edit-same>{EDIT_FIELD.same}</span>
         ) : value ? (
           <EditedChip />
@@ -802,12 +937,12 @@ function ResultField({
           recorded {bytes(utf8Bytes(recorded))}
           {value ? ` · edited ${bytes(utf8Bytes(value))}` : ""}
         </span>
-        {value ? (
+        {shown ? (
           <button
             type="button"
             className="hover:underline"
             data-edit-reset
-            onClick={() => onChange("")}
+            onClick={() => put("")}
           >
             reset to recorded
           </button>
@@ -816,7 +951,7 @@ function ResultField({
             type="button"
             className="hover:underline"
             data-edit-from-recorded
-            onClick={() => onChange(recorded)}
+            onClick={() => put(recorded)}
           >
             start from recorded
           </button>
@@ -858,6 +993,49 @@ function isHidden(e: unknown): boolean {
 /** useSourceSteps reads a source run's own steps (the transcript and
  * the run document's compactions, through the queries the run page
  * shares): the step picker's list. */
+/** useEngineContext is what the engine's choice reads from the source
+ * (lib/engine.ts's factsOf): its step count, its own input, and the
+ * step routes' costs from from_step on (stepsOf) — Studio's replay
+ * drawer and the playground read it alike. */
+export function useEngineContext(
+  runID: string,
+  fromStep: number,
+  fork: boolean,
+  caps: string[]
+): {
+  steps?: number
+  sourceInput?: string
+  costs: (StepCost | null)[] | null
+  costWhy: string
+} {
+  const { stepCount } = useSourceSteps(runID)
+  const at = stepsOf(fromStep, fork ? undefined : stepCount)
+  const qs = useQueries({
+    queries: at.map((n) => ({
+      ...stepQuery(runID, Math.max(n, 0)),
+      enabled: !!runID && caps.includes("steps") && n >= 0,
+      retry: false,
+    })),
+  })
+  const tr = useQuery({ ...transcriptQuery(runID), enabled: !!runID })
+  const first = qs.at(0)
+  return {
+    steps: stepCount,
+    sourceInput: tr.data
+      ? (turnPrompt(tr.data.batches) ?? undefined)
+      : undefined,
+    costs:
+      stepCount === undefined && !fork
+        ? null
+        : qs.map((q, i) => (at[i] < 0 ? null : (q.data ?? null))),
+    costWhy: !caps.includes("steps")
+      ? "no step route"
+      : first?.isError
+        ? `step unreadable: ${first.error.message}`
+        : "reading…",
+  }
+}
+
 export function useSourceSteps(runID: string): {
   steps: SourceStep[] | null
   error?: string

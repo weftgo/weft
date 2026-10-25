@@ -41,6 +41,29 @@ export const DRAWER_TITLES: Record<DrawerSection, string> = {
   run: "",
 }
 
+/** The side-effect modes' words, both drawers (the panel's select has
+ * no caption: its first option says what it is). */
+export const SIDE_EFFECT_WORDS = {
+  substitute: "substitute — recorded results, else park",
+  park: "park — every side-effect call waits",
+  allow: "allow — runs the tools this app opted in (AllowSideEffects) for real",
+} as const
+
+/** The ⚠ beside a side-effect tool, both drawers. */
+export const SIDE_EFFECT_TOOL =
+  "side-effect tool (ReplayPolicy never): substituted or parked, never re-fired silently — only side effects: allow runs it, if the app opted it in"
+
 /** The pointer left where the runtime-wide breakpoints were. */
 export const BREAKPOINTS_MOVED =
   "breakpoints for the whole runtime live on Settings › Runtimes"
+
+/** targetLine is the TARGET section's line, both drawers: the agent on
+ * its runtime (service, else id) and the runtime's id; "—" with none. */
+export const targetLine = (
+  agent: string,
+  rt: { id: string; service?: string } | undefined
+): string => (rt ? `${agent} on ${rt.service || rt.id} (${rt.id})` : "—")
+
+/** The preview's heading (section 2, drawn once, inside the pane). */
+export const sendHead = (step: number): string =>
+  `${DRAWER_TITLES.send} · step ${step}'s request`

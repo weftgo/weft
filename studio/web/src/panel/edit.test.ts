@@ -217,6 +217,8 @@ describe("the preview (will be sent)", () => {
       "changed",
       "added",
     ])
+    // One heading for section 2 (lib/drawer-spec.ts's), inside the block.
+    expect(text(el, ".weft-drawer").match(/will be sent/g)).toHaveLength(1)
     const first = $(el, '[data-weft-preview-op="changed"]')!
     expect(first.querySelector("[data-weft-preview-was]")!.textContent).toBe(
       "where are orders 42 and 43?"

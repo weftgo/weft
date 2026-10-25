@@ -30,6 +30,13 @@
 // in the query reopens it (lib/drafts.ts) — and carried whole by a
 // share link's fragment, #state=<compact>, which restores the form on
 // any browser against the same Studio and starts nothing.
+import {
+  engineChoice,
+  engineHeld,
+  engineOf,
+  factsOf,
+  runLabel as engineRunLabel,
+} from "@/lib/engine"
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   createFileRoute,
@@ -110,6 +117,7 @@ import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
 import {
   ExperimentForm,
+  useEngineContext,
   StepPicker,
   useSourceEditFields,
 } from "@/components/studio/experiment-form"
@@ -292,7 +300,8 @@ interface PageState {
   step: number
   agent: string
   runtime: string
-  engine: Engine
+  /** Variant A's engine pick (absent: the per-command choice, U17). */
+  engine?: Engine
 }
 
 /** pageStateKey is a page state's identity: its query form. */
@@ -426,7 +435,7 @@ function variantOfForm(fv: FormVariant): Variant {
     model: fv.model ?? "",
     thinking: fv.thinking ?? "",
     input: fv.input ?? "",
-    engine: fv.engine ?? "live",
+    engine: fv.engine,
     sideEffects: fv.side_effects ?? "substitute",
     thread: fv.thread ?? "ephemeral",
     lab: fv.lab ? { ...emptyLab(), ...fv.lab } : undefined,
@@ -487,7 +496,7 @@ function variantA(search: PlaygroundSearch): Variant {
     model: search.model ?? "",
     thinking: search.thinking ?? "",
     input: search.input ?? "",
-    engine: search.engine ?? "live",
+    engine: search.engine,
     sideEffects: search.side_effects ?? "substitute",
     thread: search.thread ?? "ephemeral",
     lab: labFromHandoff(search.lab),
@@ -592,7 +601,7 @@ function Playground({ caps }: { caps: string[] }) {
   // change that arrives from outside (Back, Forward, a link followed
   // while the page is open) is adopted into the controls and never
   // written back. The page never writes a prompt into the query.
-  const engineA = variants[0]?.engine ?? "live"
+  const engineA = variants[0]?.engine
   const current: PageState = {
     run: sourceRunID.trim(),
     step: fromStep,
@@ -625,7 +634,7 @@ function Playground({ caps }: { caps: string[] }) {
     step: routerQuery.step ?? 0,
     agent: routerQuery.agent ?? "",
     runtime: routerQuery.runtime ?? "",
-    engine: routerQuery.engine ?? "live",
+    engine: routerQuery.engine,
   }
   const queryKey = pageStateKey(queryState)
   const currentRef = useRef(current)
@@ -777,7 +786,7 @@ function Playground({ caps }: { caps: string[] }) {
       step: form.step ?? 0,
       agent: form.agent ?? "",
       runtime: form.runtime ?? "",
-      engine: vs[0]?.engine ?? "live",
+      engine: vs[0]?.engine,
     })
   }
   const applyFormRef = useRef(applyForm)
@@ -991,6 +1000,37 @@ function Playground({ caps }: { caps: string[] }) {
     ? unmatchedDrafts(editDrafts, editFields.fields, fromStep)
     : []
   const heldEdits = editsProblem(variant.thread, fromStep, editDrafts)
+  // The engine, per command (U17; lib/engine.ts): the same rule and
+  // radios as the replay drawer — scripted when this variant's Run can
+  // answer from the source's recording, else live; a pick is the
+  // variant's engine, never switched.
+  const own = sourceRow?.model
+  const src = sourceRunID.trim()
+  const ectx = useEngineContext(src, fromStep, variant.thread === "fork", caps)
+  let sentOverrides: NonNullable<PlaygroundRunBody["overrides"]> = {}
+  try {
+    if (agent) sentOverrides = overridesOf(variant, agent, own)
+  } catch {
+    // held by labProblems / the tool-set refusal
+  }
+  const choice = engineChoice(
+    factsOf({
+      source: !!src,
+      overrides: sentOverrides,
+      defaults: agent?.defaults,
+      edits: src && fromStep > 0 ? editDrafts.length : 0,
+      input: fromStep === 0 ? variant.input : "",
+      sourceInput: ectx.sourceInput,
+      fork: variant.thread === "fork",
+      fromStep,
+      steps: ectx.steps,
+      own,
+      costs: src ? ectx.costs : [],
+      costWhy: ectx.costWhy,
+    })
+  )
+  const engineRefused = engineHeld(choice, variant.engine)
+  const engineCtx = { own, steps: ectx.steps, sourceInput: ectx.sourceInput }
 
   /** decide answers one parked call of a variant's run with the
    * approval verbs (ADR 0007) — the panel's controls, rendered here
@@ -1041,6 +1081,7 @@ function Playground({ caps }: { caps: string[] }) {
         input: variant.input,
         edits: editDrafts,
         publicID: sourceRow?.public_id,
+        ...engineCtx,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -1115,6 +1156,7 @@ function Playground({ caps }: { caps: string[] }) {
                 edits: editDrafts,
                 publicID: sourceRow?.public_id,
                 experimentID,
+                ...engineCtx,
               }),
               // The cell's address rides its command id: the
               // experiment page places the run by it (plan F5).
@@ -1129,7 +1171,7 @@ function Playground({ caps }: { caps: string[] }) {
         agent: agent.name,
         variants: variants.map((v) => ({
           key: v.key,
-          overrides: overridesOf(v, agent),
+          overrides: overridesOf(v, agent, own),
           engine: v.engine,
           side_effects: v.sideEffects,
           thread: v.thread,
@@ -1438,6 +1480,8 @@ function Playground({ caps }: { caps: string[] }) {
                   fromStep={fromStep}
                   editDrafts={editDrafts}
                   setEditDrafts={setEditDrafts}
+                  own={own}
+                  choice={choice}
                 />
                 {/* Edits held at step 0 cannot travel (editsProblem): the
               line says so and holds Run, and the list stays here so
@@ -1474,10 +1518,14 @@ function Playground({ caps }: { caps: string[] }) {
                       resolving ||
                       orphans.length > 0 ||
                       !!heldEdits ||
+                      !!engineRefused ||
                       labProblems(variant, agent).length > 0
                     }
+                    data-run-engine={engineOf(choice, variant.engine)}
                   >
-                    {busy ? "sending…" : `Run ${variant.key}`}
+                    {busy
+                      ? "sending…"
+                      : engineRunLabel(choice, variant.engine, variant.key)}
                   </Button>
                 ) : (
                   <p

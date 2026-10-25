@@ -4,8 +4,8 @@
 // Studio UI posts the same body to the same endpoint (V6).
 import type {
   AgentDefaults,
-  CostFields,
-  Usage,
+  ModelInfo,
+  PlaygroundRunBody,
   Message,
   Part,
   PosEvent,
@@ -13,8 +13,8 @@ import type {
   Transcript,
 } from "../lib/api"
 import { FORK_NEEDS, labOverrides } from "../lib/experiment-body"
-import { engineChoice, keyedKnobs, noEdit } from "../lib/engine"
-import type { Engine, EngineChoice } from "../lib/engine"
+import { engineChoice, factsOf, sameModel } from "../lib/engine"
+import type { Engine, EngineChoice, StepCost } from "../lib/engine"
 import type { PreviewDoc } from "../lib/preview"
 import { editsProblem, wireEdits } from "../lib/edits"
 import type { ReplayEdit } from "../lib/edits"
@@ -23,6 +23,7 @@ import { splitTranscript, turnPrompt } from "../lib/events"
 import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { LiveRecord } from "../lib/live"
 import type { ReplayDraft, ReplayVerb } from "../lib/replay"
+import { REPLAY_WORDS } from "../lib/replay"
 import type { HoleMark } from "../lib/honesty"
 import type { DiffDoc } from "../lib/stepdiff"
 import type { CommandStatus, RuntimeView } from "./client"
@@ -64,8 +65,8 @@ export interface ExperimentDraft {
    * recorded it, and the source step's step-route doc (its cost and
    * usage; null: none) or why there is none — what engineFor reads. */
   steps?: number
-  ownModel?: string
-  cost?: (CostFields & { usage?: Usage }) | null
+  own?: ModelInfo
+  costs?: (StepCost | null)[] | null
   costWhy?: string
   sideEffects: "" | "substitute" | "park" | "allow"
   thread: "ephemeral" | "fork"
@@ -106,8 +107,10 @@ export interface ExperimentResult {
   state: CommandStatus["state"]
   runID: string
   error: string | null
-  /** §3's label: `t3·x1` — experiment 1 of turn 3. */
+  /** The replay's name: `Replay 1 of t3` (lib/replay.ts's words). */
   label: string
+  /** The engine its command ran on. */
+  engine?: string
   /** The turn the experiment hangs off: the pane draws under it. */
   sourceRunID: string
   /** The source turn's words (the diff base), taken when the command
@@ -244,16 +247,18 @@ export function foldedWords(f: FoldedRun): TurnWords {
   }
 }
 
-/** experimentLabel builds `t3·x1`: the source turn's t-number from its
- * run id (`<session>-t3`), the experiment's 1-based index among the
- * runs that forked from it. */
+/** experimentLabel names a replay of a turn (UX-D-14): `Replay 1 of
+ * t3` — the source turn's t-number from its run id (`<session>-t3`),
+ * the replay's 1-based index among the runs that forked from it. */
 export function experimentLabel(
   sourceRunID: string,
   forkedCount: number
 ): string {
   const m = /-t(\d+)$/.exec(sourceRunID)
-  const turn = m ? `t${m[1]}` : sourceRunID.slice(-8)
-  return `${turn}·x${forkedCount + 1}`
+  return REPLAY_WORDS.head(
+    forkedCount + 1,
+    m ? `t${m[1]}` : sourceRunID.slice(-8)
+  )
 }
 
 /** labOf is the drawer's option lab through Studio's labOverrides: the
@@ -272,36 +277,41 @@ export function labOf(draft: ExperimentDraft) {
   )
 }
 
-/** engineFor is the drawer's engine choice (lib/engine.ts): the facts
- * Studio's drawer reads, from the draft — and the preview's key check
- * once it answers. */
-export function engineFor(d: ExperimentDraft, pv?: PreviewDoc): EngineChoice {
-  const names = Object.keys(d.tools)
-  const on = names.filter((n) => d.tools[n])
-  const only = names.filter((n) => d.lab?.only_tools.includes(n))
-  const fork = d.thread === "fork"
-  return engineChoice({
-    source: true,
-    edits: fork ? 0 : d.edits.length,
-    prompt: !!d.instructions && d.instructions !== d.registeredInstructions,
-    model: d.model,
-    input: d.step === 0 && !!d.input.trim() && !noEdit(d.input, d.sourceInput),
-    fork,
-    keyed: keyedKnobs({
-      tools:
-        on.length < names.length ||
-        (!!only.length && only.length < names.length),
-      thinking: d.thinking,
-      toolChoice: d.lab?.tool_choice,
-    }),
-    fromStep: d.step,
-    steps: fork ? undefined : d.steps,
-    keyMatch: pv?.scripted_key_match,
-    ownModel: d.ownModel,
-    cost: d.cost,
-    costWhy: d.costWhy,
-  })
+/** overridesOf is the draft's overrides as the body sends them: only
+ * what changed (§10.1) — Studio's overridesOf, key for key. */
+function overridesOf(draft: ExperimentDraft) {
+  const names = Object.keys(draft.tools)
+  const on = names.filter((n) => draft.tools[n])
+  const o: NonNullable<PlaygroundRunBody["overrides"]> = {}
+  // An unchanged prompt is not an override (§10.1, the same diff
+  // Studio's playground applies: variant.instructions !== registered).
+  if (draft.instructions && draft.instructions !== draft.registeredInstructions)
+    o.instructions = draft.instructions
+  if (on.length && on.length < names.length) o.tools_enabled = on
+  if (draft.model && !sameModel(draft.model, draft.own)) o.model = draft.model
+  if (draft.thinking) o.thinking = draft.thinking
+  return Object.assign(o, labOf(draft).overrides)
 }
+
+/** engineFor is the drawer's engine choice: lib/engine.ts's factsOf
+ * over what the body sends, the preview's key check once it answers. */
+export const engineFor = (d: ExperimentDraft, pv?: PreviewDoc): EngineChoice =>
+  engineChoice(
+    factsOf({
+      overrides: overridesOf(d),
+      defaults: d.defaults,
+      edits: d.edits.length,
+      input: d.input,
+      sourceInput: d.sourceInput,
+      fork: d.thread === "fork",
+      fromStep: d.step,
+      steps: d.steps,
+      own: d.own,
+      costs: d.costs,
+      costWhy: d.costWhy,
+      preview: pv,
+    })
+  )
 
 /** buildRunBody is §5.1's command, assembled from the draft. The
  * overrides carry only what changed (§10.1: only present when
@@ -313,22 +323,7 @@ export function buildRunBody(
   publicId: string,
   pv?: PreviewDoc
 ): Record<string, unknown> {
-  const toolsEnabled = Object.entries(draft.tools)
-    .filter(([, on]) => on)
-    .map(([name]) => name)
-  const overrides: Record<string, unknown> = {}
-  // An unchanged prompt is not an override (§10.1, the same diff
-  // Studio's playground applies: variant.instructions !== registered).
-  if (draft.instructions && draft.instructions !== draft.registeredInstructions)
-    overrides.instructions = draft.instructions
-  if (
-    toolsEnabled.length &&
-    toolsEnabled.length < Object.keys(draft.tools).length
-  )
-    overrides.tools_enabled = toolsEnabled
-  if (draft.model) overrides.model = draft.model
-  if (draft.thinking) overrides.thinking = draft.thinking
-  Object.assign(overrides, labOf(draft).overrides)
+  const overrides = overridesOf(draft)
   const body: Record<string, unknown> = {
     runtime: draft.runtimeId,
     agent: draft.agent,

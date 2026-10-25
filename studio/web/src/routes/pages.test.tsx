@@ -695,18 +695,51 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       .on("GET runs/r_ok/transcript", golden("transcript-ok"))
   })
 
+  it("a plain run of a source opens on scripted, named on Run and posted; a prompt override turns it live (U17; UX-C-01)", async () => {
+    studio
+      .on("POST playground/runs", command("cmd_1", "queued"))
+      .on("GET playground/commands/cmd_1", command("cmd_1", "queued"))
+    renderApp("/playground?run=r_ok")
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
+    await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
+    await waitFor(() =>
+      expect(runButton.textContent).toBe("Run A on scripted · 0 tokens")
+    )
+    fireEvent.change(screen.getByLabelText("system prompt"), {
+      target: { value: "Be terse." },
+    })
+    await waitFor(() =>
+      expect(runButton.textContent).toMatch(/^Run A live on /)
+    )
+    fireEvent.change(screen.getByLabelText("system prompt"), {
+      target: { value: "" },
+    })
+    await waitFor(() =>
+      expect(runButton.textContent).toBe("Run A on scripted · 0 tokens")
+    )
+    fireEvent.click(runButton)
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(1)
+    )
+    expect(studio.calls("POST playground/runs")[0].body).toMatchObject({
+      engine: "scripted",
+    })
+  })
+
   it("carries the whole hand-off into the command — and runs the source run's agent", async () => {
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
       .on("GET playground/commands/cmd_1", command("cmd_1", "queued"))
     renderApp(
-      "/playground?run=r_ok&tools=lookup_order&engine=scripted&side_effects=park&thread=ephemeral&thinking=low"
+      // engine=live: tools= and thinking= change the replay key, so
+      // scripted could not answer (U17).
+      "/playground?run=r_ok&tools=lookup_order&engine=live&side_effects=park&thread=ephemeral&thinking=low"
     )
     // The source run is an `orders` turn: not the first agent registered.
     await waitFor(() =>
       expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
     )
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     await waitFor(() =>
@@ -717,7 +750,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       agent: "orders",
       source: { run_id: "r_ok", from_step: 0 },
       overrides: { tools_enabled: ["lookup_order"], thinking: "low" },
-      engine: "scripted",
+      engine: "live",
       side_effects: "park",
       thread: "ephemeral",
       public_id: source.public_id,
@@ -750,7 +783,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     await waitFor(() => expect(router.state.location.hash).toBe(""))
     expect(router.history.location.href).not.toContain("#")
     expect(router.history.location.href).toContain("run=r_ok")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     await waitFor(() =>
@@ -803,7 +836,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       .on("GET runs/pg_1/transcript", { batches: [] })
       .on("GET diff", golden<object>("diff"))
     renderApp("/playground?run=r_ok")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     const box = await waitFor(() => {
@@ -857,7 +890,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       .on("GET runs/pg_1/transcript", { batches: [] })
       .on("GET diff", golden<object>("diff"))
     renderApp("/playground?run=r_ok")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     await waitFor(() =>
@@ -901,7 +934,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
         )
       )
     renderApp("/playground?run=r_ok")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     await screen.findByText("waiting for the runtime to ack…")
@@ -983,7 +1016,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
         status: "succeeded",
       })
     renderApp("/playground?run=r_ok")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     const card = () =>
@@ -1035,13 +1068,15 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
         .on(`GET runs/pg_${i}/events`, pagedEvents([], { done: false }))
     }
     renderApp("/playground?run=r_ok")
-    const runA = await screen.findByRole("button", { name: "Run A" })
+    const runA = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runA).toHaveProperty("disabled", false))
     fireEvent.click(runA)
     for (const key of ["B", "C", "D", "E", "F"]) {
       fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
       fireEvent.click(screen.getByRole("button", { name: key }))
-      const run = await screen.findByRole("button", { name: `Run ${key}` })
+      const run = await screen.findByRole("button", {
+        name: new RegExp(`^Run ${key} `),
+      })
       await waitFor(() => expect(run).toHaveProperty("disabled", false))
       fireEvent.click(run)
     }
@@ -1089,7 +1124,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       .on("GET runs/pg_1/events", pagedEvents([]))
       .on("GET runs/pg_1/transcript", transcriptOf([]))
     renderApp("/playground?run=r_ok")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     const card = () =>
@@ -1129,7 +1164,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       )
       .on("GET runs/pg_1/transcript", transcriptOf([]))
     renderApp("/playground?run=r_ok")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     // The card has read the pages and the row at the ack — before the
@@ -1178,7 +1213,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       .on("GET runs/s_9-t3/transcript", transcriptOf([]))
       .on("POST runs/s_9-t3/steer", { steered: true })
     renderApp("/playground?run=r_ok&thread=fork&input=and%20then%3F")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     const card = () =>
@@ -1234,7 +1269,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       .on("GET runs/pg_1/transcript", transcriptOf([]))
       .on("POST runs/pg_1/steer", apiError(503, "unavailable", refusal))
     renderApp("/playground?run=r_ok")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     const input = await screen.findByLabelText("steer message")

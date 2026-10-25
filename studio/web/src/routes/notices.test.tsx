@@ -149,7 +149,7 @@ describe("the playground's notices", () => {
 
   async function runA() {
     const { router } = renderApp("/playground?run=r_ok")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     return router
@@ -392,7 +392,7 @@ describe("the playground's notices", () => {
           : command("cmd_m1", "accepted", "pg_m1")
       )
     renderApp("/playground?run=r_ok")
-    const runButton = await screen.findByRole("button", { name: "Run A" })
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     const name = screen.getByLabelText("experiment name")
     fireEvent.change(name, { target: { value: "exp_one" } })
@@ -765,7 +765,7 @@ describe("runtime notices", () => {
     [
       "the playground",
       "/playground?run=r_ok",
-      () => screen.queryByRole("button", { name: "Run A" }),
+      () => screen.queryByRole("button", { name: /^Run A / }),
     ],
     [
       "the open replay drawer",
@@ -911,7 +911,7 @@ describe("runtime notices", () => {
       .on("GET runs/r_ok", { ...rOK, children: [] })
     const { router } = renderApp("/playground?run=r_ok")
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Run A" })).toBeTruthy()
+      expect(screen.queryByRole("button", { name: /^Run A / })).toBeTruthy()
     )
     await waitFor(() =>
       expect(studio.calls("GET runtimes").length).toBeGreaterThan(0)
@@ -927,7 +927,7 @@ describe("runtime notices", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-replay-drawer]")).toBeNull()
     )
-    expect(screen.queryByRole("button", { name: "Run A" })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Run A / })).toBeNull()
     expect(shellInterval()).toBe(5_000)
   })
 

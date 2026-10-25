@@ -484,7 +484,8 @@ describe("the matrix (plan F5)", () => {
       inputs: [{ key: "1", text: "" }],
     })
     expect(kept.step).toBe(2)
-    // The definition saves the whole command (F5.1).
+    // The definition saves the whole command (F5.1); no engine picked
+    // saves none (each cell's own choice, U17).
     expect(studio.calls("POST experiments")[0].body).toMatchObject({
       id: "exp_step",
       name: "exp_step",
@@ -493,13 +494,11 @@ describe("the matrix (plan F5)", () => {
       variants: [
         {
           key: "A",
-          engine: "live",
           side_effects: "substitute",
           thread: "ephemeral",
         },
         {
           key: "B",
-          engine: "live",
           side_effects: "substitute",
           thread: "ephemeral",
         },

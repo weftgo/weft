@@ -147,3 +147,19 @@ export function previewView(doc: PreviewDoc): PreviewView {
       : "",
   }
 }
+
+/** previewGroups folds the rows for the drawer (UX-D-36): each run of
+ * consecutive "same" rows one group, drawn folded as "N same"; every
+ * other row its own group, drawn open — the changes read first. */
+export function previewGroups(rows: PreviewRow[]): PreviewRow[][] {
+  const out: PreviewRow[][] = []
+  for (const r of rows) {
+    const last = out.at(-1)
+    if (r.op === "same" && last?.[0].op === "same") last.push(r)
+    else out.push([r])
+  }
+  return out
+}
+
+/** The folded group's summary. */
+export const sameLine = (n: number): string => `${n} same`

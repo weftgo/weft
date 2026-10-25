@@ -644,7 +644,17 @@ reason when it is disabled, live's "calls <model> · ~N tok ≈ $x" from the
 source step's step-route cost (its usage at the pricing table's rate),
 "cost unknown: <why>" when there is none, never $0; a pick is never
 switched — a scripted pick that cannot answer holds Run and says why;
-Run reads "Run on scripted · 0 tokens" or "Run live on <model> · ≈ $x");
+Run reads "Run on scripted · 0 tokens" or "Run live on <model> · ≈ $x";
+U17-fix: the facts are `lib/engine.ts`'s `factsOf` over the overrides the
+body sends — a prompt, model, thinking or tool choice equal to the
+agent's own is no change and is not sent, an input equal to the source's
+none, parallelism 1 (SequentialTools) a key change; the preview's
+`scripted_key_match` miss is said in the server's own `message`; the
+estimate sums the source's recorded steps from `from_step` on (≥ $x and
+"later steps also run live" when some are not read); the playground and
+a saved experiment's cell re-run use the same rule and radios, an engine
+picked there riding the URL and the form; the preview folds runs of
+unchanged messages as "N same"; Studio's Run sits in a sticky footer);
 a catalog it cannot read is
 its badge, the registered tools judged instead; and the prefix line —
 "steps 0–2 kept", "· the compacted prefix (what the model saw at step
@@ -1078,8 +1088,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 275,228 B raw / 92,236 B gzip
-(90.1 KiB, the bundle of the ledger's row "U18.1"; 14,260 B — 13.9 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 276,355 B raw / 92,735 B gzip
+(90.6 KiB, the bundle of the ledger's row "U17-fix"; 13,761 B — 13.4 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

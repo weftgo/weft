@@ -714,7 +714,7 @@ describe("the replayed run links back to its source step", () => {
       expect(el).toBeTruthy()
       return el!
     })
-    expect(a.textContent).toBe("replay of r_src from step 3")
+    expect(a.textContent).toBe("replay of r_src · step 3")
     expect(a.getAttribute("href")).toBe("/runs/r_src?step=3")
     expect(
       document
@@ -2234,11 +2234,11 @@ describe("the engine is chosen per command (U17; UX-C-01, UX-C-05)", () => {
     await waitFor(() => expect(runBtn(d).disabled).toBe(false))
     expect(engineOfDrawer()).toBe("scripted")
     expect(runBtn(d).textContent).toBe("Run on scripted · 0 tokens")
-    // The step route's usage × price (golden step: 10 + 5 tokens, a
-    // scripted model's exact $0).
+    // The step routes' usage × price from step 2 on (golden steps: 10 +
+    // 5 tokens each, a scripted model's exact $0 — the bare figure).
     await waitFor(() =>
       expect(drawer()!.querySelector("[data-engine-live]")!.textContent).toBe(
-        "live · calls wefttest/script · ~15 tok ≈ $0 · scripted"
+        "live · calls wefttest/script · ~30 tok ≈ $0.00 for steps 2–3"
       )
     )
     fireEvent.click(runBtn(d))
@@ -2299,6 +2299,25 @@ describe("the engine is chosen per command (U17; UX-C-01, UX-C-05)", () => {
     await waitFor(() => expect(runBtn(d).disabled).toBe(false))
   })
 
+  it("a draft typed back to the recording is dropped: no edit listed, the field keeps the text, scripted again", async () => {
+    serve()
+    const d = await drawerFor(editResultAndReplay(2, "c3"))
+    const edit = await waitFor(() =>
+      d.getByLabelText<HTMLTextAreaElement>(
+        "edit the result of refund (c3) at step 2"
+      )
+    )
+    fireEvent.change(edit, { target: { value: "refunded" } })
+    expect(drawer()!.querySelectorAll("[data-edit-kind]")).toHaveLength(1)
+    fireEvent.change(edit, { target: { value: ERR } })
+    expect(drawer()!.querySelectorAll("[data-edit-kind]")).toHaveLength(0)
+    expect(edit.value).toBe(ERR)
+    expect(
+      edit.closest("[data-edit-field]")!.querySelector("[data-edit-same]")
+    ).toBeTruthy()
+    expect(engineOfDrawer()).toBe("scripted")
+  })
+
   it("the drawer reads in lib/drawer-spec.ts's order; advanced is folded; runtime-wide breakpoints are a pointer", async () => {
     serve({ capabilities: ["playground", "steps", "breakpoints"] })
     await drawerFor(replayFromStep(2))
@@ -2320,6 +2339,10 @@ describe("the engine is chosen per command (U17; UX-C-01, UX-C-05)", () => {
       "advanced",
       "run",
     ])
+    // The sticky footer (UX-C-19): Run stays on screen.
+    expect(drawer()!.querySelector("[data-sticky-run]")!.className).toContain(
+      "sticky"
+    )
     const adv = drawer()!.querySelector<HTMLDetailsElement>(
       "details[data-drawer-section=advanced]"
     )!

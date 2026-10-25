@@ -34,6 +34,7 @@ import type {
 } from "./experiment-body"
 import { editsFromHandoff, emptyLab } from "./experiment-body"
 import { forkSource, validExperimentID } from "./experiments"
+import { engineChoice, factsOf } from "./engine"
 
 /** The form's format version: another one is refused, never guessed.
  * 2 (U26; UX-C-21): one step for the page — `step`, which Run and the
@@ -259,7 +260,7 @@ export function formOfFields(p: {
       if (v.model) fv.model = v.model
       if (v.thinking) fv.thinking = v.thinking
       if (v.input) fv.input = v.input
-      if (v.engine !== "live") fv.engine = v.engine
+      if (v.engine) fv.engine = v.engine
       if (v.sideEffects !== "substitute") fv.side_effects = v.sideEffects
       if (v.thread !== "ephemeral") fv.thread = v.thread
       const lab = labOf(v.lab)
@@ -656,9 +657,9 @@ export function formFromExperiment(exp: ExperimentRow): FormState {
       side_effects: pick(ev.side_effects ?? exp.side_effects, SIDE_EFFECTS),
       thread: pick(ev.thread ?? exp.thread, THREADS),
     }
-    // A saved default is left out of the form (absent is the default).
+    // The saved engine (absent: the per-command choice, U17).
     const engine = saved.engine ?? guessed.engine
-    if (engine && engine !== "live") v.engine = engine
+    if (engine) v.engine = engine
     const se = saved.side_effects ?? guessed.side_effects
     if (se && se !== "substitute") v.side_effects = se
     const th = saved.thread ?? guessed.thread
@@ -703,7 +704,13 @@ export function cellBody(
   form: FormState,
   variant: string,
   input: string,
-  target: { runtime: string; publicID?: string }
+  target: {
+    runtime: string
+    publicID?: string
+    /** The source's step count and own input (the engine's choice). */
+    steps?: number
+    sourceInput?: string
+  }
 ): PlaygroundRunBody {
   const ev = exp.variants.find((v) => v.key === variant)
   const ei = exp.inputs.find((i) => i.key === input)
@@ -734,6 +741,21 @@ export function cellBody(
   if (!body.source && !body.input)
     throw new Error(`cell ${variant}×${input} has no input and no source run`)
   if (target.publicID) body.public_id = target.publicID
+  // No engine saved: the cell's own choice (U17, lib/engine.ts) — the
+  // source's step count and own input when the caller read them.
+  if (!fv?.engine)
+    body.engine = engineChoice(
+      factsOf({
+        source: !!body.source,
+        overrides: body.overrides ?? {},
+        edits: body.transcript_edits?.length ?? 0,
+        input: body.input ?? "",
+        sourceInput: target.sourceInput,
+        fork: body.thread === "fork",
+        fromStep,
+        steps: target.steps,
+      })
+    ).default
   const id = cellCommandID(variant, input, sideEffects)
   if (id) body.command_id = id
   return body

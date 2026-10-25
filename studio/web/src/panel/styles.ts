@@ -334,6 +334,7 @@ div[data-weft-editable] { display: block; }
   background: var(--weft-accent); color: var(--weft-on-accent); border: none; border-radius: var(--weft-radius-sm);
   padding: 5px 12px; font: inherit; font-weight: 600; cursor: pointer;
 }
+.weft-drawer .weft-run-btn { position: sticky; bottom: 4px; }
 .weft-xres { border-color: var(--weft-info); }
 .weft-diff { margin-top: 8px; border: 1px dashed var(--weft-line); border-radius: var(--weft-radius);
   padding: 6px 9px; }

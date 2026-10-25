@@ -110,9 +110,11 @@ describe("the playground's URL (G2)", () => {
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({ agent: "planner" })
     )
-    await choose(engineSelect(), "scripted")
+    // The prompt override keeps scripted disabled (U17): the pick is
+    // live, and a pick is written (absent is the per-command choice).
+    await choose(engineSelect(), "live")
     await waitFor(() =>
-      expect(router.state.location.search).toMatchObject({ engine: "scripted" })
+      expect(router.state.location.search).toMatchObject({ engine: "live" })
     )
     fireEvent.change(
       screen.getByPlaceholderText("a run id, or blank for fresh input"),
@@ -228,7 +230,7 @@ describe("the model field follows the agent", () => {
       target: { value: "plan my day" },
     })
     const run = await screen.findByRole<HTMLButtonElement>("button", {
-      name: "Run A",
+      name: /^Run A /,
     })
     await waitFor(() => expect(run.disabled).toBe(false))
     fireEvent.click(run)
@@ -308,7 +310,9 @@ describe("the model field follows the agent", () => {
   })
 
   it("Back and Forward round-trip the agent, the step and the engine", async () => {
-    const { router } = renderApp("/playground?run=r_ok&agent=planner")
+    const { router } = renderApp(
+      "/playground?run=r_ok&agent=planner&engine=live"
+    )
     await waitFor(() => expect(valueOf(agentSelect())).toBe("planner"))
     void router.navigate(
       playgroundStateLink({
@@ -403,7 +407,7 @@ describe("the playground's hand-off edits and run controls (final web review)", 
     .replace(/\+/g, "-")
     .replace(/\//g, "_")}.c2ln`
   const runA = () =>
-    screen.queryByRole<HTMLButtonElement>("button", { name: "Run A" })
+    screen.queryByRole<HTMLButtonElement>("button", { name: /^Run A / })
 
   it("junk edits in the fragment are dropped: the page draws, no error screen", async () => {
     const edits = JSON.stringify([
@@ -491,7 +495,7 @@ describe("the playground's hand-off edits and run controls (final web review)", 
   it("a dev token keeps Run and Run matrix", async () => {
     renderApp("/playground?run=r_ok")
     await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
-    expect(await screen.findByRole("button", { name: "Run A" })).toBeTruthy()
+    expect(await screen.findByRole("button", { name: /^Run A / })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Run matrix" })).toBeTruthy()
     expect(document.querySelector("[data-playground-read-only]")).toBeNull()
   })
@@ -569,7 +573,7 @@ describe("the playground's hand-off edits and run controls (final web review)", 
     async function runCard(swapTo?: string): Promise<HTMLElement> {
       renderApp("/playground?run=r_ok")
       const run = await screen.findByRole<HTMLButtonElement>("button", {
-        name: "Run A",
+        name: /^Run A /,
       })
       await waitFor(() => expect(run.disabled).toBe(false))
       fireEvent.click(run)
@@ -662,10 +666,10 @@ describe("the playground's hand-off edits and run controls (final web review)", 
     expect(
       await screen.findByRole("list", { name: "transcript edits" })
     ).toBeTruthy()
-    await choose(engineSelect(), "scripted")
+    await choose(engineSelect(), "live")
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({
-        engine: "scripted",
+        engine: "live",
         instructions: "keep-me",
       })
     )

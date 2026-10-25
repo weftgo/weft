@@ -568,7 +568,7 @@ describe("the experiment chip leads back to its source", () => {
     fakeStudio(r, REPLAY_META)
     const el = await mount()
     expect(text(el, '[data-key="pg_1"] [data-weft-chip="experiment"]')).toBe(
-      "experiment of t1"
+      "replay of t1 · step 2"
     )
     const back = $(el, '[data-key="pg_1"] button[data-weft-source]')!
     expect(back.closest(".weft-turn")).toBeNull() // beside the row button, never inside it
@@ -883,6 +883,10 @@ describe("the engine per command in the panel's drawer (U17)", () => {
 
   it("choosing scripted after an edit is refused inline: disabled, its reason beside it, the engine stays live", async () => {
     const el = await open()
+    // A radio group named by its heading (a11y).
+    const g = $(el, ".weft-drawer [data-drawer-section=engine]")!
+    expect(g.getAttribute("role")).toBe("radiogroup")
+    expect(g.getAttribute("aria-label")).toBe("engine")
     expect(engineOf(el)).toBe("scripted")
     await type(el, "refunded")
     expect(engineOf(el)).toBe("live")

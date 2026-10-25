@@ -7,6 +7,7 @@
 // response's when the server sent them (badge, reason, fix, holes[]),
 // the table's else. element.ts and the Request tab (E1.2) call these;
 // no other panel file spells a hole's words (badges.test.ts greps).
+import { REPLAY_WORDS } from "../lib/replay"
 import { el } from "./render"
 import { plural } from "../lib/format"
 import type { Meta, RunRow } from "../lib/api"
@@ -276,7 +277,7 @@ export function turnChips(
   if (r.forked_from) {
     const [src, step] = r.forked_from.split("#")
     chip(
-      `experiment of ${label(src)}`,
+      REPLAY_WORDS.of(label(src), step),
       `weft.forked_from = ${r.forked_from}: a playground experiment of run ${src}${step ? ` from step ${step}` : ""}${r.experiment_id ? ` (weft.experiment.id ${r.experiment_id})` : ""}`,
       "experiment"
     )

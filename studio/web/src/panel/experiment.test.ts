@@ -313,9 +313,10 @@ describe("the result pane follows the command to its run", () => {
     ) as HTMLSelectElement
     expect(se.value).toBe("") // substitute, the default
     const labels = Array.from(se.options).map((o) => o.textContent)
+    // Studio's words (lib/drawer-spec.ts's SIDE_EFFECT_WORDS).
     expect(labels).toEqual([
-      "side effects: substitute",
-      "park",
+      "side effects: substitute — recorded results, else park",
+      "park — every side-effect call waits",
       "allow — runs the tools this app opted in (AllowSideEffects) for real",
     ])
   })

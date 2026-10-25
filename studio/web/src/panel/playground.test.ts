@@ -414,8 +414,8 @@ describe("the pure halves", () => {
   })
 
   it("experimentLabel names the turn and the experiment's index", () => {
-    expect(experimentLabel("s_01M3-t3", 0)).toBe("t3·x1")
-    expect(experimentLabel("s_01M3-t3", 2)).toBe("t3·x3")
+    expect(experimentLabel("s_01M3-t3", 0)).toBe("Replay 1 of t3")
+    expect(experimentLabel("s_01M3-t3", 2)).toBe("Replay 3 of t3")
   })
 
   it("studioPlaygroundLink carries run, step and the current overrides", () => {
@@ -652,7 +652,9 @@ describe("the drawer against a fake Studio", () => {
     })
     await settle()
     // The result pane: the label names the turn and the experiment.
-    expect(text(el, ".weft-xres .weft-step-h")).toContain("t1·x1")
+    expect(text(el, ".weft-xres .weft-step-h")).toContain(
+      "Replay 1 of t1 · scripted · finished"
+    )
     expect(text(el, ".weft-xres")).toContain("track it here")
     // The inline diff against the source turn's own words.
     expect(text(el, ".weft-diff-h")).toContain("diff vs t1")

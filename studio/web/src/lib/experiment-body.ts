@@ -7,6 +7,7 @@ import type {
   AgentDefaults,
   AgentView,
   Message,
+  ModelInfo,
   PlaygroundRunBody,
   RuntimeView,
   ToolChoiceWire,
@@ -20,7 +21,7 @@ import {
 import type { TranscriptBatch } from "@/lib/events"
 import { editsProblem, kindOf, putEdit, wireEdits } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
-import { noEdit } from "@/lib/engine"
+import { engineChoice, factsOf, noEdit, sameModel } from "@/lib/engine"
 import type { Engine } from "@/lib/engine"
 
 /** A fork's precondition, in the words both forms refuse it with
@@ -40,7 +41,9 @@ export interface VariantFields {
   model: string
   thinking: string
   input: string
-  engine: Engine
+  /** The engine picked; absent, the command's own choice
+   * (lib/engine.ts — buildRunBody resolves it per command, U17). */
+  engine?: Engine
   sideEffects: SideEffects
   /** §5.4's thread mode (review fix 4a): ephemeral — an experiment,
    * never a turn — or fork, a new session with lineage whose next
@@ -125,7 +128,9 @@ export function overridesOf(
     VariantFields,
     "instructions" | "toolsOff" | "model" | "thinking" | "lab"
   >,
-  agent: AgentView
+  agent: AgentView,
+  /** The source's own model: an override naming it is none. */
+  own?: ModelInfo
 ): NonNullable<PlaygroundRunBody["overrides"]> {
   const overrides: NonNullable<PlaygroundRunBody["overrides"]> = {}
   if (
@@ -145,7 +150,8 @@ export function overridesOf(
       )
     overrides.tools_enabled = enabled
   }
-  if (variant.model) overrides.model = variant.model
+  if (variant.model && !sameModel(variant.model, own))
+    overrides.model = variant.model
   if (variant.thinking) overrides.thinking = variant.thinking
   const lab = labOverrides(variant.lab, agent, overrides.tools_enabled ?? [])
   if (lab.problems.length) throw new Error(lab.problems[0].message)
@@ -171,6 +177,12 @@ export function buildRunBody(opts: {
    * page that owns the conversation sees it too (S4.6). */
   publicID?: string
   experimentID?: string
+  /** The source's own model (an override naming it is none). */
+  own?: ModelInfo
+  /** The source's step count and own input: what the engine's choice
+   * reads when the variant picked none (lib/engine.ts). */
+  steps?: number
+  sourceInput?: string
 }): PlaygroundRunBody {
   const { variant, sourceRunID, fromStep } = opts
   const input = fromStep === 0 ? opts.input : ""
@@ -186,8 +198,8 @@ export function buildRunBody(opts: {
     runtime: opts.runtime,
     agent: opts.agent.name,
     source: sourceRunID ? { run_id: sourceRunID, from_step: fromStep } : null,
-    overrides: overridesOf(variant, opts.agent),
-    engine: variant.engine,
+    overrides: overridesOf(variant, opts.agent, opts.own),
+    engine: variant.engine ?? "live",
     side_effects: variant.sideEffects,
     thread: variant.thread,
   }
@@ -196,6 +208,23 @@ export function buildRunBody(opts: {
     body.transcript_edits = wireEdits(opts.edits)
   if (opts.experimentID) body.experiment_id = opts.experimentID
   if (opts.publicID) body.public_id = opts.publicID
+  // No engine picked: the command's own choice — scripted when it can
+  // answer (lib/engine.ts), the same rule the replay drawer shows.
+  if (!variant.engine)
+    body.engine = engineChoice(
+      factsOf({
+        source: !!sourceRunID,
+        overrides: body.overrides ?? {},
+        defaults: opts.agent.defaults,
+        edits: body.transcript_edits?.length ?? 0,
+        input,
+        sourceInput: opts.sourceInput,
+        fork: variant.thread === "fork",
+        fromStep,
+        steps: opts.steps,
+        own: opts.own,
+      })
+    ).default
   return body
 }
 

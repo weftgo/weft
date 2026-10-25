@@ -237,7 +237,7 @@ describe("formOfFields", () => {
           model: "",
           thinking: "",
           input: "",
-          engine: "live",
+          // No engine picked: the per-command choice (U17), not written.
           sideEffects: "substitute",
           thread: "ephemeral",
           lab: emptyLab(),
@@ -372,7 +372,11 @@ describe("a saved experiment read back", () => {
     })
     expect(f.step).toBe(1)
     expect(f.run).toBe("r_ok")
-    expect(f.variants.find((v) => v.key === "A")).toEqual({ key: "A" })
+    // A saved engine is a pick (U17): kept, live included.
+    expect(f.variants.find((v) => v.key === "A")).toEqual({
+      key: "A",
+      engine: "live",
+    })
     expect(f.variants.find((v) => v.key === "B")).toMatchObject({
       engine: "scripted",
       side_effects: "park",
@@ -397,7 +401,8 @@ describe("a saved experiment read back", () => {
     expect(over.variants.find((v) => v.key === "B")).toMatchObject({
       side_effects: "allow",
     })
-    expect(over.variants.find((v) => v.key === "B")?.engine).toBeUndefined()
+    // A saved engine is a pick (U17), live included.
+    expect(over.variants.find((v) => v.key === "B")?.engine).toBe("live")
     expect(over.step).toBeUndefined()
     // Absent fields fall back to the runs (a definition before F5.1).
     expect(formFromExperiment(experiment).variants[1]).toMatchObject({
@@ -423,6 +428,33 @@ describe("a saved experiment read back", () => {
       inputs: [{ key: "1", text: "" }],
       name: "a b",
     })
+  })
+
+  it("cellBody with no saved engine takes the cell's own choice (U17): scripted when it can answer, live otherwise", () => {
+    // The API golden: A sends no override, row 1 is the source's own
+    // turn, row 2 a new input, B's overrides change the key.
+    const g = golden<ExperimentRow>("experiment")
+    const bare: ExperimentRow = {
+      ...g,
+      engine: undefined,
+      transcript_edits: undefined,
+      from_step: 0,
+      variants: g.variants.map((v) => ({ ...v, engine: undefined })),
+      runs: [],
+    }
+    const f = formFromExperiment(bare)
+    // A: no override, the source's own turn (row 1 has no text).
+    expect(
+      cellBody(bare, f, "A", "1", { runtime: "rt_1", steps: 2 }).engine
+    ).toBe("scripted")
+    // A new input: live.
+    expect(
+      cellBody(bare, f, "A", "2", { runtime: "rt_1", steps: 2 }).engine
+    ).toBe("live")
+    // B's overrides change the key: live.
+    expect(
+      cellBody(bare, f, "B", "1", { runtime: "rt_1", steps: 2 }).engine
+    ).toBe("live")
   })
 
   it("cellBody re-runs one cell: its overrides as saved, its source, the same experiment id, a cell command id", () => {

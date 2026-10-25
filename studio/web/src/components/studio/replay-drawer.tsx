@@ -34,20 +34,25 @@ import {
   editsHandoff,
   labHandoff,
   labProblems,
+  overridesOf,
   pickTarget,
   realEdits,
   unmatchedDrafts,
 } from "@/lib/experiment-body"
-import { BREAKPOINTS_MOVED, DRAWER_TITLES } from "@/lib/drawer-spec"
+import {
+  BREAKPOINTS_MOVED,
+  DRAWER_TITLES,
+  sendHead,
+  targetLine,
+} from "@/lib/drawer-spec"
 import {
   engineChoice,
   engineHeld,
   engineOf,
-  ENGINE_WORDS,
-  keyedKnobs,
+  factsOf,
   runLabel,
 } from "@/lib/engine"
-import type { Engine, EngineChoice, EngineFacts } from "@/lib/engine"
+import type { Engine, EngineChoice } from "@/lib/engine"
 import type { EditDraft, VariantFields } from "@/lib/experiment-body"
 import { compareLink, playgroundLink, runLink } from "@/lib/links"
 import type { PlaygroundHandoff } from "@/lib/links"
@@ -75,6 +80,8 @@ import { useRuntimesNeeded } from "@/hooks/use-notices"
 import { quietCommand } from "@/lib/notify"
 import {
   ChangeFields,
+  EngineRadios,
+  useEngineContext,
   ModeFields,
   OptionLab,
   StepPicker,
@@ -602,32 +609,29 @@ function ReplayForm({
   // answers. The edits that count are the ones that change something.
   const fork = variant.thread === "fork"
   const sent = fork ? editDrafts : realEdits(editDrafts, edits.fields)
-  const own = sourceRow
-    ? [sourceRow.model.provider, sourceRow.model.name].filter(Boolean).join("/")
-    : ""
-  const facts: EngineFacts = {
-    source: true,
-    edits: fork ? 0 : sent.length,
-    prompt:
-      Boolean(variant.instructions) && variant.instructions !== registered,
-    model: variant.model,
-    input: fromStep === 0 && variant.input.trim() !== "",
-    fork,
-    keyed: keyedKnobs({
-      tools: toolsEnabled !== undefined,
-      thinking: variant.thinking,
-      toolChoice: variant.lab?.tool_choice,
-    }),
-    fromStep,
-    steps: fork ? undefined : stepCount,
-    ownModel: own,
-    cost: stepDoc.data?.step === ordinal ? stepDoc.data : null,
-    costWhy: !caps.includes("steps")
-      ? "no step route"
-      : stepDoc.isError
-        ? `the step is unreadable: ${stepDoc.error.message}`
-        : "reading the step…",
+  const own = sourceRow?.model
+  // The overrides the body sends (overridesOf's equality): a refused
+  // form sends nothing, and says so where Run's error goes.
+  let overrides: NonNullable<PlaygroundRunBody["overrides"]> = {}
+  try {
+    if (agent) overrides = overridesOf(variant, agent, own)
+  } catch {
+    // held below (labProblems, the tool-set refusal)
   }
+  const ectx = useEngineContext(runID, fromStep, fork, caps)
+  const facts = factsOf({
+    overrides,
+    defaults: agent?.defaults,
+    edits: sent.length,
+    input: variant.input,
+    sourceInput: ectx.sourceInput,
+    fork,
+    fromStep,
+    steps: stepCount,
+    own,
+    costs: ectx.costs,
+    costWhy: ectx.costWhy,
+  })
   const sendVariant = (c: EngineChoice): VariantFields => ({
     ...variant,
     engine: engineOf(c, picked),
@@ -651,6 +655,7 @@ function ReplayForm({
           input: variant.input,
           edits: sent,
           publicID: sourceRow?.public_id || undefined,
+          own,
         })
       )
     } catch {
@@ -703,6 +708,7 @@ function ReplayForm({
         input: variant.input,
         edits: sent,
         publicID: sourceRow?.public_id || undefined,
+        own,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -806,9 +812,10 @@ function ReplayForm({
         <section className="space-y-1" data-drawer-section="target">
           <div className="eyebrow">{DRAWER_TITLES.target}</div>
           <p className="font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground">
-            {runtime && !target.mismatch
-              ? `${wantAgent ?? "?"} on ${runtime.service || runtime.id} (${runtime.id})`
-              : "—"}
+            {targetLine(
+              wantAgent ?? "?",
+              target.mismatch ? undefined : runtime
+            )}
           </p>
         </section>
         <EngineRadios
@@ -834,6 +841,7 @@ function ReplayForm({
             fromStep={fromStep}
             editDrafts={editDrafts}
             setEditDrafts={setEditDrafts}
+            own={own}
             promptNote={
               promptHole ? (
                 <span
@@ -854,8 +862,11 @@ function ReplayForm({
         </section>
         {previewBody ? (
           <section className="space-y-1" data-drawer-section="send">
-            <div className="eyebrow">{DRAWER_TITLES.send}</div>
-            <PreviewPane state={preview} fromStep={fromStep} />
+            <PreviewPane
+              state={preview}
+              fromStep={fromStep}
+              head={sendHead(fromStep)}
+            />
           </section>
         ) : null}
         <section data-drawer-section="tools">
@@ -969,9 +980,12 @@ function ReplayForm({
             {error}
           </p>
         ) : null}
+        {/* The sticky footer (UX-C-19): Run, naming its engine, stays on
+            screen however long the form above it. */}
         <div
-          className="flex flex-wrap items-center gap-2"
+          className="sticky bottom-0 z-10 -mx-6 flex flex-wrap items-center gap-2 border-t bg-popover px-6 py-2"
           data-drawer-section="run"
+          data-sticky-run
         >
           <Button
             onClick={() => void run()}
@@ -1010,74 +1024,6 @@ function ReplayForm({
         ) : null}
       </div>
     </>
-  )
-}
-
-/** EngineRadios is the engine block (U17; UX-C-01, UX-C-05): two
- * radios, one line each — scripted's at 0 tokens, live's naming the
- * model and the estimate; scripted disabled with its reason when it
- * cannot answer, and the refusal said inline while it is the pick. */
-export function EngineRadios({
-  choice,
-  engine,
-  refused,
-  onPick,
-}: {
-  choice: EngineChoice
-  engine: Engine
-  refused: string
-  onPick: (e: Engine) => void
-}) {
-  const off = !choice.scripted.enabled
-  return (
-    <fieldset
-      className="space-y-1"
-      data-drawer-section="engine"
-      data-engine={engine}
-    >
-      <legend className="eyebrow">{DRAWER_TITLES.engine}</legend>
-      <label
-        className={`flex items-baseline gap-2 text-xs ${off ? "text-faint" : ""}`}
-        data-engine-option="scripted"
-        data-disabled={off ? "" : undefined}
-      >
-        <input
-          type="radio"
-          name="replay-engine"
-          value="scripted"
-          checked={engine === "scripted"}
-          disabled={off}
-          // A disabled option is no pick (a synthetic click included).
-          onChange={() => !off && onPick("scripted")}
-        />
-        <span>
-          {ENGINE_WORDS.scripted}
-          <span className="block text-[11px] text-faint" data-engine-why>
-            {off ? choice.scripted.reason : ENGINE_WORDS.scriptedFor}
-          </span>
-        </span>
-      </label>
-      <label
-        className="flex items-baseline gap-2 text-xs"
-        data-engine-option="live"
-      >
-        <input
-          type="radio"
-          name="replay-engine"
-          value="live"
-          checked={engine === "live"}
-          onChange={() => onPick("live")}
-        />
-        <span data-engine-live>
-          {ENGINE_WORDS.live(choice.live.model, choice.live.estimate)}
-        </span>
-      </label>
-      {refused ? (
-        <p className="text-xs text-status-bad" role="alert" data-engine-refused>
-          {refused}
-        </p>
-      ) : null}
-    </fieldset>
   )
 }
 

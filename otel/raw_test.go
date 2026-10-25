@@ -90,14 +90,18 @@ func captureSlog(t *testing.T) *bytes.Buffer {
 const (
 	rawWarn      = "otel: RawBodies ignored: WEFT_ENV is not dev"
 	rawWarnNoEnv = "otel: RawBodies ignored: otel.NoEnv reads no WEFT_ENV"
+	devModeProd  = "otel: DevMode ignored: WEFT_ENV=prod"
+	rawInfo      = "otel: raw bodies on by otel.DevMode()"
 )
 
 // Outside the dev gate RawBodies(true) is one WARN line naming the cause
 // and nothing else: Enabled says no for weft.raw, the reporter tells the
 // adapter so, and the run stores no raw record. The gate holds under
 // WEFT_ENV=dev read from the environment, or under DevMode — which an
-// isolated NoEnv pipeline needs, NoEnv reading no WEFT_ENV (issue 002).
-// Under it the option is on, silently: one weft.raw per attempt.
+// isolated NoEnv pipeline needs, NoEnv reading no WEFT_ENV (issue 002)
+// — unless an explicit WEFT_ENV other than dev overrules DevMode. Under
+// the gate the option is on with no WARN (one INFO when DevMode opened
+// it): one weft.raw per attempt.
 func TestRawBodiesDevOnly(t *testing.T) {
 	for _, c := range []struct {
 		name    string
@@ -112,7 +116,8 @@ func TestRawBodiesDevOnly(t *testing.T) {
 		{"NoEnv unset", nil, true, false, rawWarnNoEnv},
 		{"NoEnv with DevMode", nil, true, true, ""},
 		{"DevMode, WEFT_ENV unset", nil, false, true, ""},
-		{"DevMode, WEFT_ENV=prod", map[string]string{"WEFT_ENV": "prod"}, false, true, ""},
+		{"DevMode, WEFT_ENV=prod", map[string]string{"WEFT_ENV": "prod"}, false, true, devModeProd},
+		{"DevMode, WEFT_ENV=dev", map[string]string{"WEFT_ENV": "dev"}, false, true, ""},
 		{"WEFT_ENV=dev", map[string]string{"WEFT_ENV": "dev"}, false, false, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -132,8 +137,13 @@ func TestRawBodiesDevOnly(t *testing.T) {
 			}
 			defer func() { _ = p.Shutdown(context.Background()) }()
 			warns := strings.Count(logs.String(), "level=WARN")
-			if n := strings.Count(logs.String(), "RawBodies ignored"); (on && (n != 0 || warns != 0)) || (!on && (n != 1 || warns != 1)) {
-				t.Errorf("WARN lines: %d of %d mention RawBodies; on=%v\n%s", n, warns, on, logs.String())
+			if n := strings.Count(logs.String(), c.warn); (on && warns != 0) || (!on && (n != 1 || warns != 1)) {
+				t.Errorf("WARN lines: %d of %d name %q; on=%v\n%s", n, warns, c.warn, on, logs.String())
+			}
+			// The INFO line exactly when DevMode is what opened the gate.
+			byDevMode := on && c.devMode && (c.noEnv || c.env["WEFT_ENV"] != "dev")
+			if n := strings.Count(logs.String(), rawInfo); n != map[bool]int{true: 1}[byDevMode] {
+				t.Errorf("%q lines = %d, DevMode opened the gate: %v\n%s", rawInfo, n, byDevMode, logs.String())
 			}
 			if !on && !strings.Contains(logs.String(), c.warn) {
 				t.Errorf("the refusal does not name its cause %q:\n%s", c.warn, logs.String())
@@ -148,7 +158,7 @@ func TestRawBodiesDevOnly(t *testing.T) {
 				t.Fatalf("requests = %d, %v", len(reqs), err)
 			}
 			if enabled != on || wanted != on || (reqs[0].Wire != nil) != on {
-				t.Errorf("Enabled %v, WantsRaw %v, stored %v; want all %v", enabled, wanted, reqs[0].Wire != nil, on)
+				t.Fatalf("Enabled %v, WantsRaw %v, stored %v; want all %v", enabled, wanted, reqs[0].Wire != nil, on)
 			}
 			if on && strings.Contains(reqs[0].Wire.Request.Body+strings.Join(reqs[0].Wire.RedactedHeaders, ","), "SECRET") {
 				t.Error("a credential was stored")
@@ -205,6 +215,9 @@ func TestRawBodiesNoEnvDevModePerAttempt(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "level=WARN") {
 		t.Errorf("NoEnv+DevMode warned:\n%s", logs.String())
+	}
+	if n := strings.Count(logs.String(), `level=INFO msg="`+rawInfo+`"`); n != 1 {
+		t.Errorf("want one INFO %q, got %d:\n%s", rawInfo, n, logs.String())
 	}
 	reqs, err := p.LocalDB().Requests(context.Background(), res.ID, obsdb.RequestQuery{})
 	if err != nil || len(reqs) != 2 {

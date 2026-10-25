@@ -278,8 +278,9 @@ func TestLocalFloodLosesNothing(t *testing.T) {
 
 // The dev gate for Blocking in its four shapes (issue 002): WEFT_ENV
 // unset refuses naming WEFT_ENV, NoEnv refuses naming otel.NoEnv even
-// under WEFT_ENV=dev, and DevMode keeps it — beside NoEnv too — with no
-// WARN, as WEFT_ENV=dev does.
+// under WEFT_ENV=dev, DevMode keeps it beside NoEnv or with WEFT_ENV
+// unset (one INFO says DevMode did) and is itself refused by an explicit
+// WEFT_ENV other than dev; WEFT_ENV=dev keeps it silently.
 func TestBlockingDevGate(t *testing.T) {
 	for _, c := range []struct {
 		name           string
@@ -290,6 +291,8 @@ func TestBlockingDevGate(t *testing.T) {
 		{"WEFT_ENV unset", nil, false, false, "otel: Blocking ignored: WEFT_ENV is not dev"},
 		{"NoEnv under dev", map[string]string{"WEFT_ENV": "dev"}, true, false, "otel: Blocking ignored: otel.NoEnv reads no WEFT_ENV"},
 		{"NoEnv with DevMode", nil, true, true, ""},
+		{"DevMode, WEFT_ENV unset", nil, false, true, ""},
+		{"DevMode, WEFT_ENV=prod", map[string]string{"WEFT_ENV": "prod"}, false, true, "otel: DevMode ignored: WEFT_ENV=prod"},
 		{"WEFT_ENV=dev", map[string]string{"WEFT_ENV": "dev"}, false, false, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -312,14 +315,20 @@ func TestBlockingDevGate(t *testing.T) {
 				t.Errorf("Blocking kept = %v, want %v", kept, c.warn == "")
 			}
 			out := logBuf.String()
+			const info = "otel: Blocking on by otel.DevMode()"
+			wantInfo := map[bool]int{true: 1}[c.warn == "" && c.devMode]
+			if n := strings.Count(out, info); n != wantInfo {
+				t.Errorf("%q lines = %d, want %d:\n%s", info, n, wantInfo, out)
+			}
+			warns := strings.Count(out, "level=WARN")
 			if c.warn == "" {
-				if strings.Contains(out, "Blocking ignored") {
+				if warns != 0 {
 					t.Errorf("Blocking refused under the gate:\n%s", out)
 				}
 				return
 			}
-			if n := strings.Count(out, "Blocking ignored"); n != 1 || !strings.Contains(out, c.warn) {
-				t.Errorf("want one refusal %q, got %d:\n%s", c.warn, n, out)
+			if n := strings.Count(out, c.warn); n != 1 || warns != 1 {
+				t.Errorf("want one refusal %q, got %d of %d WARN lines:\n%s", c.warn, n, warns, out)
 			}
 		})
 	}

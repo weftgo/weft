@@ -34,7 +34,7 @@ export interface HoleNote {
 
 /** A dropped record's fix (gap and its causes): one string, four uses. */
 const QUEUE_FIX =
-  "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+  "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
 
 /** The closed table, in ADR 0028 §11's order. */
 export const HOLES: Record<Hole, HoleNote> = {
@@ -151,8 +151,8 @@ export const CAUSES: Partial<
     },
     raw_off: {
       reason:
-        "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev) or the adapter does not report them",
-      fix: "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)",
+        "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+      fix: "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)",
     },
     no_logger: {
       reason:

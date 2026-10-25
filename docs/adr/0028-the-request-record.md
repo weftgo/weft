@@ -626,7 +626,11 @@ behaves as if the option were absent. (2026-10-25, issue 002: the
 gate can be satisfied by `otel.DevMode()` — the attestation in code, for
 a test or harness that controls its own process — as well as by
 `WEFT_ENV=dev`; under `otel.NoEnv()` without it the WARN reads
-`otel: RawBodies ignored: otel.NoEnv reads no WEFT_ENV`.) Datadog, Langfuse, OTLP and
+`otel: RawBodies ignored: otel.NoEnv reads no WEFT_ENV`. An explicit
+`WEFT_ENV` other than `dev`, when the pipeline reads the environment,
+wins over `DevMode` (`otel: DevMode ignored: WEFT_ENV=<value>`), and
+whenever `DevMode` opens the gate Start logs one INFO line, `otel: raw
+bodies on by otel.DevMode()`.) Datadog, Langfuse, OTLP and
 Exporters never receive a raw record, whatever their content setting;
 the run tracker never asks.
 

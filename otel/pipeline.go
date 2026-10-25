@@ -83,8 +83,8 @@ type LoggerProvider struct {
 }
 
 // RawBodies reports whether this pipeline records provider wire bodies:
-// otel.RawBodies(true) and the dev gate at Start (otel.DevMode, or
-// WEFT_ENV=dev read without NoEnv).
+// otel.RawBodies(true) and the dev gate at Start (WEFT_ENV=dev read
+// without NoEnv, or otel.DevMode unless an explicit WEFT_ENV overrules it).
 // It is the duck-typed marker core.Reporter.WantsRaw asks for; the
 // destinations still decide per chain (Local and Studio only).
 func (p *LoggerProvider) RawBodies() bool { return p != nil && p.raw }
@@ -230,12 +230,12 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 		return nil, errNoDestinations
 	}
 	// RawBodies is a development switch (ADR 0028 §12): kept only when
-	// the dev gate holds — DevMode attested it in code, or this pipeline
-	// reads the environment and WEFT_ENV=dev; NoEnv reads none, so
-	// without DevMode it refuses. A refusal is one WARN naming its
-	// cause, after a successful build (Install may call Start more than
-	// once).
-	dev, refusal := devGate(cfg)
+	// the dev gate holds (devGate: WEFT_ENV=dev read from the
+	// environment, or DevMode under NoEnv or with WEFT_ENV unset; an
+	// explicit WEFT_ENV other than dev wins over DevMode). A refusal is
+	// one WARN naming its cause, and DevMode opening the gate one INFO,
+	// after a successful build (Install may call Start more than once).
+	dev, byDevMode, refusal := devGate(cfg)
 	rawRefused := cfg.rawBodies && !dev
 	if rawRefused {
 		cfg.rawBodies = false
@@ -261,13 +261,30 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 			"pid", joined.info.PID, "file", joined.path,
 			"hint", "WEFT_STUDIO_URL names another; otel.NoDiscovery() or WEFT_DISCOVERY=off ignores the file")
 	}
-	if rawRefused {
-		slog.Warn("otel: RawBodies ignored: "+refusal.reason,
-			"hint", "to record provider wire bodies, "+refusal.hint)
+	switch {
+	case refusal.devMode && (rawRefused || blockingRefused):
+		// One line for both switches: DevMode itself was overruled.
+		slog.Warn("otel: DevMode ignored: "+refusal.reason,
+			"hint", refusal.hint+"; RawBodies and Blocking stay off")
+	default:
+		if rawRefused {
+			slog.Warn("otel: RawBodies ignored: "+refusal.reason,
+				"hint", "to record provider wire bodies, "+refusal.hint)
+		}
+		if blockingRefused {
+			slog.Warn("otel: Blocking ignored: "+refusal.reason,
+				"hint", "a full queue refuses records (counted, warned); to wait instead, "+refusal.hint+"; or raise otel.QueueSize")
+		}
 	}
-	if blockingRefused {
-		slog.Warn("otel: Blocking ignored: "+refusal.reason,
-			"hint", "a full queue refuses records (counted, warned); to wait instead, "+refusal.hint+"; or raise otel.QueueSize")
+	// DevMode opening the gate is never silent: a binary that ships it
+	// says so at Start.
+	if byDevMode && cfg.rawBodies {
+		slog.Info("otel: raw bodies on by otel.DevMode()",
+			"hint", "every model call's provider request and response is recorded (Local and Studio); a production binary never sets DevMode")
+	}
+	if byDevMode && hasBlocking(dests) {
+		slog.Info("otel: Blocking on by otel.DevMode()",
+			"hint", "a full queue waits up to 5 s for room; a production binary never sets DevMode")
 	}
 	if !cfg.noGlobal {
 		registerGlobals(p)
@@ -873,26 +890,55 @@ func (p *Pipeline) startHeartbeat() {
 }
 
 // gateRefusal is why the dev gate refused, and what lifts it: the WARN
-// names the real cause (issue 002).
-type gateRefusal struct{ reason, hint string }
+// names the real cause (issue 002). devMode marks the refusal of an
+// explicit DevMode by the operator's WEFT_ENV, logged once as
+// "otel: DevMode ignored: WEFT_ENV=<value>" for both switches.
+type gateRefusal struct {
+	reason, hint string
+	devMode      bool
+}
 
 // devGate reports whether the development gate (ADR 0028 §12) holds for
-// cfg — DevMode, or WEFT_ENV=dev read from an environment NoEnv did not
-// switch off — and, when it does not, the refusal to log.
-func devGate(cfg config) (bool, gateRefusal) {
-	switch {
-	case cfg.devMode:
-		return true, gateRefusal{}
-	case cfg.noEnv:
-		return false, gateRefusal{
+// cfg, whether DevMode is what opened it, and, when it is shut, the
+// refusal to log. Under NoEnv only DevMode opens it. Reading the
+// environment, WEFT_ENV=dev opens it; an explicit WEFT_ENV other than
+// dev shuts it even against DevMode — the operator's environment wins —
+// and DevMode opens it only while WEFT_ENV is unset.
+func devGate(cfg config) (open, byDevMode bool, r gateRefusal) {
+	if cfg.noEnv {
+		if cfg.devMode {
+			return true, true, gateRefusal{}
+		}
+		return false, false, gateRefusal{
 			reason: "otel.NoEnv reads no WEFT_ENV",
 			hint:   "add otel.DevMode(), or drop otel.NoEnv (otel.NoDiscovery() isolates from the discovery file and keeps WEFT_ENV) and set WEFT_ENV=dev",
 		}
-	case envGetenv("WEFT_ENV") != "dev":
-		return false, gateRefusal{
+	}
+	switch env := envGetenv("WEFT_ENV"); {
+	case env == "dev":
+		return true, false, gateRefusal{}
+	case cfg.devMode && env == "":
+		return true, true, gateRefusal{}
+	case cfg.devMode:
+		return false, false, gateRefusal{
+			reason:  "WEFT_ENV=" + env,
+			hint:    "the operator's WEFT_ENV wins over otel.DevMode(); unset it or set WEFT_ENV=dev",
+			devMode: true,
+		}
+	default:
+		return false, false, gateRefusal{
 			reason: "WEFT_ENV is not dev",
-			hint:   "set WEFT_ENV=dev, or add otel.DevMode() in a test or harness that controls its own process",
+			hint:   "set WEFT_ENV=dev, or add otel.DevMode() in a test or harness that controls its own process (with WEFT_ENV unset)",
 		}
 	}
-	return true, gateRefusal{}
+}
+
+// hasBlocking reports whether any destination kept Blocking.
+func hasBlocking(dests []dest) bool {
+	for _, d := range dests {
+		if d.blocking {
+			return true
+		}
+	}
+	return false
 }

@@ -33,7 +33,7 @@
           {
             "hole": "gap",
             "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
-            "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+            "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
           },
           {
             "hole": "not_recorded",
@@ -62,7 +62,7 @@
           {
             "hole": "gap",
             "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
-            "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+            "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
           },
           {
             "hole": "not_recorded",
@@ -107,7 +107,7 @@
           {
             "hole": "gap",
             "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
-            "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+            "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
           },
           {
             "hole": "not_recorded",
@@ -136,7 +136,7 @@
           {
             "hole": "gap",
             "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
-            "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+            "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
           },
           {
             "hole": "not_recorded",

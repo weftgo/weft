@@ -111,6 +111,14 @@ func NoEnv() Option {
 // from it (runtime.Install keeps its own WEFT_ENV / Enabled rule). The
 // gate still applies — a production binary never sets DevMode; the
 // attestation has only moved from the process environment into code.
+// The operator's environment wins: when the pipeline reads it (no
+// NoEnv) and WEFT_ENV is set to anything but "dev", DevMode is refused
+// with one WARN ("otel: DevMode ignored: WEFT_ENV=<value>") and both
+// switches stay off; it opens the gate under NoEnv or with WEFT_ENV
+// unset. Whenever DevMode is what opened it, Start logs one INFO line
+// per switch it unlocked ("otel: raw bodies on by otel.DevMode()",
+// "otel: Blocking on by otel.DevMode()"), so a binary that ships it is
+// visible.
 func DevMode() Option {
 	return optionFunc(func(c *config) { c.devMode = true })
 }
@@ -138,7 +146,9 @@ func NoDiscovery() Option {
 // a Local or Studio destination under NoContent). Off by default, and
 // refused outside development: it takes effect only when the pipeline
 // starts under the dev gate — WEFT_ENV is "dev" (read unless NoEnv), or
-// DevMode attests it in code. Otherwise Start logs one WARN line naming
+// DevMode attests it in code (under NoEnv, or with WEFT_ENV unset; an
+// explicit WEFT_ENV other than dev wins, "otel: DevMode ignored:
+// WEFT_ENV=<value>"). Otherwise Start logs one WARN line naming
 // the cause ("otel: RawBodies ignored: WEFT_ENV is not dev", or under
 // NoEnv without DevMode "otel: RawBodies ignored: otel.NoEnv reads no
 // WEFT_ENV") and the pipeline behaves as if the option were absent: no destination asks for weft.raw, so the
@@ -366,7 +376,8 @@ func QueueSize(n int) DestOption {
 // counted, until an export begins again — a hung exporter costs the app
 // one 5 s wait, not one per record. Development only, like
 // RawBodies: it takes effect only when the pipeline starts under the
-// dev gate (WEFT_ENV=dev read unless NoEnv, or DevMode); otherwise
+// dev gate (WEFT_ENV=dev read unless NoEnv, or DevMode — which an
+// explicit WEFT_ENV other than dev overrules); otherwise
 // Start logs one WARN naming the cause ("otel: Blocking ignored:
 // WEFT_ENV is not dev", or "… otel.NoEnv reads no WEFT_ENV") and the
 // destination refuses as without it — observability never slows a

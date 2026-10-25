@@ -90,7 +90,7 @@ const (
 	CauseResponseCap HoleCause = "response_cap"
 	// CauseRawOff: the attempt has no raw record (ADR 0028 §12) — wire
 	// bodies are recorded only under otel.RawBodies(true) with
-	// WEFT_ENV=dev, by an adapter that reports them (not_recorded: the
+	// WEFT_ENV=dev (or otel.DevMode()), by an adapter that reports them (not_recorded: the
 	// requests row's raw, the wire tab).
 	CauseRawOff HoleCause = "raw_off"
 	// CauseStockSpans: the run was built by the reader from stock OTel
@@ -146,7 +146,7 @@ func MetadataCapReason(n int64) string {
 // queueFix is the knob every gap's fix names (UX-A-41): the destination
 // queue the records waited in, the dev-only wait, the app's own WARN
 // and the counter Studio heard.
-const queueFix = "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
+const queueFix = "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
@@ -164,8 +164,8 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 			"thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn",
 		},
 		CauseRawOff: {
-			"no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev) or the adapter does not report them",
-			"run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)",
+			"no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+			"run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)",
 		},
 		CauseNotServed: {
 			"this Studio does not serve the request record (no requests capability): the run may hold one",

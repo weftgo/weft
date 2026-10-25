@@ -339,7 +339,7 @@ function IngestHealth({ meta }: { meta: Meta }) {
       ))}
       <span className="block text-muted-foreground">
         raise the destination&apos;s queue with otel.QueueSize(n), or use
-        otel.Blocking() under WEFT_ENV=dev
+        otel.Blocking() under WEFT_ENV=dev (or otel.DevMode())
       </span>
     </span>
   )

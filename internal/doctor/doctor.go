@@ -317,7 +317,7 @@ func (p *printer) ingest(m meta) {
 		// weft.records.dropped counts every lost record — a full queue
 		// and failed exports alike — so the fix names both; the app's
 		// WARN says which it was.
-		p.sub("fix: queue full or exports failing — the app's WARN names which (\"weft/otel: destination queue full\": raise it with otel.QueueSize(n), or use otel.Blocking() under WEFT_ENV=dev; \"weft/otel: destination dropped records\": its err is the export's failure)")
+		p.sub("fix: queue full or exports failing — the app's WARN names which (\"weft/otel: destination queue full\": raise it with otel.QueueSize(n), or use otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); \"weft/otel: destination dropped records\": its err is the export's failure)")
 	}
 }
 

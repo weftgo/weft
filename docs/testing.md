@@ -488,7 +488,7 @@ order:
      landed item (`{"label","item","gzip"}`). The last row must equal
      the committed `studio/dist/panel/panel.js`, measured with the
      version stamp normalised and gzipped with pako level 6. The cap
-     (`cap`, 98,304 B = 96 KiB) is the single source the build, the
+     (`cap`, 106,496 B = 104 KiB) is the single source the build, the
      printed table and `budget.test.ts` all read. A rebuild that changes
      `panel.js` without appending its row fails here. The build prints
      the per-item table, with headroom.

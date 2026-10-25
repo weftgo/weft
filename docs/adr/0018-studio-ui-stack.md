@@ -59,7 +59,8 @@ mount as one `http.Handler`.
    a reason. *Amended 2026-10-16:* raised to **700 KiB** by the user for
    phase 8's one-run-screen items (run tree, call graph, step drawer,
    logs) — the shared row model is now in both bundles; the panel.js copy
-   (≈86 KiB) counts here and under its own 96 KiB cap.
+   (≈86 KiB) counts here and under its own cap (96 KiB then; 104 KiB since phase 10, the user's
+   decision of 2026-10-23).
 8. **Built for hosting from day one, without hosting code.** Two API
    rules make the same bundle serve local, self-hosted and hosted
    Studio (`WEFTGO-PRICING-AND-TIERS.md` §10: one artifact):

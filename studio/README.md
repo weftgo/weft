@@ -1062,9 +1062,9 @@ reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
 committed `studio/dist/panel/panel.js`, 272,091 B raw / 91,032 B gzip
-(88.9 KiB, the bundle of the ledger's row "P9-pre-web-fix7"; 7,272 B — 7.1 KiB — of headroom under
-the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
-test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
+(88.9 KiB, the bundle of the ledger's row "P10-cap cap raised to 104 KiB"; 15,464 B — 15.1 KiB — of headroom under
+the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
+test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
 build kept its indentation and newlines: 281,470 B raw / 81,358 B gzip,
 562 B under the cap; since P8-fix-a its stylesheet's whitespace too,
@@ -1119,9 +1119,14 @@ each plan item's estimate beside its measured gzip delta, `over` when
 the delta is more than half again the estimate (`over (accepted)` when
 the plan recorded why it was not split), the unbudgeted items, the
 baseline, and the total against the cap with the headroom left. The
-cap is 96 KiB (98,304 B) since phase 7, by the UX audit's decision 1
-(§10, 2026-10-12; item A5.4, the ledger's row "A5.4 cap raised to
-96 KiB", the bundle unchanged); it was 80 KiB (81,920 B) before. The
+cap is 104 KiB (106,496 B) since phase 10, by the user's decision of
+2026-10-23 (before phase 10, so its panel features land without a trim
+pass; item P10-cap, the ledger's row "P10-cap cap raised to 104 KiB",
+the bundle unchanged; the phase floor stays 7,500 B of headroom against
+it). The cap's history: 80 KiB (81,920 B) → 96 KiB (98,304 B) in phase
+7, by the UX audit's decision 1 (§10, 2026-10-12; item A5.4, the
+ledger's row "A5.4 cap raised to 96 KiB", the bundle unchanged) → 104
+KiB (106,496 B) in phase 10. The
 ledger's `cap` is the one source: the build's failure
 (`vite.panel.config.ts`), the printed table and
 `scripts/panel-asset.ts` all read it, and `budget.test.ts` pins it.

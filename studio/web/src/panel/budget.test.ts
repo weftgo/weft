@@ -114,9 +114,10 @@ describe("the size ledger (panel-budget.json)", () => {
     // gzipSize, as the build measures: a pure-JS deflate, the same bytes under any host Node.
     const built = gzipSize(normalizeStamp(code, weftVersion()))
     expect(ledger.rows.at(-1)?.gzip).toBe(built)
-    // The committed bundle is within the cap, and the cap is 96 KiB (A5.4, audit §10 decision 1; 80 KiB before).
-    expect(ledger.cap).toBe(96 * 1024)
-    expect(ledger.cap).toBe(98304)
+    // The committed bundle is within the cap, and the cap is 104 KiB (P10-cap, the user's decision of 2026-10-23;
+    // 96 KiB from A5.4, audit §10 decision 1; 80 KiB before).
+    expect(ledger.cap).toBe(104 * 1024)
+    expect(ledger.cap).toBe(106496)
     expect(built).toBeLessThanOrEqual(ledger.cap)
   })
 
@@ -217,9 +218,46 @@ describe("the size ledger (panel-budget.json)", () => {
     expect(before.lines.at(-1)).toBe(
       "total 78,098 B (76.3 KiB) of 81,920 B · headroom 3,822 B (3.7 KiB)"
     )
-    expect(budgetTable(ledger, 78098).lines.at(-1)).toBe(
+    expect(
+      budgetTable({ ...ledger, cap: 98304, rows: ledger.rows.slice(0, i + 1) }, 78098)
+        .lines.at(-1)
+    ).toBe(
       "total 78,098 B (76.3 KiB) of 98,304 B · headroom 20,206 B (19.7 KiB)"
+    ) // the cap of that era (96 KiB, before P10-cap)
+  })
+
+  it("raised the cap to 104 KiB in one row (P10-cap, the user's decision of 2026-10-23): the bundle unchanged, the headroom 8 KiB larger", () => {
+    const i = ledger.rows.findIndex(
+      (r) => r.label === "P10-cap cap raised to 104 KiB"
     )
+    expect(i).toBeGreaterThan(0)
+    const row = ledger.rows[i]
+    expect([row.item, row.gzip]).toEqual(["", 91032])
+    expect(ledger.rows[i - 1].label).toBe("P9-pre-web-fix7")
+    expect(row.gzip).toBe(ledger.rows[i - 1].gzip) // the bundle is unchanged
+    expect(row.note).toContain(
+      "cap raised from 98,304 B to 106,496 B (+8 KiB; user, 2026-10-23, before phase 10)"
+    )
+    expect(row.note).toContain(
+      "the phase floor stays 7,500 B of headroom against the new cap"
+    )
+    const before = budgetTable(
+      { ...ledger, cap: 98304, rows: ledger.rows.slice(0, i) },
+      91032
+    )
+    expect(before.lines.at(-1)).toBe(
+      "total 91,032 B (88.9 KiB) of 98,304 B · headroom 7,272 B (7.1 KiB)"
+    )
+    const after = budgetTable(
+      { ...ledger, rows: ledger.rows.slice(0, i + 1) },
+      91032
+    )
+    expect(after.over).toBe(false)
+    expect(after.lines.at(-1)).toBe(
+      "total 91,032 B (88.9 KiB) of 106,496 B · headroom 15,464 B (15.1 KiB)"
+    )
+    // The phase floor: 7,500 B of headroom against the new cap leaves 7,964 B for phase 10's panel deltas.
+    expect(ledger.cap - 7500 - row.gzip).toBe(7964)
   })
 
   it("prints the full ledger's table: the minified and later unbudgeted rows net into one line, 20,206 B of headroom", () => {
@@ -231,7 +269,7 @@ describe("the size ledger (panel-budget.json)", () => {
     const at = ledger.rows.findIndex(
       (r) => r.label === "A5.4 cap raised to 96 KiB"
     )
-    const atA54 = { ...ledger, rows: ledger.rows.slice(0, at + 1) }
+    const atA54 = { ...ledger, cap: 98304, rows: ledger.rows.slice(0, at + 1) } // A5.4's cap (P10-cap raised it later)
     expect(atA54.rows.at(-1)!.label).toBe("A5.4 cap raised to 96 KiB")
     const { lines, over } = budgetTable(atA54, 78098)
     expect(over).toBe(false)
@@ -263,7 +301,7 @@ describe("the size ledger (panel-budget.json)", () => {
       expect(() => ledgerFrom(text(cap))).toThrow(
         "panel-budget.json: cap must be a positive integer"
       )
-    expect(readLedger().cap).toBe(98304)
+    expect(readLedger().cap).toBe(106496)
   })
 
   it("says when the build differs from the last row, and only the cap fails", () => {
@@ -281,15 +319,16 @@ describe("the size ledger (panel-budget.json)", () => {
     const at = budgetTable(ledger, ledger.cap)
     expect(at.over).toBe(false)
     expect(at.lines.at(-1)).toBe(
-      "total 98,304 B (96.0 KiB) of 98,304 B · headroom 0 B (0.0 KiB)"
+      "total 106,496 B (104.0 KiB) of 106,496 B · headroom 0 B (0.0 KiB)"
     )
     const big = budgetTable(ledger, ledger.cap + 1)
     expect(big.over).toBe(true)
     expect(big.lines.at(-1)).toBe(
-      "total 98,305 B (96.0 KiB) of 98,304 B · headroom none · OVER THE CAP"
+      "total 106,497 B (104.0 KiB) of 106,496 B · headroom none · OVER THE CAP"
     )
-    // The old cap's overrun is no longer one: the cap is the ledger's.
+    // The old caps' overruns are no longer ones: the cap is the ledger's.
     expect(budgetTable(ledger, 81921).over).toBe(false)
+    expect(budgetTable(ledger, 98305).over).toBe(false)
   })
 
   it("studio/README.md's panel figures are the ledger's last row (D7): the chain README → ledger → built bundle", () => {

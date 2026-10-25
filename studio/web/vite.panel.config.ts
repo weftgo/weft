@@ -24,7 +24,8 @@ import {
 import { analyzeMangle } from "./scripts/panel-mangle.ts"
 
 /** §5.1's budget: panel.js is ≤ the ledger's cap in gzip bytes —
- * panel-budget.json's "cap", 96 KiB (98,304 B) since phase 7 (audit §10
+ * panel-budget.json's "cap", 104 KiB (106,496 B) since phase 10 (the
+ * user's decision of 2026-10-23, P10-cap; 96 KiB from phase 7, audit §10
  * decision 1, A5.4; 80 KiB before). The ledger is the one source: the
  * printed table, this build's failure and scripts/panel-asset.ts read it,
  * all through readLedger, which throws on a cap that is not a positive

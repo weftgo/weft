@@ -6,6 +6,12 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Changed
+
+- Devtools panel: the panel's size cap is 104 KiB (106,496 B), up from 96 KiB (98,304 B), by the user's decision of 2026-10-23 before phase 10, so phase 10's panel features land without a trim pass; the phase floor stays 7,500 B of headroom against the new cap and every panel delta still appends a ledger row. The ledger's `cap` (`studio/web/panel-budget.json`) stays the one source the build (`vite.panel.config.ts`) and `scripts/panel-asset.ts` fail on; one row, "P10-cap cap raised to 104 KiB", records the change at the unchanged 91,032 B (15,464 B of headroom).
+
 ## 0.18.3 — 2026-10-21
 
 ### Fixed

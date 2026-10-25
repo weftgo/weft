@@ -46,11 +46,19 @@ export interface PreviewDoc {
   compacted_at: unknown
   warnings: { kind: string; message: string }[]
   unchecked: string[]
-  /** U18.1, when the server sends them: whether the scripted engine
-   * holds an answer for this request, and its key check against the
-   * recording (lib/engine.ts reads them; absent is unknown). */
-  scripted_hit?: boolean | null
-  scripted_key_match?: { ok: boolean; because?: string[] } | null
+  /** U18.1: per step from from_step through the first miss, whether
+   * the scripted engine holds a recorded answer, and the key
+   * components that differ when it does not. Absent on a Studio older
+   * than the field. */
+  scripted_hit?: { step: number; hit: boolean; because: string[] }[]
+  /** U18.1: ok, or the first missing step, its components and the
+   * server's sentence. Absent on a Studio older than the field. */
+  scripted_key_match?: {
+    ok: boolean
+    because: string[]
+    step: number | null
+    message?: string
+  }
 }
 
 export const PREVIEW_PATH = "playground/preview"

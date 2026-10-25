@@ -34,7 +34,12 @@ type registration struct {
 	// `<id>-<pid>`, which the link adopts) — and a restarted process,
 	// even one reusing a pid, from the one its old commands were queued
 	// for.
-	Instance    string     `json:"instance,omitempty"`
+	Instance string `json:"instance,omitempty"`
+	// StudioURL is the Studio this link dialled (runtime.Studio's url,
+	// WEFT_STUDIO_URL, or the discovery file's), credentials and query
+	// stripped; "" in-process (runtime.Local). A Studio that holds the
+	// registration can say where the runtime went (UX-D-01).
+	StudioURL   string     `json:"studio_url,omitempty"`
 	Service     string     `json:"service"`
 	Env         string     `json:"env"`
 	WeftVersion string     `json:"weft_version"`
@@ -75,14 +80,18 @@ type registration struct {
 // Defaults are the agent's own run defaults — what a command's
 // overrides replace, shown greyed beside them by the option lab.
 type agentRegistration struct {
-	Name        string            `json:"name"`
-	Manifest    string            `json:"manifest"` // core.Manifest JSON for this one agent
-	Models      []string          `json:"models"`
-	Resolver    bool              `json:"resolver"`
-	Limits      agentLimits       `json:"limits"`
-	Defaults    agentDefaults     `json:"defaults"`
-	SideEffects map[string]string `json:"side_effects"`
-	Allow       []string          `json:"allow"`
+	Name     string `json:"name"`
+	Manifest string `json:"manifest"` // core.Manifest JSON for this one agent
+	// ManifestHash is sha256 (lowercase hex) of Manifest's bytes — the
+	// weft.manifest.hash the agent's own runs carry, so Studio can join
+	// a recorded run's build to the registered one (UX-C-06).
+	ManifestHash string            `json:"manifest_hash"`
+	Models       []string          `json:"models"`
+	Resolver     bool              `json:"resolver"`
+	Limits       agentLimits       `json:"limits"`
+	Defaults     agentDefaults     `json:"defaults"`
+	SideEffects  map[string]string `json:"side_effects"`
+	Allow        []string          `json:"allow"`
 }
 
 // agentDefaults are the agent's run defaults as the command's override

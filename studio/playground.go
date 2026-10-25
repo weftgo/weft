@@ -103,6 +103,13 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 			mux.HandleFunc("POST /api/playground/preview", s.servePlaygroundPreview(rs))
 		},
 	})
+	// The target facts (U18.1): GET /api/runtimes' per-agent
+	// manifest_hash and studio_url, the preview's scripted_hit /
+	// scripted_key_match, POST /api/playground/runs' cross-agent
+	// refusal (cross_agent: true opts in) and a command's reason. No
+	// route of its own: the capability is what a client gates its
+	// target check on.
+	s.addGroup(routeGroup{name: "target_check", capability: "target_check"})
 	s.addGroup(routeGroup{
 		name:       "breakpoints",
 		capability: "breakpoints",
@@ -142,8 +149,10 @@ func (s *Server) serveRuntimes(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 			// The app's working directory is a filesystem path: db.path's
 			// rule (the server token, or setup A's loopback), never a
 			// panel token's.
+			// The Studio URL the runtime dialled is an address on the
+			// operator's network: the same rule.
 			for i := range views {
-				views[i].Cwd = ""
+				views[i].Cwd, views[i].StudioURL = "", ""
 			}
 		}
 		if !readsPrompts(r) {
@@ -187,6 +196,11 @@ type runRequest struct {
 	Thread          string                       `json:"thread"`
 	ExperimentID    string                       `json:"experiment_id"`
 	PublicID        string                       `json:"public_id"`
+	// CrossAgent is the caller's explicit opt-in to replaying a source
+	// run as another agent than the one that recorded it (UX-C-03):
+	// without it, POST /api/playground/runs refuses the mismatch.
+	// Studio's alone — it never reaches the runtime.
+	CrossAgent bool `json:"cross_agent,omitempty"`
 }
 
 // servePlaygroundRun validates the command against the runtime's
@@ -279,6 +293,10 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			badRequest(w, r, "fork mode needs runtime.Threads(store) on this runtime")
 			return
 		}
+		if e := s.checkTargetNamed(r.Context(), &req); e != nil {
+			e.write(w, r)
+			return
+		}
 		agent, ok := reg.Agent(req.Agent)
 		if !ok {
 			notFound(w, r, "unknown agent "+req.Agent)
@@ -286,6 +304,10 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 		}
 
 		if e := s.checkSource(r.Context(), &req); e != nil {
+			e.write(w, r)
+			return
+		}
+		if e := s.checkTarget(r.Context(), &req); e != nil {
 			e.write(w, r)
 			return
 		}
@@ -602,6 +624,54 @@ func (s *Server) checkSource(ctx context.Context, req *runRequest) *cmdError {
 		return &cmdError{http.StatusInternalServerError, "internal", "read source run " + req.Source.RunID + " failed"}
 	}
 	return nil
+}
+
+// checkTargetNamed refuses a command that names no agent (400): Studio
+// never picks one for the caller (UX-C-02) — with a source run, the
+// sentence says which agent recorded it, or that it names none.
+func (s *Server) checkTargetNamed(ctx context.Context, req *runRequest) *cmdError {
+	if req.Agent != "" {
+		return nil
+	}
+	if req.Source != nil && req.Source.RunID != "" {
+		if det, err := s.db.Run(ctx, req.Source.RunID); err == nil {
+			if det.Agent == "" {
+				return refuse(unnamedSourceMsg(req.Source.RunID))
+			}
+			return refuse(fmt.Sprintf("a run needs an agent: source run %s is agent %s (send agent: %q to replay it on that agent)", req.Source.RunID, det.Agent, det.Agent))
+		}
+	}
+	return refuse("a run needs an agent (the connected runtimes view lists each runtime's)")
+}
+
+// unnamedSourceMsg is the refusal of a source run that recorded no
+// agent name when the command names none either.
+func unnamedSourceMsg(runID string) string {
+	return "source run " + runID + " names no agent: name the agent to replay it on (agent), Studio does not pick one"
+}
+
+// checkTarget refuses a source run recorded by another agent than the
+// one the command targets (400, UX-C-03) unless the body opts in with
+// cross_agent: true — a replay is that agent's prompt and tools over
+// this run's transcript, never a silent stand-in. A source that names
+// no agent passes: the command named its target explicitly. Run after
+// checkSource (the run exists).
+func (s *Server) checkTarget(ctx context.Context, req *runRequest) *cmdError {
+	if req.Source == nil || req.Source.RunID == "" || req.CrossAgent {
+		return nil
+	}
+	det, err := s.db.Run(ctx, req.Source.RunID)
+	if err != nil || det.Agent == "" || det.Agent == req.Agent {
+		return nil
+	}
+	return refuse(crossAgentMsg(req.Source.RunID, det.Agent, req.Agent))
+}
+
+// crossAgentMsg is the cross-agent refusal's sentence: both agents and
+// the escape.
+func crossAgentMsg(runID, recorded, target string) string {
+	return fmt.Sprintf("source run %s is agent %s; this command targets agent %s: send agent %q to replay it as recorded, or cross_agent: true to replay it as %s anyway",
+		runID, recorded, target, recorded, target)
 }
 
 // checkRegistered checks the overrides against the runtime's registered

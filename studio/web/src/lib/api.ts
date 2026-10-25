@@ -2436,6 +2436,9 @@ export interface AgentDefaults {
 
 export interface AgentView {
   name: string
+  /** U18.1: the registered agent's weft.manifest.hash (compare a run's
+   * manifest_hash). Absent on a Studio older than the field. */
+  manifest_hash?: string
   models: string[]
   /** The runtime holds a runtime.ModelResolver: a model name outside
    * `models` may be proposed (the runtime decides before its ack).
@@ -2467,6 +2470,13 @@ export interface RuntimeView {
   sessions?: boolean
   /** It registered breakpoints_own: runtime.Breakpoints() on an agent. */
   breakpoints_own?: boolean
+  /** The app's working directory (db.path's rule: absent to a panel token). */
+  cwd?: string
+  /** U18.1: the Studio the runtime's link dialled (cwd's rule; absent
+   * in-process). */
+  studio_url?: string
+  /** Listed from the store after a Studio restart, not registered since. */
+  restored?: boolean
   agents: AgentView[]
   /** The debugger's stored tool set for this runtime (PUT
    * /api/runtimes/{id}/breakpoints): what it parks on every run it
@@ -2553,6 +2563,14 @@ export interface CommandStatus {
   /** Why, when there is a why: a failed run's error, a rejection's
    * reason, what made the command lost. */
   error: string | null
+  /** U18.1: the error read — a scripted miss's source step, key
+   * components and the server's sentence for both surfaces. */
+  reason?: {
+    kind: "scripted_miss"
+    step: number
+    components: string[]
+    message: string
+  }
   created: string
   updated: string
 }

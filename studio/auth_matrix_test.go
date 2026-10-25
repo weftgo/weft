@@ -274,7 +274,7 @@ func TestAuthMatrix(t *testing.T) {
 	// here), rt_link is the one the link routes of the matrix touch.
 	manifest := `{\"weft\":1,\"agents\":[{\"name\":\"acme-support\",\"instructions\":\"THE SYSTEM PROMPT\",\"model\":{\"provider\":\"p\",\"name\":\"m\"},\"policy\":{},\"tools\":[{\"name\":\"refund\"}]}]}`
 	regBody := func(id string) string {
-		return `{"runtime_id":"` + id + `","cwd":"/THE/CWD","agents":[{"name":"acme-support","manifest":"` + manifest + `","limits":{"max_steps":10,"parallelism":4},` +
+		return `{"runtime_id":"` + id + `","cwd":"/THE/CWD","studio_url":"http://the-studio:7341","agents":[{"name":"acme-support","manifest":"` + manifest + `","limits":{"max_steps":10,"parallelism":4},` +
 			`"defaults":{"tool_choice":{"mode":"named","name":"refund"},"stop":["THE STOP"]}}]}`
 	}
 	for _, id := range []string{"rt_test", "rt_link"} {
@@ -1157,6 +1157,38 @@ func TestAuthMatrix(t *testing.T) {
 		// rule — the server token alone here (no panel token reads it).
 		if got, want := strings.Contains(string(b), `"cwd":"/THE/CWD"`), id.kind == "server"; got != want {
 			t.Errorf("GET /api/runtimes as %s: cwd present = %v, want %v", id.name, got, want)
+		}
+		// U18.1: the Studio URL the runtime dialled is an address on
+		// the operator's network — cwd's rule; each agent's manifest
+		// hash (a hash, no content) is every identity's.
+		if got, want := strings.Contains(string(b), `"studio_url":"http://the-studio:7341"`), id.kind == "server"; got != want {
+			t.Errorf("GET /api/runtimes as %s: studio_url present = %v, want %v", id.name, got, want)
+		}
+		if !strings.Contains(string(b), `"manifest_hash":"`) {
+			t.Errorf("GET /api/runtimes as %s: no agent manifest_hash: %s", id.name, b)
+		}
+	}
+
+	// U18.1: the preview's scripted check names key components, never
+	// their content, so every identity inside the source's public id —
+	// a read-scoped token too — gets scripted_hit and
+	// scripted_key_match.
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/playground/preview",
+			strings.NewReader(`{"agent":"acme-support","source":{"run_id":"run_a","from_step":0},"engine":"scripted"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+id.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || !strings.Contains(string(b), `"scripted_hit":[`) || !strings.Contains(string(b), `"scripted_key_match":{"ok":`) {
+			t.Errorf("POST /api/playground/preview as %s = %d, want the scripted check: %s", id.name, resp.StatusCode, b)
 		}
 	}
 

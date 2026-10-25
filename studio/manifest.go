@@ -43,19 +43,20 @@ const (
 // when it is absent — the one table capabilitiesOff reads (a test
 // checks every optional group has an entry).
 var optionalCapabilities = map[string]string{
-	"playground":  offPlayground,
-	"runtimes":    offPlayground,
-	"breakpoints": offPlayground,
-	"steer":       offPlayground,
-	"cancel":      offPlayground,
-	"preview":     offPlayground,
-	"ingest":      offIngest,
-	"auth":        offAuth,
-	"handoff":     offHandoff,
-	"search":      offSearch,
-	"manifests":   offManifests,
-	"spans_tree":  offSpansTree,
-	"timeline":    offTimeline,
+	"playground":   offPlayground,
+	"runtimes":     offPlayground,
+	"breakpoints":  offPlayground,
+	"steer":        offPlayground,
+	"cancel":       offPlayground,
+	"preview":      offPlayground,
+	"target_check": offPlayground,
+	"ingest":       offIngest,
+	"auth":         offAuth,
+	"handoff":      offHandoff,
+	"search":       offSearch,
+	"manifests":    offManifests,
+	"spans_tree":   offSpansTree,
+	"timeline":     offTimeline,
 }
 
 // manifestSourceView is one entry of api/manifest's sources.

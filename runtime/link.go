@@ -249,12 +249,29 @@ func (l *link) connect(ctx context.Context) error {
 	return err
 }
 
+// dialledURL is the Studio URL a registration reports (StudioURL):
+// base without its userinfo, query or fragment — a token must never
+// ride the registration; "" in-process or for a URL that does not
+// parse.
+func dialledURL(base string) string {
+	if base == "" {
+		return ""
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	u.User, u.RawQuery, u.Fragment, u.ForceQuery = nil, "", "", false
+	return strings.TrimRight(u.String(), "/")
+}
+
 // register is POST /api/runtime/register — on connect and again after
 // every reconnect, so Studio's copy of the agents, allow-lists and
 // caps is always the runtime's own (§10.3).
 func (l *link) register(ctx context.Context) error {
 	reg := l.reg.registration(l.id)
 	reg.Instance = l.instance
+	reg.StudioURL = dialledURL(l.base)
 	reg.Breakpoints = l.breakpointSet()
 	reg.HeartbeatMS = l.beat.Milliseconds()
 	body, err := json.Marshal(reg)

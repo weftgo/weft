@@ -40,7 +40,8 @@
     "playground": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
     "preview": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
     "runtimes": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
-    "steer": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+    "steer": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "target_check": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
   },
   "manifest_sources": 1,
   "auth_required": false,

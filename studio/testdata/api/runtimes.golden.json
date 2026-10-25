@@ -5,6 +5,7 @@
       "host": "dev-laptop",
       "pid": 41237,
       "cwd": "/home/dev/acme-api",
+      "studio_url": "http://127.0.0.1:7341",
       "service": "acme-api",
       "env": "dev",
       "connected_since": "2026-10-09T10:00:00Z",
@@ -15,6 +16,7 @@
       "agents": [
         {
           "name": "acme-support",
+          "manifest_hash": "3f1c9a0d6b2e4f5a8c7d9e0b1a2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4",
           "models": ["glm-5.3-flash"],
           "resolver": true,
           "defaults": {

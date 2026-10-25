@@ -933,6 +933,39 @@ func TestScriptedEngineEndToEnd(t *testing.T) {
 	if text := e.commandText(t, st.RunID); text != "Your order shipped yesterday." {
 		t.Errorf("scripted reply = %q, want the recorded one", text)
 	}
+
+	// U18.1, both sides real: the registered agent's manifest hash is
+	// the one its recorded run carries (R1) and the registration names
+	// the Studio the link dialled; the preview says before Run that an
+	// unchanged replay hits and a changed input misses at step 0 (A6);
+	// the failed run's command names the step and the component (R2).
+	_, rtJSON = e.api(t, http.MethodGet, "/api/runtimes", "")
+	_, runJSON := e.api(t, http.MethodGet, "/api/runs/"+runID, "")
+	var runDoc struct {
+		ManifestHash string `json:"manifest_hash"`
+	}
+	if err := json.Unmarshal([]byte(runJSON), &runDoc); err != nil || runDoc.ManifestHash == "" {
+		t.Fatalf("source run has no manifest_hash: %v %s", err, runJSON)
+	}
+	if !strings.Contains(rtJSON, `"manifest_hash":"`+runDoc.ManifestHash+`"`) || !strings.Contains(rtJSON, `"studio_url":"`+e.ts.URL+`"`) {
+		t.Errorf("runtimes = %s, want the run's manifest_hash %s and studio_url %s", rtJSON, runDoc.ManifestHash, e.ts.URL)
+	}
+	if _, pv := e.api(t, http.MethodPost, "/api/playground/preview", body); !strings.Contains(pv, `"scripted_key_match":{"ok":true`) {
+		t.Errorf("unchanged scripted preview = %s, want ok", pv)
+	}
+	changed := strings.Replace(strings.Replace(body, "cmd_scripted_1", "cmd_scripted_miss", 1), "where is my order #4411?", "where is order 99?", 1)
+	if _, pv := e.api(t, http.MethodPost, "/api/playground/preview", changed); !strings.Contains(pv,
+		`"scripted_key_match":{"ok":false,"because":["messages"],"step":0,"message":"scripted has no recorded answer for step 0: the messages differ from the recording (a changed input or tool result) — re-run on engine live"}`) {
+		t.Errorf("changed-input scripted preview = %s, want the step-0 messages miss", pv)
+	}
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", changed); code != http.StatusAccepted {
+		t.Fatalf("scripted changed-input run = %d %s", code, resp)
+	}
+	missRow := e.waitCommand(t, "cmd_scripted_miss", "finished")
+	if !strings.Contains(missRow, `"status":"failed"`) ||
+		!strings.Contains(missRow, `"reason":{"kind":"scripted_miss","step":0,"components":["messages"],"message":"scripted has no recorded answer for step 0: the messages differ from the recording (a changed input or tool result) — re-run on engine live"}`) {
+		t.Errorf("scripted miss row = %s, want the step-0 messages reason", missRow)
+	}
 }
 
 // TestPlaygroundForkMode is §10.6's P4 gate: fork mode creates a new

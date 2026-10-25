@@ -297,7 +297,6 @@ export function engineFor(d: ExperimentDraft, pv?: PreviewDoc): EngineChoice {
     fromStep: d.step,
     steps: fork ? undefined : d.steps,
     keyMatch: pv?.scripted_key_match,
-    hit: pv?.scripted_hit,
     ownModel: d.ownModel,
     cost: d.cost,
     costWhy: d.costWhy,

@@ -21,7 +21,8 @@ import (
 
 // TestRuntimesGoldenMatchesARealRuntime: testdata/api/runtimes.golden.json
 // is the GET /api/runtimes shape the web client builds the option lab
-// on (plan F3: each agent's resolver flag and run defaults). This
+// on (plan F3: each agent's resolver flag and run defaults; U18.1:
+// each agent's manifest hash and the Studio URL the link dialled). This
 // connects a real weft/runtime — run defaults set, a ModelResolver
 // installed — to a real Studio and reads the route: every field the
 // golden pins must exist in the real answer with the same JSON type.
@@ -42,7 +43,9 @@ func TestRuntimesGoldenMatchesARealRuntime(t *testing.T) {
 		core.Params(core.RequestParams{Temperature: &temp, TopP: &topP, MaxTokens: &maxTok, Seed: &seed, Stop: []string{"END"}}),
 		core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "lookup_order"}),
 		lookup, refund)
-	stop := runtime.Install(runtime.Local(srv), runtime.Enabled(true), runtime.Agents(agent),
+	// Dialled over HTTP, not runtime.Local: the registration then
+	// carries the Studio URL the link dialled (studio_url, R1).
+	stop := runtime.Install(runtime.Studio(ts.URL, ""), runtime.Enabled(true), runtime.Agents(agent),
 		runtime.Models(map[string]core.Model{"glm-5.3-flash": wefttest.Script(wefttest.Say("alt"))}),
 		runtime.ModelResolver(func(context.Context, string) (core.Model, error) { return nil, errors.New("no") }),
 		runtime.AllowSideEffects("refund"))

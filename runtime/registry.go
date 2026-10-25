@@ -63,9 +63,10 @@ func (r *registry) entryFor(a *core.Agent, name string) agentRegistration {
 		slog.Warn("weft/runtime: manifest for agent failed", "agent", name, "err", err)
 	}
 	e := agentRegistration{
-		Name:        name,
-		Manifest:    string(manifest),
-		SideEffects: map[string]string{},
+		Name:         name,
+		Manifest:     string(manifest),
+		ManifestHash: manifestHash(manifest),
+		SideEffects:  map[string]string{},
 	}
 	for _, t := range a.Tools() {
 		e.SideEffects[t.Name] = string(t.ReplayPolicy())
@@ -78,6 +79,16 @@ func (r *registry) entryFor(a *core.Agent, name string) agentRegistration {
 	e.Resolver = r.cfg.resolve != nil
 	e.Defaults = defaultsOf(a, e.Limits)
 	return e
+}
+
+// manifestHash is the core's weft.manifest.hash of a manifest's bytes:
+// sha256, lowercase hex ("" for none — an agent whose manifest failed).
+func manifestHash(manifest []byte) string {
+	if len(manifest) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(manifest)
+	return hex.EncodeToString(sum[:])
 }
 
 // defaultsOf reads the agent's run defaults — what each override

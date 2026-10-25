@@ -980,8 +980,10 @@ func TestPlaygroundOldRuntimeRefusesEditKinds(t *testing.T) {
 		}
 	}
 	body := func(run string, from int, edits string) string {
+		// r_oldcv is agent orders' run: the cross-agent opt-in keeps
+		// this a version-skew test (the refusal is pinned elsewhere).
 		return `{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"` + run + `","from_step":` + fmt.Sprint(from) +
-			`},"transcript_edits":` + edits + `,"engine":"live","side_effects":"substitute","thread":"ephemeral"}`
+			`},"transcript_edits":` + edits + `,"engine":"live","side_effects":"substitute","thread":"ephemeral","cross_agent":true}`
 	}
 	const kinds = "runtime predates transcript edit kinds: upgrade weft/runtime to use user, tool_args, insert edits"
 	const view = "runtime predates replay across a compaction: step 2's request carried a compaction view the runtime would not splice in, so its model would see the uncompacted transcript; upgrade weft/runtime"

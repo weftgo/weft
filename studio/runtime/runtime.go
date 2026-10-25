@@ -49,6 +49,8 @@
 package runtime
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -83,7 +85,11 @@ type Registration struct {
 	// across its own restarts; one that does not is told apart by host
 	// and pid alone (a restarted container reusing pid 1 would then read
 	// as the old process), and Studio WARNs once.
-	Instance    string `json:"instance,omitempty"`
+	Instance string `json:"instance,omitempty"`
+	// StudioURL is the Studio the runtime's link dialled, credentials
+	// stripped ("" in-process, or a runtime older than the field): what
+	// lets this Studio say where a runtime went (UX-D-01).
+	StudioURL   string `json:"studio_url,omitempty"`
 	Service     string `json:"service"`
 	Env         string `json:"env"`
 	WeftVersion string `json:"weft_version"`
@@ -124,14 +130,19 @@ type Registration struct {
 // (plan F3's option lab greys them). A runtime older than either sends
 // neither: false and the zero value.
 type AgentRegistration struct {
-	Name        string            `json:"name"`
-	Manifest    string            `json:"manifest"`
-	Models      []string          `json:"models"`
-	Resolver    bool              `json:"resolver"`
-	Limits      AgentLimits       `json:"limits"`
-	Defaults    AgentDefaults     `json:"defaults"`
-	SideEffects map[string]string `json:"side_effects"`
-	Allow       []string          `json:"allow"`
+	Name     string `json:"name"`
+	Manifest string `json:"manifest"`
+	// ManifestHash is sha256 (lowercase hex) of Manifest's bytes as the
+	// runtime registered them — the weft.manifest.hash its own runs of
+	// the agent carry. A runtime older than the field sends none, and
+	// Studio hashes Manifest itself (AgentView.ManifestHash).
+	ManifestHash string            `json:"manifest_hash,omitempty"`
+	Models       []string          `json:"models"`
+	Resolver     bool              `json:"resolver"`
+	Limits       AgentLimits       `json:"limits"`
+	Defaults     AgentDefaults     `json:"defaults"`
+	SideEffects  map[string]string `json:"side_effects"`
+	Allow        []string          `json:"allow"`
 }
 
 // AgentDefaults are an agent's run defaults in the command's override
@@ -170,6 +181,20 @@ func (r Registration) Agent(name string) (AgentRegistration, bool) {
 		}
 	}
 	return AgentRegistration{}, false
+}
+
+// Hash is the agent's manifest hash: the one its registration carried,
+// else sha256 of its Manifest bytes (the core's weft.manifest.hash of
+// the same bytes) — "" with no manifest.
+func (a AgentRegistration) Hash() string {
+	if a.ManifestHash != "" {
+		return a.ManifestHash
+	}
+	if a.Manifest == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(a.Manifest))
+	return hex.EncodeToString(sum[:])
 }
 
 // IsAllowed reports whether tool is on the agent's AllowSideEffects
@@ -470,7 +495,11 @@ type CommandStatus struct {
 	Status string `json:"status,omitempty"`
 	// Error is why, when there is a why: a failed run's error text, a
 	// rejection's reason, what made the command lost. Null otherwise.
-	Error   *string   `json:"error"`
+	Error *string `json:"error"`
+	// Reason is Error read: the scripted engine's miss with the source
+	// step and the key components it names, and Studio's sentence for
+	// both surfaces (ReasonOf). Absent for any other error.
+	Reason  *Reason   `json:"reason,omitempty"`
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
 }
@@ -485,7 +514,12 @@ type RuntimeView struct {
 	// Cwd is the registration's working directory — a filesystem path,
 	// so Studio's route serves it under db.path's rule (absent to a
 	// panel token).
-	Cwd            string    `json:"cwd,omitempty"`
+	Cwd string `json:"cwd,omitempty"`
+	// StudioURL is the Studio the runtime's link dialled (its
+	// registration's; absent in-process or from a runtime older than
+	// the field). An address of this machine's network, so Studio's
+	// route serves it under cwd's rule.
+	StudioURL      string    `json:"studio_url,omitempty"`
 	Service        string    `json:"service"`
 	Env            string    `json:"env"`
 	ConnectedSince time.Time `json:"connected_since"`
@@ -525,9 +559,14 @@ type RuntimeView struct {
 // outside Models may be proposed, and the run defaults the option lab
 // shows greyed beside each override.
 type AgentView struct {
-	Name     string   `json:"name"`
-	Models   []string `json:"models"`
-	Resolver bool     `json:"resolver"`
+	Name string `json:"name"`
+	// ManifestHash is the registered agent's weft.manifest.hash: what a
+	// recorded run's manifest_hash is compared with to say whether the
+	// run was recorded by this build of the agent (UX-C-06). "" when
+	// the registration carried no manifest.
+	ManifestHash string   `json:"manifest_hash"`
+	Models       []string `json:"models"`
+	Resolver     bool     `json:"resolver"`
 	// Defaults are the agent's run defaults as its runtime registered
 	// them; nil (absent on the wire) for a runtime older than the
 	// option lab, which registers none — a client greys the new knobs
@@ -1670,6 +1709,7 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			Host:           c.reg.Host,
 			Pid:            c.reg.Pid,
 			Cwd:            c.reg.Cwd,
+			StudioURL:      c.reg.StudioURL,
 			Service:        c.reg.Service,
 			Env:            c.reg.Env,
 			ConnectedSince: c.connectedSince,
@@ -1685,7 +1725,7 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			v.BreakpointsSetAt = &at
 		}
 		for _, a := range c.reg.Agents {
-			av := AgentView{Name: a.Name, Models: a.Models, Resolver: a.Resolver,
+			av := AgentView{Name: a.Name, ManifestHash: a.Hash(), Models: a.Models, Resolver: a.Resolver,
 				Instructions: a.ManifestInstructions()}
 			// A current runtime always registers its defaults (tool
 			// choice mode at least "auto"); one older than the option lab
@@ -1823,6 +1863,7 @@ func (row *commandRow) view() CommandStatus {
 		RunID:     row.runID,
 		Status:    row.status,
 		Error:     err,
+		Reason:    ReasonOf(row.errText),
 		Created:   row.created,
 		Updated:   row.updated,
 	}

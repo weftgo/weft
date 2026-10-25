@@ -449,7 +449,8 @@ func TestSessionsOptionAbsentChangesNothing(t *testing.T) {
 		b, _ := json.Marshal(f.registrations[0])
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
-		delete(m, "instance") // per link, random
+		delete(m, "instance")   // per link, random
+		delete(m, "studio_url") // each call dials its own fake Studio
 		return m
 	}
 	without := register()

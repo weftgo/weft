@@ -61,6 +61,14 @@ type previewDoc struct {
 	// Unchecked names the overrides no registration checked (no
 	// runtime with the agent): the run route checks them at send time.
 	Unchecked []string `json:"unchecked"`
+	// ScriptedHit is, per step from from_step through the first miss,
+	// whether the scripted engine holds a recorded answer for the
+	// replay's request (preview_scripted.go) — whatever the engine, so
+	// a client warns before Run; ScriptedKeyMatch sums it up: ok, or
+	// the first missing step, the key components that differ and the
+	// sentence a failed scripted run's command reads too.
+	ScriptedHit      []scriptedStep `json:"scripted_hit"`
+	ScriptedKeyMatch scriptedMatch  `json:"scripted_key_match"`
 }
 
 // previewRequest is one model request as the preview shows it. Each
@@ -440,6 +448,17 @@ func (s *Server) assemblePreview(ctx context.Context, doc *previewDoc, req runRe
 		doc.Warnings = append(doc.Warnings, previewWarning{Kind: "instructions",
 			Message: "the loop appends the offered tools' prompt snippets to the instructions; the record does not hold them, so the override is shown as written"})
 	}
+
+	// The scripted check reads the full requests, before anything is
+	// hidden: its answer names key components, never their content.
+	answering, err := s.answeringRequests(ctx, run)
+	if err != nil {
+		return &cmdError{http.StatusInternalServerError, "internal", "read requests of run " + run + " failed"}
+	}
+	doc.ScriptedHit, doc.ScriptedKeyMatch = checkScripted(scriptedInputs{
+		from: from, own: own, will: will, was: was, willSend: doc.WillSend,
+		agent: agent, req: req, first: rec, answering: answering,
+	})
 
 	// Hidden from a read-scoped panel token (readsPrompts): the system
 	// prompt and the catalog always, the messages when a view is in

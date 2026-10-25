@@ -661,7 +661,6 @@ function ReplayForm({
   const choice = engineChoice({
     ...facts,
     keyMatch: preview.doc?.scripted_key_match,
-    hit: preview.doc?.scripted_hit,
   })
   const engine = engineOf(choice, picked)
   const engineRefused = engineHeld(choice, picked)

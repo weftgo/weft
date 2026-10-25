@@ -41,3 +41,27 @@ func ExampleRuntimeServer() {
 	// register: 200
 	// runtimes: 1 rt_demo acme-support
 }
+
+// ExampleReasonOf reads a failed scripted command's error — weft/runtime's
+// miss, wrapped by the run error — into the structured why and the one
+// sentence both Studio surfaces render.
+func ExampleReasonOf() {
+	r := runtime.ReasonOf("weft: run failed at step 0: model stream: weft/runtime: no recorded turn for step 2 " +
+		"(scripted engine, key 700b66abcf4561ab): the tool list differs from the recording [tools]; " +
+		"the scripted engine answers only what the source recorded: re-run on engine live")
+	fmt.Println(r.Kind, r.Step, r.Components)
+	fmt.Println(r.Message)
+	fmt.Println(runtime.ReasonOf("weft: run failed at step 0: boom") == nil)
+	// Output:
+	// scripted_miss 2 [tools]
+	// scripted has no recorded answer for step 2: the tool list differs from the recording — re-run on engine live
+	// true
+}
+
+// ExampleScriptedMissReason is the same sentence for a miss predicted
+// before Run (the preview's scripted_key_match).
+func ExampleScriptedMissReason() {
+	fmt.Println(runtime.ScriptedMissReason(0, []string{"thinking"}).Message)
+	// Output:
+	// scripted has no recorded answer for step 0: the request sets a thinking level the recording does not hold — re-run on engine live
+}

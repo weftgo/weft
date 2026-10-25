@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"iter"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/weftgo/weft/core"
@@ -43,6 +44,20 @@ type scriptedModel struct {
 	info  core.ModelInfo
 	mu    sync.Mutex
 	byKey map[string][][]core.ModelEvent // keyed turns, recorded order
+	// tools is the sorted tool list every recorded turn is keyed with;
+	// entries every recorded request prefix with the source step it
+	// answers — what a miss is compared against to say which step and
+	// which key component (scriptedMiss).
+	tools   []string
+	entries []scriptedEntry
+}
+
+// scriptedEntry is one recorded turn's request side: the source step
+// it answered (the run's own step index, 0-based) and the messages its
+// key holds.
+type scriptedEntry struct {
+	step int
+	msgs []string // each message as JSON, the key's own encoding
 }
 
 // newScriptedModel indexes the source run's own steps: the request
@@ -58,13 +73,17 @@ func newScriptedModel(src *sourceRun, tools []string) *scriptedModel {
 	}
 	names := append([]string(nil), tools...)
 	slices.Sort(names)
+	m.tools = names
 	msgs := src.all()
+	step := 0
 	for i := len(src.input); i < len(msgs); i++ {
 		if msgs[i].Role != core.RoleAssistant {
 			continue
 		}
 		key := scriptedKey(msgs[:i], names)
 		m.byKey[key] = append(m.byKey[key], eventsOf(msgs[i]))
+		m.entries = append(m.entries, scriptedEntry{step: step, msgs: encodeMessages(msgs[:i])})
+		step++
 	}
 	// A replay from a step whose request carried a compaction view is
 	// fed what the model saw there (ADR 0029): from that step on, the
@@ -72,6 +91,12 @@ func newScriptedModel(src *sourceRun, tools []string) *scriptedModel {
 	// the replaced range, so each recorded turn from there is keyed on
 	// that prefix too.
 	if v := src.view; v != nil {
+		vstep := 0
+		for i := len(src.input); i < len(src.input)+src.cut(v.step) && i < len(msgs); i++ {
+			if msgs[i].Role == core.RoleAssistant {
+				vstep++
+			}
+		}
 		for i := len(src.input) + src.cut(v.step); i < len(msgs); i++ {
 			if msgs[i].Role != core.RoleAssistant {
 				continue
@@ -82,6 +107,8 @@ func newScriptedModel(src *sourceRun, tools []string) *scriptedModel {
 			}
 			key := scriptedKey(seen, names)
 			m.byKey[key] = append(m.byKey[key], eventsOf(msgs[i]))
+			m.entries = append(m.entries, scriptedEntry{step: vstep, msgs: encodeMessages(seen)})
+			vstep++
 		}
 	}
 	return m
@@ -192,8 +219,9 @@ func (m *scriptedModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 			// The deliberate failure (§5.5): a request the record does
 			// not answer — a changed input, a turned-off tool, a
 			// thinking override — fails the step rather than silently
-			// replaying some other turn.
-			yield(nil, fmt.Errorf("weft/runtime: no recorded turn for this request (scripted engine, key %s): the input changed since the recording, or the run is not scripted-replayable", key))
+			// replaying some other turn. The error says which source
+			// step and which key component (R2, UX-C-07).
+			yield(nil, m.miss(req, key))
 			return
 		}
 		for _, ev := range events {
@@ -216,5 +244,119 @@ func toolNames(tools []*core.ToolDef) []string {
 		out = append(out, t.Name)
 	}
 	slices.Sort(out)
+	return out
+}
+
+// The key components a miss names (scriptedMiss.components), in the
+// order the error lists them. Studio maps the bracketed list to its
+// sentence (studio/runtime ReasonOf); the words are the contract.
+const (
+	missTools      = "tools"       // the offered tool list is not the one the record is keyed with
+	missThinking   = "thinking"    // the request sets a thinking level; the record keys none
+	missToolChoice = "tool_choice" // the request sets a tool choice; the record keys none
+	missSequential = "sequential"  // sequential tool calls (parallelism 1); the record keys none
+	missMessages   = "messages"    // the messages are no recorded request's
+	missUnanswered = "unanswered"  // the source recorded no turn to answer it
+	missExhausted  = "exhausted"   // the recording answered this request fewer times than asked
+)
+
+// missPhrase is each component's clause in the error.
+var missPhrase = map[string]string{
+	missTools:      "the tool list differs from the recording",
+	missThinking:   "the request sets a thinking level the recording does not hold",
+	missToolChoice: "the request sets a tool choice the recording does not hold",
+	missSequential: "the request asks for sequential tool calls (parallelism 1), which the recording does not hold",
+	missMessages:   "the messages differ from the recording (a changed input or tool result)",
+	missUnanswered: "the source recorded no turn for it",
+	missExhausted:  "the recording answered this request fewer times than the replay asks it",
+}
+
+// scriptedMiss is the scripted engine's loud failure: the source step
+// whose recorded turn was nearest the request (-1 when the source
+// recorded none), the key components that differ from it, and the key.
+type scriptedMiss struct {
+	step       int
+	components []string
+	key        string
+}
+
+func (e *scriptedMiss) Error() string {
+	at := "this request"
+	if e.step >= 0 {
+		at = fmt.Sprintf("step %d", e.step)
+	}
+	clauses := make([]string, len(e.components))
+	for i, c := range e.components {
+		clauses[i] = missPhrase[c]
+	}
+	return fmt.Sprintf("weft/runtime: no recorded turn for %s (scripted engine, key %s): %s [%s]; the scripted engine answers only what the source recorded: re-run on engine live",
+		at, e.key, strings.Join(clauses, "; "), strings.Join(e.components, ", "))
+}
+
+// miss explains a request no recorded turn answers: each key component
+// that differs from the record (the tool list the turns are keyed
+// with; thinking, tool choice and sequential, which the record keys as
+// unset; the messages, when no recorded request holds them), and the
+// source step of the recorded request nearest it — the one whose
+// messages it equals, else the longest shared prefix (ties: the
+// nearest length).
+func (m *scriptedModel) miss(req core.ModelRequest, key string) error {
+	e := &scriptedMiss{step: -1, key: key}
+	if !slices.Equal(toolNames(req.Tools), m.tools) {
+		e.components = append(e.components, missTools)
+	}
+	if req.Thinking != (core.ThinkingConfig{}) {
+		e.components = append(e.components, missThinking)
+	}
+	if req.ToolChoice != (core.ToolChoiceConfig{}) {
+		e.components = append(e.components, missToolChoice)
+	}
+	if req.SequentialTools {
+		e.components = append(e.components, missSequential)
+	}
+	if len(m.entries) == 0 {
+		e.components = append(e.components, missUnanswered)
+		return e
+	}
+	got := encodeMessages(req.Messages)
+	best, bestShared, bestGap, exact := 0, -1, 0, false
+	for i, en := range m.entries {
+		shared := 0
+		for shared < len(got) && shared < len(en.msgs) && got[shared] == en.msgs[shared] {
+			shared++
+		}
+		gap := len(got) - len(en.msgs)
+		if gap < 0 {
+			gap = -gap
+		}
+		if shared == len(got) && len(got) == len(en.msgs) {
+			best, exact = i, true
+			break
+		}
+		if shared > bestShared || shared == bestShared && gap < bestGap {
+			best, bestShared, bestGap = i, shared, gap
+		}
+	}
+	e.step = m.entries[best].step
+	switch {
+	case !exact:
+		e.components = append(e.components, missMessages)
+	case len(e.components) == 0:
+		e.components = append(e.components, missExhausted)
+	}
+	return e
+}
+
+// encodeMessages is each message as JSON — the key document's own
+// encoding, so equal strings are equal key messages.
+func encodeMessages(msgs []core.Message) []string {
+	out := make([]string, len(msgs))
+	for i, msg := range msgs {
+		b, err := json.Marshal(msg)
+		if err != nil {
+			panic(fmt.Sprintf("weft/runtime: scripted key: %v", err))
+		}
+		out[i] = string(b)
+	}
 	return out
 }

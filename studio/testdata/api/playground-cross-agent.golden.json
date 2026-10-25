@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "bad_request",
+    "message": "source run r_orders is agent orders; this command targets agent acme-support: send agent \"orders\" to replay it as recorded, or cross_agent: true to replay it as acme-support anyway"
+  }
+}
+

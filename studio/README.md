@@ -1078,8 +1078,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 275,248 B raw / 92,243 B gzip
-(90.1 KiB, the bundle of the ledger's row "U17 engine per command"; 14,253 B — 13.9 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 275,228 B raw / 92,236 B gzip
+(90.1 KiB, the bundle of the ledger's row "U18.1"; 14,260 B — 13.9 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -2422,6 +2422,27 @@ directory — a filesystem path, so under `db.path`'s rule: the server token,
 or setup A's loopback without a Token; never a panel token (read or
 playground scope). `/api/meta`'s `runtimes` still counts connected runtimes
 only.
+
+**The target facts (capability `target_check`).** The registration
+carries each agent's `manifest_hash` (sha256 of the manifest bytes it
+registers — the `weft.manifest.hash` its own runs carry) and the
+`studio_url` its link dialled; `/api/runtimes` gives each agent
+`manifest_hash` (computed from the manifest for a runtime that sends
+none) and each runtime `studio_url` under `cwd`'s rule. A run whose
+`manifest_hash` differs from its agent's registered one was recorded by
+another build. `POST /api/playground/runs` refuses a source run recorded
+by another agent than `agent` (400, both agents named) unless the body
+sends `cross_agent: true`, and a command naming no agent (400: Studio
+never picks one). `POST /api/playground/preview` answers `scripted_hit`
+(per step from `from_step` through the first miss: `{step, hit,
+because[]}`) and `scripted_key_match` (`{ok, because[], step, message}`)
+— whether the scripted engine holds a recorded answer, read from the
+record and the registration with the engine's own key (tools, thinking,
+tool_choice, sequential, messages; never the system prompt). A failed
+scripted command's `GET /api/playground/commands/{id}` carries `reason`
+`{kind: "scripted_miss", step, components, message}` beside the runtime's
+`error`: the step is the source run's own, the message the sentence both
+surfaces render (`studio/runtime.ReasonOf`).
 
 **Wire (for the TS/Python runtime clients).** The registration gains
 `cwd` (string, optional) and `instance` (string: a random value per link,

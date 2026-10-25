@@ -263,6 +263,23 @@
       "message": "the loop appends the offered tools' prompt snippets to the instructions; the record does not hold them, so the override is shown as written"
     }
   ],
-  "unchecked": []
+  "unchecked": [],
+  "scripted_hit": [
+    {
+      "step": 2,
+      "hit": false,
+      "because": [
+        "messages"
+      ]
+    }
+  ],
+  "scripted_key_match": {
+    "ok": false,
+    "because": [
+      "messages"
+    ],
+    "step": 2,
+    "message": "scripted has no recorded answer for step 2: the messages differ from the recording (a changed input or tool result) — re-run on engine live"
+  }
 }
 

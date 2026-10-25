@@ -6,6 +6,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -44,11 +45,12 @@ func ExampleQueueSize() {
 	// Output: true true
 }
 
-// Blocking is development-only: under WEFT_ENV=dev a full queue waits
-// (up to 5 s) for room instead of refusing a durable record. Anywhere
-// else — and always under NoEnv, as here — Start ignores it with one
-// WARN and the destination refuses as without it: observability never
-// slows a production app. QueueSize is the production knob.
+// Blocking is development-only: under WEFT_ENV=dev (or DevMode) a full
+// queue waits (up to 5 s) for room instead of refusing a durable record.
+// Anywhere else — and under NoEnv without DevMode, as here — Start
+// ignores it with one WARN naming the cause and the destination refuses
+// as without it: observability never slows a production app. QueueSize
+// is the production knob.
 func ExampleBlocking() {
 	prev := slog.Default()
 	defer slog.SetDefault(prev)
@@ -69,7 +71,34 @@ func ExampleBlocking() {
 		log.Fatal(err)
 	}
 	_ = p.Shutdown(context.Background())
-	// Output: level=WARN msg="otel: Blocking ignored: WEFT_ENV is not dev"
+	// Output: level=WARN msg="otel: Blocking ignored: otel.NoEnv reads no WEFT_ENV"
+}
+
+// DevMode is the code-side twin of WEFT_ENV=dev, for a test or harness
+// that controls its own process: beside NoEnv — which reads no
+// WEFT_STUDIO_URL, OTEL_* variable or discovery file, and no WEFT_ENV
+// either — it is what lets an isolated pipeline record provider wire
+// bodies (RawBodies) or make a destination wait for queue room
+// (Blocking). Without it, Start would WARN "otel: RawBodies ignored:
+// otel.NoEnv reads no WEFT_ENV" and record no weft.raw.
+func ExampleDevMode() {
+	dir, err := os.MkdirTemp("", "weft-otel-devmode-")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	p, err := otel.Start(context.Background(),
+		otel.NoEnv(), otel.DevMode(), otel.NoGlobal(),
+		otel.Local(filepath.Join(dir, "weft.db")),
+		otel.RawBodies(true),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = p.Shutdown(context.Background()) }()
+	fmt.Println(p.LoggerProvider().RawBodies())
+	// Output: true
 }
 
 // eventNames is a log exporter that remembers the weft.event.type of

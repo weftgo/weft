@@ -587,11 +587,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //                               // records at ⅞, run_start/run_finish/the root span/heartbeats last — counted, one WARN per
 //                               // destination ("weft/otel: destination queue full"), weft.records.dropped on its heartbeats and
 //                               // every run_start/run_finish; Blocking() waits instead (≤ 5 s per stall: after one timed-out wait it
-//                               // refuses at once until an export begins), dev only like RawBodies (WEFT_ENV=dev, else one WARN)
+//                               // refuses at once until an export begins), dev only like RawBodies (WEFT_ENV=dev or otel.DevMode(), else one WARN)
 //        otel.Datadog(),                               // the Agent's OTLP intake, content off
 //        otel.Exporters(spanExporter, logExporter),    // your own exporters (either may be nil)
 //        otel.Content(otel.ContentConfig{MaxBytes: 32 << 10, Redact: redact}),
-//        otel.RawBodies(true),  // dev only (WEFT_ENV=dev; refused under NoEnv, one WARN; the gate is the pipeline provider's RawBodies() marker —
+//        otel.RawBodies(true),  // dev only (WEFT_ENV=dev, or otel.DevMode() — its code-side twin, what an isolated NoEnv() test pipeline needs; else one WARN naming the cause; the gate is the pipeline provider's RawBodies() marker —
 //                               // pass p.LoggerProvider() or rely on Install's global; a stock SDK provider never records raw bodies): each attempt's provider
 //                               // wire request/response as a weft.raw record, Local/Studio only, credentials stripped, 256 KiB per body (ADR 0028 §12)
 //    )()

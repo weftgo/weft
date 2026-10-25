@@ -36,7 +36,7 @@ import (
 // the run row is derived from.
 //
 // Admission never blocks the app unless the destination asked for
-// Blocking (development only, refused outside WEFT_ENV=dev): then a
+// Blocking (development only, refused outside the dev gate): then a
 // durable record waits — bounded by blockMax and the emitting context —
 // for room instead of being refused. Deltas never wait. The bound is per
 // stall, not per record: once one wait times out, the chain refuses at

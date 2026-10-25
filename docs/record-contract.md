@@ -573,7 +573,7 @@ stored record's step is -1 when `weft.step.index` was absent.
 
 ### `raw` — provider wire bodies (development only)
 
-Only under `otel.RawBodies(true)` with `WEFT_ENV=dev`, only to `Local` and
+Only under `otel.RawBodies(true)` with `WEFT_ENV=dev` (or `otel.DevMode()`), only to `Local` and
 `Studio` destinations with content on. Attributes `weft.raw.index`,
 `weft.step.index`, `weft.attempt.index`, `weft.content = full`,
 `weft.content.truncated_bytes` when a body was cut. Body `{step, attempt,

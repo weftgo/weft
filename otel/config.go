@@ -21,9 +21,13 @@ type config struct {
 	noEnv      bool
 	noGlobal   bool
 	dropFailed bool // Install's WARN-and-skip mode
-	// rawBodies is RawBodies' ask; Start keeps it only under
-	// WEFT_ENV=dev (and never under NoEnv), else one WARN and off.
+	// rawBodies is RawBodies' ask; Start keeps it only when the dev
+	// gate holds (devMode, or WEFT_ENV=dev read without NoEnv), else one
+	// WARN and off.
 	rawBodies bool
+	// devMode is DevMode's attestation: the dev gate holds without
+	// reading WEFT_ENV.
+	devMode bool
 	// noDiscovery is NoDiscovery's ask: skip the discovery file alone
 	// (the rest of the environment is still read).
 	noDiscovery bool
@@ -62,7 +66,8 @@ type dest struct {
 	timeout                    time.Duration
 	insecure                   bool
 	// queueSize is QueueSize's ask (0: the kind's default, queueSizeOf);
-	// blocking is Blocking's, kept by Start only under WEFT_ENV=dev.
+	// blocking is Blocking's, kept by Start only under the dev gate
+	// (DevMode, or WEFT_ENV=dev read without NoEnv).
 	queueSize int
 	blocking  bool
 	// appLogs is AppLogs' ask (nil: the kind's default, appLogsOn).

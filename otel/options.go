@@ -90,12 +90,29 @@ func Sampler(s sdktrace.Sampler) Option {
 // NoEnv ignores the WEFT_* / OTEL_* destination variables, and the
 // discovery file a running `weft studio` / `weft dev` wrote (which
 // otherwise stands in for WEFT_STUDIO_URL when that is unset). Explicit
-// options are unaffected. It is otel's alone: the runtime link's own
+// options are unaffected. It reads nothing, WEFT_ENV included: under
+// NoEnv the development gate RawBodies and Blocking need holds only
+// with DevMode (Start's WARN says "otel.NoEnv reads no WEFT_ENV"
+// otherwise); NoDiscovery is the isolation that keeps WEFT_ENV. It is otel's alone: the runtime link's own
 // discovery read (runtime.Install under WEFT_ENV=dev, when the pipeline
 // has no Studio) is governed by runtime's options and
 // WEFT_DISCOVERY=off.
 func NoEnv() Option {
 	return optionFunc(func(c *config) { c.noEnv = true })
+}
+
+// DevMode attests in code that this pipeline runs in development: it
+// satisfies the dev gate (ADR 0028 §12) that RawBodies and a
+// destination's Blocking need, without reading the environment. It is
+// the code-side twin of WEFT_ENV=dev, for tests and harnesses that
+// control their own process — typically beside NoEnv, which reads no
+// WEFT_ENV and so refuses both on its own. It unlocks those two and
+// nothing else: no destination, discovery read or runtime link follows
+// from it (runtime.Install keeps its own WEFT_ENV / Enabled rule). The
+// gate still applies — a production binary never sets DevMode; the
+// attestation has only moved from the process environment into code.
+func DevMode() Option {
+	return optionFunc(func(c *config) { c.devMode = true })
 }
 
 // NoDiscovery skips the discovery file a running `weft studio` / `weft
@@ -119,11 +136,12 @@ func NoDiscovery() Option {
 // §12), for the Local and Studio destinations only (never Datadog,
 // Langfuse, OTLP or Exporters, whatever their content setting, and not
 // a Local or Studio destination under NoContent). Off by default, and
-// refused outside development: it takes effect only when WEFT_ENV is
-// "dev" when the pipeline starts; otherwise — and always under NoEnv,
-// which does not read WEFT_ENV — Start logs one WARN line ("otel:
-// RawBodies ignored: WEFT_ENV is not dev") and the pipeline behaves as
-// if the option were absent: no destination asks for weft.raw, so the
+// refused outside development: it takes effect only when the pipeline
+// starts under the dev gate — WEFT_ENV is "dev" (read unless NoEnv), or
+// DevMode attests it in code. Otherwise Start logs one WARN line naming
+// the cause ("otel: RawBodies ignored: WEFT_ENV is not dev", or under
+// NoEnv without DevMode "otel: RawBodies ignored: otel.NoEnv reads no
+// WEFT_ENV") and the pipeline behaves as if the option were absent: no destination asks for weft.raw, so the
 // adapters buffer nothing (core.Reporter.WantsRaw is false). The gate
 // is the pipeline's LoggerProvider marker (LoggerProvider.RawBodies):
 // pass Pipeline.LoggerProvider() to weft.LoggerProvider, or rely on
@@ -347,9 +365,10 @@ func QueueSize(n int) DestOption {
 // (the exporter is stuck), every later record is refused at once,
 // counted, until an export begins again — a hung exporter costs the app
 // one 5 s wait, not one per record. Development only, like
-// RawBodies: it takes effect only when WEFT_ENV is "dev" when the
-// pipeline starts; otherwise (and always under NoEnv) Start logs one
-// WARN ("otel: Blocking ignored: WEFT_ENV is not dev") and the
+// RawBodies: it takes effect only when the pipeline starts under the
+// dev gate (WEFT_ENV=dev read unless NoEnv, or DevMode); otherwise
+// Start logs one WARN naming the cause ("otel: Blocking ignored:
+// WEFT_ENV is not dev", or "… otel.NoEnv reads no WEFT_ENV") and the
 // destination refuses as without it — observability never slows a
 // production app. Local ignores it (no queue).
 func Blocking() DestOption {

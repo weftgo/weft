@@ -276,6 +276,55 @@ func TestLocalFloodLosesNothing(t *testing.T) {
 	}
 }
 
+// The dev gate for Blocking in its four shapes (issue 002): WEFT_ENV
+// unset refuses naming WEFT_ENV, NoEnv refuses naming otel.NoEnv even
+// under WEFT_ENV=dev, and DevMode keeps it — beside NoEnv too — with no
+// WARN, as WEFT_ENV=dev does.
+func TestBlockingDevGate(t *testing.T) {
+	for _, c := range []struct {
+		name           string
+		env            map[string]string
+		noEnv, devMode bool
+		warn           string // "" = kept
+	}{
+		{"WEFT_ENV unset", nil, false, false, "otel: Blocking ignored: WEFT_ENV is not dev"},
+		{"NoEnv under dev", map[string]string{"WEFT_ENV": "dev"}, true, false, "otel: Blocking ignored: otel.NoEnv reads no WEFT_ENV"},
+		{"NoEnv with DevMode", nil, true, true, ""},
+		{"WEFT_ENV=dev", map[string]string{"WEFT_ENV": "dev"}, false, false, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			devEnv(t, c.env)
+			logBuf := captureSlogSafe(t)
+			opts := []Option{NoGlobal(), Heartbeat(0), Exporters(nil, newMemExporter(), Blocking())}
+			if c.noEnv {
+				opts = append(opts, NoEnv())
+			}
+			if c.devMode {
+				opts = append(opts, DevMode())
+			}
+			p, err := Start(testCtx(t), opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kept := p.dests[0].logProc.(*destProc).adm.blocking
+			_ = p.Shutdown(testCtx(t))
+			if kept != (c.warn == "") {
+				t.Errorf("Blocking kept = %v, want %v", kept, c.warn == "")
+			}
+			out := logBuf.String()
+			if c.warn == "" {
+				if strings.Contains(out, "Blocking ignored") {
+					t.Errorf("Blocking refused under the gate:\n%s", out)
+				}
+				return
+			}
+			if n := strings.Count(out, "Blocking ignored"); n != 1 || !strings.Contains(out, c.warn) {
+				t.Errorf("want one refusal %q, got %d:\n%s", c.warn, n, out)
+			}
+		})
+	}
+}
+
 // TestBlockingIsDevOnly: Blocking outside WEFT_ENV=dev is refused with
 // one WARN and the destination refuses on a full queue as without it;
 // under dev it waits, and a storm through a queue of 16 with a slow

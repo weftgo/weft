@@ -767,7 +767,7 @@ func (d *dropCounter) overflowed(n, queue int64) {
 	if d.overflowWarned.CompareAndSwap(false, true) {
 		d.log.WarnContext(quietCtx, "weft/otel: destination queue full, records dropped",
 			"dest", d.name, "queue", queue,
-			"hint", "raise it with otel.QueueSize(n) on the destination, or use otel.Blocking() under WEFT_ENV=dev; deltas are shed first, a run's run_start and run_finish last; the count rides weft.records.dropped on the heartbeat and each run's run_start/run_finish")
+			"hint", "raise it with otel.QueueSize(n) on the destination, or use otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); deltas are shed first, a run's run_start and run_finish last; the count rides weft.records.dropped on the heartbeat and each run's run_start/run_finish")
 	}
 }
 

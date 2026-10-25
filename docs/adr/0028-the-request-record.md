@@ -622,7 +622,11 @@ answers the marker true only under `otel.RawBodies(true)` **and**
 `otel.NoEnv()`), and its chains answer `Enabled` yes only for `Local`
 and `Studio` with content on. Otherwise Start logs one WARN
 (`otel: RawBodies ignored: WEFT_ENV is not dev`) and the pipeline
-behaves as if the option were absent. Datadog, Langfuse, OTLP and
+behaves as if the option were absent. (2026-10-25, issue 002: the
+gate can be satisfied by `otel.DevMode()` — the attestation in code, for
+a test or harness that controls its own process — as well as by
+`WEFT_ENV=dev`; under `otel.NoEnv()` without it the WARN reads
+`otel: RawBodies ignored: otel.NoEnv reads no WEFT_ENV`.) Datadog, Langfuse, OTLP and
 Exporters never receive a raw record, whatever their content setting;
 the run tracker never asks.
 

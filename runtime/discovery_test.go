@@ -210,7 +210,8 @@ func TestInstallLocalPipelineSkipsDiscovery(t *testing.T) {
 			warns = append(warns, l)
 		}
 	}
-	if len(warns) != 1 || !strings.Contains(warns[0], "runtime.Local(srv)") || !strings.Contains(warns[0], "runtime.Studio(url, token)") {
-		t.Errorf("runtime WARN lines %q, want exactly one naming runtime.Local(srv) and runtime.Studio(url, token)", warns)
+	if len(warns) != 1 || !strings.Contains(warns[0], "records only into a Local store (otel.Local, or otel.Install's default)") ||
+		!strings.Contains(warns[0], "runtime.Local(srv)") || !strings.Contains(warns[0], "runtime.Studio(url, token)") {
+		t.Errorf("runtime WARN lines %q, want exactly one saying the pipeline records only into a Local store (otel.Local, or otel.Install's default), naming runtime.Local(srv) and runtime.Studio(url, token)", warns)
 	}
 }

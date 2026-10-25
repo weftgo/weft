@@ -291,7 +291,7 @@ func Install(opts ...Option) (shutdown func()) {
 		// (issue 001): weft/otel did not join the file's Studio, so the
 		// link must not either — a Studio that starts runs whose spans
 		// never reach it. One WARN; no link.
-		slog.Warn("weft/runtime: the pipeline records locally (otel.Local) and names no Studio: no link opened",
+		slog.Warn("weft/runtime: the pipeline records only into a Local store (otel.Local, or otel.Install's default) and names no Studio: no link opened",
 			"hint", "runtime.Local(srv) dials the embedded Studio; runtime.Studio(url, token) with otel.Studio(url, token) a running one")
 		return func() {}
 	}

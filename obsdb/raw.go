@@ -8,8 +8,8 @@ import (
 // RecordRaw is the raw record kind (ADR 0028 §12, plan A6): one model
 // call attempt's wire exchange — the provider request and response a
 // first-party adapter sent and received — emitted only under
-// otel.RawBodies(true) with WEFT_ENV=dev, to the Local and Studio
-// destinations. It is positioned by weft.raw.index and stored beside
+// otel.RawBodies(true) with WEFT_ENV=dev (or otel.DevMode()), to the
+// Local and Studio destinations. It is positioned by weft.raw.index and stored beside
 // the request records; DB.Requests attaches it to its attempt's row
 // (RequestRecord.Wire).
 const RecordRaw = "raw"

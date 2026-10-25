@@ -87,30 +87,44 @@ func captureSlog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-const rawWarn = "otel: RawBodies ignored: WEFT_ENV is not dev"
+const (
+	rawWarn      = "otel: RawBodies ignored: WEFT_ENV is not dev"
+	rawWarnNoEnv = "otel: RawBodies ignored: otel.NoEnv reads no WEFT_ENV"
+)
 
-// Outside WEFT_ENV=dev — or under NoEnv, which reads no environment —
-// RawBodies(true) is one WARN line and nothing else: Enabled says no
-// for weft.raw, the reporter tells the adapter so, and the run stores no
-// raw record. Under dev it is on, silently.
+// Outside the dev gate RawBodies(true) is one WARN line naming the cause
+// and nothing else: Enabled says no for weft.raw, the reporter tells the
+// adapter so, and the run stores no raw record. The gate holds under
+// WEFT_ENV=dev read from the environment, or under DevMode — which an
+// isolated NoEnv pipeline needs, NoEnv reading no WEFT_ENV (issue 002).
+// Under it the option is on, silently: one weft.raw per attempt.
 func TestRawBodiesDevOnly(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		env   map[string]string
-		noEnv bool
-		on    bool
+		name    string
+		env     map[string]string
+		noEnv   bool
+		devMode bool
+		warn    string // "" = on
 	}{
-		{"WEFT_ENV unset", nil, false, false},
-		{"WEFT_ENV=prod", map[string]string{"WEFT_ENV": "prod"}, false, false},
-		{"NoEnv under dev", map[string]string{"WEFT_ENV": "dev"}, true, false},
-		{"WEFT_ENV=dev", map[string]string{"WEFT_ENV": "dev"}, false, true},
+		{"WEFT_ENV unset", nil, false, false, rawWarn},
+		{"WEFT_ENV=prod", map[string]string{"WEFT_ENV": "prod"}, false, false, rawWarn},
+		{"NoEnv under dev", map[string]string{"WEFT_ENV": "dev"}, true, false, rawWarnNoEnv},
+		{"NoEnv unset", nil, true, false, rawWarnNoEnv},
+		{"NoEnv with DevMode", nil, true, true, ""},
+		{"DevMode, WEFT_ENV unset", nil, false, true, ""},
+		{"DevMode, WEFT_ENV=prod", map[string]string{"WEFT_ENV": "prod"}, false, true, ""},
+		{"WEFT_ENV=dev", map[string]string{"WEFT_ENV": "dev"}, false, false, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			devEnv(t, c.env)
 			logs := captureSlog(t)
+			on := c.warn == ""
 			opts := []Option{NoGlobal(), Heartbeat(0), Local(filepath.Join(t.TempDir(), "weft.db")), RawBodies(true)}
 			if c.noEnv {
 				opts = append(opts, NoEnv())
+			}
+			if c.devMode {
+				opts = append(opts, DevMode())
 			}
 			p, err := Start(testCtx(t), opts...)
 			if err != nil {
@@ -118,8 +132,14 @@ func TestRawBodiesDevOnly(t *testing.T) {
 			}
 			defer func() { _ = p.Shutdown(context.Background()) }()
 			warns := strings.Count(logs.String(), "level=WARN")
-			if n := strings.Count(logs.String(), rawWarn); (c.on && (n != 0 || warns != 0)) || (!c.on && (n != 1 || warns != 1)) {
-				t.Errorf("WARN lines: %d of %d mention RawBodies; on=%v\n%s", n, warns, c.on, logs.String())
+			if n := strings.Count(logs.String(), "RawBodies ignored"); (on && (n != 0 || warns != 0)) || (!on && (n != 1 || warns != 1)) {
+				t.Errorf("WARN lines: %d of %d mention RawBodies; on=%v\n%s", n, warns, on, logs.String())
+			}
+			if !on && !strings.Contains(logs.String(), c.warn) {
+				t.Errorf("the refusal does not name its cause %q:\n%s", c.warn, logs.String())
+			}
+			if p.LoggerProvider().RawBodies() != on {
+				t.Errorf("LoggerProvider.RawBodies = %v, want %v", !on, on)
 			}
 			enabled := p.LoggerProvider().Logger(instrumentationName).Enabled(context.Background(), enabledParams("weft.raw"))
 			wanted, id := rawThrough(t, p)
@@ -127,10 +147,10 @@ func TestRawBodiesDevOnly(t *testing.T) {
 			if err != nil || len(reqs) != 1 {
 				t.Fatalf("requests = %d, %v", len(reqs), err)
 			}
-			if enabled != c.on || wanted != c.on || (reqs[0].Wire != nil) != c.on {
-				t.Errorf("Enabled %v, WantsRaw %v, stored %v; want all %v", enabled, wanted, reqs[0].Wire != nil, c.on)
+			if enabled != on || wanted != on || (reqs[0].Wire != nil) != on {
+				t.Errorf("Enabled %v, WantsRaw %v, stored %v; want all %v", enabled, wanted, reqs[0].Wire != nil, on)
 			}
-			if c.on && strings.Contains(reqs[0].Wire.Request.Body+strings.Join(reqs[0].Wire.RedactedHeaders, ","), "SECRET") {
+			if on && strings.Contains(reqs[0].Wire.Request.Body+strings.Join(reqs[0].Wire.RedactedHeaders, ","), "SECRET") {
 				t.Error("a credential was stored")
 			}
 		})
@@ -150,6 +170,54 @@ func TestRawBodiesDevOnly(t *testing.T) {
 			t.Error("weft.raw enabled without RawBodies")
 		}
 	})
+}
+
+// An isolated NoEnv pipeline opts into raw bodies with DevMode (issue
+// 002): the operator's WEFT_ENV, WEFT_STUDIO_URL and discovery file stay
+// unread, and each model call attempt of a two-step run stores its one
+// weft.raw — with no WARN.
+func TestRawBodiesNoEnvDevModePerAttempt(t *testing.T) {
+	devEnv(t, map[string]string{"WEFT_STUDIO_URL": "http://127.0.0.1:1"})
+	logs := captureSlog(t)
+	p, err := Start(testCtx(t), NoGlobal(), Heartbeat(0), NoEnv(), DevMode(),
+		Local(filepath.Join(t.TempDir(), "weft.db")), RawBodies(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = p.Shutdown(context.Background()) }()
+	if len(p.dests) != 1 {
+		t.Fatalf("destinations = %d, want the Local alone (NoEnv)", len(p.dests))
+	}
+	var wanted bool
+	echo := core.Tool("echo", "Echo.", func(_ context.Context, in struct{}) (string, error) { return "ok", nil })
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{}`}),
+		wefttest.Say("done"),
+	), echo,
+		core.WrapModel(func(next core.Model) core.Model { return rawReporter{next: next, wanted: &wanted} }),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	res, err := agt.Generate(context.Background(), core.Prompt("hi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logs.String(), "level=WARN") {
+		t.Errorf("NoEnv+DevMode warned:\n%s", logs.String())
+	}
+	reqs, err := p.LocalDB().Requests(context.Background(), res.ID, obsdb.RequestQuery{})
+	if err != nil || len(reqs) != 2 {
+		t.Fatalf("requests = %d, %v; want 2 attempts", len(reqs), err)
+	}
+	for i, r := range reqs {
+		if r.Wire == nil {
+			t.Errorf("attempt %d stored no weft.raw", i)
+		}
+	}
+	if !wanted {
+		t.Error("WantsRaw false under NoEnv+DevMode")
+	}
 }
 
 // Each destination kind's chain under RawBodies in force: Local and

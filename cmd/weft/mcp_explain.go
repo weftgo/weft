@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -34,18 +35,22 @@ import (
 //     names reads "awaiting a decision"; a resume names the calls it
 //     decided (the resumes block).
 //
-// Bounded: at most explainFetchCap GETs past the run row, the digest
-// at most explainDigestCap lines; anything left out is said in the
-// digest's last line with the read that goes further (events, step,
-// run on the child).
+// Bounded: at most explainFetchCap GETs in all (the run row and the
+// transcript included), 25 steps a run, 12 children listed, each
+// digest line at most 1 KB, the digest at most explainDigestCap lines;
+// whatever a cap left out is said at the digest's end — the steps a
+// run (or a child) did not walk, the children not listed, by id, a
+// child the budget left unread, by id — with the read that goes
+// further (step, events, runs {parent}, explain_failure on the child).
 
 const (
 	explainStepCap   = 25 // steps walked per run
 	explainChildCap  = 12 // children listed per run
-	explainFetchCap  = 60 // GETs one answer may make
+	explainFetchCap  = 60 // GETs one answer may make, the run row and the transcript included
 	explainDigestCap = 40 // digest lines
 	explainTextRunes = 160
-	explainChildDeep = 2 // child levels walked for a first error
+	explainLineBytes = 1024 // a digest line, at most
+	explainChildDeep = 2    // child levels walked for a first error
 )
 
 // explanation is explain_failure's answer: the run's fields and the
@@ -87,9 +92,6 @@ type explanation struct {
 	ResumedBy   string   `json:"resumed_by,omitempty"`
 	ResumedFrom string   `json:"resumed_from,omitempty"`
 	Decisions   []string `json:"decisions,omitempty"`
-	// Digest is the run read whole: one line per step (its calls and
-	// what they returned, failed attempts), then one per child run.
-	Digest []string `json:"digest,omitempty"`
 	// LastAssistantText is this run's own last assistant text (its
 	// output batches; a thread turn's input — earlier turns — is never
 	// read); null when it produced none, LastAssistantNote then saying
@@ -99,6 +101,11 @@ type explanation struct {
 	TranscriptError   string  `json:"transcript_error,omitempty"`
 	// Next names the reads that go further.
 	Next []string `json:"next"`
+	// Digest is the run read whole: one line per step (its calls and
+	// what they returned, failed attempts; at most explainLineBytes a
+	// line), then one per child run, then the caps the walk hit. After
+	// next and the text, so a cut at max_bytes takes it before them.
+	Digest []string `json:"digest,omitempty"`
 	// The step's bulk last — attempts, tool calls with their results,
 	// children — so a cut at max_bytes takes them and keeps the
 	// structured fields above (field order is the JSON's order).
@@ -248,19 +255,37 @@ type stepBrief struct {
 }
 
 // walker reads runs and steps for one answer, each once, within the
-// fetch budget.
+// read budget (explainFetchCap, the transcript's read included).
 type walker struct {
 	m      *mcpReader
 	left   int
 	runs   map[string]*runBrief
 	steps  map[string]stepRead
 	capped bool // the budget ran out: the digest says so
+	// callOf is each child run's call, as the walk matched it: the
+	// tool that started it and its place in the run's calls (step
+	// order, then call order) — call ids repeat across steps (call_1
+	// every step), so a child is never matched by call id alone.
+	callOf map[string]callRef
+	// notes are the walk's caps (steps not walked, a run's or a
+	// child's), said at the digest's end.
+	notes []string
+}
+
+type callRef struct {
+	tool string
+	ord  int
 }
 
 type stepRead struct {
 	body   []byte
 	status int
 	err    error
+}
+
+func newWalker(m *mcpReader, root string, h *runBrief) *walker {
+	return &walker{m: m, left: explainFetchCap - 2, // the run row and the transcript are reads too
+		runs: map[string]*runBrief{root: h}, steps: map[string]stepRead{}, callOf: map[string]callRef{}}
 }
 
 func (w *walker) step(ctx context.Context, id string, n int) stepRead {
@@ -300,13 +325,13 @@ func (w *walker) run(ctx context.Context, id string) (*runBrief, error) {
 	return &r, nil
 }
 
-var errBudget = fmt.Errorf("not read: this answer's %d reads were spent", explainFetchCap)
+var errBudget = errors.New("not read: this answer's read budget is spent")
 
 // readable is what a failed step read is, in words.
 func readable(r stepRead) string {
 	switch r.status {
 	case 0:
-		if r.err == errBudget {
+		if errors.Is(r.err, errBudget) {
 			return "not read (the answer's read budget is spent)"
 		}
 		return "unreachable"
@@ -316,14 +341,59 @@ func readable(r stepRead) string {
 	return fmt.Sprintf("unavailable (%d)", r.status)
 }
 
-// walkRun reads run r's steps (and, for a failed call, its child) and
-// answers the step lines and the run's first error. via is the path
-// from the explained run, depth the child level (0 = the run itself).
-func (w *walker) walkRun(ctx context.Context, id string, r *runBrief, via string, depth int, decided map[string]string) (lines []string, first *firstError) {
-	children := map[string]childBrief{}
-	for _, c := range r.Children {
-		children[c.ParentCallID] = c
+// childFor is the child run a step's call started: the step's own
+// child_run_id, else core's id rule (<run>/<step>/<call>), else the
+// one child naming that call id when only one does.
+func childFor(id string, n int, callID, childRunID string, byID map[string]childBrief, byCall map[string][]childBrief) (childBrief, bool) {
+	if childRunID != "" {
+		if c, ok := byID[childRunID]; ok {
+			return c, true
+		}
+		return childBrief{ID: childRunID}, true
 	}
+	if c, ok := byID[fmt.Sprintf("%s/%d/%s", id, n, callID)]; ok {
+		return c, true
+	}
+	if cs := byCall[callID]; len(cs) == 1 {
+		return cs[0], true
+	}
+	return childBrief{}, false
+}
+
+// digestLine joins a step's head and parts, at most explainLineBytes:
+// the parts past it are counted ("+n calls"), never cut mid-part.
+func digestLine(head string, parts []string) string {
+	if len(parts) == 0 {
+		return head
+	}
+	s := head + ": "
+	for i, p := range parts {
+		sep := ""
+		if i > 0 {
+			sep = "; "
+		}
+		if len(s)+len(sep)+len(p) > explainLineBytes && i > 0 {
+			return s + fmt.Sprintf("; +%d more (step {n:…} has them all)", len(parts)-i)
+		}
+		s += sep + p
+	}
+	return s
+}
+
+// walkRun reads run r's steps (and, for a failed call, its child) and
+// answers the step lines and the run's first error: the first one
+// nothing recovered from — a failed call, a step's last failed attempt,
+// the run's own failure — else the first attempt a retry recovered
+// from, marked so. via is the path from the explained run, depth the
+// child level (0 = the run itself).
+func (w *walker) walkRun(ctx context.Context, id string, r *runBrief, via string, depth int, decided map[string]string) (lines []string, first *firstError) {
+	byID, byCall := map[string]childBrief{}, map[string][]childBrief{}
+	for _, c := range r.Children {
+		byID[c.ID] = c
+		byCall[c.ParentCallID] = append(byCall[c.ParentCallID], c)
+	}
+	var recovered *firstError
+	ord := 0
 	last := min(r.Steps, explainStepCap-1)
 	for n := 0; n <= last; n++ {
 		sr := w.step(ctx, id, n)
@@ -341,7 +411,7 @@ func (w *walker) walkRun(ctx context.Context, id string, r *runBrief, via string
 			head += " (" + st.Reason + ")"
 		}
 		var parts []string
-		for _, a := range st.Attempts {
+		for ai, a := range st.Attempts {
 			if a.Outcome != "error" {
 				continue
 			}
@@ -350,17 +420,32 @@ func (w *walker) walkRun(ctx context.Context, id string, r *runBrief, via string
 				what += fmt.Sprintf(" (%d)", a.HTTPStatus)
 			}
 			e := orDash(firstNonEmpty(a.Error, a.ErrorType))
-			parts = append(parts, what+" "+quoteCut(e))
-			if first == nil {
-				nn := n
-				first = &firstError{Run: id, Agent: r.Agent, Step: &nn, Error: "model attempt " + fmt.Sprint(a.Attempt) + ": " + e, Via: via}
+			okAfter := int64(0)
+			for _, b := range st.Attempts[ai+1:] {
+				if b.Outcome == "ok" {
+					okAfter = b.Attempt
+					break
+				}
 			}
+			nn := n
+			fe := &firstError{Run: id, Agent: r.Agent, Step: &nn, Error: "model attempt " + fmt.Sprint(a.Attempt) + ": " + e, Via: via}
+			if okAfter > 0 {
+				what += fmt.Sprintf(" (retried, attempt %d ok)", okAfter)
+				fe.Error += fmt.Sprintf(" (retried, attempt %d ok)", okAfter)
+				if recovered == nil {
+					recovered = fe
+				}
+			} else if first == nil {
+				first = fe
+			}
+			parts = append(parts, what+" "+quoteCut(e))
 		}
 		for _, c := range st.ToolCalls {
-			child, hasChild := children[c.CallID]
-			if !hasChild && c.ChildRunID != "" {
-				child, hasChild = childBrief{ID: c.ChildRunID}, true
+			child, hasChild := childFor(id, n, c.CallID, c.ChildRunID, byID, byCall)
+			if hasChild {
+				w.callOf[child.ID] = callRef{tool: c.Name, ord: ord}
 			}
+			ord++
 			switch {
 			case c.Pending:
 				if d, ok := decided[c.CallID]; ok {
@@ -373,7 +458,7 @@ func (w *walker) walkRun(ctx context.Context, id string, r *runBrief, via string
 				if first == nil {
 					nn := n
 					if hasChild && depth < explainChildDeep {
-						if f := w.childFirst(ctx, child, joinVia(via, fmt.Sprintf("step %d %s", n, c.Name)), depth+1); f != nil {
+						if f, _ := w.childFirst(ctx, child, joinVia(via, fmt.Sprintf("step %d %s", n, c.Name)), depth+1); f != nil {
 							first = f
 							break
 						}
@@ -391,39 +476,40 @@ func (w *walker) walkRun(ctx context.Context, id string, r *runBrief, via string
 		for _, h := range st.Holes {
 			parts = append(parts, "hole "+h.Hole)
 		}
-		if len(parts) > 0 {
-			head += ": " + strings.Join(parts, "; ")
-		}
-		lines = append(lines, head)
+		lines = append(lines, digestLine(head, parts))
 	}
 	if r.Steps+1 > explainStepCap {
-		lines = append(lines, fmt.Sprintf("steps %d–%d not walked (at most %d per answer): step {id:%q, n:…} or events {id:%q}",
-			explainStepCap, r.Steps, explainStepCap, id, id))
+		w.notes = append(w.notes, fmt.Sprintf("run %s: steps %d–%d not walked (at most %d per run): step {id:%q, n:…} or events {id:%q}",
+			id, explainStepCap, r.Steps, explainStepCap, id, id))
 	}
 	if first == nil && (r.Status == "failed" || r.Status == "interrupted") && r.Err != "" {
 		n := r.Steps
 		first = &firstError{Run: id, Agent: r.Agent, Step: &n, Error: r.Err, Via: via}
 	}
+	if first == nil {
+		first = recovered
+	}
 	return lines, first
 }
 
-// childFirst is a child run's first error: walked when it failed or
-// carries a problem, nil when it has none.
-func (w *walker) childFirst(ctx context.Context, c childBrief, via string, depth int) *firstError {
+// childFirst is a child run's first error (nil when it has none) and
+// whether the child was walked: false when the read budget was spent
+// before its run row.
+func (w *walker) childFirst(ctx context.Context, c childBrief, via string, depth int) (*firstError, bool) {
 	r, err := w.run(ctx, c.ID)
 	if err != nil {
 		if c.Err != "" {
-			return &firstError{Run: c.ID, Agent: c.Agent, Error: c.Err, Via: via}
+			return &firstError{Run: c.ID, Agent: c.Agent, Error: c.Err, Via: via}, !errors.Is(err, errBudget)
 		}
-		return nil
+		return nil, !errors.Is(err, errBudget)
 	}
 	_, decided := r.Decided.words()
 	_, f := w.walkRun(ctx, c.ID, r, via, depth, decided)
-	return f
+	return f, true
 }
 
 // childLine is one child run in a phrase, with its first error when it
-// has one.
+// has one; a child the budget left unread says so, naming the read.
 func (w *walker) childLine(ctx context.Context, c childBrief, tool string, depth int) string {
 	s := fmt.Sprintf("child %s (%s)", c.ID, orDash(c.Agent))
 	if tool != "" {
@@ -443,7 +529,11 @@ func (w *walker) childLine(ctx context.Context, c childBrief, tool string, depth
 		s += fmt.Sprintf("; parked: %d calls awaiting a decision", c.Pending)
 	}
 	if c.Status == "succeeded" && (c.ToolErrors > 0 || c.ChildrenFailed > 0) && depth < explainChildDeep {
-		if f := w.childFirst(ctx, c, "", depth+1); f != nil {
+		f, walked := w.childFirst(ctx, c, "", depth+1)
+		switch {
+		case !walked:
+			s += fmt.Sprintf("; not walked (the read budget is spent): explain_failure {id:%q}", c.ID)
+		case f != nil:
 			s += "; its first error: " + f.words(c.ID)
 		}
 	}
@@ -481,7 +571,7 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 	if err := json.Unmarshal(rb, &h); err != nil {
 		return nil, nil, fmt.Errorf("GET %s: %w", runPath(in.ID), err)
 	}
-	w := &walker{m: m, left: explainFetchCap, runs: map[string]*runBrief{in.ID: &h}, steps: map[string]stepRead{}}
+	w := newWalker(m, in.ID, &h)
 	ex := explanation{
 		RunID: in.ID, URL: m.s.runLink(in.ID), Agent: h.Agent, Status: h.Status, Error: h.Err,
 		StopReason: h.StopReason, Pending: h.Pending, Steps: h.Steps, RunHoles: h.Holes,
@@ -554,26 +644,14 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 	// The run read whole: every step, then the children.
 	lines, first := w.walkRun(ctx, in.ID, &h, "", 0, decided)
 	ex.FirstError = first
-	// The children in call order (the steps' calls, as walked), each
-	// named by the tool that started it.
-	tools, order := map[string]string{}, map[string]int{}
-	for n := 0; n <= h.Steps; n++ {
-		r, ok := w.steps[in.ID+"\x00"+fmt.Sprint(n)]
-		var st stepBrief
-		if !ok || r.err != nil || json.Unmarshal(r.body, &st) != nil {
-			continue
-		}
-		for _, c := range st.ToolCalls {
-			tools[c.CallID] = c.Name
-			order[c.CallID] = len(order)
-		}
-	}
+	// The children in call order (the walk's matches: step, then call),
+	// each named by the tool that started it.
 	slices.SortStableFunc(h.Children, func(a, b childBrief) int {
-		ia, oka := order[a.ParentCallID]
-		ib, okb := order[b.ParentCallID]
+		ia, oka := w.callOf[a.ID]
+		ib, okb := w.callOf[b.ID]
 		switch {
 		case oka && okb:
-			return ia - ib
+			return ia.ord - ib.ord
 		case oka:
 			return -1
 		case okb:
@@ -583,17 +661,24 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 	})
 	for i, c := range h.Children {
 		if i == explainChildCap {
-			lines = append(lines, fmt.Sprintf("%d more children: runs {parent:%q}", len(h.Children)-i, in.ID))
+			var ids []string
+			for _, x := range h.Children[i:] {
+				ids = append(ids, x.ID)
+			}
+			w.notes = append(w.notes, fmt.Sprintf("%d more children not listed (at most %d): %s — runs {parent:%q}",
+				len(ids), explainChildCap, cutRunes(strings.Join(ids, ", "), 600), in.ID))
 			break
 		}
-		lines = append(lines, w.childLine(ctx, c, tools[c.ParentCallID], 0))
+		lines = append(lines, w.childLine(ctx, c, w.callOf[c.ID].tool, 0))
 	}
 	if w.capped {
-		lines = append(lines, fmt.Sprintf("the walk stopped at this answer's %d reads: step / run on what is left", explainFetchCap))
+		w.notes = append(w.notes, fmt.Sprintf("the walk stopped at this answer's %d reads: step / run / explain_failure on what is left", explainFetchCap))
 	}
-	if len(lines) > explainDigestCap {
-		lines = append(lines[:explainDigestCap-1], fmt.Sprintf("%d more lines: events {id:%q}, runs {parent:%q}", len(lines)-explainDigestCap+1, in.ID, in.ID))
+	// The caps last, never cut by the line cap.
+	if room := explainDigestCap - len(w.notes); len(lines) > room {
+		lines = append(lines[:room-1], fmt.Sprintf("%d more lines: events {id:%q}, runs {parent:%q}", len(lines)-room+1, in.ID, in.ID))
 	}
+	lines = append(lines, w.notes...)
 	ex.Digest = lines
 
 	if tb, err := m.get(ctx, runPath(in.ID)+"/transcript", nil); err != nil {

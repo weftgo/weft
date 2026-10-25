@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -125,19 +127,21 @@ func TestMCPExplainWalksStepsAndChildren(t *testing.T) {
 }
 
 // TestMCPCompactRows (UX-H-26): a list answer omits empty fields and
-// the bulky ones, cuts hashes, says each cost reason once, and a
-// session's turns omit what the session says.
+// the bulky ones, cuts hashes, keeps what says a figure is unknown
+// (cost_known false, a cache that is not exact), and says each cost
+// reason once with the ids of the rows that gave it.
 func TestMCPCompactRows(t *testing.T) {
-	row := func(id string) string {
+	row := func(id, cache string) string {
 		return `{"id":"` + id + `","parent_run_id":"","trace_id":"7ace0000000000000000000000000001","agent":"support",` +
 			`"model":{"provider":"wefttest","name":"script"},"manifest_hash":"3a21f0000000000000000000000000000000","session_id":"s1",` +
 			`"public_id":"pub","turn":1,"meta":{"k":"v"},"started":"2026-10-01T09:00:00Z","finished":"2026-10-01T09:00:01.5Z",` +
 			`"status":"failed","err":"` + strings.Repeat("e", 300) + `","steps":2,"pending":0,"usage":{"input_tokens":10,"output_tokens":0},` +
 			`"cost_usd":null,"cost_known":false,"cost_badge":"unpriced","cost_reason":"no price for x/y","unpriced_models":["x/y"],` +
+			`"cache":"` + cache + `","delegated_cost_usd":0,"delegated_cost_known":true,"weft_version":"v1","service":"svc",` +
 			`"forked_from_hash":"abcdefabcdefabcdef","holes":[]}`
 	}
-	b := []byte(`{"id":"s1","agent":"support","public_id":"pub","runs":[` + row("a") + `,` + row("b") + `],"next_before":null}`)
-	got := string(compactList(b, "runs", sessionSame))
+	b := []byte(`{"runs":[` + row("a", "exact") + `,` + row("b", "not_reported") + `],"next_before":null}`)
+	got := string(compactList(b, "runs", nil))
 	var doc struct {
 		Runs        []map[string]any `json:"runs"`
 		CostReasons []costReason     `json:"cost_reasons"`
@@ -145,19 +149,22 @@ func TestMCPCompactRows(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &doc); err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.CostReasons) != 1 || doc.CostReasons[0] != (costReason{Reason: "no price for x/y", Rows: 2}) {
-		t.Errorf("cost_reasons %+v, want the one reason once, 2 rows", doc.CostReasons)
+	if len(doc.CostReasons) != 1 || doc.CostReasons[0].Reason != "no price for x/y" || strings.Join(doc.CostReasons[0].Rows, ",") != "a,b" {
+		t.Errorf("cost_reasons %+v, want the one reason once, naming rows a and b", doc.CostReasons)
 	}
 	r := doc.Runs[0]
-	for _, k := range []string{"parent_run_id", "trace_id", "manifest_hash", "meta", "pending", "cost_usd", "cost_known", "cost_reason",
-		"unpriced_models", "holes", "agent", "session_id", "public_id", "finished"} {
+	for _, k := range []string{"parent_run_id", "trace_id", "manifest_hash", "meta", "pending", "cost_usd", "cost_reason",
+		"unpriced_models", "holes", "finished", "cache", "delegated_cost_known", "delegated_cost_usd", "weft_version", "service"} {
 		if _, ok := r[k]; ok {
 			t.Errorf("compact row keeps %s: %v", k, r)
 		}
 	}
-	if r["model"] != "wefttest/script" || r["duration_ms"] != float64(1500) || r["cost_badge"] != "unpriced" ||
-		r["forked_from_hash"] != "abcdefabcdef" || len([]rune(r["err"].(string))) != rowErrRunes+1 {
+	if r["model"] != "wefttest/script" || r["duration_ms"] != float64(1500) || r["cost_badge"] != "unpriced" || r["cost_known"] != false ||
+		r["forked_from_hash"] != "abcdefabcdef" || len([]rune(r["err"].(string))) != rowErrRunes+1 || r["agent"] != "support" {
 		t.Errorf("compact row %v", r)
+	}
+	if doc.Runs[1]["cache"] != "not_reported" {
+		t.Errorf("a cache that is not exact dropped: %v", doc.Runs[1])
 	}
 	if u := r["usage"].(map[string]any); len(u) != 1 || u["input_tokens"] != float64(10) {
 		t.Errorf("usage %v, want the zero dropped", u)
@@ -167,6 +174,55 @@ func TestMCPCompactRows(t *testing.T) {
 	}
 	if got := string(compactList([]byte(`{"runs":[],"total":0}`), "runs", nil)); got != `{"runs":[]}` {
 		t.Errorf("an empty page = %s, want its empty list", got)
+	}
+}
+
+// TestMCPCompactSession (UX-H-26): a session's turns omit what the
+// session says and what turn_defaults says once; a turn that differs
+// keeps it ("none" when it has none); the session row's outcomes strip
+// is counted and its known flags omitted when true.
+func TestMCPCompactSession(t *testing.T) {
+	turn := func(id, stop string) string {
+		return `{"id":"` + id + `","agent":"support","session_id":"s1","public_id":"pub","model":{"provider":"p","name":"m"},` +
+			`"status":"succeeded","stop_reason":"` + stop + `","cost_badge":"scripted","started":"2026-10-01T09:00:00Z",` +
+			`"prompt_preview":"` + strings.Repeat("p", 200) + `"}`
+	}
+	b := []byte(`{"id":"s1","agent":"support","public_id":"pub","cache":"exact","cost_known":true,"delegated_sessions_cost_known":true,` +
+		`"outcomes":["succeeded","succeeded","failed"],"first_prompt":"` + strings.Repeat("f", 200) + `",` +
+		`"runs":[` + turn("s1-t1", "stop") + `,` + turn("s1-t2", "stop") + `,` + turn("s1-t3", "") + `]}`)
+	got := string(compactList(b, "runs", sessionSame))
+	var doc struct {
+		Runs          []map[string]any `json:"runs"`
+		TurnDefaults  map[string]any   `json:"turn_defaults"`
+		OutcomeCounts map[string]any   `json:"outcome_counts"`
+		FirstPrompt   string           `json:"first_prompt"`
+	}
+	if err := json.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.TurnDefaults["model"] != "p/m" || doc.TurnDefaults["stop_reason"] != "stop" || doc.TurnDefaults["cost_badge"] != "scripted" {
+		t.Errorf("turn_defaults %v", doc.TurnDefaults)
+	}
+	for i, r := range doc.Runs {
+		for _, k := range []string{"agent", "session_id", "public_id", "model", "cost_badge"} {
+			if _, ok := r[k]; ok {
+				t.Errorf("turn %d keeps %s: %v", i, k, r)
+			}
+		}
+		if n := len([]rune(r["prompt_preview"].(string))); n != promptRunes+1 {
+			t.Errorf("turn %d prompt_preview %d runes", i, n)
+		}
+	}
+	if _, ok := doc.Runs[1]["stop_reason"]; ok || doc.Runs[2]["stop_reason"] != "none" {
+		t.Errorf("stop_reason: t2 %v t3 %v, want t2's omitted and t3's none", doc.Runs[1]["stop_reason"], doc.Runs[2]["stop_reason"])
+	}
+	if doc.OutcomeCounts["succeeded"] != float64(2) || doc.OutcomeCounts["failed"] != float64(1) || len([]rune(doc.FirstPrompt)) != promptRunes+1 {
+		t.Errorf("outcome_counts %v first_prompt %d runes", doc.OutcomeCounts, len([]rune(doc.FirstPrompt)))
+	}
+	for _, k := range []string{`"cache"`, `"cost_known"`, `"delegated_sessions_cost_known"`, `"outcomes"`} {
+		if strings.Contains(got, k+":") {
+			t.Errorf("session keeps %s: %s", k, got)
+		}
 	}
 }
 
@@ -187,5 +243,165 @@ func TestMCPCompactSpans(t *testing.T) {
 		if strings.Contains(got, not) {
 			t.Errorf("compact spans keep %s:\n%s", not, got)
 		}
+	}
+}
+
+// countingStudio is fakeStudio counting the reads it answered.
+type countingStudio struct {
+	fakeStudio
+	n *int
+}
+
+func (c countingStudio) get(ctx context.Context, path string, q url.Values) (int, []byte, error) {
+	*c.n++
+	return c.fakeStudio.get(ctx, path, q)
+}
+
+// TestMCPExplainReusedCallIDs: call ids repeat across steps (wefttest
+// and the adapters number call_1 every step), so a child is matched by
+// the step's child_run_id or core's <run>/<step>/<call> id, never by
+// call id alone: the first error descends into step 1's child, the
+// digest names each child by its own step's tool, in step order.
+func TestMCPExplainReusedCallIDs(t *testing.T) {
+	_, ex := explainOn(t, fakeStudio{
+		"/api/runs/r": {200, `{"id":"r","agent":"lead","status":"succeeded","steps":3,"holes":[],"children":[` +
+			`{"id":"r/1/call_1","parent_call_id":"call_1","agent":"auditor","status":"failed","err":"weft: run failed at step 0: ledger locked"},` +
+			`{"id":"r/0/call_1","parent_call_id":"call_1","agent":"researcher","status":"succeeded"}]}`},
+		"/api/runs/r/steps/0":              {200, `{"status":"ok","tool_calls":[{"call_id":"call_1","name":"research","result":{"content":"found it"}}],"holes":[]}`},
+		"/api/runs/r/steps/1":              {200, `{"status":"ok","tool_calls":[{"call_id":"call_1","name":"audit","result":{"content":"SUBAGENT_FAILED: ledger locked","is_error":true}}],"holes":[]}`},
+		"/api/runs/r/steps/2":              {200, `{"status":"ok","reason":"stop","holes":[]}`},
+		"/api/runs/r/transcript":           {200, `{"batches":[]}`},
+		"/api/runs/r%2F1%2Fcall_1":         {200, `{"id":"r/1/call_1","agent":"auditor","status":"failed","err":"weft: run failed at step 0: ledger locked","steps":0,"holes":[]}`},
+		"/api/runs/r%2F1%2Fcall_1/steps/0": {200, `{"status":"error","attempts":[{"attempt":1,"outcome":"error","error":"ledger locked"}],"holes":[]}`},
+	}, "r")
+	if f := ex.FirstError; f == nil || f.Run != "r/1/call_1" || f.Via != "step 1 audit" {
+		t.Fatalf("first_error %+v, want step 1's child", ex.FirstError)
+	}
+	d := strings.Join(ex.Digest, "\n")
+	i0, i1 := strings.Index(d, "child r/0/call_1 (researcher) ← research"), strings.Index(d, "child r/1/call_1 (auditor) ← audit")
+	if i0 < 0 || i1 < 0 || i0 > i1 {
+		t.Errorf("children mislabelled or out of step order:\n%s", d)
+	}
+}
+
+// TestMCPExplainPrefersUnrecovered: a model attempt a retry recovered
+// from is not the first error when a later call failed for good; alone,
+// it is, marked retried.
+func TestMCPExplainPrefersUnrecovered(t *testing.T) {
+	steps := `{"status":"ok","attempts":[{"attempt":1,"outcome":"error","http_status":429,"error":"rate limited"},{"attempt":2,"outcome":"ok"}],"holes":[]}`
+	_, ex := explainOn(t, fakeStudio{
+		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":2,"holes":[]}`},
+		"/api/runs/r/steps/0":    {200, steps},
+		"/api/runs/r/steps/1":    {200, `{"status":"ok","tool_calls":[{"call_id":"c","name":"refund","result":{"content":"card declined","is_error":true}}],"holes":[]}`},
+		"/api/runs/r/transcript": {200, `{"batches":[]}`},
+	}, "r")
+	if f := ex.FirstError; f == nil || f.Tool != "refund" || *f.Step != 1 {
+		t.Errorf("first_error %+v, want step 1's refund", ex.FirstError)
+	}
+	_, ex = explainOn(t, fakeStudio{
+		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":1,"holes":[]}`},
+		"/api/runs/r/steps/0":    {200, steps},
+		"/api/runs/r/transcript": {200, `{"batches":[]}`},
+	}, "r")
+	if f := ex.FirstError; f == nil || !strings.Contains(f.Error, "rate limited (retried, attempt 2 ok)") {
+		t.Errorf("first_error %+v, want the recovered attempt marked retried", ex.FirstError)
+	}
+}
+
+// TestMCPExplainDigestLineCap: a step of 200 calls is one line of at
+// most ~1 KB, the rest counted; the digest sits after next and the
+// text, so a cut at max_bytes takes it first.
+func TestMCPExplainDigestLineCap(t *testing.T) {
+	var calls []string
+	for i := range 200 {
+		calls = append(calls, fmt.Sprintf(`{"call_id":"c%d","name":"lookup_%03d","result":{"content":"%s","is_error":true}}`, i, i, strings.Repeat("x", 100)))
+	}
+	f := fakeStudio{
+		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"succeeded","steps":1,"holes":[]}`},
+		"/api/runs/r/steps/0":    {200, `{"status":"ok","tool_calls":[` + strings.Join(calls, ",") + `],"holes":[]}`},
+		"/api/runs/r/transcript": {200, `{"batches":[{"input":false,"messages":[{"role":"assistant","content":[{"type":"text","text":"done"}]}]}]}`},
+	}
+	_, ex := explainOn(t, f, "r")
+	if len(ex.Digest) == 0 || len(ex.Digest[0]) > explainLineBytes+80 || !strings.Contains(ex.Digest[0], "more (step {n:…} has them all)") {
+		t.Errorf("digest line %d bytes: %.200s…", len(ex.Digest[0]), ex.Digest[0])
+	}
+	res, _, err := (&mcpReader{s: f}).explainFailure(context.Background(), nil, mcpRunIn{ID: "r", mcpBound: mcpBound{MaxBytes: 1500}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := texts(t, res)[1]
+	if !strings.Contains(body, `"last_assistant_text":"done"`) || !strings.Contains(body, `"next":[`) {
+		t.Errorf("the cut took next or the text before the digest: %.400s", body)
+	}
+}
+
+// TestMCPExplainCaps: 30 steps and 15 children, each child with three
+// steps and a tool error. The walk reads at most explainFetchCap
+// (transcript included), walks 25 steps, lists 12 children, and says
+// every cap at the digest's end: the steps not walked, the children
+// not listed by id, the children the budget left unread by id.
+func TestMCPExplainCaps(t *testing.T) {
+	f := fakeStudio{"/api/runs/r/transcript": {200, `{"batches":[]}`}}
+	var children, calls []string
+	for i := range 15 {
+		id := fmt.Sprintf("r/0/c%02d", i)
+		children = append(children, fmt.Sprintf(`{"id":%q,"parent_call_id":"c%02d","agent":"w","status":"succeeded","tool_errors":1,"steps":3}`, id, i))
+		calls = append(calls, fmt.Sprintf(`{"call_id":"c%02d","name":"work","child_run_id":%q,"result":{"content":"ok"}}`, i, id))
+		esc := strings.ReplaceAll(id, "/", "%2F")
+		f["/api/runs/"+esc] = struct {
+			status int
+			body   string
+		}{200, fmt.Sprintf(`{"id":%q,"agent":"w","status":"succeeded","steps":3,"holes":[]}`, id)}
+		for n := range 3 {
+			f[fmt.Sprintf("/api/runs/%s/steps/%d", esc, n)] = struct {
+				status int
+				body   string
+			}{200, `{"status":"ok","tool_calls":[{"call_id":"call_1","name":"lookup","result":{"content":"nope","is_error":true}}],"holes":[]}`}
+		}
+	}
+	f["/api/runs/r"] = struct {
+		status int
+		body   string
+	}{200, `{"id":"r","agent":"lead","status":"succeeded","steps":30,"holes":[],"children":[` + strings.Join(children, ",") + `]}`}
+	f["/api/runs/r/steps/0"] = struct {
+		status int
+		body   string
+	}{200, `{"status":"ok","tool_calls":[` + strings.Join(calls, ",") + `],"holes":[]}`}
+	for n := 1; n < 30; n++ {
+		f[fmt.Sprintf("/api/runs/r/steps/%d", n)] = struct {
+			status int
+			body   string
+		}{200, `{"status":"ok","holes":[]}`}
+	}
+	reads := 0
+	res, _, err := (&mcpReader{s: countingStudio{f, &reads}}).explainFailure(context.Background(), nil, mcpRunIn{ID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ex explanation
+	if err := json.Unmarshal([]byte(texts(t, res)[1]), &ex); err != nil {
+		t.Fatal(err)
+	}
+	if reads > explainFetchCap {
+		t.Errorf("%d reads, at most %d", reads, explainFetchCap)
+	}
+	if ex.LastAssistantNote == "" && ex.TranscriptError == "" {
+		t.Error("the transcript was not read: its read is budgeted")
+	}
+	d := ex.Digest
+	steps := 0
+	for _, l := range d {
+		if strings.HasPrefix(l, "step ") {
+			steps++
+		}
+	}
+	tail := strings.Join(d[len(d)-3:], "\n")
+	if steps != explainStepCap || !strings.Contains(tail, "run r: steps 25–30 not walked") ||
+		!strings.Contains(tail, "3 more children not listed (at most 12): r/0/c12, r/0/c13, r/0/c14") ||
+		!strings.Contains(tail, "the walk stopped at this answer's 60 reads") {
+		t.Errorf("%d step lines; digest tail:\n%s", steps, tail)
+	}
+	if !strings.Contains(strings.Join(d, "\n"), `not walked (the read budget is spent): explain_failure {id:"r/0/c11"}`) {
+		t.Errorf("a child the budget left unread is not named:\n%s", strings.Join(d, "\n"))
 	}
 }

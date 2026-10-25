@@ -144,18 +144,39 @@ func seedInvestigations(t *testing.T, ctx context.Context, base, token string) {
 		t.Fatal(err)
 	}
 
-	// A nine-turn session: a support conversation on scripted answers.
+	// A nine-turn session as a support desk runs one: every turn looks
+	// the order up (a tool call, then the answer), every third lookup
+	// fails (the order service times out) and the agent says so; the
+	// customer's messages are real length (~220 characters).
+	type order struct {
+		OrderID string `json:"order_id"`
+	}
+	lookup := core.Tool("lookup_order", "Look up an order by id.", func(_ context.Context, in order) (string, error) {
+		var n int
+		_, _ = fmt.Sscanf(in.OrderID, "A-%d", &n)
+		if (n-1000)%3 == 0 { // turns 3, 6 and 9
+			return "", fmt.Errorf("order service timed out after 5s looking up %s", in.OrderID)
+		}
+		return fmt.Sprintf(`{"order":%q,"status":"packed","carrier":"DHL Express","eta":"tomorrow 10:00"}`, in.OrderID), nil
+	})
 	var turns []wefttest.Turn
 	for i := 1; i <= 9; i++ {
-		turns = append(turns, wefttest.Say(fmt.Sprintf("Turn %d: order A-%d is packed and leaves the Lisbon warehouse tomorrow morning by DHL Express.", i, 1000+i)))
+		id := fmt.Sprintf("A-%d", 1000+i)
+		answer := fmt.Sprintf("Turn %d: order %s is packed and leaves the Lisbon warehouse tomorrow morning by DHL Express; you will get the tracking link by email tonight.", i, id)
+		if i%3 == 0 {
+			answer = fmt.Sprintf("Turn %d: I could not reach the order service for %s just now; I have flagged it and a colleague will email you within the hour.", i, id)
+		}
+		turns = append(turns, wefttest.ToolCalls(wefttest.Call{ID: "call_1", Name: "lookup_order", Args: fmt.Sprintf(`{"order_id":%q}`, id)}), wefttest.Say(answer))
 	}
-	chat := core.New(wefttest.Script(turns...), prov(core.Name("support-desk"))...)
+	chat := core.New(wefttest.Script(turns...), prov(core.Name("support-desk"), lookup)...)
 	cs, err := thread.Create(ctx, thread.Memory(), chat, pinnedIDs(chkChatSess), thread.PublicID("pub_chk_chat"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 1; i <= 9; i++ {
-		tr, err := cs.Send(ctx, core.User(fmt.Sprintf("Where is my order A-%d? It was due yesterday.", 1000+i)))
+		prompt := fmt.Sprintf("Hi, this is Maria again. Where is my order A-%d? It was due yesterday and the tracking page still says "+
+			"'label created'. I need it before Friday for my daughter's birthday, so please tell me if it will arrive in time.", 1000+i)
+		tr, err := cs.Send(ctx, core.User(prompt))
 		if err != nil {
 			t.Fatal(err)
 		}

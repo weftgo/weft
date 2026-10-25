@@ -455,7 +455,8 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 	addTool(srv, "sessions", `List thread sessions (GET /api/sessions), newest first: agent and public_id filter, before + before_id page. Compact rows (full=true: as served).`,
 		m.sessions)
 	addTool(srv, "session", `One thread session (GET /api/sessions/{id}): its row and its turns (runs) in order, compact rows `+
-		`(a turn's agent, session and public id omitted when the session's; cost reasons once; full=true: as served).`,
+		`(a turn's agent, session and public id omitted when the session's; its model, cost_badge, stop_reason and stopped_by omitted `+
+		`when equal to turn_defaults; prompt_preview 80 runes; cost reasons once with their row ids; full=true: as served).`,
 		m.session)
 	addTool(srv, "logs", `The app's own log lines under a run's spans (GET /api/runs/{id}/logs): time order, severity at or above `+
 		`(trace|debug|info|warn|error|fatal), paged with from=<next_from>. A run without the slog bridge answers a not_recorded hole naming otel.Slog(). `+

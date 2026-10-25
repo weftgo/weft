@@ -276,12 +276,15 @@ func TestMCPLiveCheck(t *testing.T) {
 	call(cs, "explain_failure", map[string]any{"id": t2},
 		"resumed "+t1+": deploy denied by alice", `last assistant text "Deploy to prod cancelled`)
 	ex = explained(call(cs, "explain_failure", map[string]any{"id": chkChatSess + "-t5"},
-		`last assistant text "Turn 5: order A-1005`))
+		`last assistant text "Turn 5: order A-1005`, "lookup_order ok"))
 	if ex.LastAssistantText == nil || !strings.HasPrefix(*ex.LastAssistantText, "Turn 5:") {
 		t.Errorf("explain_failure t5: last text %v, want turn 5's own", ex.LastAssistantText)
 	}
+	call(cs, "explain_failure", map[string]any{"id": chkChatSess + "-t2"}, `last assistant text "Turn 2: order A-1002`)
+	call(cs, "explain_failure", map[string]any{"id": chkChatSess + "-t3"},
+		"first error: step 0 lookup_order: order service timed out after 5s looking up A-1003", `last assistant text "Turn 3: I could not reach`)
 	got := call(cs, "session", map[string]any{"id": chkChatSess}, "session "+chkChatSess+" (support-desk): succeeded, 9 turns",
-		`"cost_reasons":[`)
+		`"cost_reasons":[`, `"turn_defaults":{`, `"tool_errors":1`)
 	size := len(strings.Join(got, "\n"))
 	full := call(cs, "session", map[string]any{"id": chkChatSess, "full": true}, "9 turns")
 	fmt.Printf("session %s: %d bytes compact (%d as served)\n", chkChatSess, size, len(strings.Join(full, "\n")))

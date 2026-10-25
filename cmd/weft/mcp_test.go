@@ -776,6 +776,31 @@ func TestMCPPanelToken(t *testing.T) {
 			}
 		}
 	}
+	// The investigation tools under the read token (I5): app logs are
+	// refused (they may carry prompts); spans and a trace read only the
+	// token's public id — another's run or trace is the route's 403.
+	if isErr, got := call("logs", map[string]any{"id": "r_ok"}); !isErr || !strings.Contains(got[0], "403") {
+		t.Errorf("logs under a read token = %v %q, want the 403", isErr, got)
+	}
+	if isErr, got := call("spans", map[string]any{"id": "r_ok"}); isErr || len(got) < 2 || !strings.Contains(got[1], `"spans":[{`) {
+		t.Errorf("spans of its own run = %v %q", isErr, got)
+	}
+	if isErr, got := call("spans", map[string]any{"id": "r_fail"}); !isErr || !strings.Contains(got[0], "403") {
+		t.Errorf("spans of another public id's run = %v %q, want the 403", isErr, got)
+	}
+	traceOf := func(id string) string {
+		var r struct {
+			TraceID string `json:"trace_id"`
+		}
+		_ = json.Unmarshal([]byte(routeBody(t, base, "tok", "/api/runs/"+id)), &r)
+		return r.TraceID
+	}
+	if isErr, got := call("trace", map[string]any{"trace_id": traceOf("r_ok")}); isErr {
+		t.Errorf("trace of its own run = %q", got)
+	}
+	if isErr, got := call("trace", map[string]any{"trace_id": traceOf("r_fail")}); !isErr || !strings.Contains(got[0], "403") {
+		t.Errorf("trace of another public id's run = %v %q, want the 403", isErr, got)
+	}
 	// explain_failure under the read token: the step's request block is
 	// the hidden badge, so no request hint the token would be refused.
 	isErr, got := call("explain_failure", map[string]any{"id": "r_ok"})

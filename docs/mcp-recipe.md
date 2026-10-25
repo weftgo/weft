@@ -80,8 +80,10 @@ every step, its child runs and the transcript composed), `runs`,
 `search`, `run`, `step`, `request`, `events`, `tools`, `diff`, `export`
 (json, jsonl, otlp), `sessions`, `session`, `logs`, `spans`, `trace`,
 `transcript`, `live`, `agents`, `experiments`, `runtimes`, `meta`. Every
-answer is three parts: a one-line summary, the route's JSON, and a note
-when the output was cut.
+answer is three parts: a one-line summary, the route's JSON — compact
+rows on the list tools and compact spans on `spans`/`trace` (below;
+`full: true` answers the JSON as served) — and a note when the output
+was cut.
 
 **Compact rows.** A coding agent pays for every byte, so the list tools
 (`runs`, `search`, `sessions`, `session`, `live`) answer a projection of
@@ -94,13 +96,21 @@ preview, `started` and `duration_ms` — and leaves out the trace id, the
 content hashes, the record counts and `meta` (the `run` tool has them);
 a hash a row keeps is cut to 12 characters; every cost reason is lifted
 out of the rows into one `cost_reasons` list at the top (`{reason,
-rows}`), never one per row; a session's turns omit the agent, session
-and public id the session names. `spans` and `trace` answer each span
+rows}`, `rows` the ids of the rows that gave it), never one per row;
+a `*_known` flag is kept only when false and `cache` only when it is not
+`exact`; a session's turns omit the agent, session
+and public id the session names, cut `prompt_preview` to 80 characters
+and omit their model, cost badge, stop reason and stopped-by when equal
+to `turn_defaults` (the first turn's, said once; a turn with none where
+the default has one reads `none`); a session's outcomes strip is
+counted (`outcome_counts`). `spans` and `trace` answer each span
 as its name, ids, `start_ms` / `dur_ms` from the first span (`t0`),
 status and the attributes that say what it was (model, tokens, tool,
 step, attempt, error, HTTP status), content attributes and events left
 out. `full: true` on any of them answers the route's JSON as served. A
-nine-turn session answers 3.5 KB compact, 11.4 KB as served.
+nine-turn session — each turn a tool call and an answer, every third
+tool call failing, the prompts ~220 characters — answers 3.2 KB compact,
+13.6 KB as served.
 
 | The question | Call | Then |
 |---|---|---|
@@ -139,6 +149,18 @@ run a1100000000000000000000000000001 (support): failed before step 1 started (st
 next: step {id:"a1100000000000000000000000000001", n:0} for the step whole | request {id:"a1100000000000000000000000000001", step:0, transcript:true} for the exact model input | events {id:"a1100000000000000000000000000001"} for the event stream
 ```
 
+(`next:` is the explanation's `next` array, joined.) The answer names
+the error, the step it is about and why that step (here: the budget
+stopped the run *between* steps, so the step shown is the last one that
+ran), that step's tool calls with their outcome, and the Studio page.
+Then the step whole:
+
+```text
+> step {"id":"a1100000000000000000000000000001","n":0}
+run a1100000000000000000000000000001 step 0: ok (tool_calls); tool calls: lookup_order ok
+{"run_id":"a1100000000000000000000000000001","step":0,"status":"ok","reason":"tool_calls","started":"2026-10-01T09:09:00.002Z","finished":"2026-10-01T09:09:00.01Z","latency_ms":1,"model":{"provider":"wefttest","requested":"script","answered…
+```
+
 **It succeeded, but a child failed.** The arena's `sub.failed`, built
 in the check on scripted models: the shipping-quote subagent's
 provider is down, the parent reads `SUBAGENT_FAILED` and answers with a
@@ -147,7 +169,7 @@ the child run and its step:
 
 ```text
 > explain_failure {"id":"c5b0000000000000000000000000f001"}
-run c5b0000000000000000000000000f001 (checkout-assistant): succeeded, last step 1; stop_reason stop; first error: step 0 shipping_quote → child c5b0000000000000000000000000f001/0/q1 (shipping-quoter) step 0: model attempt 1: model stream: carrier API outage: DHL rates unavailable; digest: 2 of 3 lines report an error, a park or a failed child; last assistant text "Express quotes are down; standard shipping is €7.90, 4–6 days." — http://127.0.0.1:45545/runs/c5b0000000000000000000000000f001
+run c5b0000000000000000000000000f001 (checkout-assistant): succeeded, last step 1; stop_reason stop; first error: step 0 shipping_quote → child c5b0000000000000000000000000f001/0/q1 (shipping-quoter) step 0: model attempt 1: model stream: carrier API outage: DHL rates unavailable; digest: 2 of 3 lines report an error, a park or a failed child; last assistant text "Express quotes are down; standard shipping is €7.90, 4–6 days." — http://127.0.0.1:33933/runs/c5b0000000000000000000000000f001
 digest:
   step 0: ok (tool_calls): shipping_quote error "SUBAGENT_FAILED: agent \"shipping_quote\" failed at step 0: model stream: carrier API outage: DHL rates unavailable"
   step 1: ok (stop)
@@ -171,21 +193,21 @@ digest:
   child …/0/l1 (litigation-reviewer) ← review_litigation: succeeded; its first error: step 0 ocr_exhibit: tool "ocr_exhibit" panicked: ocr engine: nil page
 ```
 
-The walk is bounded: at most 25 steps and 12 children per run, two
-child levels for a first error, 60 reads per answer; what it left out
-is the digest's last line, with the read that goes further.
+`first_error` is the first error nothing recovered from — a failed
+call, a model attempt no retry fixed, the run's own failure — and only
+when there is none, the first attempt a retry recovered from, marked
+`(retried, attempt N ok)`. A child is matched to its call by the step's
+`child_run_id` (call ids repeat across steps).
 
-(`next:` is the explanation's `next` array, joined.) The answer names
-the error, the step it is about and why that step (here: the budget
-stopped the run *between* steps, so the step shown is the last one that
-ran), that step's tool calls with their outcome, and the Studio page.
-Then the step whole:
-
-```text
-> step {"id":"a1100000000000000000000000000001","n":0}
-run a1100000000000000000000000000001 step 0: ok (tool_calls); tool calls: lookup_order ok
-{"run_id":"a1100000000000000000000000000001","step":0,"status":"ok","reason":"tool_calls","started":"2026-10-01T09:09:00.002Z","finished":"2026-10-01T09:09:00.01Z","latency_ms":1,"model":{"provider":"wefttest","requested":"script","answered…
-```
+The walk is bounded: at most 25 steps per run (a child's too), 12
+children listed, two child levels for a first error, 60 reads per
+answer (the run row and the transcript included), each digest line at
+most 1 KB (`+n more`); every cap it hit is said at the digest's end —
+the steps a run did not walk, the children not listed (by id) — and a
+child the budget left unread says so on its own line, by id; each with
+the read that goes further. The
+digest comes after `next` and `last_assistant_text` in the JSON, so a
+cut at `max_bytes` takes it first.
 
 A parked run is not a failure, and says so:
 
@@ -200,10 +222,10 @@ never "awaiting". A thread turn parked on `deploy`, denied by alice:
 
 ```text
 > explain_failure {"id":"s_chk_ops-t1"}
-run s_chk_ops-t1 (ops-bot): succeeded, last step 0; stop_reason tool_calls; parked, decided: deploy denied by alice: change freeze until Monday → resumed as s_chk_ops-t2; tool calls: deploy denied by alice; digest: 1 of 1 lines report an error, a park or a failed child; no assistant text this run — http://127.0.0.1:45545/runs/s_chk_ops-t1
+run s_chk_ops-t1 (ops-bot): succeeded, last step 0; stop_reason tool_calls; parked, decided: deploy denied by alice: change freeze until Monday → resumed as s_chk_ops-t2; tool calls: deploy denied by alice; digest: 1 of 1 lines report an error, a park or a failed child; no assistant text this run — http://127.0.0.1:33933/runs/s_chk_ops-t1
 
 > explain_failure {"id":"s_chk_ops-t2"}
-run s_chk_ops-t2 (ops-bot): succeeded, last step 0; stop_reason stop; resumed s_chk_ops-t1: deploy denied by alice: change freeze until Monday; last assistant text "Deploy to prod cancelled: alice denied it (change freeze)." — http://127.0.0.1:45545/runs/s_chk_ops-t2
+run s_chk_ops-t2 (ops-bot): succeeded, last step 0; stop_reason stop; resumed s_chk_ops-t1: deploy denied by alice: change freeze until Monday; last assistant text "Deploy to prod cancelled: alice denied it (change freeze)." — http://127.0.0.1:33933/runs/s_chk_ops-t2
 ```
 
 `last_assistant_text` is the run's own: a thread turn's input carries
@@ -251,7 +273,7 @@ step (`step`: each call's `result` with `is_error`) or the event stream
 ```text
 > search {"q":"exceeded"}
 search: 1 runs of 1
-{"cost_reasons":[{"reason":"a scripted model: nothing bills it, an exact $0","rows":1}],"runs":[{"agent":"support","cost_badge":"scripted","duration_ms":6,"err":"weft: run failed at step 1: weft: run exceeded the maximum number of steps","e…
+{"cost_reasons":[{"reason":"a scripted model: nothing bills it, an exact $0","rows":["a1100000000000000000000000000001"]}],"runs":[{"agent":"support","cost_badge":"scripted","duration_ms":6,"err":"weft: run failed at step 1: weft: run excee…
 
 > search {"status":"failed","tool":"lookup_order"}
 search: 1 runs of 1
@@ -271,7 +293,7 @@ diff a1100000000000000000000000000001 → a1100004000000000000000000000001: 1 ch
 
 ```text
 > meta {}
-Studio at http://127.0.0.1:33933: capabilities requests, steps, export, logs, diff, traces, search, pricing, delete, proposals, live, ingest, auth, handoff, panel-config
+Studio at http://127.0.0.1:33933: capabilities requests, steps, export, logs, diff, traces, search, manifests, spans_tree, timeline, pricing, delete, proposals, live, ingest, auth, handoff, panel-config
 {"weft_version":"v0.18.3","studio_version":"v0.18.3","panel_version":"v0.18.3","db":{"kind":"sqlite","path":"/tmp/TestMCPLiveCheck3582215505/001/weft.db","size":922888},"title":"weft studio","has_manifest":false,"ingest_open":true,"interrup…
 ```
 
@@ -318,9 +340,9 @@ note, and the cut JSON does not parse:
 
 ```text
 > export {"format":"jsonl","id":"a1100000000000000000000000000001","max_bytes":2048}
-run a1100000000000000000000000000001 exported as jsonl (6535 bytes)
+run a1100000000000000000000000000001 exported as jsonl (6678 bytes)
 {"record":"run","format":"weft.run.export/1","run":{"id":"a1100000000000000000000000000001", …
-[truncated: showing 2048 of 6535 bytes — the JSON above is cut and does not parse; raise max_bytes (at most 4194304) or narrow the query (limit, step, refs)]
+[truncated: showing 2048 of 6678 bytes — the JSON above is cut and does not parse; raise max_bytes (at most 4194304) or narrow the query (limit, step, refs)]
 ```
 
 Prefer the narrow tools (`run`, `step`, `request`) to `export`; page

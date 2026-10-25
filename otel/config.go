@@ -24,6 +24,9 @@ type config struct {
 	// rawBodies is RawBodies' ask; Start keeps it only under
 	// WEFT_ENV=dev (and never under NoEnv), else one WARN and off.
 	rawBodies bool
+	// noDiscovery is NoDiscovery's ask: skip the discovery file alone
+	// (the rest of the environment is still read).
+	noDiscovery bool
 	// slog is Slog's ask: wrap slog.Default with the bridge once the
 	// globals are registered (never under NoGlobal).
 	slog bool

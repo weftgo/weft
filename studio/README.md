@@ -69,7 +69,9 @@ file, 0600, never printed (`--rotate-token` renews it;
 `otel.Install()` / `runtime.Install()` finds the running Studio through
 the discovery file `studio.json` (`./.weft`, `$XDG_RUNTIME_DIR/weft`,
 the user cache directory; `WEFT_STUDIO_URL` always wins,
-`WEFT_DISCOVERY=off` ignores it); ingest is open on loopback;
+`WEFT_DISCOVERY=off` ignores it, an explicit `otel.Local` or
+`otel.Studio` never reads it — the root README's "When weft/otel reads
+the file"); ingest is open on loopback;
 `127.0.0.1:7331` is the one default port: started again on the same
 database, the binary finds the running Studio through `/api/meta`
 (`db.path`, `pid`, read with the stable token — sent only to an

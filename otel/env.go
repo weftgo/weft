@@ -21,6 +21,10 @@ import (
 //	WEFT_DB                                                  → the default Local path
 //	(neither WEFT_STUDIO_URL nor WEFT_DISCOVERY=off)          → the discovery file's Studio (discoverStudio)
 //
+// The discovery file is read only when the pipeline names no Studio and
+// no Local destination in code and NoDiscovery is not set (see
+// discoverStudio).
+//
 // An http:// scheme the operator wrote in OTEL_EXPORTER_OTLP_ENDPOINT is
 // the opt-in for a plaintext export to that host — the variable's
 // OpenTelemetry-standard meaning, and the docker-compose/sidecar
@@ -158,8 +162,10 @@ type discovered struct {
 // WEFT_STUDIO_URL and WEFT_STUDIO_TOKEN — its url and token, together.
 // A stale file (its pid gone, or 24 hours old) is never trusted; a
 // missing, stale or malformed one changes nothing and logs Debug at
-// most. NoEnv turns this off with the rest of the environment, and an
-// explicit Studio destination (otel.Studio) turns it off on its own.
+// most. NoEnv turns this off with the rest of the environment,
+// NoDiscovery turns it off alone, and an explicit Studio or Local
+// destination (otel.Studio, otel.Local) turns it off on its own: a
+// pipeline that names where it writes writes only there.
 func discoverStudio(getenv func(string) string) (func(string) string, *discovered) {
 	info, path, ok := discovery.Lookup(getenv, slog.Default())
 	if !ok {
@@ -177,9 +183,14 @@ func discoverStudio(getenv func(string) string) (func(string) string, *discovere
 }
 
 // hasStudio reports whether dests name a Studio destination.
-func hasStudio(dests []dest) bool {
+func hasStudio(dests []dest) bool { return hasKind(dests, destStudio) }
+
+// hasLocal reports whether dests name a Local destination.
+func hasLocal(dests []dest) bool { return hasKind(dests, destLocal) }
+
+func hasKind(dests []dest, k destKind) bool {
 	for _, d := range dests {
-		if d.kind == destStudio {
+		if d.kind == k {
 			return true
 		}
 	}

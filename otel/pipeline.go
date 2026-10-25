@@ -214,12 +214,13 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	var joined *discovered
 	if !cfg.noEnv {
 		getenv := envGetenv
-		// Explicit > environment > file: a Studio named in code
-		// (otel.Studio) switches the discovery read off, as
-		// WEFT_STUDIO_URL does — the file never adds a second Studio,
-		// and never becomes the one StudioEndpoint (and runtime.Install)
-		// reports.
-		if !hasStudio(cfg.dests) {
+		// Explicit > environment > file: a Studio or a Local named in
+		// code (otel.Studio, otel.Local) switches the discovery read
+		// off, as WEFT_STUDIO_URL and NoDiscovery do — the file never
+		// adds a second Studio, never writes runs into a store the
+		// caller did not name (issue 001), and never becomes the one
+		// StudioEndpoint (and runtime.Install) reports.
+		if !cfg.noDiscovery && !hasStudio(cfg.dests) && !hasLocal(cfg.dests) {
 			getenv, joined = discoverStudio(getenv)
 		}
 		dests = append(dests, dedupe(cfg.dests, envDestinations(getenv))...)
@@ -254,7 +255,7 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 		// to stop it doing so.
 		slog.Info("weft/otel: joined the running Studio", "url", joined.info.URL,
 			"pid", joined.info.PID, "file", joined.path,
-			"hint", "WEFT_STUDIO_URL names another; WEFT_DISCOVERY=off ignores the file")
+			"hint", "WEFT_STUDIO_URL names another; otel.NoDiscovery() or WEFT_DISCOVERY=off ignores the file")
 	}
 	if rawRefused {
 		slog.Warn("otel: RawBodies ignored: WEFT_ENV is not dev",

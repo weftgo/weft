@@ -449,9 +449,22 @@ The file is a convenience, never a requirement: `WEFT_STUDIO_URL`
 always wins (the file is not read), `WEFT_DISCOVERY=off` turns the read
 off (and the write: `weft studio` and `weft dev` started under it write
 no file and say so in one line), `otel.NoEnv()` ignores it with the rest of the environment, and a
-Studio named in code — `otel.Studio(url, tok)` (which switches the read
-off: explicit > environment > file) or `runtime.Studio(url, tok)` —
+Studio named in code — `otel.Studio(url, tok)` or `runtime.Studio(url, tok)` —
 needs no file.
+
+**When weft/otel reads the file** (the one rule; explicit > environment
+> file): only when the pipeline names neither an `otel.Studio` nor an
+`otel.Local` destination in code, `WEFT_STUDIO_URL` is unset, and
+neither `otel.NoDiscovery()` (this pipeline), `WEFT_DISCOVERY=off`
+(the process) nor `otel.NoEnv()` is set. A pipeline that names its
+store writes only to what it names plus the environment's destinations
+— `otel.Install(otel.Local(path))` never joins a running Studio; to
+write to both, name both: `otel.Install(otel.Local(path),
+otel.Studio(url, tok))`. `otel.NoDiscovery()` skips the file alone and
+keeps `WEFT_STUDIO_URL`, `OTEL_*` and the `WEFT_ENV` gate;
+`otel.NoGlobal()` does not stop the read. `runtime.Install` reads the
+file on its own, when it has no `runtime.Studio` / `runtime.Local` and
+the pipeline reports no Studio.
 
 Setup A's handler serves `GET <base>/panel-config.json` —
 `{"endpoint", "version", "capabilities"}` — to a loopback (or

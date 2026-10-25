@@ -2,6 +2,7 @@ package otel
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -13,7 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/internal/discovery"
+	"github.com/weftgo/weft/obsdb/sqlite"
 )
 
 // TestMain points the discovery rung at an empty directory of this
@@ -240,5 +244,212 @@ func TestDiscoveryExplicitStudioWins(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "joined") {
 		t.Errorf("a join was claimed: %s", logs.String())
+	}
+}
+
+// runtimeDirDiscoveryFile writes a fresh discovery file naming url
+// where a running `weft studio` writes it on Linux —
+// $XDG_RUNTIME_DIR/weft/studio.json, XDG_RUNTIME_DIR a temporary
+// directory of the test's own — and points the location order at the
+// documented one (DefaultDirs) restricted to that directory, so the
+// developer's own ./.weft or cache directory never answers.
+func runtimeDirDiscoveryFile(t *testing.T, url, token string) {
+	t.Helper()
+	xdg := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", xdg)
+	dir := filepath.Join(xdg, "weft")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := discovery.Dirs
+	discovery.Dirs = func() []string {
+		var out []string
+		for _, d := range discovery.DefaultDirs() {
+			if d == dir {
+				out = append(out, d)
+			}
+		}
+		return out
+	}
+	t.Cleanup(func() { discovery.Dirs = old })
+	b, _ := json.Marshal(discovery.Info{URL: url, Token: token, PID: os.Getpid(), Started: time.Now(), Version: "v0"})
+	if err := os.WriteFile(filepath.Join(dir, discovery.FileName), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, path, ok := discovery.Lookup(func(string) string { return "" }, nil); !ok || path != filepath.Join(dir, discovery.FileName) {
+		t.Fatalf("the discovery file is not found (%q, %v): the test proves nothing", path, ok)
+	}
+}
+
+// countingSink is an OTLP/HTTP endpoint that counts the requests it got.
+type countingSink struct {
+	*httptest.Server
+	mu sync.Mutex
+	n  int
+}
+
+func newCountingSink(t *testing.T) *countingSink {
+	t.Helper()
+	s := &countingSink{}
+	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.Lock()
+		s.n++
+		s.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(s.Close)
+	return s
+}
+
+func (s *countingSink) hits() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.n
+}
+
+// clearDestinationEnv empties every variable that adds a destination
+// or skips the discovery read.
+func clearDestinationEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"WEFT_STUDIO_URL", "WEFT_STUDIO_TOKEN", "WEFT_DISCOVERY", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS"} {
+		t.Setenv(k, "")
+	}
+}
+
+// generateOne runs one scripted agent on the global providers (what
+// Install registered) or on p's, and returns the run id.
+func generateOne(t *testing.T, p *Pipeline) string {
+	t.Helper()
+	opts := []core.Option{core.Name("discovery-demo")}
+	if p != nil {
+		opts = append(opts, core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	}
+	res, err := core.New(wefttest.Script(wefttest.Say("ok")), opts...).Generate(context.Background(), core.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.ID
+}
+
+// localHasRun reports whether the Local store at path holds run id's
+// spans.
+func localHasRun(t *testing.T, path, id string) bool {
+	t.Helper()
+	db, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	spans, err := db.RunSpans(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(spans) > 0
+}
+
+// TestDiscoveryLocalOnlyWritesOnlyLocal (issue 001, I1): an explicit
+// Local switches the discovery read off, as an explicit Studio does —
+// otel.Install(otel.Local(p)) with a fresh discovery file naming a
+// running Studio writes the run to p and sends the Studio nothing,
+// reports no Studio endpoint and claims no join.
+func TestDiscoveryLocalOnlyWritesOnlyLocal(t *testing.T) {
+	clearDestinationEnv(t)
+	studio := newCountingSink(t)
+	runtimeDirDiscoveryFile(t, studio.URL, "disc-token")
+	logs := captureLog(t)
+	path := filepath.Join(t.TempDir(), "local.db")
+
+	stop := Install(Local(path), Heartbeat(0))
+	if u, _ := StudioEndpoint(); u != "" {
+		t.Errorf("otel.StudioEndpoint = %q, want none (the file is not read)", u)
+	}
+	id := generateOne(t, nil)
+	stop()
+
+	if n := studio.hits(); n != 0 {
+		t.Errorf("the discovered Studio got %d requests, want 0", n)
+	}
+	if !localHasRun(t, path, id) {
+		t.Errorf("the Local store has no spans for run %s", id)
+	}
+	if strings.Contains(logs.String(), "joined") {
+		t.Errorf("a join was claimed: %s", logs.String())
+	}
+}
+
+// TestDiscoveryNoDiscoveryKeepsEnv (I1, option B): NoDiscovery skips
+// the discovery file and nothing else — the OTEL_* destination stays,
+// the discovered Studio gets nothing. Without it the same environment
+// joins the file's Studio (the file is live).
+func TestDiscoveryNoDiscoveryKeepsEnv(t *testing.T) {
+	clearDestinationEnv(t)
+	studio, collector := newCountingSink(t), newCountingSink(t)
+	runtimeDirDiscoveryFile(t, studio.URL, "disc-token")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.URL)
+
+	control, err := Start(testCtx(t), NoGlobal(), Heartbeat(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(control.dests); n != 2 {
+		t.Errorf("without NoDiscovery: %d destinations, want 2 (env OTLP + the file's Studio)", n)
+	}
+	_ = control.Shutdown(testCtx(t))
+	before := studio.hits()
+
+	logs := captureLog(t)
+	p, err := Start(testCtx(t), NoGlobal(), NoDiscovery(), Heartbeat(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(p.dests); n != 1 {
+		t.Errorf("NoDiscovery: %d destinations, want the env OTLP one alone", n)
+	}
+	if u, _ := p.StudioEndpoint(); u != "" {
+		t.Errorf("StudioEndpoint = %q, want none", u)
+	}
+	generateOne(t, p)
+	if err := p.Shutdown(testCtx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if n := studio.hits() - before; n != 0 {
+		t.Errorf("the discovered Studio got %d requests under NoDiscovery", n)
+	}
+	if collector.hits() == 0 {
+		t.Error("the OTEL_EXPORTER_OTLP_ENDPOINT collector got nothing: NoDiscovery dropped the environment")
+	}
+	if strings.Contains(logs.String(), "joined") {
+		t.Errorf("a join was claimed: %s", logs.String())
+	}
+}
+
+// TestDiscoveryLocalPlusStudio (I1): a caller who wants the Local store
+// and a Studio names both — the run reaches both, the discovered one
+// (a different Studio) nothing.
+func TestDiscoveryLocalPlusStudio(t *testing.T) {
+	clearDestinationEnv(t)
+	discovered, explicit := newCountingSink(t), newCountingSink(t)
+	runtimeDirDiscoveryFile(t, discovered.URL, "disc-token")
+	path := filepath.Join(t.TempDir(), "local.db")
+
+	p, err := Start(testCtx(t), NoGlobal(), Heartbeat(0), Local(path), Studio(explicit.URL, "tok"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(p.dests); n != 2 {
+		t.Errorf("%d destinations, want Local + Studio", n)
+	}
+	id := generateOne(t, p)
+	if err := p.Shutdown(testCtx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if !localHasRun(t, path, id) {
+		t.Errorf("the Local store has no spans for run %s", id)
+	}
+	if explicit.hits() == 0 {
+		t.Error("the explicit Studio got nothing")
+	}
+	if n := discovered.hits(); n != 0 {
+		t.Errorf("the discovered Studio got %d requests", n)
 	}
 }

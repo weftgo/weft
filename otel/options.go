@@ -98,6 +98,20 @@ func NoEnv() Option {
 	return optionFunc(func(c *config) { c.noEnv = true })
 }
 
+// NoDiscovery skips the discovery file a running `weft studio` / `weft
+// dev` wrote, and nothing else: WEFT_STUDIO_URL, the OTEL_* variables
+// and the WEFT_ENV development gate are read as usual (NoEnv drops them
+// all). It is the per-pipeline form of WEFT_DISCOVERY=off — for a
+// harness or test that keeps the operator's destinations but must not
+// write into a Studio found on disk. A pipeline that names a Studio or
+// a Local destination in code needs no NoDiscovery: either turns the
+// read off on its own. Like NoEnv it is otel's alone: runtime.Install's
+// discovery read (under WEFT_ENV=dev, when the pipeline has no Studio)
+// is governed by runtime's options and WEFT_DISCOVERY=off.
+func NoDiscovery() Option {
+	return optionFunc(func(c *config) { c.noDiscovery = true })
+}
+
 // RawBodies records each model call attempt's wire exchange — the
 // provider request and response the first-party adapters sent and
 // received, headers included minus the credential ones, each body
@@ -124,7 +138,11 @@ func RawBodies(on bool) Option {
 }
 
 // NoGlobal leaves the OTel globals alone (Start only; Install always
-// registers). For tests and dependency-injected programs.
+// registers). For tests and dependency-injected programs. It isolates
+// the globals only: it does not stop the discovery file's read — a
+// pipeline without an explicit Studio or Local destination still joins
+// a running Studio; NoDiscovery stops that read alone, NoEnv every
+// environment destination.
 func NoGlobal() Option {
 	return optionFunc(func(c *config) { c.noGlobal = true })
 }
@@ -136,7 +154,10 @@ func NoGlobal() Option {
 // Local is the local sink: obsdb/sqlite at path ("" = $WEFT_DB or
 // ./.weft/weft.db), written synchronously — nothing emitted is lost,
 // and the DB's in-process hub is the live lane setup A shares with
-// Studio. Content on, traces + logs.
+// Studio. Content on, traces + logs. Naming a Local switches the
+// discovery file off, as Studio does: the pipeline writes to the
+// stores it names (and the environment's), never into a running Studio
+// it found on disk — add Studio(url, token) to write to one as well.
 func Local(path string, opts ...DestOption) Option {
 	return optionFunc(func(c *config) {
 		d := newDest(destLocal, "local")
@@ -148,9 +169,10 @@ func Local(path string, opts ...DestOption) Option {
 
 // Studio exports OTLP/HTTP protobuf to a Weft Studio with a bearer
 // token. Content on, traces + logs, short batches (logs 200 ms, spans
-// 1 s). Naming a Studio here switches the discovery file off: the
-// explicit destination is the pipeline's one Studio from the file's
-// point of view (WEFT_STUDIO_URL still adds its own, de-duplicated).
+// 1 s). Naming a Studio here switches the discovery file off (as
+// naming a Local does): the explicit destination is the pipeline's one
+// Studio from the file's point of view (WEFT_STUDIO_URL still adds its
+// own, de-duplicated).
 func Studio(url, token string, opts ...DestOption) Option {
 	return optionFunc(func(c *config) {
 		d := newDest(destStudio, "studio")

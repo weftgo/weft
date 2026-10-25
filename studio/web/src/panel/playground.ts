@@ -4,6 +4,8 @@
 // Studio UI posts the same body to the same endpoint (V6).
 import type {
   AgentDefaults,
+  CostFields,
+  Usage,
   Message,
   Part,
   PosEvent,
@@ -11,6 +13,9 @@ import type {
   Transcript,
 } from "../lib/api"
 import { FORK_NEEDS, labOverrides } from "../lib/experiment-body"
+import { engineChoice, keyedKnobs, noEdit } from "../lib/engine"
+import type { Engine, EngineChoice } from "../lib/engine"
+import type { PreviewDoc } from "../lib/preview"
 import { editsProblem, wireEdits } from "../lib/edits"
 import type { ReplayEdit } from "../lib/edits"
 import type { LabFields } from "../lib/experiment-body"
@@ -52,7 +57,16 @@ export interface ExperimentDraft {
   modelFree?: string
   thinking: string
   input: string
-  engine: "live" | "scripted"
+  /** The engine the user picked; absent, the command runs on
+   * engineFor's default (lib/engine.ts, U17). */
+  engine?: Engine
+  /** The source's recorded step count, the agent's own model as it
+   * recorded it, and the source step's step-route doc (its cost and
+   * usage; null: none) or why there is none — what engineFor reads. */
+  steps?: number
+  ownModel?: string
+  cost?: (CostFields & { usage?: Usage }) | null
+  costWhy?: string
   sideEffects: "" | "substitute" | "park" | "allow"
   thread: "ephemeral" | "fork"
   /** The connected runtime the command goes to. */
@@ -71,8 +85,10 @@ export interface ExperimentDraft {
    * empty (the runtime then takes the source's own, as from Studio's
    * drawer — the same body) and shows it as the placeholder. */
   sourceInput?: string
-  /** The field the drawer opens on (the verb's focus). */
+  /** The field the drawer opens on (the verb's focus), and the kept
+   * field it names (edit this result). */
   focus?: ReplayDraft["focus"]
+  at?: ReplayDraft["at"]
   /** One per opening: focus moves once per opening, not per draw. */
   key?: number
   /** edit the prompt: where the pre-filled prompt came from — the
@@ -256,6 +272,38 @@ export function labOf(draft: ExperimentDraft) {
   )
 }
 
+/** engineFor is the drawer's engine choice (lib/engine.ts): the facts
+ * Studio's drawer reads, from the draft — and the preview's key check
+ * once it answers. */
+export function engineFor(d: ExperimentDraft, pv?: PreviewDoc): EngineChoice {
+  const names = Object.keys(d.tools)
+  const on = names.filter((n) => d.tools[n])
+  const only = names.filter((n) => d.lab?.only_tools.includes(n))
+  const fork = d.thread === "fork"
+  return engineChoice({
+    source: true,
+    edits: fork ? 0 : d.edits.length,
+    prompt: !!d.instructions && d.instructions !== d.registeredInstructions,
+    model: d.model,
+    input: d.step === 0 && !!d.input.trim() && !noEdit(d.input, d.sourceInput),
+    fork,
+    keyed: keyedKnobs({
+      tools:
+        on.length < names.length ||
+        (!!only.length && only.length < names.length),
+      thinking: d.thinking,
+      toolChoice: d.lab?.tool_choice,
+    }),
+    fromStep: d.step,
+    steps: fork ? undefined : d.steps,
+    keyMatch: pv?.scripted_key_match,
+    hit: pv?.scripted_hit,
+    ownModel: d.ownModel,
+    cost: d.cost,
+    costWhy: d.costWhy,
+  })
+}
+
 /** buildRunBody is §5.1's command, assembled from the draft. The
  * overrides carry only what changed (§10.1: only present when
  * something changed — an ordinary run has none of them). The body is
@@ -263,7 +311,8 @@ export function labOf(draft: ExperimentDraft) {
  * key for key and in the same order — replay.test.ts builds both. */
 export function buildRunBody(
   draft: ExperimentDraft,
-  publicId: string
+  publicId: string,
+  pv?: PreviewDoc
 ): Record<string, unknown> {
   const toolsEnabled = Object.entries(draft.tools)
     .filter(([, on]) => on)
@@ -286,7 +335,7 @@ export function buildRunBody(
     agent: draft.agent,
     source: { run_id: draft.runId, from_step: draft.step },
     overrides,
-    engine: draft.engine,
+    engine: draft.engine ?? engineFor(draft, pv).default,
     side_effects: draft.sideEffects || "substitute",
     thread: draft.thread,
   }

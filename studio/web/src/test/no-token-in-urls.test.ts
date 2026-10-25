@@ -19,7 +19,7 @@
 //                                  fetchSessions, fetchSession, fetchPublic,
 //                                  fetchRuntimes, fetchCommand, fetchHandoff
 //                    panelPost   — postPlaygroundRun, postApproval, postSteer
-//                    panelPut    — putBreakpoints
+//                    panelPut    — putProposal
 //                    openPanelLive — POST live-grant, then new EventSource
 //   panel/config.ts  discoverEndpoint — GET panel-config.json (no credential at all)
 //   lib/api.ts       request()   — every fetch*/post*/put* and *Query queryFn
@@ -204,7 +204,7 @@ describe("no client request carries the token in a URL", () => {
       await drive("postApproval", () =>
         panel.postApproval(ep, "r1", { call_id: "c", decision: "deny" })
       )
-      await drive("putBreakpoints", () => panel.putBreakpoints(ep, "rt1", []))
+      await drive("putProposal", () => panel.putProposal(ep, "a1", "hi"))
       await drive("postSteer", () => panel.postSteer(ep, "r1", "hi"))
       await drive("fetchHandoff", () =>
         panel.fetchHandoff(ep, "/runs/r1?step=0")

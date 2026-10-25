@@ -373,6 +373,7 @@ export const EDIT_FIELD = {
   recorded: "recorded: ",
   empty: "empty: type to replace the recorded value",
   edited: "edited",
+  same: "same as the recording · not an edit",
 } as const
 
 /** The chip each token draws on the replayed run's Story. */

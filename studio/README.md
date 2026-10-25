@@ -628,7 +628,24 @@ Run, the ack preview: per tool of the step's catalog (the request
 record's replay classes) "runs", "substituted" or "parked" and why, in
 `lib/replay.ts`'s words ("replay never (unannotated) · substituted from
 the recorded result when the call repeats, else parked"), redrawn as
-the tools, mode and breakpoints change; a catalog it cannot read is
+the tools, mode and breakpoints change (U17: the drawer reads in
+`lib/drawer-spec.ts`'s order on both surfaces — source, target, engine,
+1 what changes, 2 will be sent, 3 tools during the replay, then side
+effects, thread mode and the option lab folded under "advanced", and Run;
+runtime-wide breakpoints are not a per-replay knob, the drawer points to
+Settings' runtimes card; the engine is chosen per command by
+`lib/engine.ts`'s `engineChoice` — `scripted` when it can answer: a source
+run, no edit (one equal to the recording is none: "edit this result"
+opens on an empty field), no prompt, model, input, fork, tools, thinking
+or tool-choice change, a `from_step` the source answered, and the
+preview's `scripted_key_match` / `scripted_hit` not a miss when the server
+sends them — else `live`; two radios with one line each, scripted's
+reason when it is disabled, live's "calls <model> · ~N tok ≈ $x" from the
+source step's step-route cost (its usage at the pricing table's rate),
+"cost unknown: <why>" when there is none, never $0; a pick is never
+switched — a scripted pick that cannot answer holds Run and says why;
+Run reads "Run on scripted · 0 tokens" or "Run live on <model> · ≈ $x");
+a catalog it cannot read is
 its badge, the registered tools judged instead; and the prefix line —
 "steps 0–2 kept", "· the compacted prefix (what the model saw at step
 3)" when a run-scope compaction view sits at or before the step. Run is
@@ -1005,7 +1022,7 @@ throttle stays.
 | the filters | `aria-label="filter turns"`, `aria-label="status"`, `aria-label="filter keys and values"`; `⧉` labelled `copy <key>` |
 | icon buttons | an `aria-label` on each: `⤢`, `⇆`, `◐`, `–`, `↺`, and the pill (its visible words, `weft devtools · 10→4`); from 480 px of dock width `⤢`, `⇆`, `◐` also show their word (`Studio`, `layout`, `theme` — a `data-w` attribute as `:before` content under a container query; each word inside its label) |
 | the switcher, the turn dropdown | `aria-label="conversation"`, `aria-label="turn"` |
-| the experiment drawer | the system prompt, input and edit fields inside their `<label>`; the selects `aria-label`led `model`, `thinking`, `side effects`, `engine`, `thread`; the result pane's `compare with`; tool and breakpoint checkboxes inside their labels; `–` / `↺` labelled; the option lab's fields inside their `<label>`, its checkboxes `aria-label`led `only tools: <tool>` / `park on: <tool>` in a labelled group, each `↺` `reset <knob> to the agent's default` |
+| the experiment drawer | the system prompt, input and edit fields inside their `<label>`; the selects `aria-label`led `model`, `thinking`, `side effects`, `thread`; the engine radios inside their labels; the result pane's `compare with`; tool checkboxes inside their labels; `–` / `↺` labelled; the option lab's fields inside their `<label>`, its checkboxes `aria-label`led `only tools: <tool>` / `park on: <tool>` in a labelled group, each `↺` `reset <knob> to the agent's default` |
 
 The accessibility budget. `src/panel/a11y.test.ts` runs axe-core (a
 devDependency only — a test asserts `panel.js` holds no `axe`) with its
@@ -1061,8 +1078,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 272,091 B raw / 91,032 B gzip
-(88.9 KiB, the bundle of the ledger's row "P10-cap cap raised to 104 KiB"; 15,464 B — 15.1 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 275,248 B raw / 92,243 B gzip
+(90.1 KiB, the bundle of the ledger's row "U17 engine per command"; 14,253 B — 13.9 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1597,9 +1614,9 @@ step N" — a steer at rest). The edits are the five kinds of
 accumulate into one command: the first opens the replay drawer ("Edit
 the transcript and replay"), which lists them by kind (each droppable),
 keeps `from_step` at what they imply (an edit of step N keeps N, so
-N + 1; an insert at boundary N, N) and runs them on engine live, saying
-why (the scripted engine replays recorded turns, which answered a
-different prompt). Args are JSON, checked in the editor against the
+N + 1; an insert at boundary N, N); an edit disables the scripted
+engine with its reason, so the command runs live and Run says so
+(`Run live on <model> · ≈ $x`, below). Args are JSON, checked in the editor against the
 tool's input schema from the step's catalog record (`src/lib/edits.ts`'s
 `checkArgs`, `obsdb.CheckToolArgs`' rules by name — type and type lists,
 integer literals, enum, required, properties, additionalProperties,

@@ -31,6 +31,7 @@ import {
   transcript,
   trap,
   user,
+  runBtn,
 } from "./testkit"
 import { WeftDevtools } from "./element"
 import { OVERFLOW_CALM_MS, OVERFLOW_MIN_MS } from "./state"
@@ -100,7 +101,7 @@ describe("a turn of a longer conversation", () => {
     await settle()
     const input = all(el, ".weft-drawer textarea")[1] as HTMLTextAreaElement
     expect(input.value).toBe("and the refund?")
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     await settle()
     expect(
       (studio.posts("playground/runs")[0].body as { input: string }).input

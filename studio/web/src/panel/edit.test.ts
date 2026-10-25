@@ -67,8 +67,8 @@ async function edit(el: WeftDevtools, sel: string, key: string, value: string) {
   await settle()
 }
 const runBtn = (el: WeftDevtools) =>
-  all(el, ".weft-drawer button").find(
-    (b) => b.textContent === "Run experiment ▶"
+  all(el, ".weft-drawer button").find((b) =>
+    b.classList.contains("weft-run-btn")
   ) as HTMLButtonElement
 
 /** The Done line's four edits, made in the Story. */
@@ -132,7 +132,16 @@ describe("the Story's editor (F2's Done line, panel half)", () => {
     expect(text(el, ".weft-drawer .weft-step-h")).toContain(
       "continue from step 2"
     )
-    expect($(el, "[data-weft-live]")).not.toBeNull()
+    // Edits run live: scripted is disabled with its reason (U17).
+    expect(
+      $(el, ".weft-drawer [data-drawer-section=engine]")!.getAttribute(
+        "data-engine"
+      )
+    ).toBe("live")
+    expect(
+      ($(el, '[data-engine-option="scripted"] input') as HTMLInputElement)
+        .disabled
+    ).toBe(true)
     await settle(400) // the preview answers: Run no longer waits
     click(runBtn(el))
     await settle(80)

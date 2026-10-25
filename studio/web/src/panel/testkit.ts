@@ -441,6 +441,9 @@ export const button = (
   all(el, `${within} button, ${within} a`).find(
     (b) => b.textContent === label
   ) as HTMLElement | undefined
+/** runBtn is the drawer's Run (its label names the engine, U17). */
+export const runBtn = (el: WeftDevtools): HTMLElement | undefined =>
+  ($(el, ".weft-drawer .weft-run-btn") as HTMLElement | null) ?? undefined
 export const click = (n: Element | null | undefined) =>
   n?.dispatchEvent(new Event("click", { bubbles: true }))
 
@@ -554,6 +557,6 @@ export function stepDiffRoutes(doc: unknown): Record<string, Route> {
 export async function runExperiment(el: WeftDevtools) {
   click(button(el, "✎ Experiment"))
   await settle()
-  click(button(el, "Run experiment ▶"))
+  click(runBtn(el))
   await settle(60)
 }

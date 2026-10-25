@@ -440,7 +440,7 @@ function Verbs({
             open({
               runID: doc.id,
               agent,
-              draft: editResultAndReplay(step, call.callId, content),
+              draft: editResultAndReplay(step, call.callId),
               opener: e.currentTarget,
             })
         )

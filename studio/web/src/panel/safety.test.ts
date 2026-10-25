@@ -35,6 +35,7 @@ import {
   transcript,
   trap,
   user,
+  runBtn,
 } from "./testkit"
 
 beforeEach(setup)
@@ -326,7 +327,7 @@ describe("nothing escapes into the host page", () => {
     const el = await mount()
     click(button(el, "✎ Experiment"))
     await settle()
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     await settle()
     click(button(el, "keep as prompt ⤴"))
     await settle()
@@ -749,7 +750,7 @@ describe("the token goes to data-endpoint and nowhere else (§6)", () => {
     const el = await mount({ ...ATTRS, "data-token": "dev_secret_tok" })
     click(button(el, "✎ Experiment"))
     await settle()
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     await settle()
     expect(studio.calls.length).toBeGreaterThan(5)
     for (const c of studio.calls)

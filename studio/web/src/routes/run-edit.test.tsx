@@ -61,6 +61,7 @@ import { handoffFromHash } from "@/routes/playground"
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
 
+const RUN_BTN = /^Run (on scripted|live on) /
 const rOK = golden<RunsPage>("runs").runs.find((r) => r.id === "r_ok")!
 function runDoc(over: Partial<RunDoc> = {}): RunDoc {
   return {
@@ -208,9 +209,19 @@ describe("the Story's editor (F2's Done line, Studio half)", () => {
         valueOf(within(drawer()!).getByLabelText("continue from step"))
       ).toBe("2")
     )
-    expect(drawer()!.querySelector("[data-replay-live]")).toBeTruthy()
+    // Edits run live: the scripted option says why, never a silent switch.
+    expect(
+      drawer()!
+        .querySelector("[data-drawer-section=engine]")!
+        .getAttribute("data-engine")
+    ).toBe("live")
+    expect(
+      drawer()!.querySelector<HTMLInputElement>(
+        '[data-engine-option="scripted"] input'
+      )!.disabled
+    ).toBe(true)
     const run = within(drawer()!).getByRole<HTMLButtonElement>("button", {
-      name: "Run",
+      name: RUN_BTN,
     })
     await waitFor(() => expect(run.disabled).toBe(false))
     fireEvent.click(run)
@@ -264,8 +275,9 @@ describe("the Story's editor (F2's Done line, Studio half)", () => {
       expect(drawer()!.querySelector("[data-replay-invalid]")).toBeTruthy()
     )
     expect(
-      within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
-        .disabled
+      within(drawer()!).getByRole<HTMLButtonElement>("button", {
+        name: RUN_BTN,
+      }).disabled
     ).toBe(true)
     // Nothing refused is in the command.
     expect(drawer()!.querySelectorAll("[data-edit-kind]")).toHaveLength(0)
@@ -411,8 +423,9 @@ describe("the preview (will be sent)", () => {
       )
     )
     expect(
-      within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
-        .disabled
+      within(drawer()!).getByRole<HTMLButtonElement>("button", {
+        name: RUN_BTN,
+      }).disabled
     ).toBe(true)
   })
 
@@ -622,7 +635,7 @@ describe("a steer is its step's user message (review 2)", () => {
       ).toBe("4")
     )
     const run = within(drawer()!).getByRole<HTMLButtonElement>("button", {
-      name: "Run",
+      name: RUN_BTN,
     })
     await waitFor(() => expect(run.disabled).toBe(false))
     fireEvent.click(run)
@@ -698,8 +711,9 @@ describe("a fork carries no edits (review 4)", () => {
     )
     expect(drawer()!.querySelector("[data-replay-live]")).toBeNull()
     expect(
-      within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
-        .disabled
+      within(drawer()!).getByRole<HTMLButtonElement>("button", {
+        name: RUN_BTN,
+      }).disabled
     ).toBe(true)
   })
 })
@@ -711,7 +725,7 @@ describe("Run waits for the preview (review 9)", () => {
     await story()
     await edit("the result of search_kb (c2)", "x")
     const run = within(drawer()!).getByRole<HTMLButtonElement>("button", {
-      name: "Run",
+      name: RUN_BTN,
     })
     await waitFor(() =>
       expect(studio.calls("POST playground/preview")).toHaveLength(1)
@@ -738,8 +752,9 @@ describe("an edit inside the compacted range is said before anything is posted (
       ).toBe(COMPACTED_C1)
     )
     expect(
-      within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
-        .disabled
+      within(drawer()!).getByRole<HTMLButtonElement>("button", {
+        name: RUN_BTN,
+      }).disabled
     ).toBe(true)
   })
 })
@@ -752,7 +767,7 @@ describe("a preview that never answers (closing round)", () => {
     await story()
     await edit("the result of search_kb (c2)", "x")
     const run = within(drawer()!).getByRole<HTMLButtonElement>("button", {
-      name: "Run",
+      name: RUN_BTN,
     })
     await waitFor(() =>
       expect(studio.calls("POST playground/preview").length).toBeGreaterThan(0)

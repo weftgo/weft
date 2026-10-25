@@ -117,7 +117,11 @@ import { previewBlock } from "./editor"
 import { buildRunBody as panelBody } from "./playground"
 import type { ExperimentDraft } from "./playground"
 import { studioPlaygroundLink } from "./element"
-import { drawerHandoff } from "../components/studio/replay-drawer"
+import { drawerHandoff, ReplayDrawer } from "../components/studio/replay-drawer"
+import * as RK from "./replaykit"
+import { editResultAndReplay, replayFromStep } from "../lib/replay"
+import type { ReplayDraft } from "../lib/replay"
+import { DRAWER_ORDER } from "../lib/drawer-spec"
 import { playgroundLink } from "../lib/links"
 import {
   DERIVED,
@@ -2314,7 +2318,7 @@ describe("a parked call's request expiry on both surfaces (UX-B-41)", () => {
     expect(
       document.querySelector(sel)?.getAttribute("data-request-expiry")
     ).toBe("open")
-    expect(document.querySelector('[data-parked] [data-hole]')).toBeNull()
+    expect(document.querySelector("[data-parked] [data-hole]")).toBeNull()
     cleanup()
   })
 })
@@ -4801,5 +4805,143 @@ describe("the loop line on both surfaces (U34)", () => {
         .querySelector('[data-loop-node="model"]')!
         .getAttribute("aria-pressed")
     ).toBe("true")
+  })
+})
+
+// ── U17: the engine per command, on both drawers ───────────────────
+// One fixture (panel/replaykit.ts's, the run page's replay shape), the
+// same draft on Studio's replay drawer and the panel's: the same
+// engine, the same option lines and reasons, the same Run label, the
+// same section order (lib/drawer-spec.ts) — before and after an edit.
+describe("the engine per command on both drawers (U17)", () => {
+  const STEP2 = {
+    run_id: RK.RUN,
+    step: 2,
+    model: { provider: "wefttest", requested: "script" },
+    usage: { input_tokens: 900, output_tokens: 300 },
+    cost_usd: 0.0004,
+    cost_known: true,
+    cache: "exact",
+  }
+  type Read = {
+    engine: string | null
+    scripted: string
+    live: string
+    run: string
+    order: string[]
+  }
+  const read = (root: ParentNode, run: string): Read => ({
+    engine: root
+      .querySelector("[data-drawer-section=engine]")!
+      .getAttribute("data-engine"),
+    scripted: root.querySelector('[data-engine-option="scripted"]')!
+      .textContent,
+    live: root.querySelector('[data-engine-option="live"]')!.textContent,
+    run: root.querySelector(run)!.textContent,
+    order: [...root.querySelectorAll("[data-drawer-section]")]
+      .map((n) => n.getAttribute("data-drawer-section")!)
+      .filter((k) => k !== "send"),
+  })
+
+  async function studioSide(edit: boolean): Promise<Read> {
+    stubBrowser()
+    new FakeStudio()
+      .on("GET meta", {
+        ...golden<Record<string, unknown>>("meta"),
+        capabilities: ["playground", "steps"],
+      })
+      .on(`GET runs/${RK.RUN}`, {
+        ...RK.runRowOf(),
+        children: [],
+        holes: [],
+        compactions: [],
+      })
+      .on(`GET runs/${RK.RUN}/transcript`, transcript(...RK.bodies))
+      .on(`GET runs/${RK.RUN}/steps/2`, STEP2)
+      .on("GET runtimes", { runtimes: [RK.runtimeOf()] })
+      .install()
+    const { container } = await renderWithRouter(
+      createElement(ReplayDrawer, {
+        request: {
+          runID: RK.RUN,
+          draft: edit ? editResultAndReplay(1, "c2") : replayFromStep(2),
+        },
+        requestKey: 1,
+        onClose: () => {},
+      })
+    )
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-engine-live]")?.textContent
+      ).toContain("≈")
+    )
+    if (edit) {
+      const f = await waitFor(() => {
+        const n = container.querySelector<HTMLTextAreaElement>(
+          '[data-edit-step="1"][data-edit-call="c2"]'
+        )
+        expect(n).toBeTruthy()
+        return n!
+      })
+      fireEvent.change(f, { target: { value: "policy: no refunds" } })
+    }
+    const out = read(container, "[data-run-engine]")
+    cleanup()
+    return out
+  }
+
+  async function panelSide(edit: boolean): Promise<Read> {
+    panelStudio(
+      { ...RK.replayRoutes(), [`runs/${RK.RUN}/steps/2`]: STEP2 },
+      {
+        ...RK.REPLAY_META,
+        capabilities: [...RK.REPLAY_META.capabilities, "steps"],
+      }
+    )
+    const el = await mount()
+    const model = (
+      el as unknown as {
+        model: { openExperiment: (id: string, d: ReplayDraft) => Promise<void> }
+      }
+    ).model
+    await model.openExperiment(
+      RK.RUN,
+      edit ? editResultAndReplay(1, "c2") : replayFromStep(2)
+    )
+    await settle(60)
+    if (edit) {
+      const f = $(el, '[data-weft-k="edit:1:c2"]') as HTMLInputElement
+      f.value = "policy: no refunds"
+      f.dispatchEvent(new Event("input", { bubbles: true }))
+      await settle()
+    }
+    const out = read(el.shadowRoot!, ".weft-drawer [data-run-engine]")
+    el.remove()
+    return out
+  }
+
+  it("a plain replay: scripted on both, the same lines, Run 'Run on scripted · 0 tokens'", async () => {
+    const studio = await studioSide(false)
+    const panel = await panelSide(false)
+    expect(panel).toEqual(studio)
+    expect(studio.engine).toBe("scripted")
+    expect(studio.run).toBe("Run on scripted · 0 tokens")
+    expect(studio.live).toBe(
+      "live · calls wefttest/script · ~1.2k tok ≈ $0.0004"
+    )
+    expect(studio.order).toEqual(
+      DRAWER_ORDER.filter((k) => studio.order.includes(k))
+    )
+  })
+
+  it("edit this result: an empty field, then an edit — live on both, scripted disabled with the same reason, Run 'Run live on wefttest/script · ≈ $0.0004'", async () => {
+    const studio = await studioSide(true)
+    const panel = await panelSide(true)
+    expect(panel).toEqual(studio)
+    expect(studio.engine).toBe("live")
+    expect(studio.scripted).toContain(
+      "your edit changes step 2's request: the recording answered the original"
+    )
+    expect(studio.run).toBe("Run live on wefttest/script · ≈ $0.0004")
   })
 })

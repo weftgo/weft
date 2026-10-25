@@ -46,6 +46,11 @@ export interface PreviewDoc {
   compacted_at: unknown
   warnings: { kind: string; message: string }[]
   unchecked: string[]
+  /** U18.1, when the server sends them: whether the scripted engine
+   * holds an answer for this request, and its key check against the
+   * recording (lib/engine.ts reads them; absent is unknown). */
+  scripted_hit?: boolean | null
+  scripted_key_match?: { ok: boolean; because?: string[] } | null
 }
 
 export const PREVIEW_PATH = "playground/preview"

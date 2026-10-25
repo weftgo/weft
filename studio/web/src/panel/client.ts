@@ -583,18 +583,6 @@ export function postApproval(
   return panelPost(ep, `runs/${encodeURIComponent(runID)}/approvals`, body)
 }
 
-/** PUT /api/runtimes/{id}/breakpoints — the rung-3 verb (§8.3): the
- * tools every run the runtime starts parks on from then on. */
-export function putBreakpoints(
-  ep: PanelEndpoint,
-  runtimeID: string,
-  tools: string[]
-): Promise<{ tools?: string[] } | null> {
-  return panelPut(ep, `runtimes/${encodeURIComponent(runtimeID)}/breakpoints`, {
-    tools,
-  })
-}
-
 /** POST /api/runs/{id}/steer — the rung-4 verb (§8.4): one user
  * message delivered into a runtime-started run mid-flight; on an app
  * turn (plan F4.3) a 202 with the command to poll. */

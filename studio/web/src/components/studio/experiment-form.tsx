@@ -43,19 +43,7 @@ import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
 import { SelectField } from "@/components/ui/select-field"
 
-export function ExperimentForm({
-  variant,
-  patch,
-  agent,
-  registered,
-  runtime,
-  caps,
-  sourceRunID,
-  fromStep,
-  editDrafts,
-  setEditDrafts,
-  promptNote,
-}: {
+type FormProps = {
   variant: VariantFields
   patch: (p: Partial<VariantFields>) => void
   /** The target agent as its runtime registered it. */
@@ -73,7 +61,61 @@ export function ExperimentForm({
   /** Drawn above the system prompt box: where its text came from when
    * that is not what the caller asked for (a hole, badged). */
   promptNote?: ReactNode
-}) {
+}
+
+/** ExperimentForm is the playground's per-variant form, every knob in
+ * one column. The replay drawer composes the same pieces in
+ * lib/drawer-spec.ts's order instead (ChangeFields, ModeFields,
+ * OptionLab). */
+export function ExperimentForm(props: FormProps) {
+  const { variant, patch, agent, runtime, caps } = props
+  return (
+    <>
+      <ChangeFields {...props} input={false} />
+      <ModeFields variant={variant} patch={patch} engine />
+      {agent ? (
+        <OptionLab variant={variant} patch={patch} agent={agent} />
+      ) : null}
+      {/* Rung 3 (§8.3): break on tools — PUT /api/runtimes/{id}/
+          breakpoints; the runtime parks them on every run it
+          starts. */}
+      {caps.includes("breakpoints") && runtime && agent?.tools.length ? (
+        <div className="space-y-1">
+          <span className="text-xs text-muted-foreground">
+            Break on (parks every run)
+          </span>
+          <Breakpoints
+            key={runtime.id}
+            runtimeID={runtime.id}
+            stored={runtime.breakpoints}
+            tools={[
+              ...new Set(
+                runtime.agents.flatMap((a) => a.tools.map((t) => t.name))
+              ),
+            ]}
+          />
+        </div>
+      ) : null}
+      {props.fromStep === 0 && <InputField variant={variant} patch={patch} />}
+    </>
+  )
+}
+
+/** ChangeFields is "what changes": the kept prefix's transcript edits,
+ * the system prompt, the tools, the model and thinking — and, unless
+ * input is false, the input at from_step 0. */
+export function ChangeFields({
+  variant,
+  patch,
+  agent,
+  registered,
+  sourceRunID,
+  fromStep,
+  editDrafts,
+  setEditDrafts,
+  promptNote,
+  input = true,
+}: FormProps & { input?: boolean }) {
   return (
     <>
       {/* The kept prefix's edits (D2/D3, review fix 4b — the
@@ -131,7 +173,42 @@ export function ExperimentForm({
         </div>
       ) : null}
       <ModelField variant={variant} patch={patch} agent={agent} />
-      <div className="flex flex-wrap gap-2">
+      {input && fromStep === 0 && (
+        <InputField variant={variant} patch={patch} />
+      )}
+    </>
+  )
+}
+
+/** InputField replaces the turn's user message (from_step 0). */
+function InputField({ variant, patch }: Pick<FormProps, "variant" | "patch">) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-xs text-muted-foreground">
+        Input (replaces the user message)
+      </span>
+      <textarea
+        rows={2}
+        aria-label="input"
+        className="w-full rounded border bg-transparent px-2 py-1 text-xs"
+        value={variant.input}
+        onChange={(e) => patch({ input: e.target.value })}
+      />
+    </label>
+  )
+}
+
+/** ModeFields is the run's modes: the engine select (the playground's;
+ * the replay drawer draws EngineChoice's radios instead), side effects
+ * and thread. */
+export function ModeFields({
+  variant,
+  patch,
+  engine = false,
+}: Pick<FormProps, "variant" | "patch"> & { engine?: boolean }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {engine ? (
         <div className="block min-w-0 flex-1 space-y-1">
           <SelectField
             caption="Engine"
@@ -142,100 +219,61 @@ export function ExperimentForm({
               patch({ engine: v as VariantFields["engine"] })
             }
             options={[
-              { value: "live", label: "live" },
-              { value: "scripted", label: "scripted (zero tokens)" },
+              { value: "live", label: "live (calls the model)" },
+              { value: "scripted", label: "scripted · 0 tokens" },
             ]}
           />
         </div>
-        <div className="block min-w-0 flex-1 space-y-1">
-          <SelectField
-            caption="Side effects"
-            label="Side effects"
-            className="w-full"
-            value={variant.sideEffects}
-            onValueChange={(v) =>
-              patch({ sideEffects: v as VariantFields["sideEffects"] })
-            }
-            options={[
-              {
-                value: "substitute",
-                title:
-                  "a side-effect call the source recorded is answered from the record; any other call parks",
-                label: "substitute — recorded results, else park",
-              },
-              {
-                value: "park",
-                title:
-                  "every side-effect call parks; nothing is answered from the record",
-                label: "park — every side-effect call waits",
-              },
-              {
-                value: "allow",
-                title:
-                  "refused unless every tool left on is opted in or ReplaySafe",
-                label:
-                  "allow — runs the tools this app opted in (AllowSideEffects) for real",
-              },
-            ]}
-          />
-        </div>
-        {/* §5.4's thread mode (review fix 4a): fork continues the
-            conversation in a new session with lineage — it needs a
-            source turn and an input. */}
-        <div className="block min-w-0 flex-1 space-y-1">
-          <SelectField
-            caption="Thread"
-            label="Thread"
-            className="w-full"
-            value={variant.thread}
-            onValueChange={(v) =>
-              patch({ thread: v as VariantFields["thread"] })
-            }
-            options={[
-              { value: "ephemeral", label: "ephemeral" },
-              { value: "fork", label: "fork (new session)" },
-            ]}
-          />
-        </div>
+      ) : null}
+      <div className="block min-w-0 flex-1 space-y-1">
+        <SelectField
+          caption="Side effects"
+          label="Side effects"
+          className="w-full"
+          value={variant.sideEffects}
+          onValueChange={(v) =>
+            patch({ sideEffects: v as VariantFields["sideEffects"] })
+          }
+          options={[
+            {
+              value: "substitute",
+              title:
+                "a side-effect call the source recorded is answered from the record; any other call parks",
+              label: "substitute — recorded results, else park",
+            },
+            {
+              value: "park",
+              title:
+                "every side-effect call parks; nothing is answered from the record",
+              label: "park — every side-effect call waits",
+            },
+            {
+              value: "allow",
+              title:
+                "refused unless every tool left on is opted in or ReplaySafe",
+              label:
+                "allow — runs the tools this app opted in (AllowSideEffects) for real",
+            },
+          ]}
+        />
       </div>
-      {agent ? (
-        <OptionLab variant={variant} patch={patch} agent={agent} />
-      ) : null}
-      {/* Rung 3 (§8.3): break on tools — PUT /api/runtimes/{id}/
-          breakpoints; the runtime parks them on every run it
-          starts. */}
-      {caps.includes("breakpoints") && runtime && agent?.tools.length ? (
-        <div className="space-y-1">
-          <span className="text-xs text-muted-foreground">
-            Break on (parks every run)
-          </span>
-          <Breakpoints
-            key={runtime.id}
-            runtimeID={runtime.id}
-            stored={runtime.breakpoints}
-            tools={[
-              ...new Set(
-                runtime.agents.flatMap((a) => a.tools.map((t) => t.name))
-              ),
-            ]}
-          />
-        </div>
-      ) : null}
-      {fromStep === 0 && (
-        <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">
-            Input (replaces the user message)
-          </span>
-          <textarea
-            rows={2}
-            aria-label="input"
-            className="w-full rounded border bg-transparent px-2 py-1 text-xs"
-            value={variant.input}
-            onChange={(e) => patch({ input: e.target.value })}
-          />
-        </label>
-      )}
-    </>
+      {/* §5.4's thread mode (review fix 4a): fork continues the
+          conversation in a new session with lineage — it needs a
+          source turn and an input. */}
+      <div className="block min-w-0 flex-1 space-y-1">
+        <SelectField
+          caption="Thread"
+          label="Thread"
+          className="w-full"
+          value={variant.thread}
+          onValueChange={(v) => patch({ thread: v as VariantFields["thread"] })}
+          options={[
+            { value: "ephemeral", label: "ephemeral" },
+            { value: "fork", label: "fork (new session)" },
+          ]}
+        />
+      </div>
+    </div>
   )
 }
 
@@ -755,7 +793,11 @@ function ResultField({
         />
       </label>
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-faint">
-        {value ? <EditedChip /> : null}
+        {value === recorded && value ? (
+          <span data-edit-same>{EDIT_FIELD.same}</span>
+        ) : value ? (
+          <EditedChip />
+        ) : null}
         <span data-edit-size>
           recorded {bytes(utf8Bytes(recorded))}
           {value ? ` · edited ${bytes(utf8Bytes(value))}` : ""}

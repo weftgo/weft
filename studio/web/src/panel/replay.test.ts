@@ -14,6 +14,7 @@ import type { VariantFields } from "../lib/experiment-body"
 import {
   continueHere,
   editResultAndReplay,
+  editTranscript,
   replayFromStep,
   rerun,
 } from "../lib/replay"
@@ -31,6 +32,7 @@ import {
   META,
   mount,
   pause,
+  runBtn,
   runRow,
   settle,
   setup,
@@ -121,10 +123,19 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
     expect(text(el, ".weft-drawer .weft-step-h")).toContain(
       "continue from step 3"
     )
-    // The edit on that call, pre-filled with its recorded content, and focused.
+    // The field on that call opens empty, the recording its
+    // placeholder, and focused (UX-C-05): no edit yet, so the drawer
+    // opens on scripted and Run names it.
     const edit = $(el, '[data-weft-k="edit:2:c3"]') as HTMLInputElement
-    expect(edit.value).toBe(ERR)
+    expect(edit.value).toBe("")
+    expect(edit.placeholder).toBe(ERR)
     expect(el.shadowRoot!.activeElement).toBe(edit)
+    expect(
+      $(el, ".weft-drawer [data-drawer-section=engine]")!.getAttribute(
+        "data-engine"
+      )
+    ).toBe("scripted")
+    expect(runBtn(el)!.textContent).toBe("Run on scripted · 0 tokens")
 
     // The ack preview: step 3's catalog judged under substitute.
     expect(verdict(el, "search_kb")).toBe("runs")
@@ -146,18 +157,33 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
     expect(verdict(el, "search_kb")).toBe("runs")
 
     const field = $(el, '[data-weft-k="edit:2:c3"]') as HTMLInputElement
+    // The recording itself is no edit: still scripted.
+    field.value = ERR
+    field.dispatchEvent(new Event("input", { bubbles: true }))
+    await settle()
+    expect(runBtn(el)!.textContent).toBe("Run on scripted · 0 tokens")
     field.value = "refunded"
     field.dispatchEvent(new Event("input", { bubbles: true }))
+    await settle()
+    // An edit: scripted disabled with its reason, Run live and named.
+    expect(
+      ($(el, '[data-engine-option="scripted"] input') as HTMLInputElement)
+        .disabled
+    ).toBe(true)
+    expect(text(el, '[data-engine-option="scripted"] [data-engine-why]')).toBe(
+      "your edit changes step 3's request: the recording answered the original"
+    )
+    expect(runBtn(el)!.textContent).toMatch(/^Run live on wefttest\/script · /)
     click(
-      all(el, ".weft-drawer button").find(
-        (b) => b.textContent === "Run experiment ▶"
+      all(el, ".weft-drawer button").find((b) =>
+        b.classList.contains("weft-run-btn")
       )
     )
     await settle(80)
     const posts = studio.posts("playground/runs")
     expect(posts).toHaveLength(1)
     // Byte for byte Studio's body for the same draft.
-    const draft = editResultAndReplay(2, "c3", ERR)
+    const draft = editResultAndReplay(2, "c3")
     expect(JSON.stringify(posts[0].body)).toBe(
       studioJSON(draft, { sideEffects: "park" }, [
         { step: 2, callID: "c3", toolResult: "refunded" },
@@ -275,8 +301,8 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
       "nothing kept · the whole turn runs again"
     )
     const run = () =>
-      all(el, ".weft-drawer button").find(
-        (b) => b.textContent === "Run experiment ▶"
+      all(el, ".weft-drawer button").find((b) =>
+        b.classList.contains("weft-run-btn")
       ) as HTMLButtonElement
     expect(run().disabled).toBe(true)
     input.value = "and the other order?"
@@ -359,8 +385,8 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
     )
     expect(
       (
-        all(el, ".weft-drawer button").find(
-          (b) => b.textContent === "Run experiment ▶"
+        all(el, ".weft-drawer button").find((b) =>
+          b.classList.contains("weft-run-btn")
         ) as HTMLButtonElement
       ).disabled
     ).toBe(true)
@@ -388,8 +414,8 @@ describe("a pre-filled edit is kept and said", () => {
       ""
     )
     click(
-      all(el, ".weft-drawer button").find(
-        (b) => b.textContent === "Run experiment ▶"
+      all(el, ".weft-drawer button").find((b) =>
+        b.classList.contains("weft-run-btn")
       )
     )
     await settle(60)
@@ -406,15 +432,18 @@ describe("a pre-filled edit is kept and said", () => {
         model: { openExperiment: (id: string, d: ReplayDraft) => Promise<void> }
       }
     ).model
-    await model.openExperiment(RUN, editResultAndReplay(2, "c9", "patched"))
+    await model.openExperiment(
+      RUN,
+      editTranscript(3, [{ step: 2, callID: "c9", toolResult: "patched" }])
+    )
     await settle()
     const line = $(el, "[data-weft-unplaced]")!
     expect(line.querySelector('[data-hole="gap"]')).not.toBeNull()
     expect(line.textContent).toContain("step 2 · c9 → patched")
     expect(
       (
-        all(el, ".weft-drawer button").find(
-          (b) => b.textContent === "Run experiment ▶"
+        all(el, ".weft-drawer button").find((b) =>
+          b.classList.contains("weft-run-btn")
         ) as HTMLButtonElement
       ).disabled
     ).toBe(true)
@@ -502,8 +531,8 @@ describe("a child replays as its own run (A10)", () => {
       `Experiment · researcher · child run ${CHILD} · continue from step 1`
     )
     click(
-      all(el, ".weft-drawer button").find(
-        (b) => b.textContent === "Run experiment ▶"
+      all(el, ".weft-drawer button").find((b) =>
+        b.classList.contains("weft-run-btn")
       )
     )
     await settle(60)
@@ -579,7 +608,7 @@ describe("one body for one draft (the panel's buildRunBody against Studio's)", (
   it("every verb's draft, and an edited one, serialize identically", () => {
     for (const d of [
       replayFromStep(2),
-      editResultAndReplay(2, "c3", ERR),
+      editResultAndReplay(2, "c3"),
       rerun(),
       { ...continueHere(), input: "next?" },
     ])
@@ -610,8 +639,8 @@ describe("one body for one draft (the panel's buildRunBody against Studio's)", (
 
 describe("F1.3 review fixes", () => {
   const runBtn = (el: WeftDevtools) =>
-    all(el, ".weft-drawer button").find(
-      (b) => b.textContent === "Run experiment ▶"
+    all(el, ".weft-drawer button").find((b) =>
+      b.classList.contains("weft-run-btn")
     ) as HTMLButtonElement
 
   it("1: a child replayed from its row before it was opened is read first: its verdicts are drawn before Run is enabled", async () => {
@@ -822,5 +851,61 @@ describe("F1.3 review fixes", () => {
     )
     expect(b).not.toBeNull()
     expect(b!.getAttribute("title")).not.toBe(HOLES.not_recorded.reason)
+  })
+})
+
+describe("the engine per command in the panel's drawer (U17)", () => {
+  const engineOf = (el: WeftDevtools) =>
+    $(el, ".weft-drawer [data-drawer-section=engine]")!.getAttribute(
+      "data-engine"
+    )
+  const radio = (el: WeftDevtools, v: string) =>
+    $(el, `[data-engine-option="${v}"] input`) as HTMLInputElement
+  const pick = async (el: WeftDevtools, v: string) => {
+    const r = radio(el, v)
+    r.checked = true
+    r.dispatchEvent(new Event("change"))
+    await settle()
+  }
+  const type = async (el: WeftDevtools, v: string) => {
+    const f = $(el, '[data-weft-k="edit:2:c3"]') as HTMLInputElement
+    f.value = v
+    f.dispatchEvent(new Event("input", { bubbles: true }))
+    await settle()
+  }
+  async function open() {
+    fakeStudio(replayRoutes(), REPLAY_META)
+    const el = await mount()
+    click(verbIn(el, callBox(el, "c3"), "edit_result"))
+    await settle()
+    return el
+  }
+
+  it("choosing scripted after an edit is refused inline: disabled, its reason beside it, the engine stays live", async () => {
+    const el = await open()
+    expect(engineOf(el)).toBe("scripted")
+    await type(el, "refunded")
+    expect(engineOf(el)).toBe("live")
+    expect(radio(el, "scripted").disabled).toBe(true)
+    await pick(el, "scripted")
+    expect(engineOf(el)).toBe("live")
+    expect(text(el, '[data-engine-option="scripted"] [data-engine-why]')).toBe(
+      "your edit changes step 3's request: the recording answered the original"
+    )
+  })
+
+  it("a pick of scripted is never switched: an edit holds Run with the reason, live releases it", async () => {
+    const el = await open()
+    await pick(el, "live")
+    await pick(el, "scripted")
+    await type(el, "refunded")
+    expect(engineOf(el)).toBe("scripted")
+    expect(text(el, "[data-engine-refused]")).toBe(
+      "scripted is refused: your edit changes step 3's request: the recording answered the original — pick live"
+    )
+    expect((runBtn(el) as HTMLButtonElement).disabled).toBe(true)
+    await pick(el, "live")
+    expect(engineOf(el)).toBe("live")
+    expect($(el, "[data-engine-refused]")).toBeNull()
   })
 })

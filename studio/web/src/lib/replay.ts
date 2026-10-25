@@ -240,6 +240,9 @@ export interface ReplayDraft {
   input: string
   /** The field the drawer opens on. */
   focus?: "prompt" | "edit" | "input"
+  /** The kept field focus "edit" names (edit this result: its step and
+   * call). */
+  at?: { step: number; callID: string }
 }
 
 /** A whole, non-negative number, or 0. */
@@ -258,23 +261,22 @@ export function replayFromStep(n: number): ReplayDraft {
   }
 }
 
-/** edit this result and replay: step `step`'s call `callID` patched
- * (pre-filled with its recorded content), the next step run fresh —
- * from_step = step + 1. An empty recorded result seeds no draft: the
- * server refuses an empty edit (400), so the field starts blank. */
-export function editResultAndReplay(
-  step: number,
-  callID: string,
-  content: string
-): ReplayDraft {
+/** edit this result and replay: step `step`'s call `callID` is the
+ * field the drawer opens on, the next step run fresh — from_step =
+ * step + 1. The field starts empty, the recording beside it (UX-C-05:
+ * an edit equal to the recording is not an edit, so none is seeded —
+ * the drawer opens on a plain replay, engine scripted, until the user
+ * types); the field reads the recording from the transcript. */
+export function editResultAndReplay(step: number, callID: string): ReplayDraft {
   const at = pos(step)
   return {
     verb: "edit_result",
     fromStep: at + 1,
-    edits: content ? [{ step: at, callID, toolResult: content }] : [],
+    edits: [],
     thread: "ephemeral",
     input: "",
     focus: "edit",
+    at: { step: at, callID },
   }
 }
 

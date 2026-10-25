@@ -35,8 +35,19 @@ import {
   labHandoff,
   labProblems,
   pickTarget,
+  realEdits,
   unmatchedDrafts,
 } from "@/lib/experiment-body"
+import { BREAKPOINTS_MOVED, DRAWER_TITLES } from "@/lib/drawer-spec"
+import {
+  engineChoice,
+  engineHeld,
+  engineOf,
+  ENGINE_WORDS,
+  keyedKnobs,
+  runLabel,
+} from "@/lib/engine"
+import type { Engine, EngineChoice, EngineFacts } from "@/lib/engine"
 import type { EditDraft, VariantFields } from "@/lib/experiment-body"
 import { compareLink, playgroundLink, runLink } from "@/lib/links"
 import type { PlaygroundHandoff } from "@/lib/links"
@@ -63,7 +74,9 @@ import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRuntimesNeeded } from "@/hooks/use-notices"
 import { quietCommand } from "@/lib/notify"
 import {
-  ExperimentForm,
+  ChangeFields,
+  ModeFields,
+  OptionLab,
   StepPicker,
   useSourceEditFields,
   useSourceSteps,
@@ -302,7 +315,7 @@ export function ReplayAck({
   const holeOnly = catalog.tools === null && !catalog.loading && !agent
   return (
     <div className="space-y-1.5 rounded-md border px-3 py-2" data-replay-ack>
-      <div className="eyebrow">before you run</div>
+      <div className="eyebrow">{DRAWER_TITLES.tools}</div>
       <p
         className="font-mono text-[11px] text-muted-foreground"
         data-replay-prefix
@@ -406,6 +419,9 @@ function ReplayForm({
     sideEffects: "substitute",
     thread: draft.thread,
   }))
+  // The engine the user picked; absent, the command runs on the
+  // choice's default (lib/engine.ts) — never switched behind them.
+  const [picked, setPicked] = useState<Engine | undefined>()
   const patch = (p: Partial<VariantFields>) => {
     setVariant((v) => ({ ...v, ...p }))
     // A fork re-runs no steps (from_step is the ephemeral verb): the
@@ -413,8 +429,7 @@ function ReplayForm({
     if (p.thread === "fork") setFromStep(0)
   }
   // The prefix keeps every edited step (plan F2): from_step follows the
-  // edits up, never down; and an edited prefix needs engine live (the
-  // scripted engine's turns answered the recorded prompt).
+  // edits up, never down.
   const stepRef = useRef(onStep)
   stepRef.current = onStep
   useEffect(() => stepRef.current?.(fromStep), [fromStep])
@@ -422,11 +437,6 @@ function ReplayForm({
   useEffect(() => {
     if (variant.thread !== "fork" && implied > fromStep) setFromStep(implied)
   }, [implied, fromStep, variant.thread])
-  const edited = editDrafts.length > 0 && variant.thread !== "fork"
-  useEffect(() => {
-    if (edited && variant.engine === "scripted")
-      setVariant((v) => ({ ...v, engine: "live" }))
-  }, [edited, variant.engine])
   // Focus on open: the heading, then — when the verb pre-filled a field
   // (the edit, the prompt, the input) — that field, once it is drawn
   // (the edit's field waits for the transcript).
@@ -436,14 +446,18 @@ function ReplayForm({
   useEffect(() => {
     heading.current?.focus()
   }, [])
+  const first = draft.edits.at(0)
+  const focusAt =
+    draft.at ??
+    (first?.callID ? { step: first.step, callID: first.callID } : undefined)
   const focusSel =
     draft.focus === "prompt"
       ? 'textarea[aria-label="system prompt"]'
       : draft.focus === "input"
         ? 'textarea[aria-label="input"]'
-        : draft.focus === "edit" && draft.edits[0]?.callID
+        : draft.focus === "edit" && focusAt
           ? // Step and call (UX-C-24): call ids repeat across steps.
-            `[data-edit-step="${draft.edits[0].step}"][data-edit-call="${CSS.escape(draft.edits[0].callID)}"]`
+            `[data-edit-step="${focusAt.step}"][data-edit-call="${CSS.escape(focusAt.callID)}"]`
           : ""
   useEffect(() => {
     if (fieldFocused.current || !focusSel) return
@@ -484,15 +498,6 @@ function ReplayForm({
     maxFrom !== undefined &&
     stepCount !== undefined &&
     fromStep > maxFrom
-  // The scripted engine replays the source's recorded turns: a step the
-  // source never answered (from_step at the step count) has none
-  // (runtime's wording).
-  const scriptedPastEnd =
-    variant.engine === "scripted" &&
-    variant.thread !== "fork" &&
-    fromStep > 0 &&
-    stepCount !== undefined &&
-    fromStep === stepCount
   const stepDoc = useQuery({
     ...stepQuery(runID, ordinal),
     enabled: caps.includes("steps"),
@@ -592,6 +597,43 @@ function ReplayForm({
   // walk), whatever the step offered.
   const refused = allowRefusals(agent, variant.sideEffects, toolsEnabled)
 
+  // The engine (U17): scripted when it can answer, else live — the
+  // facts lib/engine.ts reads, the preview's key check added once it
+  // answers. The edits that count are the ones that change something.
+  const fork = variant.thread === "fork"
+  const sent = fork ? editDrafts : realEdits(editDrafts, edits.fields)
+  const own = sourceRow
+    ? [sourceRow.model.provider, sourceRow.model.name].filter(Boolean).join("/")
+    : ""
+  const facts: EngineFacts = {
+    source: true,
+    edits: fork ? 0 : sent.length,
+    prompt:
+      Boolean(variant.instructions) && variant.instructions !== registered,
+    model: variant.model,
+    input: fromStep === 0 && variant.input.trim() !== "",
+    fork,
+    keyed: keyedKnobs({
+      tools: toolsEnabled !== undefined,
+      thinking: variant.thinking,
+      toolChoice: variant.lab?.tool_choice,
+    }),
+    fromStep,
+    steps: fork ? undefined : stepCount,
+    ownModel: own,
+    cost: stepDoc.data?.step === ordinal ? stepDoc.data : null,
+    costWhy: !caps.includes("steps")
+      ? "no step route"
+      : stepDoc.isError
+        ? `the step is unreadable: ${stepDoc.error.message}`
+        : "reading the step…",
+  }
+  const sendVariant = (c: EngineChoice): VariantFields => ({
+    ...variant,
+    engine: engineOf(c, picked),
+  })
+  const pre = engineChoice(facts)
+
   // The preview (plan F2, capability "preview"): the request the
   // replay's first step will send — the same body Run posts, assembled
   // by Studio (no runtime needed), re-read while the form changes. A
@@ -603,11 +645,11 @@ function ReplayForm({
         buildRunBody({
           runtime: runtime?.id ?? "",
           agent: agent ?? { name: wantAgent, models: [], tools: [] },
-          variant,
+          variant: sendVariant(pre),
           sourceRunID: runID,
           fromStep,
           input: variant.input,
-          edits: editDrafts,
+          edits: sent,
           publicID: sourceRow?.public_id || undefined,
         })
       )
@@ -616,6 +658,13 @@ function ReplayForm({
     }
   }
   const preview = usePreview(previewBody)
+  const choice = engineChoice({
+    ...facts,
+    keyMatch: preview.doc?.scripted_key_match,
+    hit: preview.doc?.scripted_hit,
+  })
+  const engine = engineOf(choice, picked)
+  const engineRefused = engineHeld(choice, picked)
   // An edit inside the view from_step's request carried is refused by
   // the server (ADR 0029 decision 4): said here first, in its words,
   // from transcript?step's compacted_at.
@@ -639,7 +688,7 @@ function ReplayForm({
           asOf.data?.compacted_at
         )
       : ""
-  const forkEdits = variant.thread === "fork" && editDrafts.length > 0
+  const forkEdits = fork && editDrafts.length > 0
 
   const run = async () => {
     setError("")
@@ -649,11 +698,11 @@ function ReplayForm({
       body = buildRunBody({
         runtime: runtime.id,
         agent,
-        variant,
+        variant: sendVariant(choice),
         sourceRunID: runID,
         fromStep,
         input: variant.input,
-        edits: editDrafts,
+        edits: sent,
         publicID: sourceRow?.public_id || undefined,
       })
     } catch (e) {
@@ -701,7 +750,7 @@ function ReplayForm({
     // The option lab's refusals (plan F3), said on their knobs.
     labProblems(variant, agent).length > 0 ||
     pastEnd ||
-    scriptedPastEnd ||
+    Boolean(engineRefused) ||
     invalid.length > 0 ||
     Boolean(preview.refused) ||
     Boolean(preview.pending) ||
@@ -709,6 +758,15 @@ function ReplayForm({
     Boolean(compactedEdit) ||
     (variant.thread === "fork" && !variant.input.trim())
 
+  // lib/drawer-spec.ts's order: what runs (source, target, engine),
+  // what changes, what will be sent, the tools during the replay, then
+  // "advanced" folded and Run naming its engine.
+  const advancedSet =
+    fork ||
+    variant.sideEffects !== "substitute" ||
+    Object.values(variant.lab ?? {}).some((v) =>
+      Array.isArray(v) ? v.length : v
+    )
   return (
     <>
       <div className="flex flex-col gap-1.5 p-6 pb-2">
@@ -720,13 +778,6 @@ function ReplayForm({
         >
           {VERB_TITLES[draft.verb]}
         </h2>
-        <p className="font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground">
-          {runID}
-          {wantAgent ? ` · ${wantAgent}` : ""}
-          {runtime && !target.mismatch
-            ? ` · on ${runtime.service || runtime.id}`
-            : ""}
-        </p>
       </div>
       <div ref={formBody} className="space-y-3 px-6 pb-6">
         {blocked ? (
@@ -738,67 +789,90 @@ function ReplayForm({
             {blocked}
           </p>
         ) : null}
-        {variant.thread === "fork" ? (
-          <p className="text-[11px] text-faint">
-            fork: a new session continues the conversation after this turn ·
-            type its next message
+        <section className="space-y-1" data-drawer-section="source">
+          <div className="eyebrow">{DRAWER_TITLES.source}</div>
+          <p className="font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground">
+            {runID}
+            {wantAgent ? ` · ${wantAgent}` : ""}
           </p>
-        ) : (
-          <StepPicker runID={runID} value={fromStep} onChange={setFromStep} />
-        )}
-        <EditList
-          edits={editDrafts}
-          onDrop={(e) => setEditDrafts((cur) => putEdit(cur, e, true))}
-        />
-        {edited ? (
-          <p className="text-[11px] text-faint" data-replay-live>
-            engine live: transcript edits need it — the scripted engine replays
-            recorded turns, which answered a different prompt
+          {fork ? (
+            <p className="text-[11px] text-faint">
+              fork: a new session continues the conversation after this turn ·
+              type its next message
+            </p>
+          ) : (
+            <StepPicker runID={runID} value={fromStep} onChange={setFromStep} />
+          )}
+        </section>
+        <section className="space-y-1" data-drawer-section="target">
+          <div className="eyebrow">{DRAWER_TITLES.target}</div>
+          <p className="font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground">
+            {runtime && !target.mismatch
+              ? `${wantAgent ?? "?"} on ${runtime.service || runtime.id} (${runtime.id})`
+              : "—"}
           </p>
-        ) : null}
-        <ExperimentForm
-          variant={variant}
-          patch={patch}
-          agent={agent}
-          registered={registered}
-          runtime={runtime}
-          caps={caps}
-          sourceRunID={runID}
-          fromStep={fromStep}
-          editDrafts={editDrafts}
-          setEditDrafts={setEditDrafts}
-          promptNote={
-            promptHole ? (
-              <span
-                className="flex flex-wrap items-center gap-1 text-[11px] text-faint"
-                data-prompt-hole={promptHole.hole}
-              >
-                <HoleBadge
-                  hole={promptHole.hole}
-                  reason={promptHole.reason}
-                  fix={promptHole.fix}
-                />
-                prompt from the registered instructions, not the step's
-                {promptHole.note ? ` · ${promptHole.note}` : ""}
-              </span>
-            ) : null
-          }
+        </section>
+        <EngineRadios
+          choice={choice}
+          engine={engine}
+          refused={engineRefused}
+          onPick={setPicked}
         />
-        <ReplayAck
-          catalog={catalog}
-          agent={agent}
-          mode={variant.sideEffects}
-          toolsEnabled={toolsEnabled}
-          breakpoints={[
-            ...breakpointsFor(runtime, agent),
-            ...(variant.lab?.park_on ?? []),
-          ]}
-          fromStep={variant.thread === "fork" ? 0 : fromStep}
-          compacted={compacted}
-        />
+        <section className="space-y-3" data-drawer-section="changes">
+          <div className="eyebrow">{DRAWER_TITLES.changes}</div>
+          <EditList
+            edits={sent}
+            onDrop={(e) => setEditDrafts((cur) => putEdit(cur, e, true))}
+          />
+          <ChangeFields
+            variant={variant}
+            patch={patch}
+            agent={agent}
+            registered={registered}
+            runtime={runtime}
+            caps={caps}
+            sourceRunID={runID}
+            fromStep={fromStep}
+            editDrafts={editDrafts}
+            setEditDrafts={setEditDrafts}
+            promptNote={
+              promptHole ? (
+                <span
+                  className="flex flex-wrap items-center gap-1 text-[11px] text-faint"
+                  data-prompt-hole={promptHole.hole}
+                >
+                  <HoleBadge
+                    hole={promptHole.hole}
+                    reason={promptHole.reason}
+                    fix={promptHole.fix}
+                  />
+                  prompt from the registered instructions, not the step's
+                  {promptHole.note ? ` · ${promptHole.note}` : ""}
+                </span>
+              ) : null
+            }
+          />
+        </section>
         {previewBody ? (
-          <PreviewPane state={preview} fromStep={fromStep} />
+          <section className="space-y-1" data-drawer-section="send">
+            <div className="eyebrow">{DRAWER_TITLES.send}</div>
+            <PreviewPane state={preview} fromStep={fromStep} />
+          </section>
         ) : null}
+        <section data-drawer-section="tools">
+          <ReplayAck
+            catalog={catalog}
+            agent={agent}
+            mode={variant.sideEffects}
+            toolsEnabled={toolsEnabled}
+            breakpoints={[
+              ...breakpointsFor(runtime, agent),
+              ...(variant.lab?.park_on ?? []),
+            ]}
+            fromStep={fork ? 0 : fromStep}
+            compacted={compacted}
+          />
+        </section>
         {forkEdits ? (
           <p
             className="text-xs text-status-bad"
@@ -851,16 +925,6 @@ function ReplayForm({
                   : ", and its last ended in a reply"}
           </p>
         ) : null}
-        {scriptedPastEnd ? (
-          <p
-            className="text-xs text-status-bad"
-            role="alert"
-            data-replay-scripted-past-end
-          >
-            the scripted engine has no recorded turn for step {fromStep}: the
-            source never answered it (use engine live)
-          </p>
-        ) : null}
         {orphans.length && !editsLoading ? (
           <p
             className="text-xs text-status-bad"
@@ -872,22 +936,50 @@ function ReplayForm({
               : "an edit names no field of the kept steps: fix it or drop it"}
           </p>
         ) : null}
-        {variant.thread === "fork" && !variant.input.trim() ? (
+        {fork && !variant.input.trim() ? (
           <p className="text-[11px] text-faint" data-replay-needs-input>
             a fork needs its next message
           </p>
         ) : null}
+        <details
+          className="space-y-2 rounded-md border px-3 py-2"
+          data-drawer-section="advanced"
+          open={advancedSet || undefined}
+        >
+          <summary className="cursor-pointer text-xs text-muted-foreground">
+            {DRAWER_TITLES.advanced}
+          </summary>
+          <div className="space-y-3 pt-2">
+            <ModeFields variant={variant} patch={patch} />
+            {agent ? (
+              <OptionLab variant={variant} patch={patch} agent={agent} />
+            ) : null}
+            {caps.includes("breakpoints") ? (
+              <Link
+                to="/settings"
+                className="block text-[11px] text-faint hover:underline"
+                data-breakpoints-moved
+              >
+                {BREAKPOINTS_MOVED}
+              </Link>
+            ) : null}
+          </div>
+        </details>
         {error ? (
           <p className="text-xs text-status-bad" role="alert" data-replay-error>
             {error}
           </p>
         ) : null}
-        <div className="flex items-center gap-2">
+        <div
+          className="flex flex-wrap items-center gap-2"
+          data-drawer-section="run"
+        >
           <Button
             onClick={() => void run()}
             disabled={held || Boolean(experiment && !settled(experiment.state))}
+            data-run-engine={engine}
           >
-            {busy ? "sending…" : "Run"}
+            {busy ? "sending…" : runLabel(choice, picked)}
           </Button>
           <Link
             {...playgroundLink(
@@ -898,8 +990,8 @@ function ReplayForm({
                 runtime: runtime?.id,
                 tools: agent?.tools.map((t) => t.name),
                 registered,
-                variant,
-                edits: editDrafts,
+                variant: sendVariant(choice),
+                edits: sent,
               })
             )}
             className="text-xs text-muted-foreground hover:underline"
@@ -919,6 +1011,74 @@ function ReplayForm({
         ) : null}
       </div>
     </>
+  )
+}
+
+/** EngineRadios is the engine block (U17; UX-C-01, UX-C-05): two
+ * radios, one line each — scripted's at 0 tokens, live's naming the
+ * model and the estimate; scripted disabled with its reason when it
+ * cannot answer, and the refusal said inline while it is the pick. */
+export function EngineRadios({
+  choice,
+  engine,
+  refused,
+  onPick,
+}: {
+  choice: EngineChoice
+  engine: Engine
+  refused: string
+  onPick: (e: Engine) => void
+}) {
+  const off = !choice.scripted.enabled
+  return (
+    <fieldset
+      className="space-y-1"
+      data-drawer-section="engine"
+      data-engine={engine}
+    >
+      <legend className="eyebrow">{DRAWER_TITLES.engine}</legend>
+      <label
+        className={`flex items-baseline gap-2 text-xs ${off ? "text-faint" : ""}`}
+        data-engine-option="scripted"
+        data-disabled={off ? "" : undefined}
+      >
+        <input
+          type="radio"
+          name="replay-engine"
+          value="scripted"
+          checked={engine === "scripted"}
+          disabled={off}
+          // A disabled option is no pick (a synthetic click included).
+          onChange={() => !off && onPick("scripted")}
+        />
+        <span>
+          {ENGINE_WORDS.scripted}
+          <span className="block text-[11px] text-faint" data-engine-why>
+            {off ? choice.scripted.reason : ENGINE_WORDS.scriptedFor}
+          </span>
+        </span>
+      </label>
+      <label
+        className="flex items-baseline gap-2 text-xs"
+        data-engine-option="live"
+      >
+        <input
+          type="radio"
+          name="replay-engine"
+          value="live"
+          checked={engine === "live"}
+          onChange={() => onPick("live")}
+        />
+        <span data-engine-live>
+          {ENGINE_WORDS.live(choice.live.model, choice.live.estimate)}
+        </span>
+      </label>
+      {refused ? (
+        <p className="text-xs text-status-bad" role="alert" data-engine-refused>
+          {refused}
+        </p>
+      ) : null}
+    </fieldset>
   )
 }
 

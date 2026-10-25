@@ -4,6 +4,7 @@
 // run id (P2-18), the approval controls on the run's own pending set
 // (P2-16), the lifecycle poll ending, the diff over whole turns, the
 // Studio hand-off (P2-17), and every refusal surfacing as words.
+import { BREAKPOINTS_MOVED } from "../lib/drawer-spec"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tokenScope } from "./config"
 import {
@@ -42,6 +43,7 @@ import {
   text,
   transcript,
   user,
+  runBtn,
 } from "./testkit"
 import type { Route } from "./testkit"
 
@@ -119,7 +121,7 @@ async function openDrawer(
 }
 
 const run = async (el: Awaited<ReturnType<typeof mount>>, ms = 60) => {
-  click(button(el, "Run experiment ▶"))
+  click(runBtn(el))
   await settle(ms)
 }
 
@@ -220,7 +222,7 @@ describe("the result pane follows the command to its run", () => {
     }
     routes["playground/commands/cmd_1"] = command("cmd_1", "accepted", "pg_x1")
     const { el, studio } = await openDrawer(routes)
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     await pause(5) // the command is in flight…
     el.setAttribute("data-public-id", "pub_other") // …and the page moved on
     await settle(80)
@@ -283,7 +285,7 @@ describe("the result pane follows the command to its run", () => {
     thread.value = "fork"
     thread.dispatchEvent(new Event("change", { bubbles: true }))
     await settle()
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     await settle(200) // an accepted row with no run id
     expect(text(el, ".weft-xres")).toContain("accepted")
     expect($(el, ".weft-xres .weft-warn")).toBeNull() // no error for an empty run id
@@ -345,7 +347,7 @@ describe("the result pane follows the command to its run", () => {
     thread.value = "fork"
     thread.dispatchEvent(new Event("change", { bubbles: true }))
     await settle()
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     await settle(1_600) // the poll reaches the ack naming the turn
     const steer = $(el, "[data-weft-k=steer]") as HTMLInputElement
     expect(steer).not.toBeNull()
@@ -392,7 +394,7 @@ describe("the result pane follows the command to its run", () => {
     routes["runs/pg_p1/events?after=0&limit=500"] = () =>
       ++reads < 3 ? page(stored.slice(0, 3)) : page(stored)
     const { el } = await openDrawer(routes)
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(1_000)
     await settle()
     expect(reads).toBeGreaterThanOrEqual(3)
@@ -424,7 +426,7 @@ describe("the result pane follows the command to its run", () => {
     let reads = 0
     routes["runs/pg_x1/transcript"] = () => (++reads < 3 ? early : full)
     const { el } = await openDrawer(routes)
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(1_000)
     await settle()
     expect(rows).toBeGreaterThanOrEqual(3)
@@ -508,7 +510,7 @@ describe("the result pane follows the command to its run", () => {
     // no playground/commands/cmd_1 route: 404
     const { el, studio } = await openDrawer(routes)
     vi.useFakeTimers()
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     await vi.advanceTimersByTimeAsync(60_000)
     expect(studio.gets("playground/commands/").length).toBe(1)
     expect(text(el, ".weft-xres")).toContain("lost")
@@ -522,7 +524,7 @@ describe("the result pane follows the command to its run", () => {
       Promise.reject(new TypeError("Failed to fetch"))
     const { el, studio } = await openDrawer(routes)
     vi.useFakeTimers()
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     await vi.advanceTimersByTimeAsync(5 * 60_000)
     expect(studio.gets("playground/commands/").length).toBe(8)
     expect(text(el, ".weft-xres")).toContain("Studio stopped answering")
@@ -536,8 +538,8 @@ describe("the result pane follows the command to its run", () => {
     }
     routes["playground/commands/cmd_1"] = command("cmd_1", "queued")
     const { el, studio } = await openDrawer(routes)
-    click(button(el, "Run experiment ▶"))
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
+    click(runBtn(el))
     await settle(60)
     expect(studio.posts("playground/runs")).toHaveLength(1)
   })
@@ -728,7 +730,7 @@ describe("the drawer", () => {
     expect(studio.posts("playground/runs")).toHaveLength(0)
     expect($(el, ".weft-drawer [data-weft-ack]")).not.toBeNull()
     expect($(el, '[data-weft-drawer-verb="rerun"]')).not.toBeNull()
-    click(button(el, "Run experiment ▶"))
+    click(runBtn(el))
     await settle()
     const body = studio.posts("playground/runs").at(0)?.body as
       { overrides: { instructions?: string } } | undefined
@@ -801,41 +803,17 @@ describe("the drawer", () => {
     expect(pickRuntime(rts, "acme-support")?.id).toBe("rt_new")
   })
 
-  it("shows the runtime's stored breakpoints, and what the PUT answered", async () => {
+  it("runtime-wide breakpoints are not a per-replay knob: a pointer to Settings, no Break on (U17; UX-D-36)", async () => {
     const routes = baseRoutes()
-    routes.runtimes = {
-      runtimes: [{ ...RUNTIMES.runtimes[0], breakpoints: ["refund"] }],
-    }
-    routes["PUT runtimes/rt_01/breakpoints"] = {
-      tools: ["lookup_order", "refund"],
-    }
     const { el, studio } = await openDrawer(routes, {
       ...META,
       capabilities: [...META.capabilities, "breakpoints"],
     })
-    const boxes = () =>
-      all(el, ".weft-drawer .weft-field")
-        .find((n) => n.textContent.includes("Break on"))!
-        .querySelectorAll("input")
-    expect(Array.from(boxes()).map((b) => b.checked)).toEqual([false, true]) // refund: set elsewhere
-    boxes()[0].checked = true
-    boxes()[0].dispatchEvent(new Event("change"))
-    await settle()
-    expect(studio.calls.find((c) => c.method === "PUT")?.body).toEqual({
-      tools: ["lookup_order", "refund"],
-    })
-    expect(Array.from(boxes()).map((b) => b.checked)).toEqual([true, true])
-    // A runtime that left: 503, nothing stored, the box goes back.
-    routes["PUT runtimes/rt_01/breakpoints"] = apiError(
-      503,
-      "unavailable",
-      "runtime rt_01 is not connected"
-    )
-    boxes()[1].checked = false
-    boxes()[1].dispatchEvent(new Event("change"))
-    await settle()
-    expect(text(el, ".weft-xres")).toContain("runtime rt_01 is not connected")
-    expect(Array.from(boxes()).map((b) => b.checked)).toEqual([true, true])
+    expect(text(el, ".weft-drawer")).not.toContain("Break on")
+    const ptr = $(el, ".weft-drawer [data-breakpoints-moved]")!
+    expect(ptr.textContent).toBe(BREAKPOINTS_MOVED)
+    expect(ptr.getAttribute("href")).toBe("http://studio.test/studio/settings")
+    expect(studio.calls.some((c) => c.method === "PUT")).toBe(false)
   })
 
   it("refuses a draft with every tool off: the wire would run it with every tool on", async () => {

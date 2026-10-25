@@ -449,7 +449,7 @@ const toolBox = (el: WeftDevtools, name: string) =>
       n.parentElement?.textContent.startsWith(name)
   ) as HTMLInputElement
 const runBtn = (el: WeftDevtools) =>
-  button(el, "Run experiment ▶") as HTMLButtonElement
+  $(el, ".weft-drawer .weft-run-btn") as HTMLButtonElement
 
 async function open(
   runtimes: unknown = { runtimes: [{ ...rt, id: "rt_01" }] },

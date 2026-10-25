@@ -151,7 +151,7 @@ export function CallVerbs({
           at={at}
           label={`edit this result and replay (call ${callId})`}
           icon={<PencilLine data-slot="icon" />}
-          draft={editResultAndReplay(n, callId, content)}
+          draft={editResultAndReplay(n, callId)}
         />
       ) : null}
       <Verb

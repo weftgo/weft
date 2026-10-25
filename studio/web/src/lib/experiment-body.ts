@@ -20,13 +20,15 @@ import {
 import type { TranscriptBatch } from "@/lib/events"
 import { editsProblem, kindOf, putEdit, wireEdits } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
+import { noEdit } from "@/lib/engine"
+import type { Engine } from "@/lib/engine"
 
 /** A fork's precondition, in the words both forms refuse it with
  * (lib/experiment-body.ts here, the panel's draftProblem). */
 export const FORK_NEEDS =
   "fork continues the conversation in a new session: it needs a source run, an input, and step 0"
 
-export type Engine = "live" | "scripted"
+export type { Engine } from "@/lib/engine"
 export type SideEffects = "substitute" | "park" | "allow"
 export type ThreadMode = "ephemeral" | "fork"
 
@@ -502,6 +504,28 @@ export function unmatchedDrafts(
     if (k === "insert") return d.step > fromStep
     if (k === "user" || k === "tool_args") return d.step >= fromStep
     return !keys.has(`${d.step}\u0000${d.callID ?? ""}`)
+  })
+}
+
+/** realEdits is the drafts that change something (UX-C-05): a kept
+ * result or reply equal to its recording is no edit — kept in the form
+ * (the field shows it), never sent and never a reason for engine live.
+ * Fields null (not read) leave every draft in. */
+export function realEdits(
+  drafts: EditDraft[],
+  fields: EditField[] | null
+): EditDraft[] {
+  if (!fields) return drafts
+  return drafts.filter((d) => {
+    const k = kindOf(d)
+    if (k !== "tool_result" && k !== "reply") return true
+    const field = fields.find(
+      (f) => f.step === d.step && (f.callID ?? "") === (d.callID ?? "")
+    )
+    return !noEdit(
+      (k === "tool_result" ? d.toolResult : d.content) ?? "",
+      field?.placeholder
+    )
   })
 }
 

@@ -46,17 +46,25 @@ import {
   ReplayDrawer,
   catalogOfStep,
 } from "@/components/studio/replay-drawer"
-import { editResultAndReplay, REPLAY_MARK, replayFromStep } from "@/lib/replay"
+import {
+  editResultAndReplay,
+  editTranscript,
+  REPLAY_MARK,
+  replayFromStep,
+} from "@/lib/replay"
 import type { ReplayDraft } from "@/lib/replay"
 import { renderWithRouter } from "@/test/render"
 import { HOLES } from "@/lib/honesty"
 import { runLink } from "@/lib/links"
 import { resetNotices } from "@/lib/notify"
+import { BREAKPOINTS_MOVED, DRAWER_ORDER } from "@/lib/drawer-spec"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
 
 const RUN = "r_fail"
+/** Run names its engine (U17): "Run on scripted · 0 tokens" / "Run live on …". */
+const RUN_BTN = /^Run (on scripted|live on) /
 const CHILD = "r_fail-child"
 const rOK = golden<RunsPage>("runs").runs.find((r) => r.id === "r_ok")!
 const usage = { input_tokens: 10, output_tokens: 4 }
@@ -317,13 +325,29 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
       "2 · script · calls refund · tool error",
       "3 · script · reply",
     ])
-    // The edit on that call, pre-filled with its recorded content.
+    // The field on that call opens empty, the recording beside it
+    // (UX-C-05): nothing is an edit yet, so the drawer opens on
+    // scripted and Run says so.
     const edit = await waitFor(() =>
       d.getByLabelText<HTMLInputElement>(
         "edit the result of refund (c3) at step 2"
       )
     )
-    expect(edit.value).toBe(ERR)
+    expect(edit.value).toBe("")
+    expect(
+      edit.closest("[data-edit-field]")!.querySelector("[data-edit-recorded]")!
+        .textContent
+    ).toBe(`recorded: ${ERR}`)
+    await waitFor(() =>
+      expect(
+        drawer()!
+          .querySelector("[data-drawer-section=engine]")!
+          .getAttribute("data-engine")
+      ).toBe("scripted")
+    )
+    expect(d.getByRole("button", { name: RUN_BTN }).textContent).toBe(
+      "Run on scripted · 0 tokens"
+    )
 
     // The ack preview: the step's catalog judged under substitute.
     await waitFor(() => expect(verdict("search_kb")).toBe("runs"))
@@ -344,8 +368,30 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
     expect(verdict("refund")).toBe("parked")
     expect(verdict("search_kb")).toBe("runs")
 
+    // Typing the recording itself is no edit: still scripted.
+    fireEvent.change(edit, { target: { value: ERR } })
+    expect(
+      drawer()!
+        .querySelector("[data-drawer-section=engine]")!
+        .getAttribute("data-engine")
+    ).toBe("scripted")
+    // An edit: scripted disabled with its reason, Run live and named.
     fireEvent.change(edit, { target: { value: "refunded" } })
-    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    const scripted = drawer()!.querySelector<HTMLInputElement>(
+      '[data-engine-option="scripted"] input'
+    )!
+    expect(scripted.disabled).toBe(true)
+    expect(
+      drawer()!.querySelector(
+        '[data-engine-option="scripted"] [data-engine-why]'
+      )!.textContent
+    ).toBe(
+      "your edit changes step 3's request: the recording answered the original"
+    )
+    expect(d.getByRole("button", { name: RUN_BTN }).textContent).toMatch(
+      /^Run live on wefttest\/script · /
+    )
+    fireEvent.click(d.getByRole("button", { name: RUN_BTN }))
     await waitFor(() =>
       expect(studio.calls("POST playground/runs").length).toBe(1)
     )
@@ -394,7 +440,7 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
       })
     )
     await waitFor(() => expect(verdict("refund")).toBe("substituted"))
-    fireEvent.click(within(drawer()!).getByRole("button", { name: "Run" }))
+    fireEvent.click(within(drawer()!).getByRole("button", { name: RUN_BTN }))
     const marker = await waitFor(() => {
       const el = drawer()!.querySelector("[data-diff-marker]")
       expect(el).toBeTruthy()
@@ -434,7 +480,7 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
       })
     )
     await waitFor(() => expect(verdict("refund")).toBe("substituted"))
-    fireEvent.click(within(drawer()!).getByRole("button", { name: "Run" }))
+    fireEvent.click(within(drawer()!).getByRole("button", { name: RUN_BTN }))
     await waitFor(() =>
       expect(drawer()!.querySelector("[data-replay-run-link]")).toBeTruthy()
     )
@@ -512,10 +558,10 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
     fireEvent.change(input, { target: { value: "and the other order?" } })
     await waitFor(() =>
       expect(
-        d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+        d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
       ).toBe(false)
     )
-    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    fireEvent.click(d.getByRole("button", { name: RUN_BTN }))
     await waitFor(() =>
       expect(studio.calls("POST playground/runs").length).toBe(1)
     )
@@ -569,7 +615,7 @@ describe("a child row replays the child as its own run (A10)", () => {
       ).toBe("agent researcher is not registered on runtime rt_1")
     )
     expect(
-      d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+      d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
     ).toBe(true)
   })
 })
@@ -763,7 +809,7 @@ describe("verbs gate on the transcript's steps, not the fold's (review 1)", () =
         "edit the result of refund (c3) at step 2"
       )
     )
-    expect(edit.value).toBe(ERR)
+    expect(edit.value).toBe("")
     // The pre-filled field has focus (review: focus the verb's field) —
     // read before the picker's options: opening and closing the select
     // hands focus back to its trigger.
@@ -780,10 +826,10 @@ describe("verbs gate on the transcript's steps, not the fold's (review 1)", () =
     fireEvent.change(edit, { target: { value: "refunded" } })
     await waitFor(() =>
       expect(
-        d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+        d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
       ).toBe(false)
     )
-    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    fireEvent.click(d.getByRole("button", { name: RUN_BTN }))
     await waitFor(() =>
       expect(studio.calls("POST playground/runs").length).toBe(1)
     )
@@ -895,10 +941,10 @@ describe("the step ordinal is from_step (review 4)", () => {
     )
     await waitFor(() =>
       expect(
-        d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+        d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
       ).toBe(false)
     )
-    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    fireEvent.click(d.getByRole("button", { name: RUN_BTN }))
     await waitFor(() =>
       expect(studio.calls("POST playground/runs").length).toBe(1)
     )
@@ -933,21 +979,21 @@ describe("continue here and fork (reviews 5, 6)", () => {
     const d = await waitFor(() => within(drawer()!))
     await waitFor(() =>
       expect(
-        d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+        d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
       ).toBe(false)
     )
     await choose(d.getByLabelText("Thread"), "fork")
     expect(d.queryByLabelText("continue from step")).toBeNull()
     expect(
-      d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+      d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
     ).toBe(true)
     fireEvent.change(d.getByLabelText("input"), {
       target: { value: "one more thing" },
     })
     expect(
-      d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+      d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
     ).toBe(false)
-    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    fireEvent.click(d.getByRole("button", { name: RUN_BTN }))
     await waitFor(() =>
       expect(studio.calls("POST playground/runs").length).toBe(1)
     )
@@ -1046,7 +1092,7 @@ describe("the drawer's refusals and failures (review 10)", () => {
     const d = await waitFor(() => within(drawer()!))
     await waitFor(() =>
       expect(
-        d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+        d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
       ).toBe(false)
     )
     return d
@@ -1061,14 +1107,14 @@ describe("the drawer's refusals and failures (review 10)", () => {
       )
     ).toBeTruthy()
     expect(
-      d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+      d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
     ).toBe(true)
     // Turning them off lifts it (the registered set, not the catalog).
     for (const name of ["lookup_order", "refund"])
       fireEvent.click(d.getByRole("checkbox", { name: new RegExp(`^${name}`) }))
     expect(d.queryByText(/side effects allow is refused/)).toBeNull()
     expect(
-      d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+      d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
     ).toBe(false)
   })
 
@@ -1090,7 +1136,7 @@ describe("the drawer's refusals and failures (review 10)", () => {
         )
     )
     const d = await openFromStep2()
-    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    fireEvent.click(d.getByRole("button", { name: RUN_BTN }))
     await waitFor(() =>
       expect(drawer()!.querySelector("[data-replay-error]")?.textContent).toBe(
         "runtime rt_1 is not connected · no runtime connected · start the app with WEFT_ENV=dev"
@@ -1112,8 +1158,9 @@ describe("the drawer's refusals and failures (review 10)", () => {
       ).toBe("no runtime connected · start the app with WEFT_ENV=dev")
     )
     expect(
-      within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
-        .disabled
+      within(drawer()!).getByRole<HTMLButtonElement>("button", {
+        name: RUN_BTN,
+      }).disabled
     ).toBe(true)
   })
 })
@@ -1121,23 +1168,13 @@ describe("the drawer's refusals and failures (review 10)", () => {
 describe("a pre-filled edit is never pruned silently (review 2)", () => {
   it("a draft no field matches is shown, badged, and holds Run", async () => {
     // The transcript's result for the refund call carries another id:
-    // the draft the verb pre-fills (step 2, c3) names no field.
+    // a draft naming (step 2, c3) names no field.
     const other = bodies.map((b, i) =>
       i === 6 ? result("c3x", "refund", ERR, true) : b
     )
     serve({ bodies: other })
-    const row = await openStory('[data-call="c3"]')
-    await waitFor(() =>
-      expect(
-        within(row).getByRole("button", {
-          name: "edit this result and replay (call c3)",
-        })
-      ).toBeTruthy()
-    )
-    fireEvent.click(
-      within(row).getByRole("button", {
-        name: "edit this result and replay (call c3)",
-      })
+    await drawerFor(
+      editTranscript(3, [{ step: 2, callID: "c3", toolResult: "patched" }])
     )
     await waitFor(() =>
       expect(drawer()!.querySelector('[data-edit-orphan="c3"]')).toBeTruthy()
@@ -1147,8 +1184,9 @@ describe("a pre-filled edit is never pruned silently (review 2)", () => {
     ).toContain("no such field in the kept prefix")
     expect(drawer()!.querySelector("[data-replay-orphans]")).toBeTruthy()
     expect(
-      within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
-        .disabled
+      within(drawer()!).getByRole<HTMLButtonElement>("button", {
+        name: RUN_BTN,
+      }).disabled
     ).toBe(true)
     // Dropping it lifts the hold.
     fireEvent.click(
@@ -1159,7 +1197,7 @@ describe("a pre-filled edit is never pruned silently (review 2)", () => {
     await waitFor(() =>
       expect(
         within(drawer()!).getByRole<HTMLButtonElement>("button", {
-          name: "Run",
+          name: RUN_BTN,
         }).disabled
       ).toBe(false)
     )
@@ -1208,7 +1246,7 @@ describe("the transcript-edit fields (UX-C-47)", () => {
         <TranscriptEdits
           runID={RUN}
           fromStep={3}
-          drafts={[{ step: 2, callID: "c3", toolResult: ERR }]}
+          drafts={[{ step: 2, callID: "c3", toolResult: "patched" }]}
           setDrafts={vi.fn()}
         />
       </QueryClientProvider>
@@ -1233,11 +1271,37 @@ describe("the transcript-edit fields (UX-C-47)", () => {
     const c3 = container.querySelector<HTMLTextAreaElement>(
       '[data-edit-call="c3"]'
     )!
-    expect(c3.value).toBe(ERR)
+    expect(c3.value).toBe("patched")
     expect(
       c3.closest("[data-edit-field]")!.querySelector("[data-edit-edited]")!
         .textContent
     ).toBe(EDIT_FIELD.edited)
+  })
+
+  it("a draft equal to the recording reads 'same as the recording · not an edit' (UX-C-05)", async () => {
+    serve()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <TranscriptEdits
+          runID={RUN}
+          fromStep={3}
+          drafts={[{ step: 2, callID: "c3", toolResult: ERR }]}
+          setDrafts={vi.fn()}
+        />
+      </QueryClientProvider>
+    )
+    const c3 = await waitFor(() => {
+      const el = container.querySelector('[data-edit-field="2:c3"]')
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(c3.querySelector("[data-edit-edited]")).toBeNull()
+    expect(c3.querySelector("[data-edit-same]")!.textContent).toBe(
+      EDIT_FIELD.same
+    )
   })
 })
 
@@ -1358,11 +1422,11 @@ describe("a run with no step re-runs from step 0 (review 3.1)", () => {
     const d = await waitFor(() => within(drawer()!))
     await waitFor(() =>
       expect(
-        d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+        d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
       ).toBe(false)
     )
     expect(drawer()!.querySelector("[data-replay-past-end]")).toBeNull()
-    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    fireEvent.click(d.getByRole("button", { name: RUN_BTN }))
     await waitFor(() =>
       expect(studio.calls("POST playground/runs").length).toBe(1)
     )
@@ -1473,7 +1537,7 @@ describe("the deferred field focus yields to the user (review 3.3)", () => {
 
   it("the edit field takes focus once drawn, when focus is still on the heading", async () => {
     const release = servePending()
-    const d = await drawerFor(editResultAndReplay(2, "c3", ERR))
+    const d = await drawerFor(editResultAndReplay(2, "c3"))
     await waitFor(() =>
       expect(document.activeElement?.id).toBe("replay-drawer-title")
     )
@@ -1488,7 +1552,7 @@ describe("the deferred field focus yields to the user (review 3.3)", () => {
 
   it("a user who moved focus before the field was drawn keeps it", async () => {
     const release = servePending()
-    const d = await drawerFor(editResultAndReplay(2, "c3", ERR))
+    const d = await drawerFor(editResultAndReplay(2, "c3"))
     await waitFor(() =>
       expect(document.activeElement?.id).toBe("replay-drawer-title")
     )
@@ -1514,22 +1578,30 @@ describe("Run is held where the server would refuse (reviews 3.4, 3.5)", () => {
       bodies: bodies.slice(0, -1),
       doc: runDoc({ status: "failed", err: "model down" }),
     })
-    // No edit (an edited prefix runs live, plan F2): the step count alone.
+    // No edit: the step count alone. The source never answered step 3,
+    // so scripted is disabled with that reason and the drawer opens on
+    // live — Run is not held.
     const d = await drawerFor(replayFromStep(3))
     await waitFor(() =>
       expect(
-        d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+        d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
       ).toBe(false)
     )
-    await choose(d.getByLabelText("Engine"), "scripted")
     expect(
-      drawer()!.querySelector("[data-replay-scripted-past-end]")!.textContent
-    ).toBe(
-      "the scripted engine has no recorded turn for step 3: the source never answered it (use engine live)"
-    )
+      drawer()!
+        .querySelector("[data-drawer-section=engine]")!
+        .getAttribute("data-engine")
+    ).toBe("live")
     expect(
-      d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+      drawer()!.querySelector<HTMLInputElement>(
+        '[data-engine-option="scripted"] input'
+      )!.disabled
     ).toBe(true)
+    expect(
+      drawer()!.querySelector(
+        '[data-engine-option="scripted"] [data-engine-why]'
+      )!.textContent
+    ).toBe("the source never answered step 3")
   })
 
   it("past a last reply: held, 'its last ended in a reply'", async () => {
@@ -1543,7 +1615,7 @@ describe("Run is held where the server would refuse (reviews 3.4, 3.5)", () => {
       )
     )
     expect(
-      d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+      d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
     ).toBe(true)
   })
 
@@ -1560,7 +1632,7 @@ describe("Run is held where the server would refuse (reviews 3.4, 3.5)", () => {
       )
     )
     expect(
-      d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+      d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
     ).toBe(true)
   })
 
@@ -1576,7 +1648,7 @@ describe("Run is held where the server would refuse (reviews 3.4, 3.5)", () => {
       )
     )
     expect(
-      d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled
+      d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
     ).toBe(true)
   })
 })
@@ -1605,7 +1677,7 @@ describe("the option lab (plan F3, Studio's drawer)", () => {
     return d
   }
   const run = (d: ReturnType<typeof within>) =>
-    d.getByRole("button", { name: "Run" }) as HTMLButtonElement
+    d.getByRole("button", { name: RUN_BTN }) as HTMLButtonElement
 
   it("each default greyed (the placeholder); an override in colour with a reset back to the default", async () => {
     const d = await openLab()
@@ -1755,7 +1827,6 @@ describe("the option lab (plan F3, Studio's drawer)", () => {
   it("a select's visible caption names it and, clicked, focuses it (what its <label> did)", async () => {
     const d = await openLab()
     for (const [caption, label] of [
-      ["Engine", "Engine"],
       ["Side effects", "Side effects"],
       ["Thread", "Thread"],
       ["Model", "model"],
@@ -2031,7 +2102,7 @@ describe("the drawer's edit fields and outcome (U29.3)", () => {
 
   it("edit this result focuses that step's field, the calls labelled apart, the result a sized textarea", async () => {
     serve({ bodies: repeated })
-    const d = await drawerFor(editResultAndReplay(1, "c1", "found"))
+    const d = await drawerFor(editResultAndReplay(1, "c1"))
     const field = await waitFor(() => {
       const el = drawer()!.querySelector<HTMLTextAreaElement>(
         '[data-edit-step="1"][data-edit-call="c1"]'
@@ -2041,7 +2112,7 @@ describe("the drawer's edit fields and outcome (U29.3)", () => {
     })
     await waitFor(() => expect(document.activeElement).toBe(field))
     expect(field.tagName).toBe("TEXTAREA")
-    expect(field.value).toBe("found")
+    expect(field.value).toBe("")
     // Parallel calls of one tool read apart: tool(args) · call id.
     const label = (key: string) =>
       drawer()!
@@ -2098,7 +2169,7 @@ describe("the drawer's edit fields and outcome (U29.3)", () => {
     resetNotices()
     const d = await drawerFor(replayFromStep(3))
     const run = await waitFor(() => {
-      const b = d.getByRole<HTMLButtonElement>("button", { name: "Run" })
+      const b = d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN })
       expect(b.disabled).toBe(false)
       return b
     })
@@ -2136,5 +2207,126 @@ describe("the drawer's edit fields and outcome (U29.3)", () => {
     expect(document.documentElement.hasAttribute("data-replay-open")).toBe(
       false
     )
+  })
+})
+
+// ── U17: the engine per command, the drawer's order ────────────────
+
+describe("the engine is chosen per command (U17; UX-C-01, UX-C-05)", () => {
+  const engineOfDrawer = () =>
+    drawer()!
+      .querySelector("[data-drawer-section=engine]")!
+      .getAttribute("data-engine")
+  const scriptedRadio = () =>
+    drawer()!.querySelector<HTMLInputElement>(
+      '[data-engine-option="scripted"] input'
+    )!
+  const liveRadio = () =>
+    drawer()!.querySelector<HTMLInputElement>(
+      '[data-engine-option="live"] input'
+    )!
+  const runBtn = (d: Awaited<ReturnType<typeof drawerFor>>) =>
+    d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN })
+
+  it("a plain replay opens on scripted; live names the model and the step's cost; Run names the engine and posts it", async () => {
+    serve()
+    const d = await drawerFor(replayFromStep(2))
+    await waitFor(() => expect(runBtn(d).disabled).toBe(false))
+    expect(engineOfDrawer()).toBe("scripted")
+    expect(runBtn(d).textContent).toBe("Run on scripted · 0 tokens")
+    // The step route's usage × price (golden step: 10 + 5 tokens, a
+    // scripted model's exact $0).
+    await waitFor(() =>
+      expect(drawer()!.querySelector("[data-engine-live]")!.textContent).toBe(
+        "live · calls wefttest/script · ~15 tok ≈ $0 · scripted"
+      )
+    )
+    fireEvent.click(runBtn(d))
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(1)
+    )
+    expect(studio.calls("POST playground/runs")[0].body).toMatchObject({
+      engine: "scripted",
+      source: { run_id: RUN, from_step: 2 },
+    })
+  })
+
+  it("choosing scripted after an edit is refused inline: the option is disabled with its reason, the engine stays live", async () => {
+    serve()
+    const d = await drawerFor(editResultAndReplay(2, "c3"))
+    const edit = await waitFor(() =>
+      d.getByLabelText<HTMLTextAreaElement>(
+        "edit the result of refund (c3) at step 2"
+      )
+    )
+    expect(edit.value).toBe("")
+    expect(engineOfDrawer()).toBe("scripted")
+    fireEvent.change(edit, { target: { value: "refunded" } })
+    expect(engineOfDrawer()).toBe("live")
+    expect(scriptedRadio().disabled).toBe(true)
+    fireEvent.click(scriptedRadio())
+    expect(engineOfDrawer()).toBe("live")
+    expect(
+      drawer()!.querySelector(
+        '[data-engine-option="scripted"] [data-engine-why]'
+      )!.textContent
+    ).toBe(
+      "your edit changes step 3's request: the recording answered the original"
+    )
+    expect(runBtn(d).textContent).toMatch(/^Run live on wefttest\/script · /)
+  })
+
+  it("a pick of scripted is never switched behind the user: an edit holds Run with the reason, live releases it", async () => {
+    serve()
+    const d = await drawerFor(editResultAndReplay(2, "c3"))
+    const edit = await waitFor(() =>
+      d.getByLabelText<HTMLTextAreaElement>(
+        "edit the result of refund (c3) at step 2"
+      )
+    )
+    // The user picks scripted (it opened there: live, then back).
+    fireEvent.click(liveRadio())
+    fireEvent.click(scriptedRadio())
+    fireEvent.change(edit, { target: { value: "refunded" } })
+    expect(engineOfDrawer()).toBe("scripted")
+    expect(drawer()!.querySelector("[data-engine-refused]")!.textContent).toBe(
+      "scripted is refused: your edit changes step 3's request: the recording answered the original — pick live"
+    )
+    await waitFor(() => expect(runBtn(d).disabled).toBe(true))
+    fireEvent.click(liveRadio())
+    expect(engineOfDrawer()).toBe("live")
+    expect(drawer()!.querySelector("[data-engine-refused]")).toBeNull()
+    await waitFor(() => expect(runBtn(d).disabled).toBe(false))
+  })
+
+  it("the drawer reads in lib/drawer-spec.ts's order; advanced is folded; runtime-wide breakpoints are a pointer", async () => {
+    serve({ capabilities: ["playground", "steps", "breakpoints"] })
+    await drawerFor(replayFromStep(2))
+    await waitFor(() =>
+      expect(
+        drawer()!.querySelector("[data-drawer-section=tools]")
+      ).toBeTruthy()
+    )
+    const order = [...drawer()!.querySelectorAll("[data-drawer-section]")].map(
+      (n) => n.getAttribute("data-drawer-section")
+    )
+    expect(order).toEqual(DRAWER_ORDER.filter((k) => order.includes(k)))
+    expect(order).toEqual([
+      "source",
+      "target",
+      "engine",
+      "changes",
+      "tools",
+      "advanced",
+      "run",
+    ])
+    const adv = drawer()!.querySelector<HTMLDetailsElement>(
+      "details[data-drawer-section=advanced]"
+    )!
+    expect(adv.open).toBe(false)
+    expect(drawer()!.textContent).not.toContain("Break on")
+    expect(
+      drawer()!.querySelector("[data-breakpoints-moved]")!.textContent
+    ).toBe(BREAKPOINTS_MOVED)
   })
 })

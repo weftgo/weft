@@ -182,7 +182,10 @@ import {
   replayBounds,
 } from "../lib/experiment-body"
 import type { LabFields } from "../lib/experiment-body"
-import { foldedWords, labOf, turnPromptOf } from "./playground"
+import { engineFor, foldedWords, labOf, turnPromptOf } from "./playground"
+import { BREAKPOINTS_MOVED, DRAWER_TITLES } from "../lib/drawer-spec"
+import type { DrawerSection } from "../lib/drawer-spec"
+import { ENGINE_WORDS, engineHeld, noEdit, runLabel } from "../lib/engine"
 import { editList, marksBlock, previewBlock } from "./editor"
 import {
   ackCatalogHole,
@@ -3468,10 +3471,13 @@ export class WeftDevtools extends HTMLElement {
     const card = el("div", "weft-step weft-drawer")
     const child = d.runId !== (d.under ?? d.runId)
     const head = el("div", "weft-step-h", [
+      // The source (lib/drawer-spec.ts's first section): the run, the
+      // step it continues from.
       el(
         "span",
         "",
-        `Experiment · ${d.agent}${child ? ` · child run ${d.runId}` : ""}${d.step > 0 ? ` · continue from step ${d.step}` : ""}`
+        `Experiment · ${d.agent}${child ? ` · child run ${d.runId}` : ""}${d.step > 0 ? ` · continue from step ${d.step}` : ""}`,
+        { "data-drawer-section": "source" }
       ),
       el("span", "weft-grow"),
     ])
@@ -3482,17 +3488,84 @@ export class WeftDevtools extends HTMLElement {
     on(close, "click", () => this.closeDrawer())
     head.append(close)
     card.append(head)
-    const body = el("div", "weft-step-b")
+    const root = el("div", "weft-step-b")
     // The verb that opened it (plan F1): Studio's replay drawer title.
     if (d.verb)
-      body.append(
+      root.append(
         el("div", "weft-verb-t", VERB_TITLES[d.verb], {
           "data-weft-drawer-verb": d.verb,
         })
       )
-    // The command's edits by kind (plan F2), each droppable; an edited
-    // prefix runs on engine live (the scripted turns answered the
-    // recorded prompt).
+    // lib/drawer-spec.ts's order (U17): source, target, engine, what
+    // changes, will be sent, tools during the replay, advanced, Run.
+    const sec = (k: DrawerSection, tag = "div") => {
+      const x = el(tag, "weft-field", "", { "data-drawer-section": k })
+      if (DRAWER_TITLES[k])
+        x.append(
+          el(tag == "div" ? "span" : "summary", "weft-name", DRAWER_TITLES[k])
+        )
+      root.append(x)
+      return x
+    }
+    sec("target").append(
+      `${d.agent} on ${rt?.service || d.runtimeId} (${d.runtimeId})`
+    )
+    // The engine (lib/engine.ts): two radios, one line each; scripted
+    // disabled with its reason when it cannot answer; a pick is never
+    // switched behind the user — it is held, said inline.
+    const ch = engineFor(d, s.preview?.doc)
+    const eng = d.engine ?? ch.default
+    const engRow = sec("engine")
+    engRow.setAttribute("data-engine", eng)
+    const off = !ch.scripted.enabled
+    for (const [v, words, why] of [
+      [
+        "scripted",
+        ENGINE_WORDS.scripted,
+        off ? ch.scripted.reason : ENGINE_WORDS.scriptedFor,
+      ],
+      ["live", ENGINE_WORDS.live(ch.live.model, ch.live.estimate)],
+    ] as const) {
+      const r = el("input", "", "", {
+        type: "radio",
+        name: "weft-engine",
+      }) as HTMLInputElement
+      r.checked = eng === v
+      r.disabled = v == "scripted" && off
+      on(
+        r,
+        "change",
+        (_, n) =>
+          !(n as HTMLInputElement).disabled &&
+          this.model?.setDraft({ engine: v })
+      )
+      engRow.append(
+        el(
+          "label",
+          "weft-tool",
+          [
+            r,
+            words,
+            ...(why
+              ? [el("span", "weft-reason", why, { "data-engine-why": "" })]
+              : []),
+          ],
+          {
+            "data-engine-option": v,
+          }
+        )
+      )
+    }
+    const engHeld = engineHeld(ch, d.engine)
+    if (engHeld)
+      engRow.append(
+        el("div", "weft-note weft-warn", engHeld, {
+          role: "alert",
+          "data-engine-refused": "",
+        })
+      )
+    let body = sec("changes")
+    // The command's edits by kind (plan F2), each droppable.
     const list = editList(d.edits, (e) => {
       const k = `${d.runId}|${editKey(e)}`
       this.edOpen.delete(k)
@@ -3510,15 +3583,6 @@ export class WeftDevtools extends HTMLElement {
           role: "alert",
           "data-weft-fork-edits": "",
         })
-      )
-    else if (list)
-      body.append(
-        el(
-          "div",
-          "weft-reason",
-          "engine live: transcript edits need it — the scripted engine replays recorded turns, which answered a different prompt",
-          { "data-weft-live": "" }
-        )
       )
     // An edit inside the view from_step's request carried: the server's
     // refusal (ADR 0029 decision 4) said first, from transcript?step.
@@ -3548,7 +3612,7 @@ export class WeftDevtools extends HTMLElement {
     // else the prompt.
     if (d.key !== undefined && d.key !== this.focusedKey && d.verb !== "edit") {
       this.focusedKey = d.key
-      const e = d.edits.at(0)
+      const e = d.at ?? d.edits.at(0)
       this.focusNext =
         d.focus === "edit" && e
           ? `edit:${e.step}:${e.callID}`
@@ -3704,120 +3768,6 @@ export class WeftDevtools extends HTMLElement {
       body.append(inputRow)
     }
 
-    // The side-effect mode (§6 rule 3): substitute (the default — a
-    // recorded side-effect call answers from the record, a miss parks),
-    // park (every side-effect call waits), allow (the tools the app
-    // opted in with AllowSideEffects run for real — only here; a
-    // ReplaySafe tool runs in every mode).
-    const seRow = el("div", "weft-fields")
-    const seSel = el("select", "weft-input", "", {
-      "aria-label": "side effects",
-    }) as HTMLSelectElement
-    seSel.title =
-      "in the re-run, ReplaySafe tools always run; the others substitute, park, or run for real under allow (opted in)"
-    option(seSel, "side effects: substitute", {
-      title:
-        "a side-effect call the source recorded is answered from the record; any other call parks for you",
-      value: "",
-    })
-    option(seSel, "park", {
-      title:
-        "every side-effect call parks for you; nothing is answered from the record",
-      value: "park",
-    })
-    option(
-      seSel,
-      "allow — runs the tools this app opted in (AllowSideEffects) for real",
-      {
-        title: "refused unless every tool left on is opted in or ReplaySafe",
-        value: "allow",
-      }
-    )
-    seSel.value = d.sideEffects === "substitute" ? "" : d.sideEffects
-    on(seSel, "change", (_, n) =>
-      this.model?.setDraft({
-        sideEffects: (n as HTMLSelectElement)
-          .value as ExperimentDraft["sideEffects"],
-      })
-    )
-    seRow.append(seSel)
-    // The engine (§5.5): live, or scripted — the source run's recorded
-    // turns at zero tokens, refused with an instructions/model
-    // override (the prompt trap).
-    const engSel = el("select", "weft-input", "", {
-      "aria-label": "engine",
-    }) as HTMLSelectElement
-    option(engSel, "engine: live", { value: "live" })
-    option(engSel, "scripted (zero tokens)", { value: "scripted" })
-    engSel.value = d.engine
-    on(engSel, "change", (_, n) =>
-      this.model?.setDraft({
-        engine: (n as HTMLSelectElement).value as ExperimentDraft["engine"],
-      })
-    )
-    seRow.append(engSel)
-    // Fork mode (§5.4, review fix 4a — P4 renders in both surfaces):
-    // ephemeral (an experiment, never a turn) or fork (a new session
-    // with lineage, the input its next turn). Fork needs an input —
-    // the runtime refuses the command otherwise.
-    const thrSel = el("select", "weft-input", "", {
-      "aria-label": "thread",
-    }) as HTMLSelectElement
-    option(thrSel, "thread: ephemeral", { value: "ephemeral" })
-    option(thrSel, "fork (new session)", { value: "fork" })
-    thrSel.value = d.thread
-    thrSel.title =
-      "fork continues the conversation in a new session (needs an input)"
-    on(thrSel, "change", (_, n) => {
-      const thread = (n as HTMLSelectElement).value as ExperimentDraft["thread"]
-      // A fork continues the conversation: it starts at step 0; back to
-      // ephemeral, the step the edits imply returns.
-      this.model?.setDraft({
-        thread,
-        step:
-          thread === "fork" ? 0 : Math.max(d.step, impliedFromStep(d.edits)),
-      })
-    })
-    seRow.append(thrSel)
-    body.append(seRow)
-    if (agent) body.append(this.lab(d, agent))
-
-    // Rung 3 in the panel (§8.3, review fix 4c — "all in the panel"
-    // per WEFT-DEVTOOLS §10's rung-3 gate): the tools every run the
-    // runtime starts parks on. Rendered only when meta reports the
-    // breakpoints capability. The rule is the runtime's: it parks the
-    // runs the runtime starts, and the app's own runs of an agent built
-    // with runtime.Breakpoints() (plan F4.2) — the label says so.
-    // Runtime-wide, so no panel token may set it (the server token, or
-    // setup A's open API).
-    if (
-      hasCapability(s, "breakpoints") &&
-      tokenScope(this.cfg.token) === "" &&
-      agent?.tools.length
-    ) {
-      const brkRow = el("div", "weft-field")
-      brkRow.append(
-        el("span", "", "Break on (parks every run)", {
-          title:
-            "applies to runs this runtime starts and the app's own runs of agents built with runtime.Breakpoints()",
-        })
-      )
-      for (const t of agent.tools) {
-        const cb = el("input") as HTMLInputElement
-        cb.type = "checkbox"
-        cb.checked = s.breakpoints.includes(t.name)
-        on(cb, "change", (_, box) => {
-          const set = this.model?.state.breakpoints ?? s.breakpoints
-          const next = set.filter((n) => n !== t.name)
-          if ((box as HTMLInputElement).checked) next.push(t.name)
-          next.sort()
-          this.go(this.model?.setBreakpoints(next))
-        })
-        brkRow.append(el("label", "weft-tool", [cb, el("span", "", t.name)]))
-      }
-      body.append(brkRow)
-    }
-
     // The transcript edits (D2/D3): when continuing from a step, the
     // kept steps' results are patchable and their call-free replies
     // rewritable — the counterfactual the fresh step answers.
@@ -3864,7 +3814,8 @@ export class WeftDevtools extends HTMLElement {
             const cur = editOf()
             const next = [...draft().edits]
             const i = cur ? next.indexOf(cur) : -1
-            if (v === "") {
+            // The recording itself is no edit (U17).
+            if (noEdit(v, String(call.result?.content))) {
               if (i >= 0) next.splice(i, 1)
             } else if (i >= 0) {
               next[i] = { ...cur, toolResult: v, step: n, callID: call.callId }
@@ -3895,7 +3846,7 @@ export class WeftDevtools extends HTMLElement {
             const cur = editOf()
             const next = [...draft().edits]
             const i = cur ? next.indexOf(cur) : -1
-            if (v === "") {
+            if (noEdit(v, step.text)) {
               if (i >= 0) next.splice(i, 1)
             } else if (i >= 0) {
               next[i] = { ...cur, content: v, step: n }
@@ -3937,11 +3888,94 @@ export class WeftDevtools extends HTMLElement {
       if (editsBox.childElementCount > 1) body.append(editsBox)
     }
 
+    // What the replay's first step will send (plan F2): its 400 holds Run.
+    if (s.preview) sec("send").append(previewBlock(s.preview, d.step))
     // The ack preview (plan F1, ack-before-execute): what each tool's
     // calls would do, and which prefix is kept — redrawn with the draft.
-    const refused = this.ack(s, d, src, agent, body)
-    // What the replay's first step will send (plan F2): its 400 holds Run.
-    if (s.preview) body.append(previewBlock(s.preview, d.step))
+    const refused = this.ack(s, d, src, agent, sec("tools"))
+    // Advanced, folded (open while one of its knobs is set).
+    body = sec("advanced", "details")
+    body.setAttribute("data-weft-open", "adv")
+    if (
+      this.openKeys.has("adv") ||
+      d.thread == "fork" ||
+      (d.sideEffects && d.sideEffects != "substitute") ||
+      labOf(d).problems.length ||
+      Object.keys(labOf(d).overrides).length
+    )
+      body.setAttribute("open", "")
+    // The side-effect mode (§6 rule 3): substitute (the default — a
+    // recorded side-effect call answers from the record, a miss parks),
+    // park (every side-effect call waits), allow (the tools the app
+    // opted in with AllowSideEffects run for real — only here; a
+    // ReplaySafe tool runs in every mode).
+    const seRow = el("div", "weft-fields")
+    const seSel = el("select", "weft-input", "", {
+      "aria-label": "side effects",
+    }) as HTMLSelectElement
+    option(seSel, "side effects: substitute", {
+      title:
+        "a side-effect call the source recorded is answered from the record; any other call parks for you",
+      value: "",
+    })
+    option(seSel, "park", {
+      title:
+        "every side-effect call parks for you; nothing is answered from the record",
+      value: "park",
+    })
+    option(
+      seSel,
+      "allow — runs the tools this app opted in (AllowSideEffects) for real",
+      {
+        title: "refused unless every tool left on is opted in or ReplaySafe",
+        value: "allow",
+      }
+    )
+    seSel.value = d.sideEffects === "substitute" ? "" : d.sideEffects
+    on(seSel, "change", (_, n) =>
+      this.model?.setDraft({
+        sideEffects: (n as HTMLSelectElement)
+          .value as ExperimentDraft["sideEffects"],
+      })
+    )
+    seRow.append(seSel)
+    // Fork mode (§5.4, review fix 4a — P4 renders in both surfaces):
+    // ephemeral (an experiment, never a turn) or fork (a new session
+    // with lineage, the input its next turn). Fork needs an input —
+    // the runtime refuses the command otherwise.
+    const thrSel = el("select", "weft-input", "", {
+      "aria-label": "thread",
+    }) as HTMLSelectElement
+    option(thrSel, "thread: ephemeral", { value: "ephemeral" })
+    option(thrSel, "fork (new session)", { value: "fork" })
+    thrSel.value = d.thread
+    thrSel.title =
+      "fork continues the conversation in a new session (needs an input)"
+    on(thrSel, "change", (_, n) => {
+      const thread = (n as HTMLSelectElement).value as ExperimentDraft["thread"]
+      // A fork continues the conversation: it starts at step 0; back to
+      // ephemeral, the step the edits imply returns.
+      this.model?.setDraft({
+        thread,
+        step:
+          thread === "fork" ? 0 : Math.max(d.step, impliedFromStep(d.edits)),
+      })
+    })
+    seRow.append(thrSel)
+    body.append(seRow)
+    if (agent) body.append(this.lab(d, agent))
+
+    // Runtime-wide breakpoints are the runtime's, not this replay's
+    // (U17): a pointer to where they are set.
+    if (hasCapability(s, "breakpoints"))
+      body.append(
+        el("a", "weft-reason", BREAKPOINTS_MOVED, {
+          href: href(this.base, settingsLink()),
+          ...NEW_TAB,
+          "data-breakpoints-moved": "",
+        })
+      )
+    body = root
     const bad = [...this.edErr.values()][0]
     if (bad)
       body.append(
@@ -3952,10 +3986,13 @@ export class WeftDevtools extends HTMLElement {
           { role: "alert", "data-weft-ed-held": "" }
         )
       )
-    const run = el("button", "weft-run-btn", "Run experiment ▶", {
+    const run = el("button", "weft-run-btn", runLabel(ch, d.engine), {
       title: "POST /api/playground/runs — the runtime in your app executes it",
+      "data-run-engine": eng,
+      "data-drawer-section": "run",
     })
     const held =
+      engHeld ||
       refused ||
       unplaced ||
       labOf(d).problems.length ||
@@ -3974,7 +4011,7 @@ export class WeftDevtools extends HTMLElement {
         !n.hasAttribute("disabled") && this.go(this.model?.runExperiment())
     )
     body.append(run)
-    card.append(body)
+    card.append(root)
     return card
   }
 
@@ -4345,7 +4382,7 @@ export class WeftDevtools extends HTMLElement {
     const box = el(
       "div",
       "weft-field weft-lab",
-      [el("span", "", "Options · empty keeps the agent's default (greyed)")],
+      [el("span", "", "options · empty keeps the agent's default")],
       { "data-weft-lab": "" }
     )
     if (old)
@@ -4754,7 +4791,6 @@ export class WeftDevtools extends HTMLElement {
       "data-weft-ack": "",
       "data-key": "ack",
     })
-    box.append(el("div", "weft-name", "before you run"))
     const from = d.thread === "fork" ? 0 : d.step
     const compacted =
       from > 0 &&
@@ -4971,7 +5007,7 @@ export class WeftDevtools extends HTMLElement {
   }
 
   /** edPut puts (next null: drops) one edit into the drawer's command:
-   * from_step follows the edits up, and an edited prefix runs live. */
+   * from_step follows the edits up (the engine is lib/engine.ts's). */
   private edPut(t: TurnView, target: ReplayEdit, next: ReplayEdit | null) {
     const m = this.model
     const d = m?.state.drawer
@@ -4983,13 +5019,7 @@ export class WeftDevtools extends HTMLElement {
     // A fork starts at step 0: its from_step stays (the drawer holds Run).
     const step =
       d.thread === "fork" ? d.step : Math.max(d.step, impliedFromStep(edits))
-    m.setDraft({
-      edits,
-      step,
-      ...(edits.length && d.engine === "scripted"
-        ? { engine: "live" as const }
-        : {}),
-    })
+    m.setDraft({ edits, step })
   }
 
   private turnRow(
@@ -6323,12 +6353,11 @@ function callVerbs(n: number, call: FoldedToolCall, r: ReplayCtx): HTMLElement {
   // from_step n+1 must be one the server accepts: below the step count,
   // or at it when the transcript's kept prefix ends in answered calls.
   if (call.result && call.callId && r.max !== null && n + 1 <= r.max) {
-    // An empty recorded result seeds no edit (lib/replay.ts).
     list.push(
       verb(
         `edit this result and replay (call ${call.callId})`,
         "✎",
-        editResultAndReplay(n, call.callId, String(call.result.content)),
+        editResultAndReplay(n, call.callId),
         r
       )
     )

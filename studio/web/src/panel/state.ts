@@ -60,7 +60,6 @@ import {
   postPreview,
   panelGet,
   postSteer,
-  putBreakpoints,
 } from "./client"
 import type {
   CommandStatus,
@@ -71,6 +70,7 @@ import type {
 import {
   buildRunBody,
   draftProblem,
+  engineFor,
   experimentLabel,
   foldedWords,
   pickRuntime,
@@ -79,6 +79,7 @@ import {
 } from "./playground"
 import type { ExperimentDraft, ExperimentResult, TurnWords } from "./playground"
 import type { PanelPreview } from "./editor"
+import { replayBounds } from "../lib/experiment-body"
 import type { CompactedNote } from "../lib/experiment-body"
 import { PREVIEW_SILENT, PREVIEW_TIMEOUT_MS } from "../lib/preview"
 import { studioIsTooNew } from "./version"
@@ -1165,7 +1166,11 @@ export class PanelModel {
         () => {
           const { at, hole } = view.exp!
           return hole == null || hole === "not_recorded"
-            ? { at: new Map<string, string>(), hole: "not_recorded", again: true }
+            ? {
+                at: new Map<string, string>(),
+                hole: "not_recorded",
+                again: true,
+              }
             : { at, hole, again: true }
         }
       )
@@ -2177,7 +2182,13 @@ export class PanelModel {
       // verb's draft carries its own input ("" = the source's own).
       input: replay ? replay.input : own,
       sourceInput: own,
-      engine: "live",
+      // The engine follows lib/engine.ts's choice until the user picks.
+      steps: src?.transcript
+        ? replayBounds(src.transcript.batches).stepCount
+        : undefined,
+      ownModel: [row?.model.provider, row?.model.name]
+        .filter(Boolean)
+        .join("/"),
       sideEffects: "",
       thread: replay?.thread ?? "ephemeral",
       runtimeId: rt.id,
@@ -2187,21 +2198,58 @@ export class PanelModel {
       key: ++this.drawerKey,
       ...(replay ? { verb: replay.verb } : {}),
       ...(replay?.focus ? { focus: replay.focus } : {}),
+      ...(replay?.at ? { at: replay.at } : {}),
       ...(promptFrom ? { promptFrom } : {}),
       ...(promptHole ? { promptHole } : {}),
     }
+    this.readCost()
     this.schedulePreview()
     this.emit()
+  }
+
+  /** readCost reads the source step's step-route doc for the live
+   * engine's estimate (lib/engine.ts): its cost block and usage. */
+  private readCost() {
+    const d = this.state.drawer
+    if (!d) return
+    const { key, step } = d
+    const put = (cost: ExperimentDraft["cost"], costWhy: string) => {
+      const n = this.state.drawer
+      if (this.disposed || !n || n.key !== key || n.step !== step) return
+      this.state.drawer = { ...n, cost, costWhy }
+      this.emit()
+    }
+    d.cost = null
+    if (!this.state.meta?.capabilities.includes("steps")) {
+      d.costWhy = "no step route"
+      return
+    }
+    d.costWhy = "reading the step…"
+    void panelGet<NonNullable<ExperimentDraft["cost"]>>(
+      this.ep,
+      `runs/${encodeURIComponent(d.runId)}/steps/${step}`
+    ).then(
+      (doc) => put(doc, ""),
+      (e: unknown) => put(null, `the step is unreadable: ${messageOf(e)}`)
+    )
   }
 
   /** setDraft patches the drawer's editable fields. still leaves the
    * dock as it is — a text field being typed in already shows its own
    * value, and redrawing it would take the caret. */
   setDraft(patch: Partial<ExperimentDraft>, still = false) {
-    if (!this.state.drawer) return
-    this.state.drawer = { ...this.state.drawer, ...patch }
+    const was = this.state.drawer
+    if (!was) return
+    const d = (this.state.drawer = { ...was, ...patch })
+    if (d.step !== was.step) this.readCost()
     this.schedulePreview()
-    if (!still) this.emit()
+    // A keystroke that changes the engine choice redraws (U17): Run's
+    // label and the scripted option follow it.
+    if (
+      !still ||
+      engineFor(d).scripted.reason !== engineFor(was).scripted.reason
+    )
+      this.emit()
   }
 
   /** closeExperiment drops the drawer (the result stays until the next
@@ -2380,28 +2428,6 @@ export class PanelModel {
     this.narrowing = narrowingOf(s)
   }
 
-  /** setBreakpoints is the rung-3 verb (§8.3): the tools every run
-   * this runtime starts parks on from then on. Rendered only when
-   * meta reports the breakpoints capability. */
-  async setBreakpoints(tools: string[]) {
-    const drawer = this.state.drawer
-    if (!drawer) return
-    const seq = this.loadSeq
-    let stored: { tools?: string[] } | null
-    try {
-      stored = await putBreakpoints(this.ep, drawer.runtimeId, tools)
-    } catch (err) {
-      // Nothing was stored (a disconnected runtime is a 503): the
-      // redraw puts the checkbox back on the set that stands.
-      if (!this.disposed && seq === this.loadSeq)
-        this.setExperimentError(messageOf(err), drawer.runId)
-      return
-    }
-    if (this.disposed || seq !== this.loadSeq) return
-    this.state.breakpoints = Array.isArray(stored?.tools) ? stored.tools : tools
-    this.emit()
-  }
-
   /** steer delivers one user message into the result's run mid-flight
    * (§8.4) — weft.Steering on the ephemeral run the runtime holds. */
   async steer(message: string) {
@@ -2461,7 +2487,10 @@ export class PanelModel {
     const seq = this.loadSeq
     let out: { command_id: string; state: string }
     try {
-      out = await postPlaygroundRun(this.ep, buildRunBody(draft, this.publicId))
+      out = await postPlaygroundRun(
+        this.ep,
+        buildRunBody(draft, this.publicId, this.state.preview?.doc)
+      )
     } catch (err) {
       if (!this.disposed && seq === this.loadSeq)
         this.setExperimentError(messageOf(err), draft.under ?? draft.runId)

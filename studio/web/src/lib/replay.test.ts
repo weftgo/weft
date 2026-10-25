@@ -280,14 +280,15 @@ describe("the verbs' drafts (one command on both surfaces)", () => {
     })
   })
 
-  it("edit this result and replay runs the NEXT step fresh against the edit", () => {
-    expect(editResultAndReplay(2, "c7", "boom")).toEqual({
+  it("edit this result and replay runs the NEXT step fresh, on that field, no edit seeded (UX-C-05)", () => {
+    expect(editResultAndReplay(2, "c7")).toEqual({
       verb: "edit_result",
       fromStep: 3,
-      edits: [{ step: 2, callID: "c7", toolResult: "boom" }],
+      edits: [],
       thread: "ephemeral",
       input: "",
       focus: "edit",
+      at: { step: 2, callID: "c7" },
     })
   })
 
@@ -372,13 +373,6 @@ describe("the verbs' drafts (one command on both surfaces)", () => {
     expect(endsInAnsweredCalls([call("c1"), res("c1"), reply])).toBe(false)
     expect(maxFromStep(4, false)).toBe(3)
     expect(endsInAnsweredCalls([])).toBe(false)
-  })
-
-  it("an empty recorded result seeds no edit (the server refuses an empty one)", () => {
-    expect(editResultAndReplay(2, "c7", "")).toMatchObject({
-      fromStep: 3,
-      edits: [],
-    })
   })
 })
 

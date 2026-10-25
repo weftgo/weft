@@ -605,8 +605,8 @@ describe("the drawer against a fake Studio", () => {
     )
     btn!.dispatchEvent(new Event("click"))
     await settle()
-    const run = all(el, ".weft-drawer button").find(
-      (b) => b.textContent === "Run experiment ▶"
+    const run = all(el, ".weft-drawer button").find((b) =>
+      b.classList.contains("weft-run-btn")
     )
     run!.dispatchEvent(new Event("click"))
     await settle(1200) // the poll tick plus the loads
@@ -717,8 +717,8 @@ describe("the drawer against a fake Studio", () => {
     )
     btn!.dispatchEvent(new Event("click"))
     await settle()
-    const run = all(el, ".weft-drawer button").find(
-      (b) => b.textContent === "Run experiment ▶"
+    const run = all(el, ".weft-drawer button").find((b) =>
+      b.classList.contains("weft-run-btn")
     )
     run!.dispatchEvent(new Event("click"))
     await settle(1200)
@@ -801,8 +801,8 @@ describe("the drawer against a fake Studio", () => {
     thread.value = "fork"
     thread.dispatchEvent(new Event("change"))
     await settle()
-    const run = all(el, ".weft-drawer button").find(
-      (b) => b.textContent === "Run experiment ▶"
+    const run = all(el, ".weft-drawer button").find((b) =>
+      b.classList.contains("weft-run-btn")
     )
     run!.dispatchEvent(new Event("click"))
     await settle()
@@ -810,12 +810,8 @@ describe("the drawer against a fake Studio", () => {
     expect((posted!.body as Record<string, unknown>).thread).toBe("fork")
   })
 
-  it("renders the rung-3 breakpoint set when the capability is on and PUTs it (review fix 4c)", async () => {
-    const routes: Record<string, unknown> = {
-      ...baseRoutes(),
-      "PUT runtimes/rt_01/breakpoints": { tools: ["refund"] },
-    }
-    const { fetchMock, puts } = fakeStudio(routes, {
+  it("the drawer has no rung-3 breakpoint set: it lives with the runtime (U17)", async () => {
+    const { fetchMock, puts } = fakeStudio(baseRoutes(), {
       ...metaPlayground,
       capabilities: ["live", "ingest", "runtimes", "playground", "breakpoints"],
     })
@@ -830,21 +826,12 @@ describe("the drawer against a fake Studio", () => {
     )
     btn!.dispatchEvent(new Event("click"))
     await settle()
-    // The breakpoint checkboxes render (gated on the capability).
-    const field = all(el, ".weft-drawer .weft-field").find((n) =>
-      n.textContent.includes("Break on (parks every run)")
-    )
-    expect(field).toBeTruthy()
-    const refund = field!.querySelectorAll(
-      "label.weft-tool"
-    )[1] as HTMLLabelElement
-    const cb = refund.querySelector("input") as HTMLInputElement
-    cb.checked = true
-    cb.dispatchEvent(new Event("change"))
-    await settle()
-    // The dead setBreakpoints path is live: the set went to the
-    // runtime's breakpoint verb.
-    const put = puts.find((p) => p.path === "runtimes/rt_01/breakpoints")
-    expect(put?.body).toEqual({ tools: ["refund"] })
+    expect(
+      all(el, ".weft-drawer .weft-field").some((n) =>
+        n.textContent.includes("Break on")
+      )
+    ).toBe(false)
+    expect(all(el, ".weft-drawer [data-breakpoints-moved]")).toHaveLength(1)
+    expect(puts).toHaveLength(0)
   })
 })

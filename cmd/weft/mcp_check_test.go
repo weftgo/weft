@@ -244,6 +244,54 @@ func TestMCPLiveCheck(t *testing.T) {
 	}
 	call(cs, "sessions", nil, "sessions: 2 sessions of 2", sessionID)
 	call(cs, "session", map[string]any{"id": sessionID}, "session "+sessionID, turnID)
+
+	// 4b. The investigation shapes (I5): explain_failure walks every
+	// step and the children, reads this run's own text, and reports a
+	// decided park as decided; a nine-turn session answers compact.
+	seedInvestigations(t, ctx, base, token)
+	child := chkSubFailed + "/0/q1"
+	ex = explained(call(cs, "explain_failure", map[string]any{"id": chkSubFailed},
+		"run "+chkSubFailed+" (checkout-assistant): succeeded, last step 1",
+		"first error: step 0 shipping_quote → child "+child+" (shipping-quoter) step 0: ", "carrier API outage: DHL rates unavailable",
+		`last assistant text "Express quotes are down`))
+	if ex.FirstError == nil || ex.FirstError.Run != child || !strings.Contains(ex.FirstError.Error, "carrier API outage") {
+		t.Errorf("explain_failure %s: first_error %+v, want the child's error", chkSubFailed, ex.FirstError)
+	}
+	fe, _ := json.Marshal(ex.FirstError)
+	fmt.Printf("first_error: %s\ndigest:\n  %s\n", fe, strings.Join(ex.Digest, "\n  "))
+	ex = explained(call(cs, "explain_failure", map[string]any{"id": chkChaos},
+		"run "+chkChaos+" (deal-lead): succeeded", "first error: step 0 review_ip → child ",
+		"SUBAGENT_FAILED", "provider maintenance window", // the IP reviewer's provider is down
+		"timed out",                                               // the tax reviewer ran past its Timeout
+		"SUBAGENT_PENDING", "parked: 1 calls awaiting a decision", // the NDA signer parked inside the delegation
+		"ocr engine: nil page")) // the litigation reviewer's tool panicked, the reviewer recovered
+	fmt.Printf("digest:\n  %s\n", strings.Join(ex.Digest, "\n  "))
+	t1, t2 := chkOpsSess+"-t1", chkOpsSess+"-t2"
+	ex = explained(call(cs, "explain_failure", map[string]any{"id": t1},
+		"; parked, decided: deploy denied by alice: change freeze until Monday → resumed as "+t2,
+		"tool calls: deploy denied by alice", "no assistant text this run"))
+	if ex.LastAssistantText != nil || strings.Contains(strings.Join(ex.Digest, " "), "awaiting") {
+		t.Errorf("explain_failure %s: %+v, want no text and no awaiting", t1, ex)
+	}
+	call(cs, "explain_failure", map[string]any{"id": t2},
+		"resumed "+t1+": deploy denied by alice", `last assistant text "Deploy to prod cancelled`)
+	ex = explained(call(cs, "explain_failure", map[string]any{"id": chkChatSess + "-t5"},
+		`last assistant text "Turn 5: order A-1005`))
+	if ex.LastAssistantText == nil || !strings.HasPrefix(*ex.LastAssistantText, "Turn 5:") {
+		t.Errorf("explain_failure t5: last text %v, want turn 5's own", ex.LastAssistantText)
+	}
+	got := call(cs, "session", map[string]any{"id": chkChatSess}, "session "+chkChatSess+" (support-desk): succeeded, 9 turns",
+		`"cost_reasons":[`)
+	size := len(strings.Join(got, "\n"))
+	full := call(cs, "session", map[string]any{"id": chkChatSess, "full": true}, "9 turns")
+	fmt.Printf("session %s: %d bytes compact (%d as served)\n", chkChatSess, size, len(strings.Join(full, "\n")))
+	if size >= 4096 {
+		t.Errorf("a nine-turn session answers %d bytes, want under 4 KB", size)
+	}
+	call(cs, "spans", map[string]any{"id": chkSubFailed, "tree": true}, "run "+chkSubFailed+" spans (tree): ", `"run_id":"`+child+`"`)
+	call(cs, "logs", map[string]any{"id": chkSubFailed}, "run "+chkSubFailed+" logs: ")
+	call(cs, "transcript", map[string]any{"id": t2}, "run "+t2+" transcript: ")
+	call(cs, "live", nil, "live: running now: 0 runs")
 	_ = cs.Close()
 	if strings.Contains(mcpErr.String(), token) || !strings.Contains(mcpErr.String(), "token from WEFT_STUDIO_TOKEN") {
 		t.Errorf("weft mcp stderr %q: want the start line naming WEFT_STUDIO_TOKEN, never the token", mcpErr.String())

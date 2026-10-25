@@ -543,8 +543,14 @@ make mcp-check   # WEFT_MODEL_REQUESTS=deny go test -tags livecheck -run '^TestM
 The test builds `weft` and starts a real `weft studio` on a free
 loopback port over a scratch SQLite file (`WEFT_DISCOVERY=off`). It
 seeds the studio with the record-contract fixtures through `/v1/traces`
-and `/v1/logs`, drives `weft mcp` with the MCP SDK's client, and prints
-one summary line per tool, ending with `MCP CHECK PASS`. It makes no
+and `/v1/logs`, then runs four investigation shapes on wefttest
+scripted models through the otel pipeline (`mcp_check_seed_test.go`:
+the arena's `sub.failed` and `agentic.chaos`, a denied thread turn, a
+nine-turn session), drives `weft mcp` with the MCP SDK's client, and
+prints one summary line per tool, ending with `MCP CHECK PASS`. I5's
+Done line is four of its assertions: `sub.failed` answers the child's
+error, `agentic.chaos` its four failure shapes, the denied turn
+"denied by alice", and the nine-turn `session` answer is under 4 KB. It makes no
 model calls. It sits behind the `livecheck` tag and stays out of
 `make test` because it listens on a port. It is not in CI. Run it before
 a release and after touching `cmd/weft/mcp*.go` or a route it reads.

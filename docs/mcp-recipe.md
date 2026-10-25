@@ -9,14 +9,15 @@ nothing Studio does not serve, and never writes: every tool is a GET.
 ## 1. Set it up: three commands
 
 ```sh
-go install github.com/weftgo/weft/cmd/weft@main     # the one binary: studio, dev, mcp, …
+go install github.com/weftgo/weft/cmd/weft@latest   # the one binary: studio, dev, mcp, …
 weft studio                                          # or: weft dev -- go run ./cmd/app
 claude mcp add weft -- weft mcp                      # Claude Code: the tools appear as mcp__weft__*
 ```
 
-`weft mcp` ships since v0.15.0: `go install github.com/weftgo/weft/cmd/weft@latest`
-(v0.18.3 at the time of writing) has it, as does `go install ./cmd/weft`
-from a checkout.
+`weft mcp` ships in every release since v0.15.0, so `@latest` has it, as
+does `go install ./cmd/weft` from a checkout; `weft version` says which
+one you run. The tools below are the current release's: `weft mcp --help`
+lists the ones your binary has.
 
 `weft studio` (or `weft dev`, which runs Studio and your app together)
 listens on `127.0.0.1:7331` and writes the discovery file `studio.json`
@@ -74,23 +75,49 @@ from --token`, `from WEFT_STUDIO_TOKEN`, `from the discovery file`).
 
 ## 2. Which tool answers which question
 
-The thirteen tools, as `weft mcp --help` lists them: `explain_failure`
-(run + step + transcript composed), `runs`, `search`, `run`, `step`,
-`request`, `events`, `tools`, `diff`, `export` (json, jsonl, otlp),
-`sessions`, `session`, `meta`. Every answer is three parts: a one-line
-summary, the route's JSON (compacted), and a note when the output was
-cut.
+The tools, as `weft mcp --help` lists them: `explain_failure` (the run,
+every step, its child runs and the transcript composed), `runs`,
+`search`, `run`, `step`, `request`, `events`, `tools`, `diff`, `export`
+(json, jsonl, otlp), `sessions`, `session`, `logs`, `spans`, `trace`,
+`transcript`, `live`, `agents`, `experiments`, `runtimes`, `meta`. Every
+answer is three parts: a one-line summary, the route's JSON, and a note
+when the output was cut.
+
+**Compact rows.** A coding agent pays for every byte, so the list tools
+(`runs`, `search`, `sessions`, `session`, `live`) answer a projection of
+the route's JSON: empty, zero, false and null fields are omitted (absent
+reads as that); a run row keeps its identity, outcome and size — id,
+parent, agent, model as `provider/name`, session and turn, status, `err`
+(200 characters), steps, pending, stop reason, the resume links, usage,
+cost and its badge, the problem counters, children counts, the prompt
+preview, `started` and `duration_ms` — and leaves out the trace id, the
+content hashes, the record counts and `meta` (the `run` tool has them);
+a hash a row keeps is cut to 12 characters; every cost reason is lifted
+out of the rows into one `cost_reasons` list at the top (`{reason,
+rows}`), never one per row; a session's turns omit the agent, session
+and public id the session names. `spans` and `trace` answer each span
+as its name, ids, `start_ms` / `dur_ms` from the first span (`t0`),
+status and the attributes that say what it was (model, tokens, tool,
+step, attempt, error, HTTP status), content attributes and events left
+out. `full: true` on any of them answers the route's JSON as served. A
+nine-turn session answers 3.5 KB compact, 11.4 KB as served.
 
 | The question | Call | Then |
 |---|---|---|
-| Why did run X fail? | `explain_failure {"id": X}` | follow its `next`: `step`, `request`, `events` |
+| Why did run X fail? | `explain_failure {"id": X}` | its `first_error` and `digest`; then its `next`: `step`, `request`, `events` |
+| It succeeded, but something went wrong inside | `explain_failure {"id": X}` | `first_error` names the run (a child's own) and the step; the `digest` has every step and child |
 | What did the model see at step N? | `request {"id": X, "step": N, "transcript": true}` | `step {"id": X, "n": N}` for the step whole |
 | Find the runs that called refund and failed | `search {"tool": "refund", "status": "failed"}` (or `"q": "<run error text>"`) | `explain_failure` on a hit |
 | Where did the refund tool return an error? | `step {"id": X, "n": N}` (each call's `result.is_error`) or `events {"id": X}` (`tool_finish` with `is_error`) | — search does not filter on tool results |
 | Compare run A and B | `diff {"a": A, "b": B}` | `step` on the first changed step |
 | What can this Studio do? | `meta {}` | a 404 or 403 elsewhere: is the capability off, and why |
 | Which runs just happened? | `runs {"agent": "…", "status": "failed", "limit": 10}` | `explain_failure` |
-| Is this run parked? | `explain_failure {"id": X}` | approve or deny in Studio (§3) |
+| Is this run parked? | `explain_failure {"id": X}` | "awaiting a decision": approve or deny in Studio (§3); "decided: … denied by alice → resumed as Y": read Y |
+| What did this turn answer? | `explain_failure {"id": X}` (`last_assistant_text`: this run's own text, never an earlier turn's) | `transcript {"id": X}` (each batch marked input or the run's own) |
+| Where did the time go? | `spans {"id": X}` (`tree: true` with the child runs) | `trace {"trace_id": T}` for a stock OTel app's trace |
+| What did the app log? | `logs {"id": X, "severity": "warn"}` | — a `not_recorded` hole names `otel.Slog()` |
+| What is running now? | `live {}` (a snapshot; call again) | `explain_failure` on one |
+| Which agents, experiments, runtimes? | `agents {}`, `experiments {}`, `runtimes {}` | a 404: the playground or the manifest is off (`meta`) |
 
 ### Worked examples
 
@@ -107,10 +134,46 @@ model that keeps calling a tool.
 
 ```text
 > explain_failure {"id":"a1100000000000000000000000000001"}
-run a1100000000000000000000000000001 (support): failed before step 1 started (step 0, its last recorded step, finished): weft: run failed at step 1: weft: run exceeded the maximum number of steps; stop_reason tool_calls; tool calls: lookup_order ok — http://127.0.0.1:33933/runs/a1100000000000000000000000000001
+run a1100000000000000000000000000001 (support): failed before step 1 started (step 0, its last recorded step, finished): weft: run failed at step 1: weft: run exceeded the maximum number of steps; stop_reason tool_calls; tool calls: lookup_order ok; no assistant text this run — http://127.0.0.1:33933/runs/a1100000000000000000000000000001
 {"run_id":"a1100000000000000000000000000001","url":"http://127.0.0.1:33933/runs/a1100000000000000000000000000001","agent":"support","status":"failed","error":"weft: run failed at step 1: weft: run exceeded the maximum number of steps","stop…
 next: step {id:"a1100000000000000000000000000001", n:0} for the step whole | request {id:"a1100000000000000000000000000001", step:0, transcript:true} for the exact model input | events {id:"a1100000000000000000000000000001"} for the event stream
 ```
+
+**It succeeded, but a child failed.** The arena's `sub.failed`, built
+in the check on scripted models: the shipping-quote subagent's
+provider is down, the parent reads `SUBAGENT_FAILED` and answers with a
+fallback. The run succeeded; `first_error` is the child's own, naming
+the child run and its step:
+
+```text
+> explain_failure {"id":"c5b0000000000000000000000000f001"}
+run c5b0000000000000000000000000f001 (checkout-assistant): succeeded, last step 1; stop_reason stop; first error: step 0 shipping_quote → child c5b0000000000000000000000000f001/0/q1 (shipping-quoter) step 0: model attempt 1: model stream: carrier API outage: DHL rates unavailable; digest: 2 of 3 lines report an error, a park or a failed child; last assistant text "Express quotes are down; standard shipping is €7.90, 4–6 days." — http://127.0.0.1:45545/runs/c5b0000000000000000000000000f001
+digest:
+  step 0: ok (tool_calls): shipping_quote error "SUBAGENT_FAILED: agent \"shipping_quote\" failed at step 0: model stream: carrier API outage: DHL rates unavailable"
+  step 1: ok (stop)
+  child c5b0000000000000000000000000f001/0/q1 (shipping-quoter) ← shipping_quote: failed (model_error) "weft: run failed at step 0: model stream: carrier API outage: DHL rates unavailable"
+```
+
+The arena's `agentic.chaos` — six reviewers in one step, every
+failure shape at once — reads each child's outcome in the digest:
+
+```text
+> explain_failure {"id":"c5b0000000000000000000000000c405"}
+run c5b0000000000000000000000000c405 (deal-lead): succeeded, last step 1; stop_reason stop; first error: step 0 review_ip → child c5b0000000000000000000000000c405/0/i1 (ip-reviewer) step 0: model attempt 1: model stream: provider maintenance window; digest: 4 of 8 lines report an error, a park or a failed child; last assistant text "Data room: …" — …
+digest:
+  step 0: ok (tool_calls): review_financials ok; review_hr ok; review_ip error "SUBAGENT_FAILED: …provider maintenance window"; review_tax error "tool \"review_tax\" timed out after 150ms"; sign_nda error "SUBAGENT_PENDING: agent \"sign_nda\" ended awaiting approval of 1 call(s)"; review_litigation ok
+  step 1: ok (stop)
+  child …/0/f1 (financials-reviewer) ← review_financials: succeeded
+  child …/0/h1 (hr-reviewer) ← review_hr: succeeded
+  child …/0/i1 (ip-reviewer) ← review_ip: failed (model_error) "weft: run failed at step 0: model stream: provider maintenance window"
+  child …/0/t1 (tax-reviewer) ← review_tax: failed (cancelled) "weft: run failed at step 0: model stream: context deadline exceeded"
+  child …/0/s1 (nda-signer) ← sign_nda: succeeded; parked: 1 calls awaiting a decision
+  child …/0/l1 (litigation-reviewer) ← review_litigation: succeeded; its first error: step 0 ocr_exhibit: tool "ocr_exhibit" panicked: ocr engine: nil page
+```
+
+The walk is bounded: at most 25 steps and 12 children per run, two
+child levels for a first error, 60 reads per answer; what it left out
+is the digest's last line, with the read that goes further.
 
 (`next:` is the explanation's `next` array, joined.) The answer names
 the error, the step it is about and why that step (here: the budget
@@ -128,15 +191,32 @@ A parked run is not a failure, and says so:
 
 ```text
 > explain_failure {"id":"a1100002000000000000000000000001"}
-run a1100002000000000000000000000001 (support): succeeded, last step 0; stop_reason tool_calls; parked: 1 calls awaiting a decision (refund_order); tool calls: refund_order pending — http://127.0.0.1:33933/runs/a1100002000000000000000000000001
+run a1100002000000000000000000000001 (support): succeeded, last step 0; stop_reason tool_calls; parked: 1 calls awaiting a decision (refund_order); tool calls: refund_order pending; digest: 1 of 1 lines report an error, a park or a failed child; no assistant text this run — http://127.0.0.1:33933/runs/a1100002000000000000000000000001
 ```
+
+Once a resume decided it, it reads decided — the outcome, who and why,
+and the turn that resumed it (the run document's `decided` block) —
+never "awaiting". A thread turn parked on `deploy`, denied by alice:
+
+```text
+> explain_failure {"id":"s_chk_ops-t1"}
+run s_chk_ops-t1 (ops-bot): succeeded, last step 0; stop_reason tool_calls; parked, decided: deploy denied by alice: change freeze until Monday → resumed as s_chk_ops-t2; tool calls: deploy denied by alice; digest: 1 of 1 lines report an error, a park or a failed child; no assistant text this run — http://127.0.0.1:45545/runs/s_chk_ops-t1
+
+> explain_failure {"id":"s_chk_ops-t2"}
+run s_chk_ops-t2 (ops-bot): succeeded, last step 0; stop_reason stop; resumed s_chk_ops-t1: deploy denied by alice: change freeze until Monday; last assistant text "Deploy to prod cancelled: alice denied it (change freeze)." — http://127.0.0.1:45545/runs/s_chk_ops-t2
+```
+
+`last_assistant_text` is the run's own: a thread turn's input carries
+the earlier turns' answers, and a turn that wrote none answers "no
+assistant text this run" (`last_assistant_note`), never the previous
+turn's.
 
 A run whose process died mid-tool (no end ever arrived) reads
 interrupted, the call it was in listed without a result:
 
 ```text
 > explain_failure {"id":"a1100003000000000000000000000001"}
-run a1100003000000000000000000000001 (support): interrupted at step 0; tool calls: lookup_order no result; holes: interrupted — http://127.0.0.1:33933/runs/a1100003000000000000000000000001
+run a1100003000000000000000000000001 (support): interrupted at step 0; tool calls: lookup_order no result; holes: interrupted; no assistant text this run — http://127.0.0.1:33933/runs/a1100003000000000000000000000001
 ```
 
 A run derived from a stock OpenTelemetry GenAI app (no weft
@@ -145,7 +225,7 @@ absent:
 
 ```text
 > explain_failure {"id":"otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081"}
-run otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081 (support): failed at step 0: agent cancelled by the user; holes: derived — http://127.0.0.1:33933/runs/otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081
+run otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081 (support): failed at step 0: agent cancelled by the user; holes: derived; no assistant text this run — http://127.0.0.1:33933/runs/otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081
 ```
 
 **What did the model see at step N?** The request records (prompt hash,
@@ -171,11 +251,11 @@ step (`step`: each call's `result` with `is_error`) or the event stream
 ```text
 > search {"q":"exceeded"}
 search: 1 runs of 1
-{"total":1,"runs":[{"id":"a1100000000000000000000000000001","parent_run_id":"","parent_call_id":"","trace_id":"7ace0000000000000000000000000001","agent":"support","model":{"provider":"wefttest","name":"script"},"manifest_hash":"3a21f0000000…
+{"cost_reasons":[{"reason":"a scripted model: nothing bills it, an exact $0","rows":1}],"runs":[{"agent":"support","cost_badge":"scripted","duration_ms":6,"err":"weft: run failed at step 1: weft: run exceeded the maximum number of steps","e…
 
 > search {"status":"failed","tool":"lookup_order"}
 search: 1 runs of 1
-{"total":1,"runs":[{"id":"a1100000000000000000000000000001", …
+{"cost_reasons":[…],"runs":[{"agent":"support", …
 ```
 
 **Compare run A and B.** Two runs aligned by step ordinal; a column a
@@ -312,14 +392,24 @@ with `HOME`, `XDG_RUNTIME_DIR` and `XDG_CACHE_HOME` inside it (so its
 and after and must not change), POSTs the `failed`, `parked`,
 `interrupted`, `tool_calls`, `session_turns` and `stock_genai` fixtures
 to `/v1/traces` and `/v1/logs` with the dev token read from
-`<db>.token`, then:
+`<db>.token`, then — later, through the otel pipeline on wefttest
+scripted models — four shapes built in the check from the arena's
+scenarios: `sub.failed`, `agentic.chaos`, a thread turn denied by alice
+and resumed, and a nine-turn session; then:
 
 - spawns `weft mcp --url …` with the token in `WEFT_STUDIO_TOKEN` and
   `WEFT_DISCOVERY=off`, over the MCP SDK's `CommandTransport`, and calls
   every tool — `meta`, `runs`, `explain_failure`, `run`, `step`,
   `request`, `events`, `tools`, `search`, `diff`, `export`,
   `explain_failure` on the parked, interrupted and derived runs,
-  `sessions`, `session` — asserting each summary line;
+  `sessions`, `session` — asserting each summary line — and then
+  `explain_failure` on the four shapes: `sub.failed` answers the
+  child's error (its `first_error` the child run), `agentic.chaos` its
+  four failure shapes (SUBAGENT_FAILED, a timeout, SUBAGENT_PENDING, a
+  panicking tool inside a child that recovered), the denied turn
+  "denied by alice … → resumed as …-t2" with no text of its own, a
+  session turn its own text; the nine-turn `session` under 4 KB; and
+  `spans` (a tree), `logs`, `transcript`, `live`;
 - spawns `weft mcp` with no flag and no token (the `claude mcp add weft
   -- weft mcp` path), which finds the scratch Studio through its
   discovery file, and asserts `meta` and the stderr line `token from the

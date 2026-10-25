@@ -239,6 +239,9 @@ func TestMCPReresolvesAfterTokenRotation(t *testing.T) {
 // (docs/record-contract.md §9).
 const derivedFailID = "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081"
 
+// derivedTraceID is that fixture's trace.
+const derivedTraceID = "5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10"
+
 // mcpCall is one tool call of the tests: the arguments and the route
 // whose body the answer must carry.
 type mcpCall struct {
@@ -246,26 +249,51 @@ type mcpCall struct {
 	args  map[string]any
 	route string   // GET path?query, "" for explain_failure
 	extra []string // further routes whose bodies follow (request's transcript)
+	// shape is the projection the tool answers the route's body as
+	// (compact rows, compact spans); nil: the body as served.
+	shape func([]byte) []byte
+	// wantErr: the route answers this status (a capability off in the
+	// seeded Studio), and the tool's error says it.
+	wantErr string
 }
+
+func rowsOf(list string, same map[string]string) func([]byte) []byte {
+	return func(b []byte) []byte { return compactList(b, list, same) }
+}
+
+var sessionSame = map[string]string{"agent": "agent", "session_id": "id", "public_id": "public_id"}
 
 // mcpCalls is every registered tool called once against mcpSeedStudio.
 func mcpCalls() []mcpCall {
 	return []mcpCall{
-		{"meta", nil, "/api/meta", nil},
+		{tool: "meta", route: "/api/meta"},
 		// I3: a read-time status word is the API's filter, as the tool documents.
-		{"runs", map[string]any{"agent": "orders", "status": "parked"}, "/api/runs?agent=orders&status=parked", nil},
-		{"search", map[string]any{"q": "order", "status": "succeeded"}, "/api/search?q=order&status=succeeded", nil},
-		{"run", map[string]any{"id": "r_ok"}, "/api/runs/r_ok", nil},
-		{"step", map[string]any{"id": "r_ok", "n": 0}, "/api/runs/r_ok/steps/0", nil},
-		{"request", map[string]any{"id": "r_ok", "step": 1, "transcript": true}, "/api/runs/r_ok/requests?step=1",
-			[]string{"/api/runs/r_ok/transcript?step=1"}},
-		{"events", map[string]any{"id": "r_ok", "limit": 3}, "/api/runs/r_ok/events?limit=3", nil},
-		{"tools", map[string]any{"id": "r_ok"}, "/api/runs/r_ok/tools", nil},
-		{"diff", map[string]any{"a": "r_ok", "b": "r_max"}, "/api/diff?a=r_ok&b=r_max", nil},
-		{"export", map[string]any{"id": "r_ok", "format": "jsonl", "max_bytes": mcpMaxBytes}, "/api/runs/r_ok/export?format=jsonl", nil},
-		{"sessions", nil, "/api/sessions", nil},
-		{"session", map[string]any{"id": "s_mcp"}, "/api/sessions/s_mcp", nil},
-		{"explain_failure", map[string]any{"id": "r_fail"}, "", nil},
+		{tool: "runs", args: map[string]any{"agent": "orders", "status": "parked"}, route: "/api/runs?agent=orders&status=parked", shape: rowsOf("runs", nil)},
+		{tool: "runs", args: map[string]any{"agent": "orders", "full": true}, route: "/api/runs?agent=orders"},
+		{tool: "search", args: map[string]any{"q": "order", "status": "succeeded"}, route: "/api/search?q=order&status=succeeded", shape: rowsOf("runs", nil)},
+		{tool: "run", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok"},
+		{tool: "step", args: map[string]any{"id": "r_ok", "n": 0}, route: "/api/runs/r_ok/steps/0"},
+		{tool: "request", args: map[string]any{"id": "r_ok", "step": 1, "transcript": true}, route: "/api/runs/r_ok/requests?step=1",
+			extra: []string{"/api/runs/r_ok/transcript?step=1"}},
+		{tool: "events", args: map[string]any{"id": "r_ok", "limit": 3}, route: "/api/runs/r_ok/events?limit=3"},
+		{tool: "tools", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok/tools"},
+		{tool: "diff", args: map[string]any{"a": "r_ok", "b": "r_max"}, route: "/api/diff?a=r_ok&b=r_max"},
+		{tool: "export", args: map[string]any{"id": "r_ok", "format": "jsonl", "max_bytes": mcpMaxBytes}, route: "/api/runs/r_ok/export?format=jsonl"},
+		{tool: "sessions", route: "/api/sessions", shape: rowsOf("sessions", nil)},
+		{tool: "session", args: map[string]any{"id": "s_mcp"}, route: "/api/sessions/s_mcp", shape: rowsOf("runs", sessionSame)},
+		{tool: "session", args: map[string]any{"id": "s_mcp", "full": true}, route: "/api/sessions/s_mcp"},
+		{tool: "logs", args: map[string]any{"id": "r_ok", "severity": "info"}, route: "/api/runs/r_ok/logs?severity=info"},
+		{tool: "spans", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok/spans",
+			shape: func(b []byte) []byte { return compactSpans(b, "r_ok") }},
+		{tool: "spans", args: map[string]any{"id": "r_ok", "tree": true, "full": true}, route: "/api/runs/r_ok/spans?tree=1"},
+		{tool: "trace", args: map[string]any{"trace_id": derivedTraceID}, route: "/api/traces/" + derivedTraceID,
+			shape: func(b []byte) []byte { return compactSpans(b, "") }},
+		{tool: "transcript", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok/transcript"},
+		{tool: "live", route: "/api/runs?all=1&status=running", shape: rowsOf("runs", nil)},
+		{tool: "agents", route: "/api/manifest", wantErr: "404 no manifest"},
+		{tool: "experiments", route: "/api/experiments", wantErr: "404"},
+		{tool: "runtimes", route: "/api/runtimes", wantErr: "404"},
+		{tool: "explain_failure", args: map[string]any{"id": "r_fail"}},
 	}
 }
 
@@ -356,6 +384,7 @@ func TestMCPStdio(t *testing.T) {
 	}
 	slices.Sort(listed)
 	slices.Sort(called)
+	called = slices.Compact(called)
 	if !slices.Equal(listed, called) {
 		t.Fatalf("listed tools %v, the test calls %v: every tool is called once", listed, called)
 	}
@@ -369,11 +398,21 @@ func TestMCPStdio(t *testing.T) {
 			t.Fatalf("%s: %v", c.tool, err)
 		}
 		got := texts(t, res)
+		if c.wantErr != "" {
+			if !res.IsError || !strings.Contains(got[0], c.wantErr) {
+				t.Errorf("%s: %v %q, want an error naming %s", c.tool, res.IsError, got, c.wantErr)
+			}
+			continue
+		}
 		if res.IsError {
 			t.Errorf("%s: error %q", c.tool, got)
 			continue
 		}
-		want := append([]string{routeBody(t, base, "tok", c.route)}, nil...)
+		body := routeBody(t, base, "tok", c.route)
+		if c.shape != nil {
+			body = string(c.shape([]byte(body)))
+		}
+		want := append([]string{body}, nil...)
 		for _, r := range c.extra {
 			want = append(want, routeBody(t, base, "tok", r))
 		}
@@ -639,8 +678,9 @@ func TestMCPNoWriteVerbs(t *testing.T) {
 	verbs := []string{"approve", "deny", "steer", "cancel", "delete", "propose", "run", "replay", "experiment",
 		"fixtures", "preview", "breakpoints", "vacuum", "resolve", "decide", "start", "send", "post", "put", "write"}
 	for _, tool := range lt.Tools {
-		if tool.Name == "run" || tool.Name == "runs" {
-			continue // GET /api/runs/{id} and GET /api/runs: nouns, pinned GET by TestMCPReadOnlyMethods
+		switch tool.Name {
+		case "run", "runs", "runtimes", "experiments":
+			continue // GET /api/runs/{id}, /api/runs, /api/runtimes, /api/experiments: nouns, pinned GET by TestMCPReadOnlyMethods
 		}
 		for _, v := range verbs {
 			if strings.Contains(tool.Name, v) {

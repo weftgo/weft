@@ -416,8 +416,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    composed with its source's kept steps; --fixtures-only the fixtures where wefttest.Replay reads them;
 //    //    --force replaces, never merges); weft mcp [--url --token] (a stdio MCP server over these read routes, read verbs
 //    //    only — runs/search/run/step/request/events/tools/diff/export/sessions/session/meta +
-//    //    explain_failure (run + step + transcript composed); every tool a GET, outputs the route's
-//    //    JSON cut at max_bytes with a note; no --url: the discovery file; it serves before a
+//    //    logs/spans/trace/transcript/live/agents/experiments/runtimes (I5) +
+//    //    explain_failure (run + every step + the children + transcript composed: first_error, a digest,
+//    //    decisions — a decided park "denied by <who>", this run's own last text); every tool a GET, outputs the route's
+//    //    JSON cut at max_bytes with a note — the list tools' compact rows (empty fields out, hashes 12 chars,
+//    //    cost_reasons once; full=true as served), spans/trace compact the same way; no --url: the discovery file; it serves before a
 //    //    Studio answers (one WARN; a call isErrors "no Studio answers /api/meta" until one does)
 //    //    and, after a transport failure, re-resolves per call (no --url: WEFT_STUDIO_URL, then
 //    //    the discovery file; --url retried as given); docs/mcp-recipe.md;

@@ -26,8 +26,11 @@ import (
 // so a coding agent (Claude Code, Cursor) reads runs while you debug.
 // It is a third client of the same routes `weft runs`/`open`/`export`
 // call — it adds no route and computes nothing Studio does not serve:
-// each tool is one GET (explain_failure composes three), its output
-// the route's JSON, compacted, bounded by max_bytes with a visible note.
+// each tool is one GET (explain_failure composes the run, its steps,
+// its children and the transcript, mcp_explain.go), its output the
+// route's JSON — projected to compact rows on the list tools and to
+// compact spans on spans/trace (mcp_compact.go; full=true as served) —
+// bounded by max_bytes with a visible note.
 //
 // Read only, by construction: every tool goes through mcpGet, which
 // issues GET and nothing else, and no write verb (approve, deny, steer,
@@ -48,8 +51,12 @@ const mcpInstructions = `weft mcp is READ-ONLY: it reads a weft Studio's recorde
 	`replays or starts anything. Start with explain_failure <run id> for "why did run X fail"; ` +
 	`find runs with runs (newest first, filters) or search (text and filters); ` +
 	`drill in with run (the row), step (one step assembled), request (the exact model input), ` +
-	`events, tools, diff (two runs step by step), export (the whole run). ` +
-	`Outputs are the route's JSON; a cut output says so in a final note (raise max_bytes or narrow the query). ` +
+	`events, tools, transcript, diff (two runs step by step), export (the whole run); ` +
+	`investigate with logs (the app's log lines), spans (timing; tree=true with the child runs), trace (by trace id), ` +
+	`live (running now), agents (manifests), experiments, runtimes. ` +
+	`Outputs are the route's JSON; list tools (runs, search, sessions, session, live) answer compact rows — ` +
+	`empty, zero, false and null fields omitted, hashes cut to 12 characters, cost reasons said once in cost_reasons — ` +
+	`full=true gives the route's JSON as served. A cut output says so in a final note (raise max_bytes or narrow the query). ` +
 	`Badges and holes ("not_recorded", "stripped", "hidden", "gap", ...) mean the data is absent for that reason — never empty. ` +
 	`A 403 means this token may not read that (a read-scoped panel token).`
 
@@ -61,7 +68,7 @@ type mcpTool struct {
 
 // mcpTools is the tool table, in the order --help and the docs list it.
 var mcpTools = []mcpTool{
-	{"explain_failure", "run + step + transcript", "why a run failed (or how it ended): status, error, the failing step's tool calls and results, holes, last assistant text"},
+	{"explain_failure", "run + steps + children + transcript", "why a run failed (or how it ended): status, error, the first error anywhere in the run (its steps, its child runs), every step and child in a digest, decisions, holes, this run's last assistant text"},
 	{"runs", "GET /api/runs", "list runs, newest first (agent, status, session, public_id, experiment_id, all, parent, limit, before cursor)"},
 	{"search", "GET /api/search", "find runs by text (prompt, answer, error, tool names) and filters (since/until, model, min_tokens, min_cost, sort)"},
 	{"run", "GET /api/runs/{id}", "one run's row: status, error, steps, usage, cost, children, holes"},
@@ -73,6 +80,14 @@ var mcpTools = []mcpTool{
 	{"export", "GET /api/runs/{id}/export", "the whole run as one document: json, jsonl or otlp (not wefttest)"},
 	{"sessions", "GET /api/sessions", "list thread sessions"},
 	{"session", "GET /api/sessions/{id}", "one session with its turns"},
+	{"logs", "GET /api/runs/{id}/logs", "the app's own log lines under a run's spans (severity, from, limit)"},
+	{"spans", "GET /api/runs/{id}/spans", "a run's spans, compact (timing, status, model, tokens, tool); tree=true adds every descendant run's"},
+	{"trace", "GET /api/traces/{id}", "one trace's spans by trace id, weft or stock OTel, compact"},
+	{"transcript", "GET /api/runs/{id}/transcript", "a run's messages, input and its own; step=N adds what step N's model call carried"},
+	{"live", "GET /api/runs?status=running", "the runs running now, compact rows (a snapshot, not the stream)"},
+	{"agents", "GET /api/manifest", "the agents Studio knows: manifests (instructions, tools, options) and their sources"},
+	{"experiments", "GET /api/experiments", "the playground's saved experiments, or one with its command and runs (id)"},
+	{"runtimes", "GET /api/runtimes", "the connected runtimes: agents, breakpoints, connected or not"},
 	{"meta", "GET /api/meta", "what this Studio is and can do: versions, capabilities, debug_scope, retention"},
 }
 
@@ -117,7 +132,8 @@ weft studio/weft dev wrote (WEFT_DISCOVERY=off ignores it), else `+defaultURL+`.
 The token: --token, else $WEFT_STUDIO_TOKEN, else the discovery file's (when it
 names that Studio); sent in the Authorization header only, never printed.
 
-Tools (each output is the route's JSON, cut at max_bytes — default 64 KiB — with a note):
+Tools (each output is the route's JSON — compact rows on the list tools and
+spans/trace, full=true as served — cut at max_bytes, default 64 KiB, with a note):
 `+mcpToolTable()+`
 Flags:
 `)
@@ -393,13 +409,15 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 		},
 	})
 	m := &mcpReader{s: linkGetter{link}}
-	addTool(srv, "explain_failure", `Why did run X fail? Start here. A convenience over run + step + transcript (no new server logic): `+
-		`fetches the run row, picks the failing step (the step in flight when the run failed, else its last step), `+
-		`fetches that step assembled and the transcript, and answers {status, error, stop_reason, step, tool_calls `+
-		`(the step's calls with their results), attempts, run_holes, step_holes, last_assistant_text, url}. `+
+	addTool(srv, "explain_failure", `Why did run X fail (or misbehave)? Start here. A convenience over run + steps + transcript (no new server logic): `+
+		`fetches the run row, walks every step and the run's subagent children, and answers {status, error, stop_reason, step `+
+		`(the step in flight when the run failed, else its last), first_error (the first error anywhere — a step's tool call, a model `+
+		`attempt, a child run's own step — naming the run and step), decisions (a parked run's calls as the resume decided them: `+
+		`"denied by alice: …"; only an undecided park reads "awaiting a decision"), digest (one line per step and per child), `+
+		`last_assistant_text (this run's own output only, never an earlier turn's), tool_calls, attempts, holes, url}. `+
 		`Works on any run: a succeeded run explains how it ended. Then use step/request for more.`,
 		m.explainFailure)
-	addTool(srv, "runs", `List runs, newest first (GET /api/runs): one row per run with status, error, steps, usage, cost. `+
+	addTool(srv, "runs", `List runs, newest first (GET /api/runs): one compact row per run with status, error, steps, usage, cost (full=true: the route's rows). `+
 		`Top-level runs only unless all=true or parent=<run id>. Filter by agent, status (running|succeeded|failed|interrupted), `+
 		`session, public_id, experiment_id. Page with before + before_id from the answer's next_before/next_before_id. `+
 		`For text or a time window use search.`,
@@ -434,10 +452,37 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 		`Large: usually cut by max_bytes — prefer run/step/request for questions. The wefttest format is a zip of replay `+
 		`fixtures and is not offered here: run "weft export <id> --wefttest dir" in a terminal.`,
 		m.export)
-	addTool(srv, "sessions", `List thread sessions (GET /api/sessions), newest first: agent and public_id filter, before + before_id page.`,
+	addTool(srv, "sessions", `List thread sessions (GET /api/sessions), newest first: agent and public_id filter, before + before_id page. Compact rows (full=true: as served).`,
 		m.sessions)
-	addTool(srv, "session", `One thread session (GET /api/sessions/{id}): its row and its turns (runs) in order.`,
+	addTool(srv, "session", `One thread session (GET /api/sessions/{id}): its row and its turns (runs) in order, compact rows `+
+		`(a turn's agent, session and public id omitted when the session's; cost reasons once; full=true: as served).`,
 		m.session)
+	addTool(srv, "logs", `The app's own log lines under a run's spans (GET /api/runs/{id}/logs): time order, severity at or above `+
+		`(trace|debug|info|warn|error|fatal), paged with from=<next_from>. A run without the slog bridge answers a not_recorded hole naming otel.Slog(). `+
+		`Refused (403) to a read-scoped panel token.`,
+		m.logs)
+	addTool(srv, "spans", `A run's spans (GET /api/runs/{id}/spans), compact: name, start_ms / dur_ms from the first span, status, `+
+		`model, tokens, tool, step, attempt and error attributes (content left out; full=true: as served). tree=true adds every `+
+		`descendant run's spans (run_id on each), with the tree's holes. The view for "where did the time go", retries and stock-OTel runs.`,
+		m.spans)
+	addTool(srv, "trace", `One trace by id (GET /api/traces/{id}), weft or stock OTel spans, compact as spans is (full=true: as served). `+
+		`A run's trace_id is on the run tool's row.`,
+		m.trace)
+	addTool(srv, "transcript", `A run's transcript (GET /api/runs/{id}/transcript): its message batches in order, each marked input `+
+		`(what the run was given — a thread turn's earlier turns) or the run's own; step=N also returns what step N's model call carried.`,
+		m.transcript)
+	addTool(srv, "live", `The runs running now (GET /api/runs?status=running&all=1): a snapshot in compact rows, subagent children included; `+
+		`call again to see it move (the /api/live stream is not an MCP answer).`,
+		m.live)
+	addTool(srv, "agents", `The agents this Studio knows (GET /api/manifest): each agent's manifest — instructions, tools, options — `+
+		`and where it came from (weft.json or a runtime's registration). A 404 means no manifest is loaded.`,
+		m.agents)
+	addTool(srv, "experiments", `The playground's experiments (GET /api/experiments, or /api/experiments/{id} with id): `+
+		`each saved command (engine, overrides, edits), its runs and their outcomes. 404 when the playground is off (see meta).`,
+		m.experiments)
+	addTool(srv, "runtimes", `The connected runtimes (GET /api/runtimes): each app process linked to Studio, its agents, `+
+		`breakpoints and whether it is connected now — is a breakpoint why a run parked? 404 when the playground is off (see meta).`,
+		m.runtimes)
 	addTool(srv, "meta", `What this Studio is and can do (GET /api/meta): versions, database kind, capabilities and capabilities_off `+
 		`(why one is off), debug_scope, retention, pricing source. Call when a tool answers 404/403 to see whether the route exists.`,
 		m.meta)
@@ -462,6 +507,11 @@ type mcpBound struct {
 
 type mcpMetaIn struct{ mcpBound }
 
+// mcpFull is a list tool's opt-out of compact rows (mcp_compact.go).
+type mcpFull struct {
+	Full bool `json:"full,omitempty" jsonschema:"the route's JSON as served: every field, hash and cost reason (default: compact rows)"`
+}
+
 type mcpRunIn struct {
 	ID string `json:"id" jsonschema:"the run id (a subagent child's id carries slashes, e.g. parent/0/call)"`
 	mcpBound
@@ -478,6 +528,7 @@ type mcpRunsIn struct {
 	Limit        int    `json:"limit,omitempty" jsonschema:"page size (Studio's default when 0)"`
 	Before       string `json:"before,omitempty" jsonschema:"the previous answer's next_before (RFC 3339): the next page"`
 	BeforeID     string `json:"before_id,omitempty" jsonschema:"the previous answer's next_before_id, with before"`
+	mcpFull
 	mcpBound
 }
 
@@ -498,6 +549,7 @@ type mcpSearchIn struct {
 	All       bool    `json:"all,omitempty" jsonschema:"subagent children too"`
 	Limit     int     `json:"limit,omitempty" jsonschema:"page size"`
 	Offset    int     `json:"offset,omitempty" jsonschema:"the previous answer's next_offset"`
+	mcpFull
 	mcpBound
 }
 
@@ -542,11 +594,13 @@ type mcpSessionsIn struct {
 	Limit    int    `json:"limit,omitempty" jsonschema:"page size"`
 	Before   string `json:"before,omitempty" jsonschema:"the previous answer's next_before (RFC 3339)"`
 	BeforeID string `json:"before_id,omitempty" jsonschema:"the previous answer's next_before_id, with before"`
+	mcpFull
 	mcpBound
 }
 
 type mcpSessionIn struct {
 	ID string `json:"id" jsonschema:"the session id"`
+	mcpFull
 	mcpBound
 }
 
@@ -704,7 +758,7 @@ func (m *mcpReader) runs(ctx context.Context, _ *sdk.CallToolRequest, in mcpRuns
 	if err != nil {
 		return nil, nil, err
 	}
-	return out(in.MaxBytes, pageSummary("runs", b, "runs"), b)
+	return out(in.MaxBytes, pageSummary("runs", b, "runs"), in.rows(b, "runs", nil))
 }
 
 func (m *mcpReader) search(ctx context.Context, _ *sdk.CallToolRequest, in mcpSearchIn) (*sdk.CallToolResult, any, error) {
@@ -726,7 +780,7 @@ func (m *mcpReader) search(ctx context.Context, _ *sdk.CallToolRequest, in mcpSe
 	if err != nil {
 		return nil, nil, err
 	}
-	return out(in.MaxBytes, pageSummary("search", b, "runs"), b)
+	return out(in.MaxBytes, pageSummary("search", b, "runs"), in.rows(b, "runs", nil))
 }
 
 // runHead is the part of a run row a summary names.
@@ -739,6 +793,10 @@ type runHead struct {
 	Pending    int             `json:"pending"`
 	StopReason string          `json:"stop_reason"`
 	Holes      json.RawMessage `json:"holes"`
+	// ResumedBy is, on a parked run, the run that resumed it: its calls
+	// are decided, never "awaiting a decision" (UX-H-24).
+	ResumedBy   string `json:"resumed_by"`
+	ResumedFrom string `json:"resumed_from"`
 }
 
 func (h runHead) line(link string) string {
@@ -749,8 +807,14 @@ func (h runHead) line(link string) string {
 	if h.StopReason != "" {
 		s += "; stop_reason " + h.StopReason
 	}
-	if h.Pending > 0 {
+	switch {
+	case h.Pending > 0 && h.ResumedBy != "":
+		s += fmt.Sprintf("; parked (%d calls), decided → resumed as %s", h.Pending, h.ResumedBy)
+	case h.Pending > 0:
 		s += fmt.Sprintf("; %d calls awaiting a decision", h.Pending)
+	}
+	if h.ResumedFrom != "" {
+		s += "; resumes " + h.ResumedFrom
 	}
 	return s + " — " + link
 }
@@ -780,6 +844,7 @@ type stepHead struct {
 	Status    string `json:"status"`
 	Reason    string `json:"reason"`
 	ToolCalls []struct {
+		CallID string `json:"call_id"`
 		Name   string `json:"name"`
 		Result *struct {
 			IsError bool `json:"is_error"`
@@ -791,7 +856,12 @@ type stepHead struct {
 	} `json:"holes"`
 }
 
-func (h stepHead) line(id string, n int) string {
+func (h stepHead) line(id string, n int) string { return h.lineDecided(id, n, nil) }
+
+// lineDecided is line with each parked call a resume decided read as
+// its decision (decided, by call id: "denied by alice: …"), never
+// "pending" (UX-H-24).
+func (h stepHead) lineDecided(id string, n int, decided map[string]string) string {
 	s := fmt.Sprintf("run %s step %d: %s", id, n, h.Status)
 	if h.Reason != "" {
 		s += " (" + h.Reason + ")"
@@ -801,6 +871,8 @@ func (h stepHead) line(id string, n int) string {
 		for _, c := range h.ToolCalls {
 			state := "no result"
 			switch {
+			case c.Pending && decided[c.CallID] != "":
+				state, _, _ = strings.Cut(decided[c.CallID], ":")
 			case c.Pending:
 				state = "pending"
 			case c.Result != nil && c.Result.IsError:
@@ -958,7 +1030,7 @@ func (m *mcpReader) sessions(ctx context.Context, _ *sdk.CallToolRequest, in mcp
 	if err != nil {
 		return nil, nil, err
 	}
-	return out(in.MaxBytes, pageSummary("sessions", b, "sessions"), b)
+	return out(in.MaxBytes, pageSummary("sessions", b, "sessions"), in.rows(b, "sessions", nil))
 }
 
 func (m *mcpReader) session(ctx context.Context, _ *sdk.CallToolRequest, in mcpSessionIn) (*sdk.CallToolResult, any, error) {
@@ -969,233 +1041,27 @@ func (m *mcpReader) session(ctx context.Context, _ *sdk.CallToolRequest, in mcpS
 	if err != nil {
 		return nil, nil, err
 	}
-	return out(in.MaxBytes, "session "+in.ID, b)
+	return out(in.MaxBytes, sessionSummary(in.ID, b), in.rows(b, "runs", map[string]string{"agent": "agent", "session_id": "id", "public_id": "public_id"}))
 }
 
-// ── explain_failure ────────────────────────────────────────────────
-
-// explanation is explain_failure's answer: the run's fields and the
-// chosen step's, each passed through as the routes serve them.
-type explanation struct {
-	RunID      string          `json:"run_id"`
-	URL        string          `json:"url"`
-	Agent      string          `json:"agent"`
-	Status     string          `json:"status"`
-	Error      string          `json:"error"`
-	StopReason string          `json:"stop_reason"`
-	Pending    int             `json:"pending"`
-	Steps      int             `json:"steps"`
-	RunHoles   json.RawMessage `json:"run_holes"`
-	// Step is the step explained: the one in flight when the run
-	// ended, else its last; null when the run has no step.
-	Step *int `json:"step"`
-	// StepRole says which: "in_flight" (the step the run was in when
-	// it ended — a model or tool failure inside it) or "last" (the
-	// run's last recorded step: it ended between steps — a budget at
-	// the continuation point, a success).
-	StepRole string `json:"step_role,omitempty"`
-	// StepNote says why the in-flight step is not the one shown: it
-	// answered 403 (hidden) or 5xx (unavailable).
-	StepNote   string          `json:"step_note,omitempty"`
-	StepStatus string          `json:"step_status,omitempty"`
-	StepReason string          `json:"step_reason,omitempty"`
-	Model      json.RawMessage `json:"model,omitempty"`
-	StepHoles  json.RawMessage `json:"step_holes,omitempty"`
-	// LastAssistantText is the transcript's last assistant text; null
-	// when there is none, TranscriptError when the transcript was not
-	// readable (its error line).
-	LastAssistantText *string `json:"last_assistant_text"`
-	TranscriptError   string  `json:"transcript_error,omitempty"`
-	// Next names the reads that go further.
-	Next []string `json:"next"`
-	// The step's bulk last — attempts, tool calls with their results,
-	// children — so a cut at max_bytes takes them and keeps the
-	// structured fields above (field order is the JSON's order).
-	Attempts  json.RawMessage `json:"attempts,omitempty"`
-	ToolCalls json.RawMessage `json:"tool_calls,omitempty"`
-	Children  json.RawMessage `json:"children,omitempty"`
+// rows is a list answer as the tool gives it: compact rows
+// (mcp_compact.go), or the route's JSON under full=true.
+func (f mcpFull) rows(b []byte, list string, sameAs map[string]string) []byte {
+	if f.Full {
+		return b
+	}
+	return compactList(b, list, sameAs)
 }
 
-func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, in mcpRunIn) (*sdk.CallToolResult, any, error) {
-	if err := needID("id", in.ID); err != nil {
-		return nil, nil, err
+// sessionSummary is a session answer's line: its turns and outcome.
+func sessionSummary(id string, b []byte) string {
+	var d struct {
+		Agent  string            `json:"agent"`
+		Status string            `json:"status"`
+		Runs   []json.RawMessage `json:"runs"`
 	}
-	rb, err := m.get(ctx, runPath(in.ID), nil)
-	if err != nil {
-		return nil, nil, err
+	if json.Unmarshal(b, &d) != nil {
+		return "session " + id
 	}
-	var h runHead
-	if err := json.Unmarshal(rb, &h); err != nil {
-		return nil, nil, fmt.Errorf("GET %s: %w", runPath(in.ID), err)
-	}
-	ex := explanation{
-		RunID: in.ID, URL: m.s.runLink(in.ID), Agent: h.Agent, Status: h.Status, Error: h.Err,
-		StopReason: h.StopReason, Pending: h.Pending, Steps: h.Steps, RunHoles: h.Holes,
-	}
-	// The step: the one in flight when the run ended (ordinal = the
-	// count of finished steps) when it started, else the last finished
-	// one. A succeeded run's in-flight step does not exist.
-	var sb []byte
-	tryStep := func(n int, role string) bool {
-		if n < 0 {
-			return false
-		}
-		status, b, err := m.fetch(ctx, stepPath(in.ID, n), nil)
-		if status == http.StatusNotFound {
-			return false
-		}
-		if err != nil {
-			what := fmt.Sprintf("unavailable (%d)", status)
-			switch status {
-			case 0: // the request itself failed: no answer to name
-				what = "unreachable"
-			case http.StatusForbidden:
-				what = "hidden (403)"
-			}
-			note := fmt.Sprintf("step %d is %s", n, what)
-			if role == "in_flight" {
-				note = fmt.Sprintf("the in-flight step %d is %s; showing the last recorded step", n, what)
-			}
-			// A failing fallback adds to the in-flight note, never replaces it.
-			if ex.StepNote != "" {
-				note = ex.StepNote + "; " + note
-			}
-			ex.StepNote = note
-			ex.Next = append(ex.Next, fmt.Sprintf("step %d not readable: %v", n, err))
-			return false
-		}
-		sb, ex.Step, ex.StepRole = b, &n, role
-		return true
-	}
-	if !tryStep(h.Steps, "in_flight") {
-		tryStep(h.Steps-1, "last")
-	}
-	var sh stepHead
-	requestHidden := false
-	if sb != nil {
-		var sd struct {
-			Status    string          `json:"status"`
-			Reason    string          `json:"reason"`
-			Model     json.RawMessage `json:"model"`
-			Attempts  json.RawMessage `json:"attempts"`
-			ToolCalls json.RawMessage `json:"tool_calls"`
-			Children  json.RawMessage `json:"children"`
-			Holes     json.RawMessage `json:"holes"`
-			Request   struct {
-				Badge string `json:"badge"`
-			} `json:"request"`
-		}
-		_ = json.Unmarshal(sb, &sd)
-		_ = json.Unmarshal(sb, &sh)
-		ex.StepStatus, ex.StepReason, ex.Model, ex.Attempts = sd.Status, sd.Reason, sd.Model, sd.Attempts
-		ex.ToolCalls, ex.Children, ex.StepHoles = sd.ToolCalls, sd.Children, sd.Holes
-		requestHidden = sd.Request.Badge == "hidden"
-	}
-	if tb, err := m.get(ctx, runPath(in.ID)+"/transcript", nil); err != nil {
-		ex.TranscriptError = err.Error()
-	} else {
-		ex.LastAssistantText = lastAssistantText(tb)
-	}
-	if ex.Step != nil {
-		ex.Next = append(ex.Next, fmt.Sprintf("step {id:%q, n:%d} for the step whole", in.ID, *ex.Step))
-		if !requestHidden { // a read token's request block is the hidden badge: the request tool would 403
-			ex.Next = append(ex.Next, fmt.Sprintf("request {id:%q, step:%d, transcript:true} for the exact model input", in.ID, *ex.Step))
-		}
-	}
-	ex.Next = append(ex.Next, fmt.Sprintf("events {id:%q} for the event stream", in.ID))
-	b, err := json.Marshal(ex)
-	if err != nil {
-		return nil, nil, err
-	}
-	return out(in.MaxBytes, explainLine(ex, sh), b)
-}
-
-// explainLine is the answer in one sentence an agent can quote.
-func explainLine(ex explanation, sh stepHead) string {
-	s := fmt.Sprintf("run %s (%s): %s", ex.RunID, orDash(ex.Agent), ex.Status)
-	if ex.Step != nil {
-		switch {
-		case ex.StepRole == "in_flight" || ex.StepStatus == "error":
-			s += fmt.Sprintf(" at step %d", *ex.Step)
-		case ex.Status == "failed" || ex.Status == "interrupted":
-			s += fmt.Sprintf(" before step %d started (step %d, its last recorded step, finished)", *ex.Step+1, *ex.Step)
-		default:
-			s += fmt.Sprintf(", last step %d", *ex.Step)
-		}
-	} else {
-		s += ", no step recorded"
-	}
-	if ex.Error != "" {
-		s += ": " + ex.Error
-	}
-	if ex.StopReason != "" {
-		s += "; stop_reason " + ex.StopReason
-	}
-	if ex.StepNote != "" {
-		s += "; " + ex.StepNote
-	}
-	if ex.Pending > 0 {
-		var names []string
-		for _, c := range sh.ToolCalls {
-			if c.Pending {
-				names = append(names, c.Name)
-			}
-		}
-		s += fmt.Sprintf("; parked: %d calls awaiting a decision (%s)", ex.Pending, strings.Join(names, ", "))
-	}
-	if ex.Step != nil {
-		if d := sh.line(ex.RunID, *ex.Step); strings.Contains(d, "; ") {
-			s += "; " + d[strings.Index(d, "; ")+2:]
-		}
-	}
-	if ex.LastAssistantText != nil {
-		t := *ex.LastAssistantText
-		if utf8.RuneCountInString(t) > 200 {
-			t = string([]rune(t)[:200]) + "…"
-		}
-		s += fmt.Sprintf("; last assistant text %q", t)
-	}
-	return s + " — " + ex.URL
-}
-
-// lastAssistantText reads GET /api/runs/{id}/transcript's batches and
-// returns the last assistant message's text; nil when none has text.
-func lastAssistantText(b []byte) *string {
-	var tr struct {
-		Batches []struct {
-			Messages json.RawMessage `json:"messages"`
-		} `json:"batches"`
-	}
-	if json.Unmarshal(b, &tr) != nil {
-		return nil
-	}
-	var last *string
-	for _, batch := range tr.Batches {
-		var msgs []struct {
-			Role  string `json:"role"`
-			Parts []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		}
-		if json.Unmarshal(batch.Messages, &msgs) != nil {
-			continue
-		}
-		for _, msg := range msgs {
-			if msg.Role != "assistant" {
-				continue
-			}
-			var t []string
-			for _, p := range msg.Parts {
-				if p.Type == "text" && p.Text != "" {
-					t = append(t, p.Text)
-				}
-			}
-			if len(t) > 0 {
-				s := strings.Join(t, "")
-				last = &s
-			}
-		}
-	}
-	return last
+	return fmt.Sprintf("session %s (%s): %s, %d turns", id, orDash(d.Agent), orDash(d.Status), len(d.Runs))
 }

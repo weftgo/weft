@@ -9,9 +9,13 @@
     "steps": 2,
     "status": "succeeded"
   },
+  "aligned": null,
   "steps": [
     {
       "step": 0,
+      "a_step": 0,
+      "b_step": 0,
+      "kept": false,
       "changed": false,
       "a": {
         "status": "ok",
@@ -78,10 +82,14 @@
         "tool_results",
         "text",
         "usage"
-      ]
+      ],
+      "differs": []
     },
     {
       "step": 1,
+      "a_step": 1,
+      "b_step": 1,
+      "kept": false,
       "changed": false,
       "a": {
         "status": "ok",
@@ -148,12 +156,14 @@
         "tool_results",
         "text",
         "usage"
-      ]
+      ],
+      "differs": []
     }
   ],
   "summary": {
     "changed_steps": [],
-    "first_changed": null
+    "first_changed": null,
+    "kept": 0
   },
   "holes": []
 }

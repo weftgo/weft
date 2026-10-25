@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { RunRow } from "./api"
 import {
+  answerLine,
+  idTail,
+  replayChanges,
+  replayGroups,
   fetchSessionForks,
   forkSource,
   nestExperiments,
@@ -192,5 +196,80 @@ describe("the experiments list's words (UX-C-36, UX-C-44)", () => {
     expect(matchesExperiment(e, "ORDERS")).toBe(true)
     expect(matchesExperiment(e, "orders r_two")).toBe(true)
     expect(matchesExperiment(e, "orders r_three")).toBe(false)
+  })
+})
+
+describe("the replays list and the grid cell (UX-C-15, UX-C-16)", () => {
+  const at = (
+    id: string,
+    ff: string,
+    s: number,
+    over: Partial<RunRow> = {}
+  ): RunRow => ({
+    ...run(id, ff, new Date(Date.UTC(2026, 9, 1, 9, 0, s)).toISOString()),
+    model: { provider: "openai", name: "gpt" },
+    meta: {},
+    ...over,
+  })
+
+  it("replayGroups: by source, oldest first inside, the newest group first, no-source last, children out", () => {
+    const g = replayGroups([
+      at("p3", "a#1", 3),
+      at("p1", "a#1", 1),
+      at("q1", "b#0", 2),
+      at("n1", "", 9),
+      at("p2", "a#2", 4),
+      at("c1", "a#1", 5, { parent_run_id: "p1" }),
+    ])
+    expect(g.map((x) => x.source)).toEqual(["a", "b", ""])
+    expect(g[0].replays.map((r) => [r.run.id, r.fromStep])).toEqual([
+      ["p1", 1],
+      ["p3", 1],
+      ["p2", 2],
+    ])
+  })
+
+  it("replayChanges: edits from weft.edits; prompt and model against the source row", () => {
+    const src = at("s", "", 0, { instructions_hash: "h1" })
+    expect(
+      replayChanges(
+        at("p", "s#1", 1, {
+          meta: { "weft.edits": "1:c1:result,1:reply" },
+          instructions_hash: "h2",
+          model: { provider: "anthropic", name: "c" },
+        }),
+        src
+      )
+    ).toEqual(["2 edits", "prompt", "model"])
+    const scripted = at("q", "s#1", 1, {
+      instructions_hash: "h1",
+      model: { provider: "weft/runtime", name: "scripted" },
+    })
+    expect(replayChanges(scripted, src)).toEqual([])
+    expect(replayChanges(at("r", "s#0", 1))).toEqual([])
+  })
+
+  it("answerLine is the last own text's first line, cut; idTail the id's tail", () => {
+    const batches = [
+      {
+        input: true,
+        step: 0,
+        messages: [{ role: "user", content: [{ type: "text", text: "q?" }] }],
+      },
+      {
+        input: false,
+        step: 0,
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "\nWe have 42 units.\nmore" }],
+          },
+        ],
+      },
+    ] as unknown as Parameters<typeof answerLine>[0]
+    expect(answerLine(batches)).toBe("We have 42 units.")
+    expect(answerLine([])).toBeNull()
+    expect(idTail("pg_01M4R0YKXDFEANRNTC16VGKSMX")).toBe("…VGKSMX")
+    expect(idTail("pg_a1")).toBe("pg_a1")
   })
 })

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest"
 import {
   CELL_WORDS,
   DIFF_COLUMNS,
+  ROW_WORDS,
   cellHole,
   cellText,
   diffPath,
@@ -212,5 +213,64 @@ describe("a hidden children hole hides no system prompt (P8-pre-web #7)", () => 
     // The explicit fact, never the hole's count: a counted hidden hole
     // beside it still hides the prompt.
     expect(systemHidden({ ...side, holes: [kids] })).toBe(true)
+  })
+})
+
+describe("diff-replay.golden.json (A8: a scripted replay of a two-step run from step 1)", () => {
+  const doc = golden("diff-replay")
+  const v = stepDiffView(doc)
+
+  it("reads kept · same: step 0 the source's, not re-run; step 1 the same, usage not counted", () => {
+    expect(doc.aligned).toEqual({
+      replay: "b",
+      from_step: 1,
+      forked_from: "r_src#1",
+    })
+    expect(v.rows.map((r) => r.state)).toEqual(["kept", "same"])
+    expect(v.rows.map((r) => ROW_WORDS[r.state])).toEqual(["kept", "same"])
+    expect(v.rows[0].cells).toEqual(
+      Object.fromEntries(DIFF_COLUMNS.map((c) => [c, "kept"]))
+    )
+    expect(v.rows[1].cells).toEqual({ ...SAME, usage: "differs" })
+    expect(v.markers).toEqual([])
+    // each side's own ordinal: the replay's step 0 is the source's step 1
+    expect(v.rows.map((r) => [r.aStep, r.bStep])).toEqual([
+      [0, null],
+      [1, 0],
+    ])
+    expect(cellText(v.rows[1].b.side, "usage")).toBe("0→0")
+    expect(summaryWords(v)).toBe(
+      "no step changed of 1 · 1 kept (not re-run) · usage differs (0 tokens)"
+    )
+  })
+
+  it("N-way keeps each compared run's own ordinal beside the aligned one", () => {
+    const n = nWayView([doc])
+    expect(n.aligned).toBe(true)
+    expect(n.rows.map((r) => [r.step, r.baseStep, r.others[0].step])).toEqual([
+      [0, 0, null],
+      [1, 1, 0],
+    ])
+    expect(n.rows.map((r) => r.others[0].state)).toEqual(["kept", "same"])
+  })
+
+  it("a Studio before A8 (no a_step, b_step, kept, differs) reads as before", () => {
+    const old = golden("diff")
+    for (const r of old.steps) {
+      delete r.a_step
+      delete r.b_step
+      delete r.kept
+      delete r.differs
+    }
+    const w = stepDiffView(old)
+    expect(w.rows.map((r) => r.state)).toEqual([
+      "same",
+      "same",
+      "same",
+      "changed",
+      "same",
+    ])
+    expect(w.rows[3].bStep).toBe(3)
+    expect(nWayView([old]).aligned).toBe(false)
   })
 })

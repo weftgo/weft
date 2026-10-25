@@ -33,9 +33,9 @@ import { Button } from "@/components/ui/button"
  * under the Content-Disposition's name and toasts the outcome. */
 export async function saveTest(runID: string): Promise<void> {
   try {
-    const { blob, name } = await fetchTestExport(runID)
+    const { blob, name, kept } = await fetchTestExport(runID)
     saveBlob(blob, name)
-    notifySave({ kind: "save-test", ok: true, file: name })
+    notifySave({ kind: "save-test", ok: true, file: name, kept })
   } catch (e) {
     notifySave({
       kind: "save-test",

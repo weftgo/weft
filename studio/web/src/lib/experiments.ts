@@ -6,8 +6,12 @@
 // it: the session page finds the forks by asking for playground runs
 // and joining on forked_from.
 import { fetchRuns, nextCursor } from "./api"
-import { plural } from "./format"
+import { isScripted } from "./cost"
+import { editMarks } from "./edits"
+import { producedTexts } from "./events"
+import { plural, tokens } from "./format"
 import type { ExperimentRow, PageCursor, RunRow, SessionRow } from "./api"
+import type { TranscriptBatch } from "./events"
 
 /** The run an experiment was forked from, and the step it continued
  * at: forked_from is "<run id>#<from_step>". A run id may itself hold
@@ -190,4 +194,155 @@ export function matrixStepLine(
       ? ` with the page's ${edits === 1 ? "transcript edit" : `${edits} transcript edits`}`
       : ""
   return `every cell continues ${run} from step ${step} (the page's step, picked above)${carried}; the rows' text is not sent past step 0`
+}
+
+// ── The grid cell and the replays list (UX-C-16, UX-C-15) ──────────
+
+/** The longest answer line a cell draws; the rest is "…". */
+export const ANSWER_CHARS = 80
+
+/** answerLine is a run's answer in one line: the first non-empty line
+ * of its last own assistant text, cut at ANSWER_CHARS — null when the
+ * run produced no text (a parked or failed run, a content-off one). */
+export function answerLine(batches: TranscriptBatch[]): string | null {
+  const texts = producedTexts(batches)
+  const last = texts.at(-1)
+  if (!last) return null
+  const line = last
+    .split("\n")
+    .map((l) => l.trim())
+    .find(Boolean)
+  if (!line) return null
+  return line.length > ANSWER_CHARS
+    ? `${line.slice(0, ANSWER_CHARS - 1)}…`
+    : line
+}
+
+/** usageWords is a run's tokens in a cell: "15 tok" (in + out), the
+ * split in its title (usageTitle). */
+export function usageWords(r: Pick<RunRow, "usage">): string {
+  return `${tokens(r.usage.input_tokens + r.usage.output_tokens)} tok`
+}
+
+export function usageTitle(r: Pick<RunRow, "usage">): string {
+  return `${r.usage.input_tokens} in / ${r.usage.output_tokens} out`
+}
+
+/** idTail is a run id as a cell shows it: its tail (ULIDs share their
+ * head, so cells of one matrix would all read alike), the whole id in
+ * the title. */
+export function idTail(id: string, n = 6): string {
+  return id.length > n + 1 ? `…${id.slice(-n)}` : id
+}
+
+/** The grid cell's and the replays list's words. */
+export const REPLAY_WORDS = {
+  noAnswer: "no answer text",
+  noAnswerHint:
+    "the run produced no assistant text: it parked, failed, called tools only, or its content was not recorded",
+  reading: "…",
+  tabs: { matrices: "matrices", replays: "replays" },
+  replaysHint:
+    "every playground run, grouped by the run it replays (weft.forked_from)",
+  noReplays:
+    "No replays yet: a replay from the drawer (replay from here) is listed here under its source run.",
+  noSource: "no source run (typed inputs)",
+  fromStep: (n: number) => `from step ${n}`,
+  compare: "compare",
+  edits: (n: number) => plural(n, "edit"),
+  prompt: "prompt",
+  model: "model",
+  unsaved:
+    "no saved definition: these runs carry the experiment id, but no matrix was saved under it",
+  cut: (n: number) =>
+    `the newest ${n} playground runs: older ones are not listed`,
+} as const
+
+/** replayChanges is what a replay changed against its source, as
+ * chips: the transcript edits its weft.edits names, a prompt whose
+ * instructions hash differs from the source's, a model it answered as
+ * other than the source's (a live replay). The source row is optional:
+ * without it only the edits are known. */
+export function replayChanges(
+  r: RunRow,
+  source?: Pick<RunRow, "instructions_hash" | "model">
+): string[] {
+  const out: string[] = []
+  const edits = editMarks(r)
+  const n = edits.marks.length + edits.more
+  if (n) out.push(REPLAY_WORDS.edits(n))
+  if (
+    source &&
+    r.instructions_hash &&
+    source.instructions_hash &&
+    r.instructions_hash !== source.instructions_hash
+  )
+    out.push(REPLAY_WORDS.prompt)
+  if (
+    source &&
+    !isScripted(r) &&
+    (r.model.provider !== source.model.provider ||
+      r.model.name !== source.model.name)
+  )
+    out.push(REPLAY_WORDS.model)
+  return out
+}
+
+/** One source run and the replays taken from it, oldest first. */
+export interface ReplayGroup {
+  /** The source run id; "" for playground runs with no source. */
+  source: string
+  replays: { run: RunRow; fromStep: number }[]
+}
+
+/** replayGroups groups playground runs by the run they replay
+ * (forkSource), the group with the newest replay first; runs with no
+ * source are one last group (source ""). A subagent child of a replay
+ * inherits its parent's lineage and is left out: it is reached through
+ * its parent. */
+export function replayGroups(runs: RunRow[]): ReplayGroup[] {
+  const groups = new Map<string, ReplayGroup>()
+  for (const r of runs) {
+    if (r.parent_run_id || r.caller_run_id) continue
+    const src = forkSource(r)
+    const key = src?.runID ?? ""
+    let g = groups.get(key)
+    if (!g) {
+      g = { source: key, replays: [] }
+      groups.set(key, g)
+    }
+    g.replays.push({ run: r, fromStep: src?.fromStep ?? 0 })
+  }
+  const newest = (g: ReplayGroup) =>
+    Math.max(...g.replays.map((x) => Date.parse(x.run.started)))
+  for (const g of groups.values())
+    g.replays.sort(
+      (a, b) => Date.parse(a.run.started) - Date.parse(b.run.started)
+    )
+  return [...groups.values()].sort((a, b) =>
+    !a.source !== !b.source ? (a.source ? -1 : 1) : newest(b) - newest(a)
+  )
+}
+
+/** fetchReplays reads the playground runs, newest first, a bounded
+ * number of pages (as fetchSessionForks), saying when it stopped early. */
+export async function fetchReplays(): Promise<{
+  runs: RunRow[]
+  truncated: boolean
+}> {
+  const runs: RunRow[] = []
+  let cursor: PageCursor | undefined
+  for (let page = 0; page < PAGES; page++) {
+    const doc = await fetchRuns({
+      playground: true,
+      limit: LIMIT,
+      before: cursor?.before,
+      before_id: cursor?.before_id,
+    })
+    runs.push(...doc.runs)
+    const next = nextCursor(doc, cursor)
+    if (!next) return { runs, truncated: false }
+    cursor = next
+  }
+  return { runs, truncated: true }
 }

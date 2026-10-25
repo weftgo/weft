@@ -1175,7 +1175,7 @@ function ReplayOutcome({
       {/* The replayed run beside its source, step by step (plan E3):
           once it finished — half a run is not a difference. */}
       {e.runID && e.state === "finished" ? (
-        <StepCompare base={sourceRunID} others={[e.runID]} />
+        <StepCompare base={sourceRunID} others={[e.runID]} arriving />
       ) : null}
     </div>
   )

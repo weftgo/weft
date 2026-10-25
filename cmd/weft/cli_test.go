@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -636,7 +637,7 @@ func TestRunsCursorThatDoesNotMove(t *testing.T) {
 }
 
 // TestExportCommand is B1.1's Done line for export: `weft export <id>
-// --wefttest dir` writes the fixtures where wefttest.Replay reads them,
+// --wefttest dir --fixtures-only` writes the fixtures where wefttest.Replay reads them,
 // and the same agent definition over the replayed model reproduces the
 // recorded transcript message for message. Without --wefttest the
 // export goes to stdout; a non-empty target needs --force.
@@ -646,7 +647,7 @@ func TestExportCommand(t *testing.T) {
 	t.Setenv("WEFT_STUDIO_TOKEN", "tok")
 	dir := filepath.Join(t.TempDir(), "testdata")
 
-	out, errb, code := weft("export", "r_ok", "--wefttest", dir, "--test", t.Name())
+	out, errb, code := weft("export", "r_ok", "--wefttest", dir, "--fixtures-only", "--test", t.Name())
 	if code != 0 || !strings.HasPrefix(out, "weft: wrote 2 fixtures to "+filepath.Join(dir, t.Name())) {
 		t.Fatalf("export --wefttest = exit %d %q %q", code, out, errb)
 	}
@@ -667,7 +668,7 @@ func TestExportCommand(t *testing.T) {
 	}
 
 	// A non-empty target is refused without --force, written with it.
-	if _, errb, code := weft("export", "r_ok", "--wefttest", dir, "--test", t.Name()); code != 1 || !strings.Contains(errb, "is not empty: --force") {
+	if _, errb, code := weft("export", "r_ok", "--wefttest", dir, "--fixtures-only", "--test", t.Name()); code != 1 || !strings.Contains(errb, "is not empty: --force") {
 		t.Errorf("second export = exit %d %q, want the refusal", code, errb)
 	}
 	// --force replaces the fixtures, never merges: a stray one from an
@@ -676,7 +677,7 @@ func TestExportCommand(t *testing.T) {
 	if err := os.WriteFile(stray, []byte(`{}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, errb, code := weft("export", "--force", "r_ok", "--wefttest", dir, "--test", t.Name()); code != 0 {
+	if _, errb, code := weft("export", "--force", "r_ok", "--wefttest", dir, "--fixtures-only", "--test", t.Name()); code != 0 {
 		t.Errorf("--force = exit %d %q", code, errb)
 	}
 	if _, err := os.Stat(stray); !os.IsNotExist(err) {
@@ -686,13 +687,13 @@ func TestExportCommand(t *testing.T) {
 		t.Errorf("after --force the target holds %d files, want the 2 fixtures", len(entries))
 	}
 	// The directory defaults to the run id; --test cannot climb out.
-	if _, errb, code := weft("export", "r_ok", "--wefttest", dir); code != 0 {
+	if _, errb, code := weft("export", "r_ok", "--wefttest", dir, "--fixtures-only"); code != 0 {
 		t.Errorf("default name = exit %d %q", code, errb)
 	} else if _, err := os.Stat(filepath.Join(dir, "r_ok")); err != nil {
 		t.Errorf("default directory: %v", err)
 	}
 	for _, name := range []string{"../out", "/abs/TestX", filepath.Join(t.TempDir(), "TestX")} {
-		if _, errb, code := weft("export", "r_ok", "--wefttest", dir, "--test", name); code != 2 {
+		if _, errb, code := weft("export", "r_ok", "--wefttest", dir, "--fixtures-only", "--test", name); code != 2 {
 			t.Errorf("--test %s = exit %d %q, want 2", name, code, errb)
 		}
 	}
@@ -709,15 +710,136 @@ func TestExportCommand(t *testing.T) {
 		{"export", "r_ok", "--format", "wefttest"},
 		{"export", "r_ok", "--format", "xml"},
 		{"export", "r_ok", "--force"},
-		{"export", "r_ok", "--wefttest", dir, "--format", "json"},
+		{"export", "r_ok", "--wefttest", dir, "--fixtures-only", "--format", "json"},
+		{"export", "r_ok", "--fixtures-only"},
+		{"export", "r_ok", "--wefttest", dir, "--test", "TestX"},
 		{"export"},
 	} {
 		if _, errb, code := weft(args...); code != 2 {
 			t.Errorf("weft %q = exit %d %q, want a usage error", args, code, errb)
 		}
 	}
-	if _, errb, code := weft("export", "nope", "--wefttest", dir); code != 1 || !strings.Contains(errb, "404") {
+	if _, errb, code := weft("export", "nope", "--wefttest", dir, "--fixtures-only"); code != 1 || !strings.Contains(errb, "404") {
 		t.Errorf("unknown run = exit %d %q", code, errb)
+	}
+}
+
+// TestExportTreeIsTheUIZip is UX-S5a-07's Done line: `weft export <id>
+// --wefttest <pkg dir>` writes the very tree Studio's "save as test"
+// zip holds — the generated test file at the root, the fixtures under
+// testdata/TestReplay_<run>/ — byte for byte; a second export is
+// refused without --force, and --force replaces a stray fixture.
+func TestExportTreeIsTheUIZip(t *testing.T) {
+	url, _ := apiStudio(t, false)
+	t.Setenv("WEFT_STUDIO_URL", url)
+	t.Setenv("WEFT_STUDIO_TOKEN", "tok")
+	pkg := filepath.Join(t.TempDir(), "orders")
+	out, errb, code := weft("export", "r_ok", "--wefttest", pkg)
+	if code != 0 || !strings.HasPrefix(out, "weft: wrote orders_replay_test.go and 2 fixtures under testdata/TestReplay_r_ok/ in "+pkg) {
+		t.Fatalf("export --wefttest = exit %d %q %q", code, out, errb)
+	}
+	// The UI's zip, as the run page's save as test fetches it.
+	req, _ := http.NewRequest(http.MethodGet, url+"/api/runs/r_ok/export?format=wefttest", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipBody, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	zr, err := zip.NewReader(bytes.NewReader(zipBody), int64(len(zipBody)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ui := map[string]string{}
+	for _, f := range zr.File {
+		rc, _ := f.Open()
+		b, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		ui[f.Name] = string(b)
+	}
+	cli := map[string]string{}
+	if err := filepath.WalkDir(pkg, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		rel, _ := filepath.Rel(pkg, p)
+		cli[filepath.ToSlash(rel)] = string(b)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(ui) != 3 || len(cli) != len(ui) {
+		t.Fatalf("trees: ui %d entries, cli %d, want the same 3 (test + 2 fixtures)", len(ui), len(cli))
+	}
+	for name, body := range ui {
+		if cli[name] != body {
+			t.Errorf("%s differs between the UI zip and weft export --wefttest", name)
+		}
+	}
+	if _, ok := cli["orders_replay_test.go"]; !ok {
+		t.Errorf("cli tree = %v, want orders_replay_test.go at the root", keysOf(cli))
+	}
+
+	if _, errb, code := weft("export", "r_ok", "--wefttest", pkg); code != 1 || !strings.Contains(errb, "exists: --force") {
+		t.Errorf("second export = exit %d %q, want the refusal", code, errb)
+	}
+	stray := filepath.Join(pkg, "testdata", "TestReplay_r_ok", "00009-x.json")
+	if err := os.WriteFile(stray, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, errb, code := weft("export", "--force", "r_ok", "--wefttest", pkg); code != 0 {
+		t.Errorf("--force = exit %d %q", code, errb)
+	}
+	if _, err := os.Stat(stray); !os.IsNotExist(err) {
+		t.Errorf("the stray fixture survived --force: %v", err)
+	}
+}
+
+func keysOf(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// TestUnzipTreeGuards: an entry outside the layout (a path, a second
+// test file, two fixture directories, no test file) refuses the whole
+// zip before anything is written.
+func TestUnzipTreeGuards(t *testing.T) {
+	layout := func(names ...string) []byte {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		for _, n := range names {
+			w, _ := zw.Create(n)
+			_, _ = w.Write([]byte("{}"))
+		}
+		_ = zw.Close()
+		return buf.Bytes()
+	}
+	for _, names := range [][]string{
+		{"a_test.go", "../x.json"},
+		{"a_test.go", "b_test.go", "testdata/T/1.json"},
+		{"a_test.go", "testdata/A/1.json", "testdata/B/2.json"},
+		{"testdata/T/1.json"},
+		{"a_test.go", "1.json"},
+		{"a_test.go", "testdata/T/sub/1.json"},
+		{"sub/a_test.go", "testdata/T/1.json"},
+	} {
+		dir := filepath.Join(t.TempDir(), "pkg")
+		if _, err := unzipTree(layout(names...), dir, false); err == nil {
+			t.Errorf("%q: unzipped", names)
+		}
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("%q: the target was created (%v)", names, err)
+		}
+	}
+	dir := filepath.Join(t.TempDir(), "pkg")
+	tree, err := unzipTree(layout("a_test.go", "testdata/T/00001-a.json"), dir, false)
+	if err != nil || tree.test != "a_test.go" || tree.testdata != "testdata/T/" || tree.fixtures != 1 {
+		t.Errorf("unzipTree = %+v %v", tree, err)
 	}
 }
 

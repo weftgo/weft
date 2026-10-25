@@ -9,8 +9,14 @@ import type { PreviewDoc } from "./preview"
 import { queryOptions } from "@tanstack/react-query"
 
 import type { ContentAttrs } from "./honesty"
-import { diffPath } from "./stepdiff"
-import { dispositionName, exportPath } from "./saves"
+import { ARRIVAL, diffPath } from "./stepdiff"
+import {
+  KEPT_PREFIX_HEADER,
+  dispositionName,
+  exportPath,
+  keptPrefixOf,
+} from "./saves"
+import type { KeptPrefix } from "./saves"
 import { tokenScopeOf } from "./replay"
 import { marksCapped, runMarksPath } from "./decisions"
 import type { DiffDoc } from "./stepdiff"
@@ -1993,11 +1999,22 @@ export function stepQuery(runId: string, n: number) {
 /** GET /api/diff?a=&b= (capability "diff", plan E3): two runs
  * aligned by step ordinal (lib/stepdiff.ts reads it). A side still
  * running is read again until it ends. */
-export function diffQuery(a: string, b: string) {
+export function diffQuery(
+  a: string,
+  b: string,
+  opts: { arriving?: boolean } = {}
+) {
   return queryOptions({
     queryKey: ["diff", a, b],
     queryFn: () => get<DiffDoc>(diffPath(a, b)),
-    retry: false,
+    // A run a command just named may not be ingested yet (UX-C-10): a
+    // 404 there is retried, bounded; any other read fails at once.
+    retry: (count, err) =>
+      !!opts.arriving &&
+      err instanceof ApiError &&
+      err.status === 404 &&
+      count < ARRIVAL.retries,
+    retryDelay: ARRIVAL.delayMs,
     refetchInterval: (q) =>
       q.state.data &&
       (q.state.data.a.status === "running" ||
@@ -2052,7 +2069,7 @@ async function fetchDownload(
   path: string,
   accept: string,
   fallback: string
-): Promise<{ blob: Blob; name: string }> {
+): Promise<{ blob: Blob; name: string; headers: Headers }> {
   const res = await authorized(new URL(path, apiBase()).toString(), {
     headers: { Accept: accept },
   })
@@ -2073,14 +2090,24 @@ async function fetchDownload(
   return {
     blob: await res.blob(),
     name: dispositionName(res.headers.get("Content-Disposition"), fallback),
+    headers: res.headers,
   }
 }
 
 /** GET /api/runs/{id}/export?format=wefttest: the zip (fetchExport). */
-export function fetchTestExport(
+export async function fetchTestExport(
   runID: string
-): Promise<{ blob: Blob; name: string }> {
-  return fetchExport(runID, "wefttest")
+): Promise<{ blob: Blob; name: string; kept?: KeptPrefix }> {
+  const r = await fetchDownload(
+    exportPath(runID, "wefttest"),
+    "application/zip",
+    `${runID}.zip`
+  )
+  return {
+    blob: r.blob,
+    name: r.name,
+    kept: keptPrefixOf(r.headers.get(KEPT_PREFIX_HEADER)),
+  }
 }
 
 /** DELETE /api/runs/{id}'s 200 (studio/delete.go's deleteDoc). */
@@ -2672,6 +2699,9 @@ export interface ExperimentRow extends CostFields {
   succeeded?: number
   last_run?: string
   runs?: RunRow[]
+  /** The detail of an id runs carry with no saved definition (UX-C-15):
+   * a synthetic document, no variants or inputs. */
+  unsaved?: boolean
 }
 
 /** GET /api/experiments — the history. */

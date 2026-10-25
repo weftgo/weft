@@ -1,6 +1,8 @@
 package runtime_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2317,5 +2319,124 @@ func TestPlaygroundOptionLabAndResolver(t *testing.T) {
 	row = e.waitCommand(t, "cmd_gpt9", "rejected")
 	if !strings.Contains(row, `"state":"rejected"`) || !strings.Contains(row, "model gpt-9: this app serves no model named gpt-9") {
 		t.Errorf("refused command row = %s, want rejected with the resolver's text", row)
+	}
+}
+
+// TestScriptedReplayFromStepOneIsKeptSame is A8's Done line with both
+// halves real (UX-C-04, UX-D-15, UX-C-30): a scripted replay of the
+// app's two-step turn from step 1 — the drawer's identical replay —
+// reads, on GET /api/diff against its source, kept at step 0 (the
+// source's, not re-run) and the same at step 1 (the replay's own step
+// 0 aligned on the source's step 1 by weft.forked_from; its zero usage
+// in differs, never a change); its save as test composes the source's
+// step-0 fixture with its own, stamped with the source's model, not
+// the scripted engine's.
+func TestScriptedReplayFromStepOneIsKeptSame(t *testing.T) {
+	e := newE2E(t)
+	e.agent = core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"4411"}`, ID: "c1"}),
+		wefttest.Say("Your order shipped yesterday."),
+	), core.Name("acme-support"), core.Instructions("You are Acme's support agent."),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()),
+		core.Tool("lookup_order", "Look up an order.", func(context.Context, struct {
+			OrderID string `json:"order_id"`
+		}) (string, error) {
+			return "shipped", nil
+		}, core.Replay(core.ReplaySafe)))
+	src := e.appTurn(t, "where is my order #4411?")
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent),
+		runtime.AllowSideEffects("lookup_order"), runtime.Enabled(true))
+	defer shutdown()
+	rt := e.runtimeID(t)
+	e.waitTranscript(t, src, "shipped yesterday")
+
+	_, replay := e.run(t, "cmd_kept_same", fmt.Sprintf(`{
+	  "command_id": "cmd_kept_same", "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": %q, "from_step": 1},
+	  "engine": "scripted", "side_effects": "substitute", "thread": "ephemeral"
+	}`, rt, src), "finished")
+	if text := e.commandText(t, replay); text != "Your order shipped yesterday." {
+		t.Fatalf("scripted replay from step 1 = %q, want the recorded reply", text)
+	}
+
+	type side struct {
+		Usage core.Usage `json:"usage"`
+	}
+	var d struct {
+		Aligned *struct {
+			Replay   string `json:"replay"`
+			FromStep int    `json:"from_step"`
+		} `json:"aligned"`
+		Steps []struct {
+			Step    int      `json:"step"`
+			AStep   *int     `json:"a_step"`
+			BStep   *int     `json:"b_step"`
+			Kept    bool     `json:"kept"`
+			Changed bool     `json:"changed"`
+			B       *side    `json:"b"`
+			Changes []string `json:"changes"`
+			Differs []string `json:"differs"`
+		} `json:"steps"`
+		Summary struct {
+			ChangedSteps []int `json:"changed_steps"`
+		} `json:"summary"`
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var body string
+	for {
+		var code int
+		code, body = e.api(t, http.MethodGet, "/api/diff?a="+src+"&b="+replay, "")
+		if code == http.StatusOK && json.Unmarshal([]byte(body), &d) == nil && len(d.Steps) == 2 &&
+			!strings.Contains(body, `"status":"running"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("diff never settled: %s", body)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if d.Aligned == nil || d.Aligned.Replay != "b" || d.Aligned.FromStep != 1 || len(d.Summary.ChangedSteps) != 0 {
+		t.Fatalf("diff = %s, want aligned on the source from step 1, nothing changed", body)
+	}
+	k, s := d.Steps[0], d.Steps[1]
+	if !k.Kept || k.Changed || k.B != nil || k.BStep != nil {
+		t.Errorf("step 0 = %+v, want kept: the source's, not re-run", k)
+	}
+	if s.Kept || s.Changed || len(s.Changes) != 0 || s.BStep == nil || *s.BStep != 0 || *s.AStep != 1 ||
+		s.B == nil || s.B.Usage != (core.Usage{}) || !slices.Equal(s.Differs, []string{"usage"}) {
+		t.Errorf("step 1 = %+v, want the same: the replay's step 0, zero usage in differs", s)
+	}
+
+	// Save as test on the replay: the kept prefix's fixture, then the
+	// replay's own, stamped with the source's model.
+	req, _ := http.NewRequest(http.MethodGet, e.ts.URL+"/api/runs/"+replay+"/export?format=wefttest", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zb, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Weft-Kept-Prefix") != src+"#1" {
+		t.Fatalf("replay export = %d %q %s", resp.StatusCode, resp.Header.Get("Weft-Kept-Prefix"), zb)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(zb), int64(len(zb)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []string
+	for _, f := range zr.File {
+		if !strings.HasPrefix(f.Name, "testdata/") {
+			continue
+		}
+		rc, _ := f.Open()
+		b, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		fixtures = append(fixtures, f.Name)
+		if strings.Contains(string(b), `"provider": "weft/runtime"`) {
+			t.Errorf("%s is stamped with the scripted engine, want the source's model", f.Name)
+		}
+	}
+	if len(fixtures) != 2 || !strings.Contains(fixtures[0], "/00001-") || !strings.Contains(fixtures[1], "/00002-") {
+		t.Errorf("replay fixtures = %v, want the source's step 0 then the replay's step", fixtures)
 	}
 }

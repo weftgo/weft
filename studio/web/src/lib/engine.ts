@@ -21,9 +21,10 @@ import type {
   CostFields,
   ModelInfo,
   PlaygroundRunBody,
+  RunRow,
   Usage,
 } from "./api"
-import { costView, formatUSD } from "./cost"
+import { costView, formatUSD, isScripted } from "./cost"
 import { tokens } from "./format"
 import type { PreviewDoc } from "./preview"
 
@@ -98,6 +99,29 @@ export const ENGINE_WORDS = {
   /** What a change that misses the recording adds to its name. */
   changed: ": the recording answered the original",
 } as const
+
+/** A recorded run's engine in one cell (the experiment grid, the
+ * replays list): what it ran on. Apart from ENGINE_WORDS, which the
+ * panel bundles whole: Studio's alone. */
+export const RAN_WORDS = {
+  scripted: "scripted",
+  live: (model: string) => `live · ${model}`,
+} as const
+
+/** runEngine is the engine a recorded run ran on: scripted when it
+ * answered as the scripted engine's model (lib/cost.ts's isScripted),
+ * else live. */
+export const runEngine = (r: Pick<RunRow, "model">): Engine =>
+  isScripted(r) ? "scripted" : "live"
+
+/** runEngineWords is runEngine in a cell: "scripted", or "live ·
+ * provider/name" (the model it answered as; "the agent's model" when
+ * the row names none). */
+export function runEngineWords(r: Pick<RunRow, "model">): string {
+  if (runEngine(r) === "scripted") return RAN_WORDS.scripted
+  const m = [r.model.provider, r.model.name].filter(Boolean).join("/")
+  return RAN_WORDS.live(m || ENGINE_WORDS.ownModel)
+}
 
 /** scriptedBlock is why the scripted engine cannot answer, "" when it
  * can: the server's refusals first (studio/playground.go), then what

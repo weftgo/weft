@@ -186,8 +186,11 @@ These are tools for writing tests, not separate commands. They run inside
   convention `WEFT_RECORD=1`; `wefttest` never reads it. Record spends
   money and never checks `WEFT_MODEL_REQUESTS` (the inner model does).
   Re-recording is the review: read the fixture diff. Studio's
-  `runs/{id}/export?format=wefttest` and `weft export <run> --wefttest
-  ./testdata --test Name` write the same fixtures from a recorded run.
+  `runs/{id}/export?format=wefttest` (the run page's "save as test")
+  and `weft export <run> --wefttest ./pkg` write the same tree from a
+  recorded run — `<agent>_replay_test.go` beside
+  `testdata/TestReplay_<run>/` — and `--fixtures-only --test Name` the
+  fixtures alone under `./testdata/Name/`.
 - **`wefttest/conformance`** (ADR 0013) is the executable contract every
   provider adapter passes. Each adapter (`openai/`, `anthropic/`,
   `google/`) runs `conformance.Run` offline against recorded wire

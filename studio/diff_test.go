@@ -28,17 +28,27 @@ type diffDocT struct {
 		Steps  int    `json:"steps"`
 		Status string `json:"status"`
 	}
+	Aligned *struct {
+		Replay     string `json:"replay"`
+		FromStep   int    `json:"from_step"`
+		ForkedFrom string `json:"forked_from"`
+	} `json:"aligned"`
 	Steps []struct {
 		Step    int        `json:"step"`
+		AStep   *int       `json:"a_step"`
+		BStep   *int       `json:"b_step"`
+		Kept    bool       `json:"kept"`
 		Changed bool       `json:"changed"`
 		A       *diffSideT `json:"a"`
 		B       *diffSideT `json:"b"`
 		Changes []string   `json:"changes"`
 		Unknown []string   `json:"unknown"`
+		Differs []string   `json:"differs"`
 	} `json:"steps"`
 	Summary struct {
 		ChangedSteps []int `json:"changed_steps"`
 		FirstChanged *int  `json:"first_changed"`
+		Kept         int   `json:"kept"`
 	} `json:"summary"`
 	Holes []struct{ Hole, Cause, Reason, Fix string } `json:"holes"`
 }
@@ -806,5 +816,112 @@ func TestDiffSideHiddenChildrenCount(t *testing.T) {
 	b, _ := json.Marshal(read)
 	if !strings.Contains(string(b), `"system_hidden":true`) {
 		t.Errorf("the side's JSON carries no system_hidden: %s", b)
+	}
+}
+
+// recordReplayOf records what weft/runtime's scripted replay of
+// recordDiffRun's two-step run (calls 1: lookup_order at step 0, "all
+// looked up" at step 1) from step 1 records: the source's input and
+// step 0 as the prefix, the recorded reply as the one fresh step, zero
+// usage (the scripted engine bills nothing), and weft.forked_from
+// "<source>#1" — the run row a drawer replay leaves.
+func recordReplayOf(t *testing.T, url, source, runID string) {
+	t.Helper()
+	withPipeline(t, url, true, func(prov []core.Option) {
+		lookup := core.Tool("lookup_order", "Look up an order.", func(_ context.Context, in diffOrderIn) (string, error) {
+			return "order " + in.OrderID + " shipped", nil
+		})
+		agent := core.New(wefttest.Script(wefttest.Say("all looked up").WithUsage(core.Usage{})),
+			append([]core.Option{core.Name("orders"), core.Instructions("You are a support agent."), lookup}, prov...)...)
+		prefix := []core.Message{
+			core.User("look up orders 0 to 3"),
+			{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c0", Name: "lookup_order", Args: []byte(`{"order_id":"0"}`)}}},
+			{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c0", Name: "lookup_order", Content: "order 0 shipped"}}},
+		}
+		meta := map[string]string{"weft.playground": "true", "weft.forked_from": source + "#1"}
+		if _, err := agent.Generate(context.Background(), core.RunID(runID), core.Messages(prefix...), core.Metadata(meta)); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// TestDiffAlignsAReplayOnItsSource is A8's Done line on the API
+// (UX-C-04, UX-D-15): an identical scripted replay of a two-step run
+// from step 1 reads kept at step 0 (the source's, not re-run: the
+// replay side null, nothing compared) and the same at step 1 — the
+// replay's own step 0 aligned on the source's step 1 by its
+// forked_from — with the usage 10→5 against 0→0 listed in differs,
+// never a change. Pinned as diff-replay.golden.json (the web table's
+// fixture). Swapped (the replay as a), the alignment is the same;
+// a run that does not name the other aligns by its own ordinals.
+func TestDiffAlignsAReplayOnItsSource(t *testing.T) {
+	ts, _ := requestsServer(t)
+	recordDiffRun(t, ts.URL, "r_src", "unused", 1, nil)
+	recordReplayOf(t, ts.URL, "r_src", "pg_replay")
+	waitRun(t, ts, "r_src", 2, "")
+	waitRun(t, ts, "pg_replay", 1, "")
+
+	check := func(d diffDocT, replay string) {
+		t.Helper()
+		if d.Aligned == nil || d.Aligned.Replay != replay || d.Aligned.FromStep != 1 || d.Aligned.ForkedFrom != "r_src#1" {
+			t.Fatalf("aligned = %+v, want replay %s from step 1", d.Aligned, replay)
+		}
+		if len(d.Steps) != 2 || len(d.Summary.ChangedSteps) != 0 || d.Summary.FirstChanged != nil || d.Summary.Kept != 1 {
+			t.Fatalf("diff = %d rows, summary %+v; want 2 rows, nothing changed, 1 kept", len(d.Steps), d.Summary)
+		}
+		src, rep := func(i int) *diffSideT { return d.Steps[i].A }, func(i int) *diffSideT { return d.Steps[i].B }
+		srcStep, repStep := func(i int) *int { return d.Steps[i].AStep }, func(i int) *int { return d.Steps[i].BStep }
+		if replay == "a" {
+			src, rep = rep, src
+			srcStep, repStep = repStep, srcStep
+		}
+		k := d.Steps[0]
+		if !k.Kept || k.Changed || len(k.Changes) != 0 || len(k.Unknown) != 0 || src(0) == nil || rep(0) != nil ||
+			srcStep(0) == nil || *srcStep(0) != 0 || repStep(0) != nil {
+			t.Errorf("step 0 = %+v, want kept: the source's side alone, nothing compared", k)
+		}
+		s := d.Steps[1]
+		if s.Kept || s.Changed || len(s.Changes) != 0 || len(s.Unknown) != 0 || !slices.Equal(s.Differs, []string{"usage"}) ||
+			*srcStep(1) != 1 || *repStep(1) != 0 || rep(1).Usage != (core.Usage{}) || src(1).Usage.InputTokens == 0 ||
+			*rep(1).Text != "all looked up" {
+			t.Errorf("step 1 = %+v, want the same, usage in differs, b_step 0 against a_step 1", s)
+		}
+	}
+	d, body := getDiff(t, ts, "r_src", "pg_replay", "")
+	stepGolden(t, "diff-replay.golden.json", body)
+	check(d, "b")
+	swapped, _ := getDiff(t, ts, "pg_replay", "r_src", "")
+	check(swapped, "a")
+
+	// No lineage between the two: own ordinals, the replay's step 0
+	// against the source's step 0 — changed, as before A8.
+	recordDiffRun(t, ts.URL, "r_other", "unused", 1, nil)
+	waitRun(t, ts, "r_other", 2, "")
+	plain, _ := getDiff(t, ts, "r_other", "pg_replay", "")
+	if plain.Aligned != nil || plain.Summary.Kept != 0 || len(plain.Steps) != 2 || !plain.Steps[0].Changed || plain.Steps[0].Kept {
+		t.Errorf("unrelated diff = aligned %+v kept %d rows %d, want ordinal alignment", plain.Aligned, plain.Summary.Kept, len(plain.Steps))
+	}
+}
+
+func TestForkedStep(t *testing.T) {
+	for _, c := range []struct {
+		ff, src string
+		n       int
+		ok      bool
+	}{
+		{"r#1", "r", 1, true},
+		{"a#b#2", "a#b", 2, true},
+		{"r#0", "r", 0, true},
+		{"r#x", "r", 0, false},
+		{"r#-1", "r", 0, false},
+		{"r", "r", 0, false},
+		{"q#1", "r", 0, false},
+		{"", "r", 0, false},
+		{"r#100000", "r", 0, false},
+	} {
+		n, ok := forkedStep(c.ff, c.src)
+		if n != c.n || ok != c.ok {
+			t.Errorf("forkedStep(%q, %q) = %d %v, want %d %v", c.ff, c.src, n, ok, c.n, c.ok)
+		}
 	}
 }

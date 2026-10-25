@@ -20,10 +20,11 @@ import type {
   ExperimentRow,
   PlaygroundRunBody,
   RunDoc,
+  RunRow,
   RunsPage,
 } from "@/lib/api"
 import { experimentDraftID, resetDrafts, saveDraft } from "@/lib/drafts"
-import { EXPERIMENT_CELLS } from "@/lib/experiments"
+import { EXPERIMENT_CELLS, REPLAY_WORDS } from "@/lib/experiments"
 import { parseCellCommandID } from "@/lib/form-state"
 import { COST_WAITS } from "@/routes/experiments.$id"
 import { EXPERIMENTS_HIDDEN_REASON } from "@/components/studio/no-experiments"
@@ -280,6 +281,7 @@ describe("/experiments", () => {
       "succeeded",
       "last_run",
       "runs",
+      "unsaved",
       "cost_usd",
       "cost_known",
       "cost_badge",
@@ -860,5 +862,160 @@ describe("the experiments pages' accessibility", () => {
     await waitFor(() => expect(cell("B×2").textContent).toContain("failed"))
     expect(await check()).toEqual([])
     vi.restoreAllMocks()
+  })
+})
+
+// UX-C-15's Done line: the drawer's replays — the common path, which
+// saves no matrix — are listed on /experiments under the run they
+// replay, each with its step, what it changed, its engine, its outcome
+// and its compare; the page opens on them when no matrix is saved.
+describe("/experiments' replays", () => {
+  const replay = (id: string, i: number, over: Partial<RunRow> = {}) =>
+    runOf(id, "A", "1", {
+      experiment_id: "",
+      meta: {},
+      started: new Date(Date.parse(rOK.started) + i * 1000).toISOString(),
+      ...over,
+    })
+  const five = [
+    replay("pg_r1", 1, {
+      model: { provider: "weft/runtime", name: "scripted" },
+    }),
+    replay("pg_r2", 2, { meta: { "weft.edits": "1:c1:result" } }),
+    replay("pg_r3", 3, { status: "failed" }),
+    replay("pg_r4", 4, { forked_from: "r_ok#0" }),
+    replay("pg_r5", 5),
+  ]
+  const other = replay("pg_other", 6, { forked_from: "r_other#2" })
+
+  it("the five drawer replays of a run appear under their source, the page opening on them with no matrix saved", async () => {
+    studio
+      .on("GET experiments", { experiments: [], total: 0 })
+      .on("GET runs", (req) => {
+        expect(req.query.get("playground")).toBe("true")
+        return { runs: [other, ...five].reverse(), total: 6, next_before: null }
+      })
+      .on("GET runs/r_other", { ...rOK, id: "r_other", children: [] })
+    renderApp("/experiments")
+    const group = await waitFor(() => {
+      const g = document.querySelector<HTMLElement>(
+        '[data-replay-group="r_ok"]'
+      )
+      expect(g?.querySelectorAll("[data-replay-row]")).toHaveLength(5)
+      return g!
+    })
+    expect(
+      [...group.querySelectorAll("[data-replay-row]")].map((r) =>
+        r.getAttribute("data-replay-row")
+      )
+    ).toEqual(["pg_r1", "pg_r2", "pg_r3", "pg_r4", "pg_r5"])
+    // The newest replay's group first: r_other (pg_other) leads.
+    expect(
+      [...document.querySelectorAll("[data-replay-group]")].map((g) =>
+        g.getAttribute("data-replay-group")
+      )
+    ).toEqual(["r_other", "r_ok"])
+    const row = (id: string) =>
+      group.querySelector<HTMLElement>(`[data-replay-row="${id}"]`)!
+    expect(row("pg_r1").querySelector("[data-replay-step]")?.textContent).toBe(
+      "from step 1"
+    )
+    expect(row("pg_r4").querySelector("[data-replay-step]")?.textContent).toBe(
+      "from step 0"
+    )
+    expect(
+      row("pg_r1").querySelector("[data-replay-engine]")?.textContent
+    ).toBe("scripted")
+    expect(
+      row("pg_r5").querySelector("[data-replay-engine]")?.textContent
+    ).toContain("live · ")
+    expect(
+      row("pg_r2").querySelector("[data-replay-changes]")?.textContent
+    ).toContain("1 edit")
+    expect(
+      row("pg_r3")
+        .querySelector("[data-replay-outcome]")
+        ?.getAttribute("data-replay-outcome")
+    ).toBe("failed")
+    const cmp = new URL(
+      row("pg_r1")
+        .querySelector("[data-replay-compare]")!
+        .getAttribute("href")!,
+      "http://x"
+    )
+    expect(cmp.pathname).toBe("/compare")
+    expect(cmp.searchParams.get("a")).toBe("r_ok")
+    expect(cmp.searchParams.get("b")).toContain("pg_r1")
+    expect(
+      document
+        .querySelector('[data-experiments-tab="replays"]')
+        ?.getAttribute("aria-selected")
+    ).toBe("true")
+  })
+
+  it("with a matrix saved the page opens on matrices; the replays tab is a click away", async () => {
+    studio.on("GET runs", { runs: five, total: 5, next_before: null })
+    renderApp("/experiments")
+    await waitFor(() =>
+      expect(document.querySelector("[data-experiment-row]")).toBeTruthy()
+    )
+    expect(document.querySelector("[data-replay-group]")).toBeNull()
+    fireEvent.click(
+      document.querySelector<HTMLElement>('[data-experiments-tab="replays"]')!
+    )
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll(
+          '[data-replay-group="r_ok"] [data-replay-row]'
+        )
+      ).toHaveLength(5)
+    )
+  })
+})
+
+// UX-C-16: a grid cell reads its outcome, the first line of its answer,
+// its tokens, its cost and the engine it ran on, the id as its tail.
+describe("/experiments/{id}'s grid cell", () => {
+  it("outcome · answer line · tokens · cost · engine", async () => {
+    studio.on("GET runs/pg_a1/transcript", golden("transcript-ok"))
+    renderApp("/experiments/exp_tone")
+    await waitFor(() =>
+      expect(
+        cell("A×1").querySelector("[data-cell-answer]")?.textContent
+      ).toBeTruthy()
+    )
+    const c = cell("A×1")
+    expect(c.querySelector("[data-run-status]")?.textContent).toBeTruthy()
+    expect(c.querySelector("[data-cell-tokens]")?.textContent).toMatch(/ tok$/)
+    expect(c.querySelector("[data-cell-cost]")?.textContent).toContain("$0.01")
+    expect(c.querySelector("[data-cell-engine]")?.textContent).toContain(
+      "live · "
+    )
+    expect(cell("B×1").querySelector("[data-cell-engine]")?.textContent).toBe(
+      "scripted"
+    )
+    expect(
+      c.querySelector("[data-cell-compare]")?.getAttribute("href")
+    ).toContain("/compare")
+  })
+
+  it("an experiment id runs carry with no saved definition reads as its runs, unsaved", async () => {
+    studio.on("GET experiments/ux-probe", {
+      ...experiment,
+      id: "ux-probe",
+      name: "",
+      variants: [],
+      inputs: [],
+      created: undefined,
+      updated: undefined,
+      unsaved: true,
+    })
+    renderApp("/experiments/ux-probe")
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-experiment-unsaved]")?.textContent
+      ).toBe(REPLAY_WORDS.unsaved)
+    )
+    expect(document.querySelector("[data-loose-runs]")).toBeTruthy()
   })
 })

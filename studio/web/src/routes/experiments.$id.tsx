@@ -31,7 +31,17 @@ import type { CommandStatus, ExperimentRow, RunRow } from "@/lib/api"
 import { absoluteTime, relativeTime } from "@/lib/format"
 import { formatUSD, sumCost } from "@/lib/cost"
 import { pickTarget } from "@/lib/experiment-body"
-import { counted, matrixSize } from "@/lib/experiments"
+import {
+  REPLAY_WORDS,
+  answerLine,
+  counted,
+  forkSource,
+  idTail,
+  matrixSize,
+  usageTitle,
+  usageWords,
+} from "@/lib/experiments"
+import { runEngineWords } from "@/lib/engine"
 import {
   cellBody,
   cellKey,
@@ -489,6 +499,11 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
           {error}
         </p>
       ) : null}
+      {exp.unsaved ? (
+        <p className="text-xs text-muted-foreground" data-experiment-unsaved>
+          {REPLAY_WORDS.unsaved}
+        </p>
+      ) : null}
       {placed.byOrder ? (
         <p className="text-xs text-faint" data-placed-by-order>
           these runs carry no cell address (a matrix run before Studio named its
@@ -559,21 +574,35 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                               onChange={() => togglePick(run.id)}
                             />
                             <RunStatus run={run} />
-                            <Link
-                              {...runLink(run.id)}
-                              className="font-mono hover:underline"
-                              title={run.id}
+                            <CellAnswer run={run} />
+                            <span
+                              className="font-mono text-muted-foreground"
+                              title={usageTitle(run)}
+                              data-cell-tokens
                             >
-                              {run.id.length > 14
-                                ? `${run.id.slice(0, 12)}…`
-                                : run.id}
-                            </Link>
+                              {usageWords(run)}
+                            </span>
                             {costCapable ? (
                               <span data-cell-cost>
                                 <CostText v={sumCost([run])} />
                               </span>
                             ) : null}
+                            <span
+                              className="font-mono text-muted-foreground"
+                              data-cell-engine
+                            >
+                              {runEngineWords(run)}
+                            </span>
                             <ScriptedChip row={run} />
+                            <Link
+                              {...runLink(run.id)}
+                              className="font-mono hover:underline"
+                              title={run.id}
+                              aria-label={run.id}
+                            >
+                              {idTail(run.id)}
+                            </Link>
+                            <VsSource run={run} />
                             {all.length > 1 ? (
                               <span
                                 className="text-faint"
@@ -668,6 +697,47 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
         </div>
       ) : null}
     </section>
+  )
+}
+
+/** CellAnswer is a cell's answer in one line (UX-C-16): the run's last
+ * own assistant text from its transcript, read once it settled. */
+function CellAnswer({ run }: { run: RunRow }) {
+  const settledRun = run.status !== "running" && !run.settling
+  const t = useQuery({ ...transcriptQuery(run.id), enabled: settledRun })
+  if (!settledRun || t.isPending)
+    return <span className="text-faint">{REPLAY_WORDS.reading}</span>
+  const line = t.data ? answerLine(t.data.batches) : null
+  if (!line)
+    return (
+      <span
+        className="text-faint"
+        title={t.isError ? t.error.message : REPLAY_WORDS.noAnswerHint}
+        data-cell-answer=""
+      >
+        {REPLAY_WORDS.noAnswer}
+      </span>
+    )
+  return (
+    <span className="max-w-64 truncate" title={line} data-cell-answer={line}>
+      {line}
+    </span>
+  )
+}
+
+/** VsSource is a cell's compare against the run it replays (its
+ * forked_from), aligned on the source's steps (A8). */
+function VsSource({ run }: { run: RunRow }) {
+  const src = forkSource(run)
+  if (!src) return null
+  return (
+    <Link
+      {...compareLink(src.runID, [run.id], src.fromStep || undefined)}
+      className="text-muted-foreground hover:underline"
+      data-cell-compare
+    >
+      {REPLAY_WORDS.compare}
+    </Link>
   )
 }
 

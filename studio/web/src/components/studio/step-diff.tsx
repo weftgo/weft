@@ -12,13 +12,16 @@ import { Fragment, useEffect, useRef } from "react"
 import { diffQuery, stepQuery } from "@/lib/api"
 import type { CostFields } from "@/lib/api"
 import { costCell, costCellWords, costView } from "@/lib/cost"
+import { isNotFound } from "@/lib/not-found"
 import { runLink } from "@/lib/links"
 import {
+  ARRIVAL,
   CELL_REASONS,
   CELL_WORDS,
   COST_FOLLOWS_USAGE,
   COLUMN_LABELS,
   DIFF_COLUMNS,
+  ROW_WORDS,
   cellHole,
   cellText,
   markerWords,
@@ -30,6 +33,7 @@ import type {
   DiffDoc,
   DiffSide,
   NWayView,
+  RowState,
   SideView,
 } from "@/lib/stepdiff"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -42,6 +46,28 @@ const STATE_TONE: Record<CellState, string> = {
   changed: "bg-ev-error/10 text-foreground",
   unknown: "text-muted-foreground italic",
   missing: "text-muted-foreground",
+  kept: "text-faint",
+  differs: "text-faint",
+}
+
+const ROW_TONE: Record<RowState, string> = {
+  kept: "text-faint",
+  same: "text-faint",
+  changed: "text-status-bad",
+}
+
+/** RowWord is a compared run's row in one word — kept (not re-run) ·
+ * same · changed — lib/stepdiff.ts's ROW_WORDS. */
+function RowWord({ state }: { state: RowState }) {
+  return (
+    <span
+      className={`mr-1 font-sans ${ROW_TONE[state]}`}
+      data-diff-row-state={state}
+      title={state === "kept" ? CELL_REASONS.kept : undefined}
+    >
+      {ROW_WORDS[state]}
+    </span>
+  )
 }
 
 /** SideMarks draws a side's marks and its holes: a mark that is a
@@ -113,7 +139,16 @@ function Cell({
       data-diff-state={state}
       title={CELL_REASONS[state]}
     >
-      {state === "changed" ? text : CELL_WORDS[state]}
+      {state === "changed" ? (
+        text
+      ) : state === "differs" ? (
+        <>
+          {text}
+          <span className="sr-only">{` ${CELL_WORDS.differs}`}</span>
+        </>
+      ) : (
+        CELL_WORDS[state]
+      )}
       {hole ? (
         <>
           {" "}
@@ -290,9 +325,10 @@ export function StepDiffTable({
       .map((r) => ({
         run: o.run_id,
         step: r.step,
+        own: r.others[i].step ?? r.step,
         words: markerWords({
-          step: r.step,
           ...r.others[i],
+          step: r.step,
           a: r.base,
           b: r.others[i].side,
         }),
@@ -327,7 +363,7 @@ export function StepDiffTable({
             data-diff-run={m.run}
           >
             <Link
-              {...runLink(m.run, { step: m.step })}
+              {...runLink(m.run, { step: m.own })}
               className="text-thread-ink hover:underline"
             >
               {m.words}
@@ -342,7 +378,8 @@ export function StepDiffTable({
       <div className="relative overflow-x-auto rounded border">
         <table className="w-full font-mono text-[11px]">
           <caption className="sr-only">
-            steps of {runs.join(", ")} aligned by step ordinal;{" "}
+            steps of {runs.join(", ")} aligned by{" "}
+            {view.aligned ? "the source's step ordinal" : "step ordinal"};{" "}
             {view.base.run_id} is the base
           </caption>
           <thead>
@@ -409,12 +446,16 @@ export function StepDiffTable({
                   scope="row"
                   className="px-2 py-1 text-left align-top font-normal"
                 >
-                  <Link
-                    {...runLink(view.base.run_id, { step: row.step })}
-                    className="hover:underline"
-                  >
-                    {row.step}
-                  </Link>
+                  {row.baseStep !== null ? (
+                    <Link
+                      {...runLink(view.base.run_id, { step: row.baseStep })}
+                      className="hover:underline"
+                    >
+                      {row.step}
+                    </Link>
+                  ) : (
+                    row.step
+                  )}
                 </th>
                 <td
                   className="border-l px-2 py-1 align-top"
@@ -438,7 +479,11 @@ export function StepDiffTable({
                 {costs ? (
                   <CostCellTd
                     run={view.base.run_id}
-                    read={costs(view.base.run_id, row.step)}
+                    read={
+                      row.baseStep !== null
+                        ? costs(view.base.run_id, row.baseStep)
+                        : undefined
+                    }
                     missing={!row.base.side}
                     compared={false}
                   />
@@ -450,6 +495,7 @@ export function StepDiffTable({
                       data-diff-run={o.run_id}
                       data-diff-marks
                     >
+                      <RowWord state={o.state} />
                       <SideMarks side={o.side} />
                     </td>
                     {DIFF_COLUMNS.map((c) => (
@@ -462,11 +508,27 @@ export function StepDiffTable({
                         state={o.cells[c]}
                       />
                     ))}
-                    {costs ? (
+                    {costs && o.state === "kept" ? (
+                      <td
+                        className="border-l px-2 py-1 align-top text-faint"
+                        data-diff-run={o.run_id}
+                        data-diff-cell="cost"
+                        data-diff-state="kept"
+                        title={CELL_REASONS.kept}
+                      >
+                        {CELL_WORDS.kept}
+                      </td>
+                    ) : costs ? (
                       <CostCellTd
                         run={o.run_id}
-                        read={costs(o.run_id, row.step)}
-                        base={costs(view.base.run_id, row.step)}
+                        read={
+                          o.step !== null ? costs(o.run_id, o.step) : undefined
+                        }
+                        base={
+                          row.baseStep !== null
+                            ? costs(view.base.run_id, row.baseStep)
+                            : undefined
+                        }
                         missing={!row.base.side || !o.side.side}
                         compared
                         usageUnknown={o.cells.usage === "unknown"}
@@ -495,16 +557,24 @@ export function StepCompare({
   base,
   others,
   focus,
+  arriving = false,
 }: {
   base: string
   others: string[]
   focus?: number
+  /** The compared runs were just named by a command (the replay
+   * drawer's outcome): a 404 is a run not ingested yet, retried
+   * (ARRIVAL), then said as "not recorded yet" with a read-again. */
+  arriving?: boolean
 }) {
   const { has } = useCapabilities()
   const ids = [...new Set(others.filter((x) => x && x !== base))]
   const on = has("diff") && !!base && ids.length > 0
   const qs = useQueries({
-    queries: ids.map((b) => ({ ...diffQuery(base, b), enabled: on })),
+    queries: ids.map((b) => ({
+      ...diffQuery(base, b, { arriving }),
+      enabled: on,
+    })),
   })
   // The cost column (plan A5): each side's step docs (the step route
   // prices a step's own model call), the first COST_STEPS of each run.
@@ -515,14 +585,14 @@ export function StepCompare({
     const seen = new Set<string>()
     for (const d of answeredDocs)
       for (const r of (d.steps as DiffDoc["steps"] | undefined) ?? [])
-        for (const [run, side] of [
-          [d.a.run_id, r.a],
-          [d.b.run_id, r.b],
+        for (const [run, side, own] of [
+          [d.a.run_id, r.a, r.a_step ?? r.step],
+          [d.b.run_id, r.b, r.b_step ?? r.step],
         ] as const) {
-          const k = `${run}#${r.step}`
-          if (side && r.step < COST_STEPS && !seen.has(k)) {
+          const k = `${run}#${own}`
+          if (side && own < COST_STEPS && !seen.has(k)) {
             seen.add(k)
-            keys.push({ run, step: r.step })
+            keys.push({ run, step: own })
           }
         }
   }
@@ -550,8 +620,18 @@ export function StepCompare({
   const sides = ids.map((id, i) => ({ id, q: qs[i] }))
   if (sides.some(({ q }) => !q.data && !q.isError))
     return (
-      <div className="flex items-center gap-2 text-xs text-faint">
-        <Spinner /> reading the step compare…
+      <div
+        className="flex items-center gap-2 text-xs text-faint"
+        data-step-diff-reading={
+          arriving && sides.some(({ q }) => q.failureCount > 0)
+            ? "arriving"
+            : ""
+        }
+      >
+        <Spinner />{" "}
+        {arriving && sides.some(({ q }) => q.failureCount > 0)
+          ? ARRIVAL.reading
+          : "reading the step compare…"}
       </div>
     )
   const answered = sides.filter(({ q }) => q.data)
@@ -573,9 +653,24 @@ export function StepCompare({
             not compared
           </Badge>
           <span className="font-mono">{id}</span>
-          <span className="text-status-bad">
-            the step compare could not be read: {q.error?.message}
-          </span>
+          {arriving && isNotFound(q.error) ? (
+            <>
+              <span className="text-muted-foreground" data-step-diff-not-yet>
+                {ARRIVAL.notYet(id)}
+              </span>
+              <button
+                type="button"
+                className="hover:underline"
+                onClick={() => void q.refetch()}
+              >
+                {ARRIVAL.again}
+              </button>
+            </>
+          ) : (
+            <span className="text-status-bad">
+              the step compare could not be read: {q.error?.message}
+            </span>
+          )}
         </li>
       ))}
     </ul>

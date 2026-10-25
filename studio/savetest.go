@@ -61,11 +61,12 @@ func replayTestName(runID string) string {
 }
 
 // replayPackage is the skeleton's package clause stem: the agent's name
-// lowercased to an identifier, "replay" without one; one that would not
+// lowercased to an identifier, "run" without one (UX-S5a-07: never
+// "replay_replay_test.go"); one that would not
 // start an identifier, or is a Go keyword ("func", "go", "select"), is
 // prefixed "replay_".
 func replayPackage(agent string) string {
-	id := strings.ToLower(identOf(agent, "replay"))
+	id := strings.ToLower(identOf(agent, "run"))
 	if id[0] >= '0' && id[0] <= '9' || id[0] == '_' || token.IsKeyword(id) {
 		id = "replay_" + id
 	}
@@ -100,6 +101,7 @@ type replaySkeleton struct {
 	runID, agent, model string
 	recorded            time.Time
 	set                 *fixtureSet
+	kept                *keptPrefix // a replay's composed fixtures, nil otherwise
 }
 
 // goString is s as a Go literal: a raw string when it spans lines and
@@ -314,6 +316,14 @@ func (k replaySkeleton) render() ([]byte, error) {
 	}
 	p("// Recorded on: %s\n", k.recorded.UTC().Format("2006-01-02"))
 	p("// Steps:       %d\n", n)
+	if k.kept != nil {
+		last := "step"
+		if n-k.kept.steps > 1 {
+			last = "steps"
+		}
+		p("// Replay of:   %s from step %d — steps 0–%d are the source's fixtures (kept, not re-run),\n", commentText(k.kept.source, 80), k.kept.steps, k.kept.steps-1)
+		p("//              the replay's own %s after them, so the test replays the turn from its start.\n", last)
+	}
 	for _, o := range overrides {
 		if c := o.compacted; c != nil {
 			p("// Step %d replays from the compacted view (compaction %d, made at step %d: seq [%d, %d) replaced by %d entries, hash %s).\n",

@@ -1,1 +1,0 @@
-import{ga as e,ma as t}from"./use-capabilities-BTnPmeRG.js";var n=e(t(),1);function r({controlled:e,default:t,name:r,state:i=`value`}){let{current:a}=n.useRef(e!==void 0),[o,s]=n.useState(t);return[a&&e!==void 0?e:o,n.useCallback(e=>{a||s(e)},[])]}export{r as t};

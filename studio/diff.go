@@ -16,14 +16,28 @@ import (
 //
 //	GET /api/diff?a=<run id>&b=<run id>
 //
-// Two runs, aligned by step ordinal (decision 8: the ordinal is the
-// step's id everywhere, here the alignment key), each step assembled
+// Two runs, aligned by the SOURCE's step ordinal (decision 8: the
+// ordinal is the step's id everywhere, here the alignment key; A8,
+// UX-C-04). A replay numbers its own steps from 0 — its step 0 is the
+// fresh step from_step of its source — so when one side's run row
+// carries weft.forked_from "<other side>#<n>" (weft/runtime stamps it,
+// ADR 0029) that side's step k aligns with the other's step n+k, and
+// the source's steps before n are rows marked kept: not re-run, the
+// replay's prefix (the replay side null, nothing compared, never a
+// change). The response says so in aligned (which side is the replay
+// and its from_step), and each row names both sides' own ordinals
+// (a_step, b_step) beside the aligned one (step) — a link to a side's
+// step is by its own ordinal. Runs with no such lineage align by
+// their own ordinals, as before. Each step assembled
 // exactly as GET /api/runs/{id}/steps/{n} assembles it (assembleStep),
 // then compared field by field: the system prompt (by hash when both
 // sides have one), the tool calls as name(args) with the arguments
 // canonicalised (sorted keys), the tool results (content and is_error,
 // in call order), the assistant text (exact), the usage (the numbers).
 // A step one run has and the other lacks is changed with "missing".
+// A usage difference where a side reported no tokens at all (the
+// scripted engine's 0→0, UX-D-15) is not a change: the column is listed
+// in the row's differs, the numbers kept on both sides.
 //
 // A compaction view and a subagent call are marks on their side, never
 // alignment changes (decision 12): they flip nothing by themselves.
@@ -53,10 +67,22 @@ const (
 	diffMissing     = "missing"
 )
 
+// diffAlign is the response's alignment when one side replays the
+// other (weft.forked_from "<source>#<from_step>"): Replay names the
+// side that is the replay ("a" or "b"), FromStep the source ordinal
+// its step 0 is. null when the two align by their own ordinals.
+type diffAlign struct {
+	Replay     string `json:"replay"`
+	FromStep   int    `json:"from_step"`
+	ForkedFrom string `json:"forked_from"`
+}
+
 // diffDoc is GET /api/diff.
 type diffDoc struct {
-	A       diffRun     `json:"a"`
-	B       diffRun     `json:"b"`
+	A diffRun `json:"a"`
+	B diffRun `json:"b"`
+	// Aligned is the lineage alignment (diffAlign), null without one.
+	Aligned *diffAlign  `json:"aligned"`
 	Steps   []diffRow   `json:"steps"`
 	Summary diffSummary `json:"summary"`
 	// Holes is the diff's own: truncated (cause response_cap) when a
@@ -75,12 +101,24 @@ type diffRun struct {
 type diffSummary struct {
 	ChangedSteps []int `json:"changed_steps"`
 	FirstChanged *int  `json:"first_changed"`
+	// Kept counts the kept rows: the source's steps before the replay's
+	// from_step (0 without a lineage alignment).
+	Kept int `json:"kept"`
 }
 
-// diffRow is one step ordinal: each side's step (null when that run
-// has no such step) and what differs.
+// diffRow is one aligned step ordinal (the source's, under a lineage
+// alignment): each side's step (null when that run has no such step)
+// and what differs. AStep and BStep are each side's own ordinal (null
+// when the side has no step here): equal to Step without an
+// alignment, the replay's own k = Step − from_step with one. Kept
+// marks a source step before the replay's from_step: the replay did
+// not re-run it (its side null), so nothing was compared and the row
+// is no change.
 type diffRow struct {
 	Step    int       `json:"step"`
+	AStep   *int      `json:"a_step"`
+	BStep   *int      `json:"b_step"`
+	Kept    bool      `json:"kept"`
 	Changed bool      `json:"changed"`
 	A       *diffSide `json:"a"`
 	B       *diffSide `json:"b"`
@@ -89,6 +127,10 @@ type diffRow struct {
 	// side did not record them (its holes say why) — neither changed
 	// nor the same; [] when every column compared.
 	Unknown []string `json:"unknown"`
+	// Differs lists the columns that differ but do not count as a
+	// change: usage when a side reported no tokens (the scripted
+	// engine's zero usage, UX-D-15). [] otherwise.
+	Differs []string `json:"differs"`
 }
 
 // diffSide is one run's step, reduced to the compared columns. System
@@ -168,18 +210,39 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 		reason, fix := obsdb.HoleNoteFor(obsdb.HoleTruncated, obsdb.CauseResponseCap)
 		doc.Holes = []stepHole{{Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap), Reason: reason, Fix: fix}}
 	}
-	for n := range max(len(ra.sides), len(rb.sides)) {
-		row := diffRow{Step: n, Changes: []string{}, Unknown: []string{}}
-		if n < len(ra.sides) {
-			row.A = ra.sides[n]
+	// The lineage offset: the replay side's step k is the source's
+	// step off+k (offA for a, offB for b; at most one is non-zero).
+	offA, offB := 0, 0
+	if b != a {
+		if n, ok := forkedStep(rb.forkedFrom, a); ok {
+			offB = n
+			doc.Aligned = &diffAlign{Replay: "b", FromStep: n, ForkedFrom: rb.forkedFrom}
+		} else if n, ok := forkedStep(ra.forkedFrom, b); ok {
+			offA = n
+			doc.Aligned = &diffAlign{Replay: "a", FromStep: n, ForkedFrom: ra.forkedFrom}
 		}
-		if n < len(rb.sides) {
-			row.B = rb.sides[n]
+	}
+	at := func(sides []*diffSide, off, n int) (*diffSide, *int) {
+		k := n - off
+		if k < 0 || k >= len(sides) {
+			return nil, nil
 		}
-		if row.A == nil || row.B == nil {
+		return sides[k], &k
+	}
+	for n := range max(len(ra.sides)+offA, len(rb.sides)+offB) {
+		row := diffRow{Step: n, Changes: []string{}, Unknown: []string{}, Differs: []string{}}
+		row.A, row.AStep = at(ra.sides, offA, n)
+		row.B, row.BStep = at(rb.sides, offB, n)
+		switch {
+		case n < offA && row.A == nil || n < offB && row.B == nil:
+			// A source step before the replay's from_step: kept, not
+			// re-run — nothing to compare, never a change.
+			row.Kept = true
+			doc.Summary.Kept++
+		case row.A == nil || row.B == nil:
 			row.Changes = append(row.Changes, diffMissing)
-		} else {
-			row.Changes, row.Unknown = compareSides(row.A, row.B)
+		default:
+			row.Changes, row.Unknown, row.Differs = compareSides(row.A, row.B)
 		}
 		row.Changed = len(row.Changes) > 0
 		if row.Changed {
@@ -196,9 +259,21 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 
 // diffRunSteps is one run's steps, reduced.
 type diffRunSteps struct {
-	ref       diffRun
-	sides     []*diffSide
-	truncated bool
+	ref        diffRun
+	sides      []*diffSide
+	truncated  bool
+	forkedFrom string // the run row's weft.forked_from
+}
+
+// forkedStep reads a weft.forked_from value "<run id>#<from_step>": the
+// step when it names source (a run id may itself hold a "#", so the
+// step is what follows the last one) and is a step ordinal.
+func forkedStep(forkedFrom, source string) (int, bool) {
+	src, n, ok := parseForkedFrom(forkedFrom)
+	if !ok || src != source || n > maxDiffSteps {
+		return 0, false
+	}
+	return n, true
 }
 
 // diffSteps assembles every step of run id (up to maxDiffSteps) and
@@ -209,7 +284,7 @@ func (s *Server) diffSteps(r *http.Request, id string, prompts bool) (diffRunSte
 	if err != nil {
 		return diffRunSteps{}, err
 	}
-	out := diffRunSteps{ref: diffRun{RunID: id, Status: string(sr.det.Status)}}
+	out := diffRunSteps{ref: diffRun{RunID: id, Status: string(sr.det.Status)}, forkedFrom: sr.det.ForkedFrom}
 	var texts map[int]*string
 	readable := true
 	for n := 0; ; n++ {
@@ -388,11 +463,14 @@ func derivedSide(side *diffSide) {
 //   - every column: unknown when a side is a derived run's (derivedSide).
 //
 // Marks, holes, status and timing are never compared: a compaction or
-// a subagent call marks its side and changes nothing by itself.
-func compareSides(a, b *diffSide) (changes, unknown []string) {
-	changes, unknown = []string{}, []string{}
+// a subagent call marks its side and changes nothing by itself. A
+// usage that differs where a side reported no tokens (zero usage: the
+// scripted engine replays recorded answers and bills nothing) is in
+// differs, not changes (UX-D-15): the numbers stay on both sides.
+func compareSides(a, b *diffSide) (changes, unknown, differs []string) {
+	changes, unknown, differs = []string{}, []string{}, []string{}
 	if a.derived || b.derived {
-		return changes, []string{diffSystem, diffToolCalls, diffToolResults, diffText, diffUsage}
+		return changes, []string{diffSystem, diffToolCalls, diffToolResults, diffText, diffUsage}, differs
 	}
 	note := func(col string, known, same bool) {
 		switch {
@@ -427,8 +505,14 @@ func compareSides(a, b *diffSide) (changes, unknown []string) {
 		return x.Content == y.Content && x.IsError == y.IsError
 	}))
 	note(diffText, !a.textLost && !b.textLost, sameText(a.Text, b.Text))
-	note(diffUsage, eventsKnown, a.Usage == b.Usage)
-	return changes, unknown
+	zero := core.Usage{}
+	switch {
+	case eventsKnown && a.Usage != b.Usage && (a.Usage == zero || b.Usage == zero):
+		differs = append(differs, diffUsage)
+	default:
+		note(diffUsage, eventsKnown, a.Usage == b.Usage)
+	}
+	return changes, unknown, differs
 }
 
 // sameText says two nullable texts are both null or equal.

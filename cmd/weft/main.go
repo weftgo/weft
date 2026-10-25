@@ -7,7 +7,7 @@
 //	weft dev [studio's flags] [--no-watch] [--watch dir] [-- command args…]
 //	weft runs [--agent] [--since] [--failed] [--status] [--limit] [--json]
 //	weft open <run id> [--open] [--with-token]
-//	weft export <run id> [--wefttest dir [--test name] [--force]] [--format json|jsonl|otlp]
+//	weft export <run id> [--wefttest dir [--fixtures-only [--test name]] [--force]] [--format json|jsonl|otlp]
 //	weft doctor
 //	weft vacuum [--db] [--retain]
 //	weft version
@@ -105,11 +105,16 @@
 // bare: --with-token prints the #token= fragment too, --open hands
 // the browser the link with the token. `weft export <id>`
 // writes GET /api/runs/<id>/export to stdout (--format json, jsonl or
-// otlp); with --wefttest <dir> it downloads the wefttest fixtures and
-// unzips them into <dir>/<name>/, the directory wefttest.Replay(t, dir)
-// reads for a test named <name> (--test, a relative name; default the
-// run id), refusing a non-empty target without --force. With --force
-// the target's *.json fixtures are replaced, never merged (as
+// otlp); with --wefttest <dir> it writes the run's save-as-test tree
+// into the package directory <dir> — the files of Studio's "save as
+// test" zip, byte for byte: <agent>_replay_test.go beside
+// testdata/TestReplay_<run>/*.json, a test that passes under go test
+// (a replay's composes its source's fixtures for the steps it kept).
+// With --fixtures-only it writes the fixtures alone into <dir>/<name>/,
+// the directory wefttest.Replay(t, dir) reads for a test named <name>
+// (--test, a relative name; default the run id). Either refuses a test
+// file or fixtures already there without --force; with --force the
+// target's *.json fixtures are replaced, never merged (as
 // wefttest.Record replaces them): a stale one would answer for a
 // request the new run never made.
 //
@@ -254,7 +259,7 @@ Usage:
   weft dev     [studio's flags] [--no-watch] [--watch dir] [-- command args…]   (default: go run .)
   weft runs    [--url] [--token] [--agent] [--since] [--failed] [--status] [--limit] [--json]
   weft open    <run id> [--url] [--token] [--open] [--with-token]
-  weft export  <run id> [--url] [--token] [--format json|jsonl|otlp] [--wefttest dir [--test name] [--force]]
+  weft export  <run id> [--url] [--token] [--format json|jsonl|otlp] [--wefttest dir [--fixtures-only [--test name]] [--force]]
   weft doctor  [--url] [--token]
   weft mcp     [--url] [--token]   (a read-only stdio MCP server over the Studio API; weft mcp -h lists its tools)
   weft vacuum  [--db] [--retain]

@@ -422,15 +422,20 @@ func runLink(base, id, token string) string {
 // ── weft export ────────────────────────────────────────────────────
 
 // runExport is `weft export <id>`: GET /api/runs/<id>/export to
-// stdout, or with --wefttest the fixtures unzipped where
-// wefttest.Replay reads them.
+// stdout, or with --wefttest the run's save-as-test tree written into a
+// package directory — the very files Studio's "save as test" zip holds
+// (UX-S5a-07: one layout): <agent>_replay_test.go beside
+// testdata/TestReplay_<run>/*.json, a test that passes under go test.
+// --fixtures-only keeps the fixtures alone, under <dir>/<test>, where
+// wefttest.Replay(t, dir) reads them for a test of your own.
 func runExport(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("export", stderr)
 	base, token := clientFlags(fs)
 	format := fs.String("format", "json", "the export written to stdout: json, jsonl or otlp")
-	dir := fs.String("wefttest", "", "write the run's wefttest replay fixtures under this `dir` (a suite's testdata) instead")
-	test := fs.String("test", "", "with --wefttest: the `name` of the test that replays them, the fixtures' directory (default: the run id)")
-	force := fs.Bool("force", false, "with --wefttest: write into a non-empty target directory")
+	dir := fs.String("wefttest", "", "write the run's save-as-test tree (the replay test and its testdata/, Studio's zip) into this package `dir` instead")
+	fixturesOnly := fs.Bool("fixtures-only", false, "with --wefttest: write the fixtures alone under <dir>/<test> (a suite's testdata), no test file")
+	test := fs.String("test", "", "with --fixtures-only: the `name` of the test that replays them, the fixtures' directory (default: the run id)")
+	force := fs.Bool("force", false, "with --wefttest: write over a test file or fixtures already there")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -444,8 +449,8 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 	c := newClient(*base, apiToken(*token))
 	ctx := context.Background()
 	if *dir == "" {
-		if set["test"] || set["force"] {
-			return usageError("--test and --force go with --wefttest")
+		if set["test"] || set["force"] || set["fixtures-only"] {
+			return usageError("--test, --fixtures-only and --force go with --wefttest")
 		}
 		switch *format {
 		case "json", "jsonl", "otlp":
@@ -463,6 +468,22 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 	}
 	if set["format"] {
 		return usageError("--format and --wefttest are two exports: pick one")
+	}
+	if !*fixturesOnly {
+		if set["test"] {
+			return usageError("--test goes with --fixtures-only: the save-as-test tree names its test TestReplay_<run>, its fixtures' directory with it")
+		}
+		body, err := c.get(ctx, runPath(id)+"/export", url.Values{"format": {"wefttest"}})
+		if err != nil {
+			return err
+		}
+		tree, err := unzipTree(body, *dir, *force)
+		if err != nil {
+			return fmt.Errorf("export %s: %w", id, err)
+		}
+		_, err = fmt.Fprintf(stdout, "weft: wrote %s and %d fixtures under %s in %s; go test there replays run %s (rename the package clause to the directory's package plus _test)\n",
+			tree.test, tree.fixtures, tree.testdata, *dir, id)
+		return err
 	}
 	name := *test
 	if name == "" {
@@ -493,6 +514,128 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 	_, err = fmt.Fprintf(stdout, "weft: wrote %d fixtures to %s; a test named %s replays them with wefttest.Replay(t, %q)\n",
 		n, target, name, *dir)
 	return err
+}
+
+// exportTree is what unzipTree wrote: the test file's name, the
+// fixtures' directory (relative to the package directory) and their
+// count.
+type exportTree struct {
+	test, testdata string
+	fixtures       int
+}
+
+// unzipTree writes Studio's save-as-test zip into the package
+// directory dir exactly as it is laid out — the one root *_test.go and
+// testdata/<test>/*.json, nothing else — so the terminal's tree is the
+// UI's byte for byte (UX-S5a-07). The zip is checked whole (names,
+// the one test file, the one fixture directory, the total size) before
+// the first write. A test file or fixtures already there are refused
+// without force; with it the test file is replaced and the fixture
+// directory's *.json removed first (as wefttest.Record replaces a
+// test's fixtures: a stale one would answer in place of
+// ErrNoFixture). Nothing is followed through a symlink.
+func unzipTree(body []byte, dir string, force bool) (exportTree, error) {
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		return exportTree{}, fmt.Errorf("the wefttest export is not a zip: %w", err)
+	}
+	plain := func(name string) bool {
+		return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\:`)
+	}
+	var (
+		tree    exportTree
+		testZip *zip.File
+		fx      []*zip.File
+		names   []string
+		testDir string
+		total   uint64
+	)
+	for _, f := range zr.File {
+		if !f.Mode().IsRegular() {
+			return exportTree{}, fmt.Errorf("the wefttest export holds %q: want a test file and fixture files", f.Name)
+		}
+		total += f.UncompressedSize64
+		if total > uint64(maxUnzip) {
+			return exportTree{}, fmt.Errorf("the wefttest export unzips to more than %d bytes", maxUnzip)
+		}
+		if plain(f.Name) && strings.HasSuffix(f.Name, "_test.go") {
+			if testZip != nil {
+				return exportTree{}, fmt.Errorf("the wefttest export holds two test files (%q, %q)", testZip.Name, f.Name)
+			}
+			testZip = f
+			continue
+		}
+		rest, ok := strings.CutPrefix(f.Name, "testdata/")
+		test, file, cut := strings.Cut(rest, "/")
+		if !ok || !cut || !plain(test) || !plain(file) || testDir != "" && test != testDir {
+			return exportTree{}, fmt.Errorf("the wefttest export holds %q: want <name>_test.go and fixtures under one testdata/<test>/", f.Name)
+		}
+		testDir = test
+		fx = append(fx, f)
+		names = append(names, file)
+	}
+	if testZip == nil || len(fx) == 0 {
+		return exportTree{}, errors.New("the wefttest export holds no test file or no fixtures: a Studio before save as test (plan F6) — use --fixtures-only")
+	}
+	tree = exportTree{test: testZip.Name, testdata: "testdata/" + testDir + "/", fixtures: len(fx)}
+	fixDir := filepath.Join(dir, "testdata", testDir)
+	testPath := filepath.Join(dir, testZip.Name)
+	if !force {
+		if _, err := os.Lstat(testPath); err == nil {
+			return exportTree{}, fmt.Errorf("%s exists: --force writes over it", testPath)
+		}
+		if entries, err := os.ReadDir(fixDir); err == nil && len(entries) > 0 {
+			return exportTree{}, fmt.Errorf("%s is not empty: --force writes into it", fixDir)
+		}
+	}
+	read := func(f *zip.File, left int64) ([]byte, error) {
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = rc.Close() }()
+		// The declared sizes passed the cap; the read is bounded by what
+		// is left of it, so a lying header cannot exceed it.
+		b, err := io.ReadAll(io.LimitReader(rc, left+1))
+		if err == nil && int64(len(b)) > left {
+			err = fmt.Errorf("the wefttest export unzips to more than %d bytes", maxUnzip)
+		}
+		return b, err
+	}
+	left := maxUnzip
+	testBody, err := read(testZip, left)
+	if err != nil {
+		return exportTree{}, err
+	}
+	left -= int64(len(testBody))
+	bodies := make([][]byte, len(fx))
+	for i, f := range fx {
+		if bodies[i], err = read(f, left); err != nil {
+			return exportTree{}, fmt.Errorf("%s: %w", f.Name, err)
+		}
+		left -= int64(len(bodies[i]))
+	}
+	if err := os.MkdirAll(fixDir, 0o755); err != nil {
+		return exportTree{}, err
+	}
+	stale, err := filepath.Glob(filepath.Join(fixDir, "*.json"))
+	if err != nil {
+		return exportTree{}, err
+	}
+	for _, p := range stale {
+		if err := os.Remove(p); err != nil {
+			return exportTree{}, fmt.Errorf("clear the target: %w", err)
+		}
+	}
+	if err := writeNew(testPath, testBody); err != nil {
+		return exportTree{}, err
+	}
+	for i := range fx {
+		if err := writeNew(filepath.Join(fixDir, names[i]), bodies[i]); err != nil {
+			return exportTree{}, err
+		}
+	}
+	return tree, nil
 }
 
 // unzipFixtures writes the export's fixtures into dir. The zip holds

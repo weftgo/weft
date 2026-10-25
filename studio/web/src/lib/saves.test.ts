@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest"
 import type { ManifestAgent } from "./api"
 import { proposalOf } from "./request-pane"
 import {
+  keptPrefixOf,
   dispositionName,
   keepEditedTitle,
   keepPromptWords,
@@ -163,6 +164,26 @@ describe("proposalOf: keep as prompt proposes the instructions", () => {
     )
     expect(proposalOf(text, [], undefined).note).toContain(
       "may include a PrepareStep rewrite"
+    )
+  })
+})
+
+// UX-C-30: a replay's zip composes its source's fixtures for the steps
+// it kept; the server names it (Weft-Kept-Prefix) and the toast says so.
+describe("a replay's composed save as test", () => {
+  it("reads the header and says which steps are the source's", () => {
+    expect(keptPrefixOf("r#a#1")).toEqual({ source: "r#a", steps: 1 })
+    for (const bad of [null, "", "r", "r#0", "#2", "r#x"])
+      expect(keptPrefixOf(bad)).toBeUndefined()
+    expect(
+      saveWords({
+        kind: "save-test",
+        ok: true,
+        file: "orders_replay_test.zip",
+        kept: { source: "r_src", steps: 1 },
+      }).title
+    ).toBe(
+      "saved orders_replay_test.zip (steps 0–0 from the source r_src, 1 on from the replay) — unzip into a package directory and go test"
     )
   })
 })

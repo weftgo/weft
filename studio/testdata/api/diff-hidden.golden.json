@@ -9,9 +9,13 @@
     "steps": 5,
     "status": "succeeded"
   },
+  "aligned": null,
   "steps": [
     {
       "step": 0,
+      "a_step": 0,
+      "b_step": 0,
+      "kept": false,
       "changed": false,
       "a": {
         "status": "ok",
@@ -84,10 +88,14 @@
         "system_hidden": true
       },
       "changes": [],
-      "unknown": []
+      "unknown": [],
+      "differs": []
     },
     {
       "step": 1,
+      "a_step": 1,
+      "b_step": 1,
+      "kept": false,
       "changed": false,
       "a": {
         "status": "ok",
@@ -160,10 +168,14 @@
         "system_hidden": true
       },
       "changes": [],
-      "unknown": []
+      "unknown": [],
+      "differs": []
     },
     {
       "step": 2,
+      "a_step": 2,
+      "b_step": 2,
+      "kept": false,
       "changed": false,
       "a": {
         "status": "ok",
@@ -236,10 +248,14 @@
         "system_hidden": true
       },
       "changes": [],
-      "unknown": []
+      "unknown": [],
+      "differs": []
     },
     {
       "step": 3,
+      "a_step": 3,
+      "b_step": 3,
+      "kept": false,
       "changed": true,
       "a": {
         "status": "ok",
@@ -314,10 +330,14 @@
       "changes": [
         "tool_results"
       ],
-      "unknown": []
+      "unknown": [],
+      "differs": []
     },
     {
       "step": 4,
+      "a_step": 4,
+      "b_step": 4,
+      "kept": false,
       "changed": false,
       "a": {
         "status": "ok",
@@ -362,14 +382,16 @@
         "system_hidden": true
       },
       "changes": [],
-      "unknown": []
+      "unknown": [],
+      "differs": []
     }
   ],
   "summary": {
     "changed_steps": [
       3
     ],
-    "first_changed": 3
+    "first_changed": 3,
+    "kept": 0
   },
   "holes": []
 }

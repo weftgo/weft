@@ -356,7 +356,7 @@ func (s *Server) exportFixtures(w http.ResponseWriter, r *http.Request, id strin
 		dbError(w, r, "run", id, err)
 		return
 	}
-	set, ok := fixturesOrConflict(w, r, src)
+	set, kept, ok := s.runFixtureSet(w, r, det, src)
 	if !ok {
 		return
 	}
@@ -364,7 +364,18 @@ func (s *Server) exportFixtures(w http.ResponseWriter, r *http.Request, id strin
 	if det.Provider != "" && model != "" {
 		model = det.Provider + "/" + model
 	}
-	skeleton, err := replaySkeleton{runID: id, agent: det.Agent, model: model, recorded: det.Started, set: set}.render()
+	if kept != nil {
+		// The composed set (UX-C-30): the header names it, and a scripted
+		// replay's skeleton names the model its fixtures are stamped with.
+		w.Header().Set(keptPrefixHeader, fmt.Sprintf("%s#%d", kept.source, kept.steps))
+		if m := set.steps[kept.steps-1].model; det.Provider == scriptedEngineModel.Provider && det.Model == scriptedEngineModel.Name && m.Name != "" {
+			model = m.Name
+			if m.Provider != "" {
+				model = m.Provider + "/" + m.Name
+			}
+		}
+	}
+	skeleton, err := replaySkeleton{runID: id, agent: det.Agent, model: model, recorded: det.Started, set: set, kept: kept}.render()
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "internal", "replay test of run "+id+": "+err.Error())
 		return

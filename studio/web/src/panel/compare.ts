@@ -14,6 +14,7 @@ import {
   CELL_WORDS,
   COLUMN_LABELS,
   DIFF_COLUMNS,
+  ROW_WORDS,
   cellHole,
   cellText,
   markerWords,
@@ -68,7 +69,7 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
       if (r.changed) {
         // The marker is a link to the step, as Studio's: the compared run's.
         const a = el("a", "", markerWords(r), {
-          href: href(base, runPage(v.b.run_id, { step: r.step })),
+          href: href(base, runPage(v.b.run_id, { step: r.bStep ?? r.step })),
           ...NEW_TAB,
         })
         list.append(
@@ -82,7 +83,7 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
     el(
       "caption",
       "weft-sr",
-      `the source ${v.a.run_id} (a) and ${v.b.run_id} (b), aligned by step ordinal`
+      `the source ${v.a.run_id} (a) and ${v.b.run_id} (b), aligned by the source's step ordinal`
     )
   )
   const head = el("tr")
@@ -95,7 +96,13 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
     const tr = el("tr", r.changed ? "weft-diff-changed" : undefined, "", {
       "data-weft-diff-step": String(r.step),
     })
-    const th = el("th", "", String(r.step), { scope: "row" })
+    // The row's one word (kept · same · changed) beside its ordinal.
+    const th = el("th", "", `${r.step} `, { scope: "row" })
+    th.append(
+      el("span", `weft-diff-${r.state}`, ROW_WORDS[r.state], {
+        "data-weft-diff-row-state": r.state,
+      })
+    )
     for (const [which, side] of [
       ["a", r.a],
       ["b", r.b],
@@ -117,7 +124,7 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
       if (hole) {
         td.append(" ", badge(hole))
       }
-      if (state === "changed") {
+      if (state === "changed" || state === "differs") {
         td.append(
           el("div", "weft-diff-row weft-diff-a", `a ${cellText(r.a.side, c)}`),
           el("div", "weft-diff-row weft-diff-b", `b ${cellText(r.b.side, c)}`)

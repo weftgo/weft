@@ -346,7 +346,7 @@ div[data-weft-editable] { display: block; }
 .weft-diff-markers a { color: inherit; }
 .weft-diff-table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .weft-diff-table th, .weft-diff-table td { text-align: left; vertical-align: top; padding: 2px 4px; border-top: 1px solid var(--weft-line); font-weight: normal; }
-.weft-diff-same, .weft-diff-missing { color: var(--weft-faint); }
+.weft-diff-same, .weft-diff-missing, .weft-diff-kept, .weft-diff-differs { color: var(--weft-faint); }
 .weft-diff-unknown { color: var(--weft-dim); font-style: italic; }
 .weft-diff-changed > th, td.weft-diff-changed { color: var(--weft-warn); }
 .weft-diff-a { color: var(--weft-err); }

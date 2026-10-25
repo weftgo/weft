@@ -97,9 +97,12 @@ picking the Studio: `weft runs [--agent] [--since] [--failed] [--status] [--limi
 /api/runs/{id}`, prints the bare `<url>/runs/<id>`; the token goes only
 to the browser, or to stdout on `--with-token`), `weft export <run id>
 [--format json|jsonl|otlp]` and `weft export <run id> --wefttest
-./testdata [--test TestName] [--force]` (`GET /api/runs/{id}/export`,
-the fixtures unzipped where `wefttest.Replay(t, "testdata")` reads
-them; `--force` replaces a non-empty target's fixtures), `weft doctor`
+./pkg [--fixtures-only [--test TestName]] [--force]` (`GET
+/api/runs/{id}/export`: the save-as-test zip's tree written into the
+package directory byte for byte — `<agent>_replay_test.go` beside
+`testdata/TestReplay_<run>/`; `--fixtures-only` the fixtures alone
+where `wefttest.Replay(t, "testdata")` reads them; `--force` replaces
+what is there), `weft doctor`
 (`GET /api/meta`), and `weft mcp` — the same read routes as a stdio MCP
 server for a coding agent, GET only (tools `runs`, `search`, `run`,
 `step`, `request`, `events`, `tools`, `diff`, `export`, `sessions`,
@@ -1088,8 +1091,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 276,355 B raw / 92,735 B gzip
-(90.6 KiB, the bundle of the ledger's row "U17-fix"; 13,761 B — 13.4 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 277,116 B raw / 93,028 B gzip
+(90.8 KiB, the bundle of the ledger's row "U19 compare aligned"; 13,468 B — 13.2 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1545,8 +1548,17 @@ source run's steps.
 
 Every matrix is saved as an experiment (plan F5). Experiments in the
 sidebar (`/experiments`) lists them with their agent, size, run count and
-cost. `/experiments/{id}` draws the variants × inputs grid, each cell its
-latest run with status and cost. From there you can re-run one cell or all
+cost — the *matrices* tab — beside a *replays* tab (UX-C-15): every
+playground run (`/api/runs?playground=true`, the newest 2,000, said when
+cut) grouped under the run it replays (`forked_from`), each row its
+step, what it changed (edits, prompt, model), its engine, its outcome
+and a compare against its source; the page opens on replays when no
+matrix is saved. An experiment id runs carry with no saved definition
+reads as its runs (`GET /api/experiments/{id}` answers `unsaved: true`,
+no variants or inputs), never a 404. `/experiments/{id}` draws the
+variants × inputs grid, each cell its latest run: its outcome, its
+answer's first line, its tokens, its cost, the engine it ran on, the
+id's tail, and a compare against its source (UX-C-16). From there you can re-run one cell or all
 of them under the same experiment id, compare two cells on the compare page,
 or "clone into the form", which reopens the playground on a draft holding the
 matrix's form — exactly, in any browser: the experiment saves the whole
@@ -1706,6 +1718,25 @@ to its step — with a ⤢ hand-off to the same compare page at the first
 changed step.
 `src/panel/parity.test.ts` holds both to the same rows, markers and
 badges from the same goldens (`studio/testdata/api/diff*.golden.json`).
+
+A replay is compared on its **source's** step ordinals (A8, UX-C-04):
+a replay numbers its own steps from 0, so when one side's
+`weft.forked_from` names the other (`<source>#<n>`) the response's
+`aligned` says so (`replay` `a` or `b`, `from_step`, `forked_from`),
+its step k is the row of the source's step n+k, and the source's steps
+before n are rows with `kept: true` — not re-run: the replay side null,
+nothing compared, never a change (`summary.kept` counts them). Each row
+names both sides' own ordinals (`a_step`, `b_step`; null where a side
+has no step), and a link to a side's step carries its own. A usage that
+differs where a side billed no tokens at all (the scripted engine's
+0→0, UX-D-15) is in the row's `differs`, not `changes`: the cell reads
+"differs · not counted", the numbers kept. Each compared run's row reads
+one word — kept · same · changed — so an identical scripted replay from
+step 1 reads "kept · same" (`diff-replay.golden.json`). The replay
+drawer's compare is read right after its command finished, before
+Studio may hold the run row: a 404 there is retried three times a
+second apart ("recording the run…"), then "has not reached Studio yet"
+with a read-again (UX-C-10).
 
 Status words (U1) are one table, `src/lib/status.ts`, on every surface
 — the runs list, the run header, a session's turns and its header, the
@@ -2661,7 +2692,15 @@ the skeleton's header repeats each step that replays from a compacted
 view; results keyed by (step, call id); steered steps replayed through a
 generated `wefttest.NewSteers` source; a step the recorded run rewrote
 replays its recorded messages (replayed, not re-derived); a step whose request carried a compaction view is keyed on it
-and noted `compacted_at`. The run block's children carry their `holes`
+and noted `compacted_at`; a replay from step n > 0 (`weft.forked_from`)
+recorded only its fresh steps, so its zip composes the source's
+fixtures for steps 0 to n−1 with its own renumbered after them (a
+scripted replay's stamped with the source's model), says so in the
+skeleton's header and the `Weft-Kept-Prefix: <source>#<n>` response
+header (the toast's "steps 0–0 from the source …"), and is a 409 naming
+why when the source cannot give them (UX-C-30); an agentless run's
+test file is `run_replay_test.go`. `weft export <id> --wefttest <pkg>`
+writes this zip's tree byte for byte (UX-S5a-07). The run block's children carry their `holes`
 as `runs/{id}` serves them. A read-scoped panel token gets `json` and
 `jsonl` with the request block `{badge: "hidden", …}` and each
 compaction view's `messages` null under the same badge; `otlp` and

@@ -108,9 +108,34 @@ export const PROPOSAL_NEEDS_DEV = "a proposal needs the dev token"
 export const PROPOSAL_POINTER =
   "the durable path is WEFT-PROMPT.md P3: a propose command over the runtime link"
 
+/** A replay's save-as-test zip composed with its source (UX-C-30): the
+ * source run whose fixtures answer steps 0 to steps − 1, the steps it
+ * kept (studio/fixtures.go's Weft-Kept-Prefix, "<source>#<from_step>"). */
+export interface KeptPrefix {
+  source: string
+  steps: number
+}
+
+export const KEPT_PREFIX_HEADER = "Weft-Kept-Prefix"
+
+/** keptPrefixOf reads the header; undefined when absent or malformed. */
+export function keptPrefixOf(h: string | null): KeptPrefix | undefined {
+  if (!h) return undefined
+  const i = h.lastIndexOf("#")
+  const steps = Number(h.slice(i + 1))
+  if (i <= 0 || !Number.isInteger(steps) || steps < 1) return undefined
+  return { source: h.slice(0, i), steps }
+}
+
+/** keptWords says what a composed zip holds: "steps 0–0 from the
+ * source r_1, the rest from the replay". */
+export function keptWords(k: KeptPrefix): string {
+  return `steps 0–${k.steps - 1} from the source ${k.source}, ${k.steps} on from the replay`
+}
+
 /** One save's outcome, in words both surfaces say. */
 export type SaveOutcome =
-  | { kind: "save-test"; ok: true; file: string }
+  | { kind: "save-test"; ok: true; file: string; kept?: KeptPrefix }
   | { kind: "save-test"; ok: false; message: string }
   | KeepPrompt
   | { kind: "withdraw"; agent: string; ok: boolean; message?: string }
@@ -138,7 +163,7 @@ export function saveWords(o: SaveOutcome): { title: string; tone: SaveTone } {
     case "save-test":
       return o.ok
         ? {
-            title: `saved ${o.file} — unzip into a package directory and go test`,
+            title: `saved ${o.file}${o.kept ? ` (${keptWords(o.kept)})` : ""} — unzip into a package directory and go test`,
             tone: "success",
           }
         : { title: `save as test refused: ${o.message}`, tone: "error" }

@@ -256,3 +256,35 @@ describe("a compare the response left thin (review 9)", () => {
     expect(noSteps.querySelectorAll("tbody tr")).toHaveLength(0)
   })
 })
+
+// A8 on the panel's 2-way block (UX-C-04, UX-D-15): the same golden as
+// Studio's table reads kept · same, nothing changed, and a marker or
+// row link names the replay's own ordinal.
+describe("the panel's compare of an identical scripted replay from step 1", () => {
+  it("diff-replay.golden.json reads kept · same on every row", () => {
+    const box = stepDiffBlock(
+      golden<DiffDoc>("diff-replay"),
+      "http://studio.test/studio/"
+    )
+    const words = [...box.querySelectorAll("[data-weft-diff-row-state]")].map(
+      (e) => e.textContent
+    )
+    expect(words).toEqual(["kept", "same"])
+    expect(box.querySelector("[data-weft-diff-marker]")).toBeNull()
+    expect(box.querySelector(".weft-diff-h")!.textContent).toContain(
+      "no step changed of 1 · 1 kept (not re-run)"
+    )
+    const usage = box.querySelector(
+      '[data-weft-diff-step="1"] [data-weft-diff-cell="usage"]'
+    )!
+    expect(usage.getAttribute("data-state")).toBe("differs")
+    expect(usage.textContent).toContain("b 0→0")
+    expect(
+      box
+        .querySelector(
+          '[data-weft-diff-step="0"] [data-weft-diff-cell="text"]'
+        )!
+        .getAttribute("data-state")
+    ).toBe("kept")
+  })
+})

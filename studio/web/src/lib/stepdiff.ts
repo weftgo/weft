@@ -7,7 +7,15 @@
 // goldens; src/panel/parity.test.ts checks both surfaces against it).
 //
 // The rules the server already applied are read, never re-derived:
-//   - rows are keyed by the step ORDINAL (decision 8, lib/links.ts);
+//   - rows are keyed by the step ORDINAL (decision 8, lib/links.ts) —
+//     the SOURCE's when one side replays the other (A8: the response's
+//     aligned names the replay side and its from_step; each row's
+//     a_step / b_step is that side's own ordinal, the one a link to its
+//     step carries). A source step before the replay's from_step is a
+//     kept row: not re-run, nothing compared, never a change;
+//   - a column the server lists in a row's differs[] (usage where a
+//     side billed no tokens: a scripted replay's 0→0, UX-D-15) is
+//     "differs": shown, never counted as a change;
 //   - a column the server lists in a row's unknown[] is "not
 //     comparable" — never "same", never "changed": a side did not
 //     record it, and its holes say why;
@@ -93,9 +101,16 @@ export interface DiffSide {
   system_hidden?: boolean
 }
 
-/** One step ordinal of the pair. */
+/** One aligned step ordinal of the pair (the source's under a lineage
+ * alignment). */
 export interface DiffRowDoc {
   step: number
+  /** Each side's own ordinal at this row, null when it has no step here
+   * (absent from a Studio before A8: the row's step). */
+  a_step?: number | null
+  b_step?: number | null
+  /** A source step before the replay's from_step: kept, not re-run. */
+  kept?: boolean
   changed: boolean
   a: DiffSide | null
   b: DiffSide | null
@@ -103,18 +118,49 @@ export interface DiffRowDoc {
   changes: string[]
   /** The columns a side did not record: not comparable. */
   unknown: string[]
+  /** The columns that differ but do not count as a change (usage when
+   * a side billed no tokens). */
+  differs?: string[]
+}
+
+/** The response's lineage alignment: which side replays the other,
+ * from which source step (studio/diff.go's diffAlign). */
+export interface DiffAlign {
+  replay: "a" | "b"
+  from_step: number
+  forked_from: string
 }
 
 /** GET /api/diff?a=&b= (capability "diff"). */
 export interface DiffDoc {
   a: DiffRun
   b: DiffRun
+  /** null (or absent, before A8) when the two align by their own ordinals. */
+  aligned?: DiffAlign | null
   steps: DiffRowDoc[]
-  summary: { changed_steps: number[]; first_changed: number | null }
+  summary: {
+    changed_steps: number[]
+    first_changed: number | null
+    kept?: number
+  }
   /** The response's own: truncated (cause response_cap) when a run has
    * more steps than one diff compares. */
   holes: HoleMark[]
 }
+
+/** A compare read right after a command named its run (UX-C-10): the
+ * command's "finished" can arrive before Studio has ingested the run
+ * row, so a 404 there is "arriving", retried ARRIVAL.retries times
+ * ARRIVAL.delayMs apart, then an honest "has not reached Studio yet" — never an
+ * error that never recovers, never an empty pane. */
+export const ARRIVAL = {
+  retries: 3,
+  delayMs: 1000,
+  reading: "recording the run… the step compare follows once Studio has it",
+  notYet: (id: string) =>
+    `${id} has not reached Studio yet (still absent after ${ARRIVAL.retries} more reads, ${ARRIVAL.delayMs / 1000} s apart)`,
+  again: "read the compare again",
+} as const
 
 /** The API path of one 2-way diff (relative to /api/): both clients
  * fetch it with their own transport. */
@@ -124,8 +170,10 @@ export function diffPath(a: string, b: string): string {
 
 // ── Cells ─────────────────────────────────────────────────────────
 
-/** A compared cell's state. */
-export type CellState = "same" | "changed" | "unknown" | "missing"
+/** A compared cell's state. kept: the row is a source step the replay
+ * did not re-run; differs: the values differ, not counted as a change. */
+export type CellState =
+  "same" | "changed" | "unknown" | "missing" | "kept" | "differs"
 
 /** What a cell says. unknown is "not comparable": a side did not record
  * the column, so the two were not compared — never "same". */
@@ -134,6 +182,8 @@ export const CELL_WORDS: Record<CellState, string> = {
   changed: "changed",
   unknown: "not comparable",
   missing: "missing",
+  kept: "kept",
+  differs: "differs · not counted",
 }
 
 /** A cell's tooltip: why it reads as it does. */
@@ -143,6 +193,22 @@ export const CELL_REASONS: Record<CellState, string> = {
   unknown:
     "a side did not record this column (its holes say why): the two were not compared",
   missing: "one run has no such step",
+  kept: "not re-run: the source's, kept",
+  differs: "0 tokens on a side: not counted",
+}
+
+/** A row's state as one word: kept (not re-run), same, or changed. */
+export type RowState = "kept" | "same" | "changed"
+
+export const ROW_WORDS: Record<RowState, string> = {
+  kept: "kept",
+  same: "same",
+  changed: "changed",
+}
+
+/** rowState reads a row: kept, changed (the server's flag), else same. */
+export function rowState(row: Pick<DiffRowDoc, "kept" | "changed">): RowState {
+  return row.kept ? "kept" : row.changed ? "changed" : "same"
 }
 
 /** The cost cell's reason when the server marked a side's usage not
@@ -156,10 +222,12 @@ const list = <T>(v: T[] | undefined): T[] => v ?? []
 
 /** cellOf reads one column of one row as the server compared it. */
 export function cellOf(row: DiffRowDoc, col: DiffColumn): CellState {
+  if (row.kept) return "kept"
   const changes = list(row.changes)
   if (!row.a || !row.b || changes.includes("missing")) return "missing"
   if (list(row.unknown).includes(col)) return "unknown"
   if (changes.includes(col)) return "changed"
+  if (list(row.differs).includes(col)) return "differs"
   return "same"
 }
 
@@ -304,9 +372,14 @@ export interface SideView {
   holes: HoleMark[]
 }
 
-/** One step ordinal as a surface draws it. */
+/** One aligned step ordinal as a surface draws it. */
 export interface StepRowView {
   step: number
+  /** Each side's own ordinal (null: no step of it here) — the one a
+   * link to that run's step carries. */
+  aStep: number | null
+  bStep: number | null
+  state: RowState
   changed: boolean
   cells: Record<DiffColumn, CellState>
   /** The changed columns, by their headers ("tool results"). */
@@ -325,6 +398,10 @@ export interface StepDiffView {
   holes: HoleMark[]
   /** How many cells are not comparable. */
   unknown: number
+  /** The kept rows (source steps the replay did not re-run). */
+  kept: number
+  /** The rows with a column that differs, not counted (usage). */
+  differs: number
 }
 
 /** sideView is a side as drawn: its holes, and its marks less any
@@ -353,6 +430,11 @@ export function stepDiffView(doc: DiffDoc): StepDiffView {
       const cells = cellsOf(r)
       return {
         step: r.step,
+        // Each side's own ordinal: the server's, else (a Studio before
+        // A8, or a side with no step: null) the row's when it is there.
+        aStep: r.a_step ?? (r.a ? r.step : null),
+        bStep: r.b_step ?? (r.b ? r.step : null),
+        state: rowState(r),
         changed: r.changed,
         cells,
         changedColumns: DIFF_COLUMNS.filter((c) => cells[c] === "changed").map(
@@ -372,6 +454,10 @@ export function stepDiffView(doc: DiffDoc): StepDiffView {
       (n, r) => n + DIFF_COLUMNS.filter((c) => r.cells[c] === "unknown").length,
       0
     ),
+    kept: rows.filter((r) => r.state === "kept").length,
+    differs: rows.filter((r) =>
+      DIFF_COLUMNS.some((c) => r.cells[c] === "differs")
+    ).length,
   }
 }
 
@@ -389,16 +475,22 @@ export function markerWords(
  * the first — and, when some cells were not comparable, that "no step
  * changed" covers only what both runs recorded. */
 export function summaryWords(
-  v: Pick<StepDiffView, "rows" | "markers" | "unknown">
+  v: Pick<StepDiffView, "rows" | "markers" | "unknown"> &
+    Partial<Pick<StepDiffView, "kept" | "differs">>
 ): string {
   const n = v.markers.length
+  const kept = v.kept ?? 0
+  // The steps compared: a kept row is the source's alone.
+  const compared = v.rows.length - kept
   // A step only one run has is a change (E3.1), said apart.
   const only = v.rows.filter(
     (r) => r.changed && DIFF_COLUMNS.every((c) => r.cells[c] === "missing")
   ).length
-  const head = n
-    ? `${n} of ${v.rows.length} ${v.rows.length === 1 ? "step" : "steps"} changed${only ? ` (${only} only in one run)` : ""} · first at step ${v.markers[0]}`
-    : `no step changed of ${v.rows.length}`
+  let head = n
+    ? `${n} of ${compared} ${compared === 1 ? "step" : "steps"} changed${only ? ` (${only} only in one run)` : ""} · first at step ${v.markers[0]}`
+    : `no step changed of ${compared}`
+  if (kept) head += ` · ${kept} kept (not re-run)`
+  if (v.differs) head += " · usage differs (0 tokens)"
   return v.unknown
     ? `${head} · ${v.unknown} ${v.unknown === 1 ? "cell" : "cells"} not comparable`
     : head
@@ -409,6 +501,9 @@ export function summaryWords(
 /** One compared run's cells at one ordinal (N-way). */
 export interface OtherCell {
   run_id: string
+  /** The compared run's own ordinal at this row (null: none). */
+  step: number | null
+  state: RowState
   changed: boolean
   cells: Record<DiffColumn, CellState>
   changedColumns: string[]
@@ -417,6 +512,8 @@ export interface OtherCell {
 
 export interface NWayRow {
   step: number
+  /** The base run's own ordinal at this row (null: none). */
+  baseStep: number | null
   /** Any compared run changed here. */
   changed: boolean
   base: SideView
@@ -430,6 +527,8 @@ export interface NWayView {
   /** Per compared run (same order as others), its changed ordinals. */
   markers: number[][]
   holes: HoleMark[]
+  /** Whether any compared run aligned on the source's ordinals (A8). */
+  aligned?: boolean
   /** Why the responses cannot be laid side by side (none, or not one
    * base): one line a renderer shows instead of the table. */
   error?: string
@@ -478,6 +577,8 @@ export function nWayView(docs: DiffDoc[]): NWayView {
       return r
         ? {
             run_id: v.b.run_id,
+            step: r.bStep,
+            state: r.state,
             changed: r.changed,
             cells: r.cells,
             changedColumns: r.changedColumns,
@@ -485,15 +586,19 @@ export function nWayView(docs: DiffDoc[]): NWayView {
           }
         : {
             run_id: v.b.run_id,
+            step: null,
+            state: "same",
             changed: false,
             cells: ALL_MISSING(),
             changedColumns: [],
             side: sideView(null),
           }
     })
-    const baseSide = at.find((r) => r?.a.side)?.a ?? sideView(null)
+    const baseRow = at.find((r) => r?.a.side)
+    const baseSide = baseRow?.a ?? sideView(null)
     return {
       step,
+      baseStep: baseRow?.aStep ?? null,
       changed: others.some((o) => o.changed),
       base: baseSide,
       others,
@@ -505,5 +610,6 @@ export function nWayView(docs: DiffDoc[]): NWayView {
     rows,
     markers: views.map((v) => v.markers),
     holes: mergeHoles(...views.map((v) => v.holes)),
+    aligned: docs.some((d) => !!d.aligned),
   }
 }

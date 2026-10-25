@@ -239,3 +239,48 @@ func TestExperimentsListBounded(t *testing.T) {
 		t.Errorf("?limit=x = %d, want 400", code)
 	}
 }
+
+// TestExperimentWithRunsButNoDefinition is UX-C-15's read half: an id
+// runs are labelled with but no definition was saved for (a replay
+// sent with an experiment_id the matrix never saved) answers a
+// synthetic document — unsaved, no variants or inputs, its runs listed
+// — never a 404; an id with neither stays a 404.
+func TestExperimentWithRunsButNoDefinition(t *testing.T) {
+	ts, db := newExperimentServer(t)
+	rec := obsdb.Batch{Records: []obsdb.Record{{
+		EventName: "weft.event", Body: `{"type":"run_start","id":"pg_9","agent":"acme"}`,
+		Attrs: map[string]any{"weft.record": "event", "weft.run.id": "pg_9", "weft.event.type": "run_start", "weft.event.pos": int64(0),
+			"weft.agent.name": "acme", "weft.playground": true, "weft.experiment.id": "ux-probe"},
+	}}}
+	if err := db.Write(t.Context(), rec); err != nil {
+		t.Fatal(err)
+	}
+	get, err := http.Get(ts.URL + "/api/experiments/ux-probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = get.Body.Close() }()
+	var doc struct {
+		ID       string            `json:"id"`
+		Unsaved  bool              `json:"unsaved"`
+		Variants []json.RawMessage `json:"variants"`
+		Inputs   []json.RawMessage `json:"inputs"`
+		RunCount int               `json:"run_count"`
+		Runs     []struct {
+			ID string `json:"id"`
+		} `json:"runs"`
+	}
+	if get.StatusCode != http.StatusOK {
+		t.Fatalf("synthetic experiment = %d, want 200", get.StatusCode)
+	}
+	if err := json.NewDecoder(get.Body).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.ID != "ux-probe" || !doc.Unsaved || doc.Variants == nil || len(doc.Variants) != 0 || doc.Inputs == nil ||
+		len(doc.Runs) != 1 || doc.Runs[0].ID != "pg_9" || doc.RunCount != 1 {
+		t.Errorf("synthetic experiment = %+v, want unsaved, [] variants and inputs, pg_9 listed", doc)
+	}
+	if resp, _ := http.Get(ts.URL + "/api/experiments/ux-nothing"); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("an id with no runs and no definition = %d, want 404", resp.StatusCode)
+	}
+}

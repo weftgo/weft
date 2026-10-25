@@ -411,9 +411,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    WEFT_STUDIO_URL, --token WEFT_STUDIO_TOKEN): weft doctor checks one; weft runs
 //    //    [--agent --since --failed --status running|succeeded|failed|interrupted|parked|cancelled --limit --json] (PROMPT and STOPPED BY columns — every cell's control characters as spaces; --json carries prompt_preview/stopped_by/cancel_cause); weft open <run id> [--open --with-token]
 //    //    (prints the bare <url>/runs/<id>; the token only to the browser or on --with-token);
-//    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./testdata --test Name
-//    //    --force] (fixtures where wefttest.Replay reads them; --force replaces, never
-//    //    merges); weft mcp [--url --token] (a stdio MCP server over these read routes, read verbs
+//    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./pkg [--fixtures-only --test Name]
+//    //    --force] (Studio's save-as-test tree: <agent>_replay_test.go + testdata/TestReplay_<run>/, a replay's
+//    //    composed with its source's kept steps; --fixtures-only the fixtures where wefttest.Replay reads them;
+//    //    --force replaces, never merges); weft mcp [--url --token] (a stdio MCP server over these read routes, read verbs
 //    //    only — runs/search/run/step/request/events/tools/diff/export/sessions/session/meta +
 //    //    explain_failure (run + step + transcript composed); every tool a GET, outputs the route's
 //    //    JSON cut at max_bytes with a note; no --url: the discovery file; it serves before a

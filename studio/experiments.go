@@ -95,6 +95,12 @@ type experimentView struct {
 	Updated time.Time `json:"updated"`
 	experimentSummary
 	Runs []runRow `json:"runs"`
+	// Unsaved marks an experiment id its runs carry with no saved
+	// definition (UX-C-15): a replay sent with an experiment_id the
+	// matrix never saved, or one whose definition is gone. The
+	// document is then synthetic — no variants, no inputs, no dates,
+	// the agent its runs name — and its runs are listed as usual.
+	Unsaved bool `json:"unsaved,omitempty"`
 }
 
 // checkExperiment refuses a definition the matrix could not have sent:
@@ -270,11 +276,25 @@ func (s *Server) serveExperiment(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	e, err := s.db.Experiment(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, obsdb.ErrNotFound) {
+	unsaved := false
+	if errors.Is(err, obsdb.ErrNotFound) {
+		// Runs labelled with the id but no definition: a synthetic
+		// one (runs only), never a 404 for an id /runs?experiment_id=
+		// lists runs under (UX-C-15).
+		page, rerr := s.db.Runs(r.Context(), obsdb.RunQuery{ExperimentID: id, Limit: 1})
+		if rerr != nil {
+			dbError(w, r, "experiment runs", id, rerr)
+			return
+		}
+		if len(page.Runs) == 0 {
 			notFound(w, r, "unknown experiment "+id)
 			return
 		}
+		e = obsdb.Experiment{ID: id, Agent: page.Runs[0].Agent,
+			Variants: []obsdb.ExperimentVariant{}, Inputs: []obsdb.ExperimentInput{}}
+		unsaved, err = true, nil
+	}
+	if err != nil {
 		dbError(w, r, "experiment", id, err)
 		return
 	}
@@ -309,6 +329,7 @@ func (s *Server) serveExperiment(w http.ResponseWriter, r *http.Request) {
 		Updated:           e.Updated,
 		experimentSummary: sum,
 		Runs:              runs,
+		Unsaved:           unsaved,
 	})
 }
 

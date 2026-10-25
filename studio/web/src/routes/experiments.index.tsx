@@ -12,22 +12,46 @@
 // run (lib/experiments.ts matchesExperiment). The
 // list is the server's cut — the most recently updated, 50 by default,
 // 200 at most — and says so when total is larger, with a load-more.
+// Beside the matrices, a replays tab (UX-C-15): every playground run —
+// the drawer's replays are the common path, and they save no matrix —
+// grouped by the run it replays (forked_from), each row its step, what
+// it changed, its engine, its outcome and the compare against its
+// source. It opens on replays when no matrix was saved.
 import { useState } from "react"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 
-import { EXPERIMENTS_MAX, EXPERIMENTS_PAGE, experimentsQuery } from "@/lib/api"
+import {
+  EXPERIMENTS_MAX,
+  EXPERIMENTS_PAGE,
+  experimentsQuery,
+  runQuery,
+} from "@/lib/api"
+import type { RunRow } from "@/lib/api"
 import { absoluteTime, relativeTime } from "@/lib/format"
 import { statusClass } from "@/lib/status-class"
 import { costView, sumCost } from "@/lib/cost"
 import {
   EXPERIMENT_CELLS,
+  REPLAY_WORDS,
   experimentEngines,
   experimentSources,
+  fetchReplays,
+  idTail,
   matchesExperiment,
   passLine,
+  replayChanges,
+  replayGroups,
 } from "@/lib/experiments"
-import { experimentLink, playgroundLink, runLink } from "@/lib/links"
+import type { ReplayGroup } from "@/lib/experiments"
+import { runEngineWords } from "@/lib/engine"
+import { statusOf } from "@/lib/status"
+import {
+  compareLink,
+  experimentLink,
+  playgroundLink,
+  runLink,
+} from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { CapsUnread } from "@/components/studio/caps-unread"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -59,7 +83,241 @@ function ExperimentsPage() {
   if (!caps.has("playground"))
     return <NoExperiments why={caps.why("playground")} />
   if (!mayReadExperiments(caps.caps)) return <ExperimentsHidden />
-  return <ExperimentList />
+  return <ExperimentTabs />
+}
+
+type Tab = "matrices" | "replays"
+
+/** ExperimentTabs is the page's two lists: the saved matrices and the
+ * replays. Without a pick it opens on matrices when one is saved, else
+ * on replays — the list a drawer replay lands in. */
+function ExperimentTabs() {
+  const [picked, setPicked] = useState<Tab | undefined>(undefined)
+  const matrices = useQuery(experimentsQuery())
+  const tab: Tab =
+    picked ??
+    (matrices.data && matrices.data.experiments.length === 0
+      ? "replays"
+      : "matrices")
+  return (
+    <div>
+      <div
+        role="tablist"
+        aria-label="experiments"
+        className="flex gap-3 px-4 pt-3 text-xs"
+      >
+        {(["matrices", "replays"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            aria-selected={tab === t}
+            className={
+              tab === t
+                ? "border-b border-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground"
+            }
+            onClick={() => setPicked(t)}
+            data-experiments-tab={t}
+          >
+            {REPLAY_WORDS.tabs[t]}
+          </button>
+        ))}
+      </div>
+      {tab === "matrices" ? <ExperimentList /> : <ReplayList />}
+    </div>
+  )
+}
+
+/** ReplayList is every playground run, grouped by its source run. */
+function ReplayList() {
+  const q = useQuery({
+    queryKey: ["experiments", "replays"],
+    queryFn: fetchReplays,
+    staleTime: 10_000,
+  })
+  const groups = q.data ? replayGroups(q.data.runs) : []
+  const n = q.data?.runs.length ?? 0
+  return (
+    <section className="space-y-3 p-4" aria-labelledby="replays-title">
+      <header className="flex flex-wrap items-baseline gap-2">
+        <h1 id="replays-title" className="text-sm font-medium">
+          Replays
+        </h1>
+        <span
+          className="text-xs text-muted-foreground"
+          title={REPLAY_WORDS.replaysHint}
+          data-replays-count
+        >
+          {n} {n === 1 ? "run" : "runs"} under {groups.length}{" "}
+          {groups.length === 1 ? "source" : "sources"}
+        </span>
+        {q.data?.truncated ? (
+          <span className="text-xs text-faint" data-replays-cut>
+            {REPLAY_WORDS.cut(n)}
+          </span>
+        ) : null}
+      </header>
+      {q.isPending ? (
+        <p className="text-xs text-muted-foreground">loading…</p>
+      ) : q.isError ? (
+        <p className="text-xs text-status-bad" role="alert">
+          the replays could not be read: {q.error.message}
+        </p>
+      ) : groups.length === 0 ? (
+        <p className="py-16 text-center text-sm text-muted-foreground">
+          {REPLAY_WORDS.noReplays}
+        </p>
+      ) : (
+        groups.map((g) => <ReplayGroupBlock key={g.source} group={g} />)
+      )}
+    </section>
+  )
+}
+
+/** ReplayGroupBlock is one source run and its replays: the source read
+ * once (its prompt and model, what a replay's changes are against). */
+function ReplayGroupBlock({ group }: { group: ReplayGroup }) {
+  const src = useQuery({ ...runQuery(group.source), enabled: !!group.source })
+  const source = src.data
+  return (
+    <div
+      className="overflow-x-auto rounded-lg border"
+      data-scroll-box=""
+      data-replay-group={group.source}
+    >
+      <div className="flex flex-wrap items-baseline gap-2 border-b px-3 py-2 text-xs">
+        {group.source ? (
+          <>
+            <span className="text-muted-foreground">source</span>
+            <Link
+              {...runLink(group.source)}
+              className="font-mono hover:underline"
+              title={group.source}
+            >
+              {group.source}
+            </Link>
+            {source ? (
+              <span className="text-muted-foreground">
+                {source.agent}
+                {source.prompt_preview ? ` · ${source.prompt_preview}` : ""}
+              </span>
+            ) : null}
+          </>
+        ) : (
+          <span className="text-muted-foreground">{REPLAY_WORDS.noSource}</span>
+        )}
+        <span className="ml-auto text-faint">
+          {group.replays.length}{" "}
+          {group.replays.length === 1 ? "replay" : "replays"}
+        </span>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>replay</TableHead>
+            <TableHead>step</TableHead>
+            <TableHead>changed</TableHead>
+            <TableHead>engine</TableHead>
+            <TableHead>outcome</TableHead>
+            <TableHead>started</TableHead>
+            <TableHead>compare</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {group.replays.map(({ run, fromStep }) => (
+            <ReplayRow
+              key={run.id}
+              run={run}
+              fromStep={fromStep}
+              source={group.source}
+              sourceRow={source}
+            />
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+function ReplayRow({
+  run,
+  fromStep,
+  source,
+  sourceRow,
+}: {
+  run: RunRow
+  fromStep: number
+  source: string
+  sourceRow?: RunRow
+}) {
+  const s = statusOf(run)
+  const changes = replayChanges(run, sourceRow)
+  return (
+    <TableRow data-replay-row={run.id}>
+      <TableCell>
+        <Link
+          {...runLink(run.id)}
+          className="font-mono text-xs hover:underline"
+          title={run.id}
+          aria-label={run.id}
+        >
+          {idTail(run.id)}
+        </Link>
+        {run.experiment_id ? (
+          <Link
+            {...experimentLink(run.experiment_id)}
+            className="ml-2 text-xs text-faint hover:underline"
+          >
+            {run.experiment_id}
+          </Link>
+        ) : null}
+      </TableCell>
+      <TableCell className="font-mono text-xs" data-replay-step>
+        {source ? REPLAY_WORDS.fromStep(fromStep) : "—"}
+      </TableCell>
+      <TableCell className="text-xs" data-replay-changes>
+        {changes.length ? (
+          changes.map((c) => (
+            <span
+              key={c}
+              className="mr-1 rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+            >
+              {c}
+            </span>
+          ))
+        ) : (
+          <span className="text-faint">—</span>
+        )}
+      </TableCell>
+      <TableCell className="font-mono text-xs" data-replay-engine>
+        {runEngineWords(run)}
+      </TableCell>
+      <TableCell className="text-xs" data-replay-outcome={s.key}>
+        <span className={statusClass(s.role).text} title={s.hint}>
+          {s.word}
+        </span>
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">
+        <span title={absoluteTime(run.started)}>
+          {relativeTime(run.started)}
+        </span>
+      </TableCell>
+      <TableCell className="text-xs">
+        {source ? (
+          <Link
+            {...compareLink(source, [run.id], fromStep || undefined)}
+            className="hover:underline"
+            data-replay-compare
+          >
+            {REPLAY_WORDS.compare}
+          </Link>
+        ) : (
+          <span className="text-faint">—</span>
+        )}
+      </TableCell>
+    </TableRow>
+  )
 }
 
 /** The runs cell's dash when the row carries no run_count (a Studio

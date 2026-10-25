@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -209,6 +210,42 @@ func TestSaveAsTestPasses(t *testing.T) {
 		t.Errorf("r_steer's skeleton does not steer:\n%s", s)
 	}
 
+	// UX-C-30: a replay of r_src from step 1 recorded only its fresh
+	// step; its save as test composes the source's step-0 fixture (the
+	// kept prefix, byte for byte) with its own, renumbered, so the test
+	// replays the turn from its start — and passes under go test.
+	recordDiffRun(t, ts.URL, "r_src", "unused", 1, nil)
+	recordReplayOf(t, ts.URL, "r_src", "pg_replay")
+	waitRun(t, ts, "r_src", 2, "")
+	resp, rep := exportGet(t, ts, "/api/runs/pg_replay/export?format=wefttest", settledRun(1))
+	if h := resp.Header.Get(keptPrefixHeader); h != "r_src#1" {
+		t.Errorf("%s = %q, want r_src#1", keptPrefixHeader, h)
+	}
+	repFiles := unzipTo(t, rep, filepath.Join(mod, "replay"))
+	_, src := exportGet(t, ts, "/api/runs/r_src/export?format=wefttest", settledRun(2))
+	srcFiles := unzipTo(t, src, filepath.Join(t.TempDir(), "src"))
+	var repFx, srcFx []string
+	for name := range repFiles {
+		if strings.HasPrefix(name, "testdata/TestReplay_pg_replay/") {
+			repFx = append(repFx, strings.TrimPrefix(name, "testdata/TestReplay_pg_replay/"))
+		}
+	}
+	for name := range srcFiles {
+		if strings.HasPrefix(name, "testdata/TestReplay_r_src/") {
+			srcFx = append(srcFx, strings.TrimPrefix(name, "testdata/TestReplay_r_src/"))
+		}
+	}
+	slices.Sort(repFx)
+	slices.Sort(srcFx)
+	if len(repFx) != 2 || len(srcFx) != 2 || repFx[0] != srcFx[0] || !strings.HasPrefix(repFx[1], "00002-") ||
+		repFiles["testdata/TestReplay_pg_replay/"+repFx[0]] != srcFiles["testdata/TestReplay_r_src/"+srcFx[0]] {
+		t.Errorf("replay fixtures = %v (source %v), want the source's 00001 verbatim, then the replay's own as 00002", repFx, srcFx)
+	}
+	if s := repFiles["orders_replay_test.go"]; !strings.Contains(s, "// Replay of:   \"r_src\" from step 1 — steps 0–0 are the source's fixtures") ||
+		!strings.Contains(s, `weft.Prompt("look up orders 0 to 3")`) {
+		t.Errorf("the replay's skeleton does not replay from the source's start:\n%s", s)
+	}
+
 	goTest := func(pkgs ...string) (string, error) {
 		cmd := exec.Command(gobin, append([]string{"test", "-count=1"}, pkgs...)...)
 		cmd.Dir = mod
@@ -218,12 +255,12 @@ func TestSaveAsTestPasses(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
-	out, err := goTest("./fx", "./req", "./dup", "./steer")
+	out, err := goTest("./fx", "./req", "./dup", "./steer", "./replay")
 	if err != nil {
 		t.Fatalf("go test on the extracted skeletons: %v\n%s", err, out)
 	}
-	if strings.Count(out, "ok  \tsavetest.example/") != 4 {
-		t.Errorf("go test ran %q, want the four packages ok", out)
+	if strings.Count(out, "ok  \tsavetest.example/") != 5 {
+		t.Errorf("go test ran %q, want the five packages ok", out)
 	}
 	if out, err := goTest("./neg"); err == nil || !strings.Contains(out, "no replay fixture for this request") {
 		t.Errorf("a changed prompt's replay = %v\n%s\nwant a failure naming the missing fixture", err, out)
@@ -388,7 +425,7 @@ func TestSaveAsTestStringLiterals(t *testing.T) {
 func TestReplayPackageKeyword(t *testing.T) {
 	for agent, want := range map[string]string{
 		"func": "replay_func", "type": "replay_type", "go": "replay_go", "Select": "replay_select",
-		"orders": "orders", "": "replay", "9lives": "replay_9lives", "_x": "replay__x",
+		"orders": "orders", "": "run", "9lives": "replay_9lives", "_x": "replay__x",
 	} {
 		if got := replayPackage(agent); got != want {
 			t.Errorf("replayPackage(%q) = %q, want %q", agent, got, want)

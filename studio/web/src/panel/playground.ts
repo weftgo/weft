@@ -25,7 +25,7 @@ import type { LiveRecord } from "../lib/live"
 import type { ReplayDraft, ReplayVerb } from "../lib/replay"
 import { REPLAY_WORDS } from "../lib/replay"
 import type { HoleMark } from "../lib/honesty"
-import { targetCheck } from "../lib/target"
+import { recordedToolsOf, targetCheck } from "../lib/target"
 import type { CommandReason, TargetCheck } from "../lib/target"
 import type { DiffDoc } from "../lib/stepdiff"
 import type { CommandStatus, RuntimeView } from "./client"
@@ -81,8 +81,8 @@ export interface ExperimentDraft {
   sourceAgent?: string
   recordedHash?: string
   recordedTools?: string[] | null
-  crossOk?: boolean
-  buildOk?: boolean
+  /** The key the reader took the target check's escape for. */
+  escaped?: string
   /** The option lab's knobs (plan F3; absent: every knob at the
    * agent's default) and the defaults it greys, as registered. */
   lab?: LabFields
@@ -354,9 +354,6 @@ export function buildRunBody(
   if (draft.step > 0 && draft.edits.length)
     body.transcript_edits = wireEdits(draft.edits)
   if (publicId) body.public_id = publicId
-  // Held until the reader said "replay as <agent> anyway" (targetFor).
-  if (draft.sourceAgent && draft.agent !== draft.sourceAgent)
-    body.cross_agent = true
   return body
 }
 
@@ -377,10 +374,11 @@ export function targetFor(
     agent,
     missing: agent ? "" : d.agent,
     recordedHash: d.recordedHash,
-    recordedTools: pv?.was_sent.tools?.map((t) => t.name) ?? d.recordedTools,
+    recordedTools: recordedToolsOf(pv) ?? d.recordedTools,
     keyMatch: pv?.scripted_key_match,
-    crossOk: d.crossOk,
-    buildOk: d.buildOk,
+    at: `${d.runId}#${d.step}`,
+    runtime: d.runtimeId,
+    escaped: d.escaped,
   })
 }
 

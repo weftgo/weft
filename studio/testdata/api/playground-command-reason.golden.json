@@ -11,7 +11,7 @@
       "tools",
       "messages"
     ],
-    "message": "scripted has no recorded answer for step 2: the tool list differs from the recording; the messages differ from the recording (a changed input or tool result) — re-run on engine live"
+    "message": "scripted has no recorded answer for step 2: the tool list differs from the recording; the messages differ from the recording (a changed input or tool result) — run on live"
   },
   "created": "(time)",
   "updated": "(time)"

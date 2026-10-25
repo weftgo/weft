@@ -510,7 +510,7 @@ describe("a child replays as its own run (A10)", () => {
     // U18.2: the drawer opens and asks for the agent (lib/target.ts),
     // never a stand-in; Run is held.
     expect(text(el, '[data-target-held="unregistered"]')).toBe(
-      TARGET_WORDS.unregistered("researcher")
+      TARGET_WORDS.cross("researcher", "")
     )
     expect(all(el, "[data-target-option]").length).toBeGreaterThan(0)
     expect($(el, ".weft-run-btn")!.hasAttribute("disabled")).toBe(true)

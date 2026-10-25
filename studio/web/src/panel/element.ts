@@ -189,7 +189,14 @@ import {
   targetFor,
   turnPromptOf,
 } from "./playground"
-import { agentOptions, missOf, outcomeWord, TARGET_WORDS } from "../lib/target"
+import {
+  agentOptions,
+  exhaustedOf,
+  MISS_FROM_ZERO,
+  missOf,
+  outcomeWord,
+  TARGET_WORDS,
+} from "../lib/target"
 import {
   BREAKPOINTS_MOVED,
   DRAWER_TITLES,
@@ -695,6 +702,13 @@ interface OpenState {
   keys: Set<string>
   scope: string
 }
+
+/** clickBtn is a weft-btn button with its click handler. */
+const clickBtn = (
+  t: string,
+  f: () => unknown,
+  attrs?: Record<string, string>
+): HTMLElement => on(el("button", "weft-btn", t, attrs), "click", f)
 
 export class WeftDevtools extends HTMLElement {
   constructor() {
@@ -3087,12 +3101,12 @@ export class WeftDevtools extends HTMLElement {
     })
     on(lay, "click", () => this.cycle())
     h.append(lay, this.themeButton())
-    const close = el("button", "weft-btn", "–", {
-      title: "collapse (Alt+W)",
-      "aria-label": "collapse",
-    })
-    on(close, "click", () => this.toggle())
-    h.append(close)
+    h.append(
+      clickBtn("–", () => this.toggle(), {
+        title: "collapse (Alt+W)",
+        "aria-label": "collapse",
+      })
+    )
     return h
   }
 
@@ -3500,12 +3514,12 @@ export class WeftDevtools extends HTMLElement {
       ),
       el("span", "weft-grow"),
     ])
-    const close = el("button", "weft-btn", "–", {
-      title: "close the drawer",
-      "aria-label": "close the drawer",
-    })
-    on(close, "click", () => this.closeDrawer())
-    head.append(close)
+    head.append(
+      clickBtn("–", () => this.closeDrawer(), {
+        title: "close the drawer",
+        "aria-label": "close the drawer",
+      })
+    )
     card.append(head)
     const root = el("div", "weft-step-b")
     // The verb that opened it (plan F1): Studio's replay drawer title.
@@ -3531,21 +3545,19 @@ export class WeftDevtools extends HTMLElement {
     const tc = targetFor(d, s.runtimes, s.preview?.doc)
     const tg = sec("target")
     tg.append(targetLine(d.agent || "?", agent && rt))
-    for (const [t, k] of [
-      [tc.build && `! ${tc.build}`, "build"],
-      [tc.kind != "build" && tc.held, "held"],
-    ] as const)
-      if (t)
-        tg.append(
-          el("div", `weft-note${tc.held ? " weft-warn" : ""}`, t, {
-            [`data-target-${k}`]: tc.kind,
-          })
-        )
-    const pick = (t: string, k: string, v: string, f: () => void) => {
-      const b = el("button", "weft-btn", t, { [`data-target-${k}`]: v })
-      on(b, "click", f)
-      tg.append(b)
-    }
+    // One note: the build line, else why Run is held.
+    const tn = tc.build ? `! ${tc.build}` : tc.held
+    if (tn)
+      tg.append(
+        el("div", `weft-note${tc.held ? " weft-warn" : ""}`, tn, {
+          role: "status",
+          [`data-target-${tc.build ? "build" : "held"}`]: tc.kind,
+        })
+      )
+    const g = el("div", "", "", { role: "group", "aria-label": "target" })
+    tg.append(g)
+    const pick = (t: string, k: string, v: string, f: () => void) =>
+      g.append(clickBtn(t, f, { [`data-target-${k}`]: v }))
     if (/^(un|cr)/.test(tc.kind))
       for (const o of agentOptions(s.runtimes, d.recordedTools))
         pick(o.label, "option", o.agent, () =>
@@ -3553,9 +3565,7 @@ export class WeftDevtools extends HTMLElement {
         )
     if (tc.escape)
       pick(tc.escape, "escape", tc.kind, () =>
-        this.model?.setDraft(
-          tc.kind == "build" ? { buildOk: true } : { crossOk: true }
-        )
+        this.model?.setDraft({ escaped: tc.key })
       )
     // The engine (lib/engine.ts): two radios, one line each; scripted
     // disabled with its reason when it cannot answer; a pick is never
@@ -4059,9 +4069,7 @@ export class WeftDevtools extends HTMLElement {
     id: string,
     attrs?: Record<string, string>
   ): HTMLElement {
-    const go = el("button", "weft-btn", label, attrs)
-    on(go, "click", () => this.go(this.model?.select(id, true)))
-    return go
+    return clickBtn(label, () => this.go(this.model?.select(id, true)), attrs)
   }
 
   /** tabs is the turn view's tablist (D4): ARIA tabs, one tab stop,
@@ -4575,12 +4583,16 @@ export class WeftDevtools extends HTMLElement {
     const t = s.turn
     if (!t) return el("div")
     const row = el("div", "weft-actions")
-    const experiment = el("button", "weft-btn", "✎ Experiment", {
-      title:
-        "open the experiment drawer, pre-filled from the registered config",
-    })
-    on(experiment, "click", () => this.go(this.model?.openExperiment(t.id, 0)))
-    row.append(experiment)
+    row.append(
+      clickBtn(
+        "✎ Experiment",
+        () => this.go(this.model?.openExperiment(t.id, 0)),
+        {
+          title:
+            "open the experiment drawer, pre-filled from the registered config",
+        }
+      )
+    )
     const again = el("button", "weft-btn", "↻ Re-run", {
       title:
         "re-run the whole turn from step 0: the drawer keeps its prompt, tools and model, drops transcript edits — Run after the ack",
@@ -5287,27 +5299,49 @@ export class WeftDevtools extends HTMLElement {
     for (const ev of ["pointerdown", "focus", "click", "contextmenu"])
       on(compare, ev, (_, a) => link(a))
     head.append(compare)
-    const discard = el("button", "weft-btn", "discard", {
-      title: "clear the result pane",
-    })
-    on(discard, "click", () => this.model?.discardResult())
-    head.append(discard)
+    head.append(
+      clickBtn("discard", () => this.model?.discardResult(), {
+        title: "clear the result pane",
+      })
+    )
     card.append(head)
     const body = el("div", "weft-step-b")
     // A scripted miss: the server's sentence and "run again on live" —
     // the drawer back on live with its estimate, never a retry.
-    const miss = r.state == "finished" && missOf(r)
-    if (miss) {
-      const m = el("div", "weft-note weft-warn", miss, {
+    // A scripted miss (the server's sentence) and its ways on, or a
+    // wefttest script's exhaustion (UX-C-09).
+    const miss = missOf(r)
+    const gone = exhaustedOf(r)
+    if (miss || gone) {
+      const m = el("div", "weft-note weft-warn", miss || gone, {
         "data-weft-miss": "",
       })
-      if (s.drawer) {
-        const b = el("button", "weft-btn", TARGET_WORDS.again, {
-          "data-weft-live-again": "",
-        })
-        on(b, "click", () => this.model?.setDraft({ engine: "live" }))
-        m.append(" ", b)
-      }
+      // "run again on live" acts on this result's source: its drawer
+      // when open, else that drawer reopened (UX-C-07's step 0 too).
+      const dr = s.drawer
+      const mine = dr?.runId == r.sourceRunID && dr
+      const usd = mine && engineFor(mine, s.preview?.doc).live.usd
+      const live = () => this.model?.setDraft({ engine: "live" })
+      if (miss)
+        for (const v of [1, 0]) {
+          m.append(
+            " ",
+            clickBtn(
+              v
+                ? TARGET_WORDS.again + (usd ? ` (${usd})` : "")
+                : MISS_FROM_ZERO,
+              () =>
+                mine && v
+                  ? live()
+                  : void this.model
+                      ?.openExperiment(r.sourceRunID, v && r.fromStep, {
+                        under: r.under,
+                      })
+                      .then(() => v && live()),
+              { "data-weft-miss-verb": v ? "live" : "zero" }
+            )
+          )
+        }
       body.append(m)
     } else if (r.error) body.append(el("div", "weft-note weft-warn", r.error))
     // The link back (plan F1): the new run, the source step it replays.

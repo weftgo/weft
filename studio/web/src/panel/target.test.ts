@@ -14,13 +14,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { AgentView } from "./client"
 import type { RunRow } from "../lib/api"
 import { STATUS } from "../lib/status"
-import { TARGET_WORDS } from "../lib/target"
+import { MISS_FROM_ZERO, TARGET_WORDS, sourceUnread } from "../lib/target"
 import { replayFromStep } from "../lib/replay"
 import type { ReplayDraft } from "../lib/replay"
 import { ReplayDrawer } from "../components/studio/replay-drawer"
 import { stubBrowser } from "../test/app"
 import { renderWithRouter } from "../test/render"
-import { FakeStudio, golden } from "../test/fake-studio"
+import { apiError, FakeStudio, golden } from "../test/fake-studio"
+import { buildRunBody } from "./playground"
+import type { ExperimentDraft } from "./playground"
 import * as RK from "./replaykit"
 import {
   $,
@@ -49,7 +51,7 @@ const other: AgentView = {
 }
 
 const MISS =
-  "scripted has no recorded answer for step 2: the tool list differs from the recording — re-run on engine live"
+  "scripted has no recorded answer for step 2: the tool list differs from the recording — run on live"
 const missed = {
   command_id: "cmd_1",
   state: "finished",
@@ -67,17 +69,15 @@ const missed = {
   updated: T0,
 }
 
-/** The unnamed source's ask, naming the tools its step recorded. */
-const RECORDED_UNNAMED = TARGET_WORDS.unnamed([
-  "lookup_order",
-  "refund",
-  "search_kb",
-])
+/** The unnamed source's ask. */
+const RECORDED_UNNAMED = TARGET_WORDS.unnamed
 
 type Fx = {
   row?: Partial<RunRow>
   agents?: AgentView[]
   command?: unknown
+  /** The source row's read fails (Studio's drawer). */
+  rowError?: boolean
 }
 
 /** Studio's replay drawer over the fixture. */
@@ -88,12 +88,17 @@ async function studio(draft: ReplayDraft, fx: Fx = {}) {
       ...golden<Record<string, unknown>>("meta"),
       capabilities: ["playground", "steps"],
     })
-    .on(`GET runs/${RK.RUN}`, {
-      ...RK.runRowOf(fx.row),
-      children: [],
-      holes: [],
-      compactions: [],
-    })
+    .on(
+      `GET runs/${RK.RUN}`,
+      fx.rowError
+        ? () => apiError(500, "internal", "db down")
+        : {
+            ...RK.runRowOf(fx.row),
+            children: [],
+            holes: [],
+            compactions: [],
+          }
+    )
     .on(`GET runs/${RK.RUN}/transcript`, transcript(...RK.bodies))
     .on(`GET runs/${RK.RUN}/steps/2`, {
       ...golden<Record<string, unknown>>("step-0"),
@@ -146,13 +151,17 @@ async function panel(draft: ReplayDraft, fx: Fx = {}) {
   const el = await mount()
   const model = (
     el as unknown as {
-      model: { openExperiment: (id: string, d: ReplayDraft) => Promise<void> }
+      model: {
+        openExperiment: (id: string, d: ReplayDraft) => Promise<void>
+        closeExperiment: () => void
+        state: { drawer: ExperimentDraft | null }
+      }
     }
   ).model
   await model.openExperiment(RK.RUN, draft)
   await settle(60)
   const run = () => $(el, ".weft-drawer [data-run-engine]") as HTMLButtonElement
-  return { fake, el, run }
+  return { fake, el, run, model }
 }
 
 describe("a source that names no agent asks for one (UX-C-02)", () => {
@@ -219,7 +228,7 @@ describe("a source agent nobody registers: pick, then 'replay as <agent> anyway'
   it("Studio: held, picked, held again with both names, released by the escape; the body sends cross_agent", async () => {
     const s = await studio(replayFromStep(2), fx)
     expect((await s.q('[data-target-held="unregistered"]')).textContent).toBe(
-      TARGET_WORDS.unregistered("orders")
+      TARGET_WORDS.cross("orders", "")
     )
     fireEvent.click(await s.q('[data-target-option="analyst"]'))
     expect((await s.q('[data-target-held="cross_agent"]')).textContent).toBe(
@@ -243,7 +252,7 @@ describe("a source agent nobody registers: pick, then 'replay as <agent> anyway'
   it("panel: the same holds, the same escape, the same body", async () => {
     const p = await panel(replayFromStep(2), fx)
     expect(text(p.el, '[data-target-held="unregistered"]')).toBe(
-      TARGET_WORDS.unregistered("orders")
+      TARGET_WORDS.cross("orders", "")
     )
     ;($(p.el, '[data-target-option="analyst"]') as HTMLElement).click()
     await settle(60)
@@ -273,9 +282,11 @@ describe("a scripted miss after Run (UX-D-03, UX-C-07)", () => {
     const out = await s.q('[data-replay-state="finished"]')
     await waitFor(() => expect(out.textContent).toContain(STATUS.failed.word))
     expect(out.textContent).not.toContain("finished")
-    expect((await s.q("[data-replay-miss]")).textContent).toBe(
-      `${MISS} ${TARGET_WORDS.again}`
-    )
+    // The server's sentence and the ways on (UX-C-07): live with its
+    // estimate, from step 0 with the recorded agent.
+    const line = (await s.q("[data-replay-miss]")).textContent
+    expect(line.startsWith(`${MISS} · ${TARGET_WORDS.again}`)).toBe(true)
+    expect(line).toContain(MISS_FROM_ZERO)
     fireEvent.click(await s.q("[data-replay-live-again]"))
     await waitFor(() =>
       expect(s.run().getAttribute("data-run-engine")).toBe("live")
@@ -292,11 +303,100 @@ describe("a scripted miss after Run (UX-D-03, UX-C-07)", () => {
       `· ${STATUS.failed.word}`
     )
     expect(text(p.el, ".weft-xres .weft-step-h")).not.toContain("finished")
-    expect(text(p.el, "[data-weft-miss]")).toBe(`${MISS} ${TARGET_WORDS.again}`)
-    ;($(p.el, "[data-weft-live-again]") as HTMLElement).click()
+    expect(text(p.el, "[data-weft-miss]")).toBe(
+      `${MISS} ${TARGET_WORDS.again} ${MISS_FROM_ZERO}`
+    )
+    ;($(p.el, '[data-weft-miss-verb="live"]') as HTMLElement).click()
     await settle(60)
     expect(p.run().getAttribute("data-run-engine")).toBe("live")
     expect(p.run().textContent).toMatch(/^Run live on /)
+    expect(p.fake.posts("playground/runs")).toHaveLength(1)
+  })
+})
+
+// U18.2-fix: an escape holds for the target it was taken for; a source
+// row that is not read holds Run; the panel's body sends cross_agent
+// only after a release; "run again on live" acts on its own source.
+describe("the target check's escapes and holds (U18.2-fix)", () => {
+  const fx: Fx = { row: { agent: "orders" } }
+
+  it("Studio: a new pick after the escape is held again; Run names the held line; the picker is a labelled group", async () => {
+    const s = await studio(replayFromStep(2), fx)
+    fireEvent.click(await s.q('[data-target-option="analyst"]'))
+    fireEvent.click(await s.q('[data-target-escape="cross_agent"]'))
+    await waitFor(() => expect(s.run().disabled).toBe(false))
+    fireEvent.click(await s.q('[data-target-option="acme-support"]'))
+    const held = await s.q('[data-target-held="cross_agent"]')
+    expect(held.textContent).toBe(TARGET_WORDS.cross("orders", "acme-support"))
+    expect(s.run().disabled).toBe(true)
+    expect(s.run().getAttribute("aria-describedby")).toBe(held.id)
+    const group = await s.q("[data-target-picker]")
+    expect(group.getAttribute("role")).toBe("group")
+    const label = group.getAttribute("aria-labelledby")!
+    expect(s.container.querySelector(`[id="${label}"]`)?.textContent).toContain(
+      "pick the agent"
+    )
+  })
+
+  it("Studio: a source row that cannot be read holds Run with why, never a stand-in", async () => {
+    const s = await studio(replayFromStep(2), { rowError: true })
+    await waitFor(() =>
+      expect(
+        s.container.querySelector("[data-replay-blocked]")?.textContent
+      ).toContain(sourceUnread("x").split("(")[0])
+    )
+    expect(s.run().disabled).toBe(true)
+    expect(s.fake.calls("POST playground/runs")).toHaveLength(0)
+  })
+
+  it("panel: a new pick after the escape is held again; the notes are status, the options a group", async () => {
+    const p = await panel(replayFromStep(2), fx)
+    ;($(p.el, '[data-target-option="analyst"]') as HTMLElement).click()
+    await settle(60)
+    ;($(p.el, '[data-target-escape="cross_agent"]') as HTMLElement).click()
+    await settle(60)
+    expect(p.run().hasAttribute("disabled")).toBe(false)
+    ;($(p.el, '[data-target-option="acme-support"]') as HTMLElement).click()
+    await settle(60)
+    const held = $(p.el, '[data-target-held="cross_agent"]')!
+    expect(held.getAttribute("role")).toBe("status")
+    expect(p.run().hasAttribute("disabled")).toBe(true)
+    expect(
+      $(p.el, "[data-target-option]")!.parentElement!.getAttribute("role")
+    ).toBe("group")
+  })
+
+  it("panel: the body sends cross_agent only once released for this very target, never the preview's", async () => {
+    const p = await panel(replayFromStep(2), fx)
+    ;($(p.el, '[data-target-option="analyst"]') as HTMLElement).click()
+    await settle(400)
+    const before = p.fake.posts("playground/preview").at(-1)?.body as
+      Record<string, unknown> | undefined
+    expect(before?.cross_agent).toBeUndefined()
+    ;($(p.el, '[data-target-escape="cross_agent"]') as HTMLElement).click()
+    await settle(400)
+    for (const c of p.fake.posts("playground/preview"))
+      expect((c.body as Record<string, unknown>).cross_agent).toBeUndefined()
+    // The panel's own body builder knows no escape: the post adds it.
+    expect(buildRunBody(p.model.state.drawer!, "").cross_agent).toBeUndefined()
+    p.run().click()
+    await settle(60)
+    expect(p.fake.posts("playground/runs")[0].body).toMatchObject({
+      agent: "analyst",
+      cross_agent: true,
+    })
+  })
+
+  it("panel: 'run again on live' with the drawer closed reopens this source's drawer on live", async () => {
+    const p = await panel(replayFromStep(2), { command: missed })
+    p.run().click()
+    await settle(200)
+    p.model.closeExperiment()
+    await settle(60)
+    ;($(p.el, '[data-weft-miss-verb="live"]') as HTMLElement).click()
+    await settle(200)
+    expect(p.model.state.drawer?.runId).toBe(RK.RUN)
+    expect(p.model.state.drawer?.engine).toBe("live")
     expect(p.fake.posts("playground/runs")).toHaveLength(1)
   })
 })

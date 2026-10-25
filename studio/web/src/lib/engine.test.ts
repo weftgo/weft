@@ -122,7 +122,7 @@ describe("engineChoice", () => {
     )
     // The preview's key check (U18.1): the server's sentence, verbatim.
     const msg =
-      "scripted has no recorded answer for step 2: the tool list differs from the recording — re-run on engine live"
+      "scripted has no recorded answer for step 2: the tool list differs from the recording — run on live"
     expect(
       why({
         keyMatch: {

@@ -28,7 +28,7 @@ func TestReasonOfReadsEveryMissShape(t *testing.T) {
 			t.Errorf("ReasonOf(%q) = %+v, want nil", text, r)
 		}
 	}
-	if got := ScriptedMissReason(-1, []string{"unanswered"}).Message; got != "scripted has no recorded answer for this request: the source never answered it — re-run on engine live" {
+	if got := ScriptedMissReason(-1, []string{"unanswered"}).Message; got != "scripted has no recorded answer for this request: the source never answered it — run on live, or replay from an earlier step" {
 		t.Errorf("no-step sentence = %q", got)
 	}
 }

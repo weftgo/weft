@@ -45,7 +45,7 @@ import {
   useNavigate,
   useSearch,
 } from "@tanstack/react-router"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import type { Dispatch, SetStateAction } from "react"
 
 import {
@@ -118,20 +118,21 @@ import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
 import {
   ExperimentForm,
-  MissLine,
-  TargetCheckBlock,
   useEngineContext,
   StepPicker,
   useSourceEditFields,
 } from "@/components/studio/experiment-form"
 import { EditList, usePreview } from "@/components/studio/transcript-editor"
+import { MissLine, TargetCheckBlock } from "@/components/studio/target-check"
 import {
   agentOptions,
+  crossAgentOf,
   exhaustedOf,
   missOf,
   optionValue,
   outcomeWord,
   recordedToolsOf,
+  sourceUnread,
   targetCheck,
 } from "@/lib/target"
 import { mayReadExperiments } from "@/components/studio/no-experiments"
@@ -731,8 +732,9 @@ function Playground({ caps }: { caps: string[] }) {
   const runtime = target.runtime
   const agent = target.agent
   // The reader's escapes from the target check (lib/target.ts).
-  const [crossOk, setCrossOk] = useState(false)
-  const [buildOk, setBuildOk] = useState(false)
+  // The key the reader took the target check's escape for: another
+  // source, step, runtime or agent since is no escape (U18.2-fix).
+  const [escaped, setEscaped] = useState("")
   // The source row decides the agent: hold the verbs until it is read.
   const resolving = Boolean(sourceRunID) && !agentChoice && source.isFetching
 
@@ -1093,9 +1095,32 @@ function Playground({ caps }: { caps: string[] }) {
     recordedHash: sourceRow?.manifest_hash,
     recordedTools,
     keyMatch,
-    crossOk,
-    buildOk,
+    at: `${src}#${fromStep}`,
+    runtime: runtime?.id,
+    escaped,
   })
+  const crossAgent = crossAgentOf(check, escaped)
+  // A source set but unread (or its read failed) names no agent yet:
+  // Run waits, never a stand-in (U18.2-fix).
+  const sourceHold =
+    src && !sourceRow
+      ? sourceUnread(source.isError ? source.error.message : undefined)
+      : ""
+  // The preview's answer decides the engine and the target check: Run
+  // waits for it, and its refusal holds Run (UX-D-03).
+  const previewHold = previewBody
+    ? preview.refused
+      ? (preview.error ?? "the preview refused the command")
+      : preview.pending
+        ? "previewing…"
+        : ""
+    : ""
+  const heldID = useId()
+  const runHeld = check.held || sourceHold || previewHold
+  // The recorded agent, registered: the miss line's "from step 0".
+  const recordedHere = all.some((r) =>
+    r.agents.some((a) => !!sourceRow?.agent && a.name === sourceRow.agent)
+  )
   const picker =
     check.kind === "unnamed" ||
     check.kind === "unregistered" ||
@@ -1157,7 +1182,7 @@ function Playground({ caps }: { caps: string[] }) {
       setError(e instanceof Error ? e.message : String(e))
       return
     }
-    if (check.kind === "cross_agent") body.cross_agent = true
+    if (crossAgent) body.cross_agent = true
     setBusy(true)
     try {
       const out = await postPlaygroundRun(body)
@@ -1194,7 +1219,7 @@ function Playground({ caps }: { caps: string[] }) {
   ) => {
     setError("")
     // The target check holds the matrix as it holds Run (UX-C-03).
-    if (!runtime || !agent || busy || check.held) return
+    if (!runtime || !agent || busy || runHeld) return
     if (!validExperimentID(experimentID)) {
       setError(
         `experiment id ${experimentID} breaks the rule [A-Za-z0-9._:-]{1,128}`
@@ -1233,7 +1258,7 @@ function Playground({ caps }: { caps: string[] }) {
               // The cell's address rides its command id: the
               // experiment page places the run by it (plan F5).
               cellCommandID(v.key, i.key, v.sideEffects),
-              check.kind === "cross_agent"
+              crossAgent
             ),
           })
       // The whole command (F5.1): the modes per variant, the step and
@@ -1407,6 +1432,16 @@ function Playground({ caps }: { caps: string[] }) {
                     {restored.text}
                   </p>
                 ) : null}
+                {sourceHold || (previewHold && !preview.pending) ? (
+                  <p
+                    id={check.held ? undefined : heldID}
+                    className="text-xs text-status-bad"
+                    role="alert"
+                    data-run-held
+                  >
+                    {sourceHold || previewHold}
+                  </p>
+                ) : null}
                 {check.kind ? (
                   <section className="space-y-1 text-xs" data-target-check>
                     <TargetCheckBlock
@@ -1421,17 +1456,14 @@ function Playground({ caps }: { caps: string[] }) {
                             })
                           : undefined
                       }
+                      recorded={recordedTools}
+                      heldID={heldID}
                       onPick={(o) => {
                         setRuntimeChoice(o.runtime)
                         setAgentChoice(o.agent)
-                        setCrossOk(false)
                         write({ runtime: o.runtime, agent: o.agent })
                       }}
-                      onEscape={() =>
-                        check.kind === "build"
-                          ? setBuildOk(true)
-                          : setCrossOk(true)
-                      }
+                      onEscape={() => setEscaped(check.key)}
                     />
                   </section>
                 ) : null}
@@ -1608,13 +1640,14 @@ function Playground({ caps }: { caps: string[] }) {
                       !agent ||
                       busy ||
                       resolving ||
-                      !!check.held ||
+                      !!runHeld ||
                       orphans.length > 0 ||
                       !!heldEdits ||
                       !!engineRefused ||
                       labProblems(variant, agent).length > 0
                     }
                     data-run-engine={engineOf(choice, variant.engine)}
+                    aria-describedby={runHeld ? heldID : undefined}
                   >
                     {busy
                       ? "sending…"
@@ -1686,6 +1719,21 @@ function Playground({ caps }: { caps: string[] }) {
                             )
                             if (i === 0) write({ engine: "live" })
                           }}
+                          estimate={choice.live.usd}
+                          onFromZero={
+                            recordedHere
+                              ? () => {
+                                  setAgentChoice("")
+                                  setFromStep(0)
+                                  write({ agent: "", step: 0 })
+                                }
+                              : undefined
+                          }
+                          onSave={
+                            caps.includes("export") && sourceRunID
+                              ? () => void saveTest(sourceRunID)
+                              : undefined
+                          }
                         />
                       ))}
                     </div>
@@ -1706,7 +1754,7 @@ function Playground({ caps }: { caps: string[] }) {
                   savedID={matrixID}
                   fromStep={sourceRunID ? fromStep : 0}
                   runMatrix={runMatrix}
-                  busy={busy || resolving || !runtime || !agent || !!check.held}
+                  busy={busy || resolving || !runtime || !agent || !!runHeld}
                   mayRun={mayRun}
                   issuing={busy}
                   cells={cells}
@@ -1932,6 +1980,9 @@ function ResultCard({
   live,
   decide,
   onLive,
+  estimate,
+  onFromZero,
+  onSave,
 }: {
   experiment: Experiment
   onUpdate: Dispatch<SetStateAction<Experiment | null>>
@@ -1956,6 +2007,10 @@ function ResultCard({
   /** "run again on live" after a scripted miss: the variant on live
    * (its Run then names the estimate), never a retry by itself. */
   onLive?: () => void
+  /** The live estimate and the miss line's other ways on (UX-C-07). */
+  estimate?: string
+  onFromZero?: () => void
+  onSave?: () => void
 }) {
   const [transcriptText, setTranscriptText] = useState<string | null>(null)
   const [steerText, setSteerText] = useState("")
@@ -2094,7 +2149,10 @@ function ResultCard({
           <MissLine
             text={missOf(experiment) || exhaustedOf(experiment)}
             again={!!missOf(experiment)}
+            estimate={estimate}
             onLive={onLive}
+            onFromZero={onFromZero}
+            onSave={onSave}
           />
         ) : experiment.error ? (
           <p className="text-destructive">{experiment.error}</p>

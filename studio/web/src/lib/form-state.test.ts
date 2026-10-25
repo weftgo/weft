@@ -341,7 +341,9 @@ describe("a saved experiment read back", () => {
       run: "r_ok",
       step: 1,
       variants: [
-        { key: "A" },
+        // A's runs ran live: a matrix saved before U17 stays live
+        // (U18.2-fix), never the per-command choice.
+        { key: "A", engine: "live" },
         {
           key: "B",
           instructions: "Be brief.",

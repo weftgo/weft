@@ -54,7 +54,7 @@ func ExampleReasonOf() {
 	fmt.Println(runtime.ReasonOf("weft: run failed at step 0: boom") == nil)
 	// Output:
 	// scripted_miss 2 [tools]
-	// scripted has no recorded answer for step 2: the tool list differs from the recording — re-run on engine live
+	// scripted has no recorded answer for step 2: the tool list differs from the recording — run on live
 	// true
 }
 
@@ -63,7 +63,7 @@ func ExampleReasonOf() {
 func ExampleScriptedMissReason() {
 	fmt.Println(runtime.ScriptedMissReason(0, []string{"thinking"}).Message)
 	// Output:
-	// scripted has no recorded answer for step 0: the request sets a thinking level the recording does not hold — re-run on engine live
+	// scripted has no recorded answer for step 0: the request sets a thinking level the recording does not hold — run on live
 }
 
 // ExampleAgentRegistration_ManifestModelProvider reads the provider of

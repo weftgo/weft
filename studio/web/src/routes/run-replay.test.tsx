@@ -614,7 +614,7 @@ describe("a child row replays the child as its own run (A10)", () => {
       expect(
         drawer()!.querySelector('[data-target-held="unregistered"]')
           ?.textContent
-      ).toBe(TARGET_WORDS.unregistered("researcher"))
+      ).toBe(TARGET_WORDS.cross("researcher", ""))
     )
     // The picker asks for the agent instead (U18.2): Studio never
     // takes a stand-in.

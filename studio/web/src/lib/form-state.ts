@@ -603,8 +603,16 @@ function modesOf(runs: RunRow[]): Pick<
   } = {}
   const r = runs.at(-1)
   if (!r) return out
-  if (r.model.provider === "weft/runtime" && r.model.name === "scripted")
-    out.engine = "scripted"
+  // The engine its newest run ran on: a matrix saved before U17 with
+  // no engine stays what it ran — live included, never the
+  // per-command choice (U18.2-fix). Only weft/runtime's scripted model
+  // is the scripted engine here: a wefttest model a live run answered
+  // as (lib/engine.ts's runEngine reads it scripted, for its price) ran
+  // on live.
+  out.engine =
+    r.model.provider === "weft/runtime" && r.model.name === "scripted"
+      ? "scripted"
+      : "live"
   if (r.session_id) out.thread = "fork"
   const c = parseCellCommandID(commandOf(r))
   if (c && c.sideEffects !== "substitute") out.side_effects = c.sideEffects
@@ -710,6 +718,9 @@ export function cellBody(
     /** The source's step count and own input (the engine's choice). */
     steps?: number
     sourceInput?: string
+    /** The reader released the target check's cross-agent hold
+     * (lib/target.ts): the cell sends cross_agent: true. */
+    crossAgent?: boolean
   }
 ): PlaygroundRunBody {
   const ev = exp.variants.find((v) => v.key === variant)
@@ -741,6 +752,7 @@ export function cellBody(
   if (!body.source && !body.input)
     throw new Error(`cell ${variant}×${input} has no input and no source run`)
   if (target.publicID) body.public_id = target.publicID
+  if (target.crossAgent) body.cross_agent = true
   // No engine saved: the cell's own choice (U17, lib/engine.ts) — the
   // source's step count and own input when the caller read them.
   if (!fv?.engine)

@@ -957,7 +957,7 @@ func TestScriptedEngineEndToEnd(t *testing.T) {
 	}
 	changed := strings.Replace(strings.Replace(body, "cmd_scripted_1", "cmd_scripted_miss", 1), "where is my order #4411?", "where is order 99?", 1)
 	if _, pv := e.api(t, http.MethodPost, "/api/playground/preview", changed); !strings.Contains(pv,
-		`"scripted_key_match":{"ok":false,"because":["messages"],"step":0,"message":"scripted has no recorded answer for step 0: the messages differ from the recording (a changed input or tool result) — re-run on engine live"}`) {
+		`"scripted_key_match":{"ok":false,"because":["messages"],"step":0,"message":"scripted has no recorded answer for step 0: the messages differ from the recording (a changed input or tool result) — run on live"}`) {
 		t.Errorf("changed-input scripted preview = %s, want the step-0 messages miss", pv)
 	}
 	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", changed); code != http.StatusAccepted {
@@ -965,7 +965,7 @@ func TestScriptedEngineEndToEnd(t *testing.T) {
 	}
 	missRow := e.waitCommand(t, "cmd_scripted_miss", "finished")
 	if !strings.Contains(missRow, `"status":"failed"`) ||
-		!strings.Contains(missRow, `"reason":{"kind":"scripted_miss","step":0,"components":["messages"],"message":"scripted has no recorded answer for step 0: the messages differ from the recording (a changed input or tool result) — re-run on engine live"}`) {
+		!strings.Contains(missRow, `"reason":{"kind":"scripted_miss","step":0,"components":["messages"],"message":"scripted has no recorded answer for step 0: the messages differ from the recording (a changed input or tool result) — run on live"}`) {
 		t.Errorf("scripted miss row = %s, want the step-0 messages reason", missRow)
 	}
 }
@@ -2480,7 +2480,7 @@ func TestScriptedPastTheEndAgreesEndToEnd(t *testing.T) {
 	}
 	body := fmt.Sprintf(`{"command_id": "cmd_cut", "runtime": %q, "agent": "acme-support",
 	  "source": {"run_id": "r_cut", "from_step": 0}, "engine": "scripted", "side_effects": "substitute"}`, runtimes.Runtimes[0].ID)
-	const sentence = "scripted has no recorded answer for step 1: the source never answered it — re-run on engine live"
+	const sentence = "scripted has no recorded answer for step 1: the source never answered it — run on live, or replay from an earlier step"
 	if _, pv := e.api(t, http.MethodPost, "/api/playground/preview", body); !strings.Contains(pv,
 		`"scripted_key_match":{"ok":false,"because":["unanswered"],"step":1,"message":"`+sentence+`"}`) {
 		t.Errorf("preview = %s, want the step-1 unanswered miss", pv)

@@ -158,13 +158,13 @@ func TestPreviewScriptedCheck(t *testing.T) {
 		{"unchanged", "r_sc", 0, "", "0:hit 1:hit 2:hit", ""},
 		{"from step 1", "r_sc", 1, "", "1:hit 2:hit", ""},
 		{"narrowed tools", "r_sc", 0, `,"overrides":{"only_tools":["lookup_order"]}`, "0:tools",
-			"scripted has no recorded answer for step 0: the tool list differs from the recording — re-run on engine live"},
+			"scripted has no recorded answer for step 0: the tool list differs from the recording — run on live"},
 		{"thinking", "r_sc", 1, `,"overrides":{"thinking":"high"}`, "1:thinking",
-			"scripted has no recorded answer for step 1: the request sets a thinking level the recording does not hold — re-run on engine live"},
+			"scripted has no recorded answer for step 1: the request sets a thinking level the recording does not hold — run on live"},
 		{"changed input", "r_sc", 0, `,"input":"where is order 99?"`, "0:messages",
-			"scripted has no recorded answer for step 0: the messages differ from the recording (a changed input or tool result) — re-run on engine live"},
+			"scripted has no recorded answer for step 0: the messages differ from the recording (a changed input or tool result) — run on live"},
 		{"recorded call to an unregistered tool", "r_docs", 0, "", "0:hit 1:tools",
-			"scripted has no recorded answer for step 1: the tool list differs from the recording — re-run on engine live"},
+			"scripted has no recorded answer for step 1: the tool list differs from the recording — run on live"},
 	} {
 		d := preview(c.run, c.from, c.extra)
 		if got := hits(d); got != c.hits {
@@ -210,7 +210,7 @@ func TestCommandReasonNamesScriptedMiss(t *testing.T) {
 	if st.Error != miss {
 		t.Errorf("error = %q, want the runtime's text verbatim", st.Error)
 	}
-	want := "scripted has no recorded answer for step 2: the tool list differs from the recording; the messages differ from the recording (a changed input or tool result) — re-run on engine live"
+	want := "scripted has no recorded answer for step 2: the tool list differs from the recording; the messages differ from the recording (a changed input or tool result) — run on live"
 	if st.Reason == nil || st.Reason.Kind != "scripted_miss" || st.Reason.Step != 2 ||
 		strings.Join(st.Reason.Components, ",") != "tools,messages" || st.Reason.Message != want {
 		t.Errorf("reason = %+v, want scripted_miss at step 2 [tools messages] %q", st.Reason, want)
@@ -281,7 +281,7 @@ func TestPreviewScriptedPastTheRecordedEnd(t *testing.T) {
 		t.Errorf("scripted_hit = %+v, want step 0 hit, step 1 [unanswered]", d.Hit)
 	}
 	if d.Match.OK || d.Match.Step == nil || *d.Match.Step != 1 ||
-		d.Match.Message != "scripted has no recorded answer for step 1: the source never answered it — re-run on engine live" {
+		d.Match.Message != "scripted has no recorded answer for step 1: the source never answered it — run on live, or replay from an earlier step" {
 		t.Errorf("scripted_key_match = %+v, want the step-1 unanswered miss", d.Match)
 	}
 }
@@ -375,7 +375,7 @@ func TestCommandReasonPrefersTheTypedAck(t *testing.T) {
 	}
 	decode(t, out, &st)
 	if st.Reason == nil || st.Reason.Step != 3 || strings.Join(st.Reason.Components, ",") != "tools" ||
-		st.Reason.Message != "scripted has no recorded answer for step 3: the tool list differs from the recording — re-run on engine live" {
+		st.Reason.Message != "scripted has no recorded answer for step 3: the tool list differs from the recording — run on live" {
 		t.Errorf("reason = %+v, want the typed step-3 tools miss", st.Reason)
 	}
 }

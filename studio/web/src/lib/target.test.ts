@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest"
 
 import {
   agentOptions,
+  crossAgentOf,
+  SCRIPT_EXHAUSTED,
   exhaustedOf,
   SCRIPT_WORDS,
   scriptNote,
@@ -31,19 +33,19 @@ describe("targetCheck", () => {
     expect(targetCheck({}).kind).toBe("")
   })
 
-  it("a source that names no agent asks, naming the recorded tools", () => {
+  it("a source that names no agent asks", () => {
     const c = targetCheck({ source: "", recordedTools: ["search_docs"] })
     expect(c.kind).toBe("unnamed")
-    expect(c.held).toBe(
-      "the source run names no agent: pick the one to replay it on (its tools: search_docs)"
-    )
+    expect(c.held).toBe("the source run names no agent: pick one")
     expect(c.escape).toBe("")
   })
 
   it("an agent nobody registers: pick it, or start the app", () => {
     const c = targetCheck({ source: "orders", missing: "orders" })
     expect(c.kind).toBe("unregistered")
-    expect(c.held).toBe(TARGET_WORDS.unregistered("orders"))
+    expect(c.held).toBe(
+      "the source run is agent orders; no runtime registers it: pick one, or start its app"
+    )
   })
 
   it("another agent picked: held with both names until the escape; the body sends cross_agent either way", () => {
@@ -59,10 +61,43 @@ describe("targetCheck", () => {
     const ok = targetCheck({
       source: "orders",
       agent: researcher(HA, "web_search"),
-      crossOk: true,
+      escaped: held.key,
     })
     expect(ok.held).toBe("")
-    expect(ok.kind).toBe("cross_agent")
+    expect(crossAgentOf(ok, held.key)).toBe(true)
+    expect(crossAgentOf(held, "")).toBe(false)
+  })
+
+  it("an escape holds only for the target and source it was taken for (U18.2-fix)", () => {
+    const f = {
+      source: "orders",
+      agent: researcher(HA, "web_search"),
+      at: "r1#2",
+      runtime: "rt_1",
+    }
+    const key = targetCheck(f).key
+    expect(targetCheck({ ...f, escaped: key }).held).toBe("")
+    for (const other of [
+      { at: "r2#2" },
+      { at: "r1#0" },
+      { runtime: "rt_2" },
+      { agent: { ...f.agent, name: "analyst" } },
+    ])
+      expect(targetCheck({ ...f, ...other, escaped: key }).held).not.toBe("")
+  })
+
+  it("an unnamed source with an agent picked: the build line names no recorder it does not know, the hold's escape names the target (U18.2-fix)", () => {
+    const c = targetCheck({
+      source: "",
+      agent: researcher(HA, "web_search"),
+      recordedHash: H9,
+      recordedTools: ["search_docs"],
+    })
+    expect(c.build).toBe(
+      "recorded by an unnamed agent@9b5997a3 · registered now researcher@a59ce89e · tools differ: search_docs → web_search"
+    )
+    expect(c.held).toBe(c.build)
+    expect(c.escape).toBe("replay as researcher anyway")
   })
 
   it("an unnamed source with an agent picked runs on it (no cross_agent)", () => {
@@ -85,7 +120,7 @@ describe("targetCheck", () => {
     )
     expect(c.held).toBe(c.build)
     expect(c.escape).toBe(TARGET_WORDS.buildEscape)
-    expect(targetCheck({ ...f, buildOk: true }).held).toBe("")
+    expect(targetCheck({ ...f, escaped: c.key }).held).toBe("")
   })
 
   it("another build with the same tools is said, never held; the same build says nothing", () => {
@@ -152,10 +187,7 @@ describe("the facts", () => {
       ],
       ["lookup_order"]
     )
-    expect(o.map((x) => x.label)).toEqual([
-      "orders on app · tools match",
-      "analyst on app",
-    ])
+    expect(o.map((x) => x.label)).toEqual(["orders on app", "analyst on app"])
   })
 })
 
@@ -185,7 +217,7 @@ describe("after Run", () => {
         error:
           "wefttest: model script exhausted (agent made more model calls than the script provides)",
       })
-    ).toBe(SCRIPT_WORDS.exhausted)
+    ).toBe(SCRIPT_EXHAUSTED)
     expect(exhaustedOf({ error: "boom" })).toBe("")
   })
 })

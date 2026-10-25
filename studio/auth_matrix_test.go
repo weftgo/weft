@@ -1203,7 +1203,7 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		b, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK || !strings.Contains(string(b), `"reason":{"kind":"scripted_miss","step":1,"components":["tools"],"message":"scripted has no recorded answer for step 1: the tool list differs from the recording — re-run on engine live"}`) {
+		if resp.StatusCode != http.StatusOK || !strings.Contains(string(b), `"reason":{"kind":"scripted_miss","step":1,"components":["tools"],"message":"scripted has no recorded answer for step 1: the tool list differs from the recording — run on live"}`) {
 			t.Errorf("GET /api/playground/commands/{id} as %s = %d, want the reason: %s", id.name, resp.StatusCode, b)
 		}
 	}

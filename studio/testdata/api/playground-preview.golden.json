@@ -279,7 +279,7 @@
       "messages"
     ],
     "step": 2,
-    "message": "scripted has no recorded answer for step 2: the messages differ from the recording (a changed input or tool result) — re-run on engine live"
+    "message": "scripted has no recorded answer for step 2: the messages differ from the recording (a changed input or tool result) — run on live"
   }
 }
 

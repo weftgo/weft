@@ -5046,7 +5046,7 @@ describe("the engine per command on both drawers (U17)", () => {
 
   it("the preview's key check misses: scripted disabled on both, in the server's own sentence (U18.1)", async () => {
     const message =
-      "scripted has no recorded answer for step 2: the tool list differs from the recording — re-run on engine live"
+      "scripted has no recorded answer for step 2: the tool list differs from the recording — run on live"
     const r = await bothDrawers(() => replayFromStep(2), undefined, {
       ...golden<PreviewDoc>("playground-preview"),
       scripted_key_match: { ok: false, because: ["tools"], step: 2, message },
@@ -5092,7 +5092,7 @@ describe("the engine per command on both drawers (U17)", () => {
   // miss before Run, and hold Run until the reader takes today's build.
   it("another build of the same agent: the build line, the tools and the miss on both, Run held until today's build is taken (U18.2)", async () => {
     const message =
-      "scripted has no recorded answer for step 2: the tool list differs from the recording — re-run on engine live"
+      "scripted has no recorded answer for step 2: the tool list differs from the recording — run on live"
     const base = golden<PreviewDoc>("playground-preview")
     const pv: PreviewDoc = {
       ...base,
@@ -5115,7 +5115,7 @@ describe("the engine per command on both drawers (U17)", () => {
     }
     const r = await bothDrawers(() => replayFromStep(2), undefined, pv, fx)
     expect(r.build).toBe(
-      `! ${TARGET_WORDS.build("acme-support", "9b5997a3", "a59ce89e")} · tools differ: search_docs → web_search · scripted will miss at step 2`
+      `! ${TARGET_WORDS.build("acme-support", "9b5997a3", "acme-support", "a59ce89e")} · tools differ: search_docs → web_search · scripted will miss at step 2`
     )
     expect(r.held).toBe(true)
     expect(r.engine).toBe("live")

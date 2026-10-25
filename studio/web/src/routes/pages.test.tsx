@@ -24,7 +24,7 @@ import type {
   SessionsPage,
 } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
-import { valueOf } from "@/test/select"
+import { choose, valueOf } from "@/test/select"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
   FakeStudio,
@@ -740,7 +740,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       expect(el).toBeTruthy()
       return el!
     })
-    expect(held.textContent).toBe(TARGET_WORDS.unregistered("billing"))
+    expect(held.textContent).toBe(TARGET_WORDS.cross("billing", ""))
     const runButton = await screen.findByRole("button", { name: /^Run A / })
     expect(runButton).toHaveProperty("disabled", true)
     expect(screen.getByRole("button", { name: "Run matrix" })).toHaveProperty(
@@ -770,13 +770,74 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     })
   })
 
+  // U18.2-fix: the escape is the target's it was taken for — a header
+  // agent change (or a source, step or runtime change) asks again.
+  it("an escape taken for one agent does not hold for the next one picked in the header (U18.2-fix)", async () => {
+    studio.on("GET runs/r_ok", { ...source, agent: "billing" })
+    renderApp("/playground?run=r_ok&agent=orders")
+    const esc = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(
+        '[data-target-escape="cross_agent"]'
+      )
+      expect(el).toBeTruthy()
+      return el!
+    })
+    fireEvent.click(esc)
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
+    await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
+    await choose(screen.getByLabelText("agent"), "planner")
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-target-held="cross_agent"]')?.textContent
+      ).toBe(TARGET_WORDS.cross("billing", "planner"))
+    )
+    expect(runButton).toHaveProperty("disabled", true)
+  })
+
+  it("a source run whose read fails holds Run and Run matrix with why — never the first agent as a stand-in (U18.2-fix)", async () => {
+    studio.on("GET runs/r_ok", () => apiError(500, "internal", "db down"))
+    renderApp("/playground?run=r_ok")
+    await waitFor(() =>
+      expect(document.querySelector("[data-run-held]")?.textContent).toContain(
+        "the source run could not be read"
+      )
+    )
+    expect(
+      await screen.findByRole("button", { name: /^Run A / })
+    ).toHaveProperty("disabled", true)
+    expect(screen.getByRole("button", { name: "Run matrix" })).toHaveProperty(
+      "disabled",
+      true
+    )
+  })
+
+  it("Run waits for the preview, and its refusal holds Run with the server's words (U18.2-fix, UX-D-03)", async () => {
+    studio
+      .on(
+        "GET meta",
+        meta(["live", "playground", "runtimes", "preview", "steps"])
+      )
+      .on("POST playground/preview", () =>
+        apiError(400, "bad_request", "tool nope is not in the manifest")
+      )
+    renderApp("/playground?run=r_ok")
+    await waitFor(() =>
+      expect(document.querySelector("[data-run-held]")?.textContent).toBe(
+        "tool nope is not in the manifest"
+      )
+    )
+    expect(
+      await screen.findByRole("button", { name: /^Run A / })
+    ).toHaveProperty("disabled", true)
+  })
+
   it("a source that names no agent asks for one: Run held, nothing posted until a pick (U18.2)", async () => {
     studio.on("GET runs/r_ok", { ...source, agent: "" })
     renderApp("/playground?run=r_ok")
     await waitFor(() =>
       expect(
         document.querySelector('[data-target-held="unnamed"]')?.textContent
-      ).toContain(TARGET_WORDS.unnamed([]).split(" (")[0])
+      ).toContain(TARGET_WORDS.unnamed)
     )
     expect(document.querySelector("[data-pick-agent-head]")).toBeTruthy()
     expect(studio.calls("POST playground/runs")).toHaveLength(0)

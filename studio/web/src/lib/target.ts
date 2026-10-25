@@ -23,15 +23,15 @@ import { STATUS } from "./status"
 
 /** The words, both surfaces. */
 export const TARGET_WORDS = {
-  unnamed: (tools: string[]) =>
-    `the source run names no agent: pick the one to replay it on${tools.length ? ` (its tools: ${tools.join(", ")})` : ""}`,
-  unregistered: (agent: string) =>
-    `no connected runtime registers agent ${agent}: pick one, or start the app that does`,
+  unnamed: "the source run names no agent: pick one",
+  /** Another agent than the source's ("" none registers it). */
   cross: (source: string, target: string) =>
-    `the source run is agent ${source}; this replays it as ${target}`,
+    `the source run is agent ${source}; ${target ? `this replays it as ${target}` : "no runtime registers it: pick one, or start its app"}`,
   crossEscape: (target: string) => `replay as ${target} anyway`,
-  build: (agent: string, was: string, now: string) =>
-    `recorded by ${agent}@${was} · registered now ${agent}@${now}`,
+  build: (was: string, wasHash: string, now: string, nowHash: string) =>
+    `recorded by ${was}@${wasHash} · registered now ${now}@${nowHash}`,
+  /** The recorder of an unnamed source run, in the build line. */
+  noName: "an unnamed agent",
   tools: (removed: string[], added: string[]) =>
     `tools differ: ${removed.join(", ") || "none"} → ${added.join(", ") || "none"}`,
   miss: (step: number) => `scripted will miss at step ${step}`,
@@ -43,15 +43,30 @@ export const TARGET_WORDS = {
  * script, so live calls the script, not a provider. */
 export const SCRIPT_WORDS = {
   note: "live calls this agent's wefttest script, not a provider, and runs out of turns: scripted replays the recording",
-  exhausted: "the agent's wefttest script ran out of turns",
 } as const
+/** A wefttest script's exhaustion (both surfaces). */
+export const SCRIPT_EXHAUSTED = "the agent's wefttest script ran out"
 
 /** scriptNote is UX-C-09's note beside the engine ("" none). */
 export const scriptNote = (a?: Pick<AgentView, "model_provider">): string =>
   a?.model_provider === "wefttest" ? SCRIPT_WORDS.note : ""
 
-/** The picker's caption (Studio's). */
+/** The miss line's other ways on (UX-C-07): step 0 (both surfaces)
+ * and the save (Studio's; the panel's result head has its own). */
+export const MISS_FROM_ZERO = "replay from step 0 with the recorded agent"
+export const MISS_SAVE = "save the recording as a test"
+
+/** The picker's caption and the recorded tools beside it (Studio's). */
 export const TARGET_PICK = "pick the agent"
+export const recordedLine = (tools: string[]) =>
+  `the source step was offered: ${tools.join(", ")}`
+
+/** A source run set but not read (Studio's): Run waits for its row —
+ * the agent it names decides the target. */
+export const sourceUnread = (why?: string) =>
+  why
+    ? `the source run could not be read (${why}): Run waits until it is`
+    : "reading the source run…"
 
 /** The length a manifest hash is shown at. */
 const HASH = 8
@@ -67,6 +82,10 @@ export interface TargetCheck {
   escape: string
   /** The build line ("" when the build is the recording's, or unknown). */
   build: string
+  /** What an escape is taken for: the source position, its agent, the
+   * runtime and the target — an escape taken under another key (the
+   * target or the source changed since) does not hold. */
+  key: string
 }
 
 export interface TargetFacts {
@@ -82,9 +101,12 @@ export interface TargetFacts {
   /** The tool names the source step was offered (null: unknown). */
   recordedTools?: string[] | null
   keyMatch?: PreviewDoc["scripted_key_match"]
-  /** The escapes the reader took. */
-  crossOk?: boolean
-  buildOk?: boolean
+  /** The source position ("run#step") and the target's runtime: with
+   * the agents, the key an escape is taken for. */
+  at?: string
+  runtime?: string
+  /** The key the reader took the escape for (TargetCheck.key). */
+  escaped?: string
 }
 
 /** toolsDiff is the recorded tool names against the registered ones:
@@ -119,31 +141,33 @@ export function recordedToolsOf(
   return t ? t.map((x) => x.name) : null
 }
 
+/** targetKey is what an escape is taken for (TargetCheck.key). */
+export const targetKey = (
+  at?: string,
+  source?: string,
+  runtime?: string,
+  agent?: string
+) => `${at}|${source}|${runtime}|${agent}`
+
 /** targetCheck is the rule (see the header). A cross-agent kind sends
- * cross_agent: true once released. */
+ * cross_agent: true once released (crossAgentOf). */
 export function targetCheck(f: TargetFacts): TargetCheck {
   const W = TARGET_WORDS
   const a = f.agent
+  const key = targetKey(f.at, f.source, f.runtime, a?.name)
+  const ok = f.escaped === key
   const c = (
     kind: TargetKind,
     held = "",
     escape = "",
     build = ""
-  ): TargetCheck => ({
-    kind,
-    held,
-    escape,
-    build,
-  })
+  ): TargetCheck => ({ kind, held, escape, build, key })
   if (!a)
     return f.missing
-      ? c("unregistered", W.unregistered(f.missing))
-      : c(
-          f.source === "" ? "unnamed" : "",
-          f.source === "" ? W.unnamed(f.recordedTools ?? []) : ""
-        )
+      ? c("unregistered", W.cross(f.missing, ""))
+      : c(f.source === "" ? "unnamed" : "", f.source === "" ? W.unnamed : "")
   if (f.source && a.name !== f.source)
-    return f.crossOk
+    return ok
       ? c("cross_agent")
       : c("cross_agent", W.cross(f.source, a.name), W.crossEscape(a.name))
   const was = f.recordedHash
@@ -156,16 +180,26 @@ export function targetCheck(f: TargetFacts): TargetCheck {
   const differ = !!d && d.removed.length + d.added.length > 0
   const k = f.keyMatch
   const build = [
-    W.build(a.name, was.slice(0, HASH), now.slice(0, HASH)),
+    W.build(
+      f.source || W.noName,
+      was.slice(0, HASH),
+      a.name,
+      now.slice(0, HASH)
+    ),
     differ && W.tools(d.removed, d.added),
     k && !k.ok && k.step !== null && W.miss(k.step),
   ]
     .filter(Boolean)
     .join(" · ")
-  return differ && !f.buildOk
-    ? c("build", build, W.buildEscape, build)
+  return differ && !ok
+    ? c("build", build, f.source ? W.buildEscape : W.crossEscape(a.name), build)
     : c("build", "", "", build)
 }
+
+/** crossAgentOf says the body sends cross_agent: true — the reader
+ * released a cross-agent hold under the target it has now. */
+export const crossAgentOf = (c: TargetCheck, escaped?: string): boolean =>
+  c.kind === "cross_agent" && escaped === c.key
 
 /** One agent a picker offers: its runtime, its name, and whether its
  * tools are the recorded ones. */
@@ -193,7 +227,7 @@ export function agentOptions(
         return {
           runtime: r.id,
           agent: a.name,
-          label: `${a.name} on ${r.service || r.id}${matches ? " · tools match" : ""}`,
+          label: `${a.name} on ${r.service || r.id}`,
           matches,
         }
       })
@@ -236,4 +270,4 @@ export const missOf = (c: { reason?: CommandReason | null }): string =>
 /** exhaustedOf is a wefttest script's exhaustion in words (UX-C-09;
  * Studio's): live is the script, so no live retry is offered. */
 export const exhaustedOf = (c: { error?: string | null }): string =>
-  /model script exhausted/.test(c.error ?? "") ? SCRIPT_WORDS.exhausted : ""
+  /script exhausted/.test(c.error ?? "") ? SCRIPT_EXHAUSTED : ""

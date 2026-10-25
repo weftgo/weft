@@ -12,7 +12,14 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { XIcon } from "lucide-react"
-import { createContext, useContext, useEffect, useRef, useState } from "react"
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react"
 import type { Dispatch, SetStateAction } from "react"
 
 import {
@@ -72,13 +79,17 @@ import type {
 import {
   agentOptions,
   exhaustedOf,
+  crossAgentOf,
   missOf,
   optionValue,
   scriptNote,
   outcomeWord,
   recordedToolsOf,
+  sourceUnread,
   targetCheck,
 } from "@/lib/target"
+import { MissLine, TargetCheckBlock } from "@/components/studio/target-check"
+import { saveTest } from "@/components/studio/saves"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import {
   queued,
@@ -91,8 +102,6 @@ import { quietCommand } from "@/lib/notify"
 import {
   ChangeFields,
   EngineRadios,
-  MissLine,
-  TargetCheckBlock,
   useEngineContext,
   ModeFields,
   OptionLab,
@@ -417,8 +426,9 @@ function ReplayForm({
   // The reader's pick of the target (U18.2): asked for when the source
   // names no agent, or one no connected runtime registers.
   const [pick, setPick] = useState<{ runtime: string; agent: string }>()
-  const [crossOk, setCrossOk] = useState(false)
-  const [buildOk, setBuildOk] = useState(false)
+  // The key the reader took the target check's escape for: another
+  // source, step, runtime or target since is no escape (U18.2-fix).
+  const [escaped, setEscaped] = useState("")
   const wantAgent = pick?.agent || request.agent || sourceAgent
   const all = runtimes.data?.runtimes ?? []
   const target = pickTarget(all, { runtime: pick?.runtime, agent: wantAgent })
@@ -700,9 +710,15 @@ function ReplayForm({
     recordedHash: sourceRow?.manifest_hash,
     recordedTools,
     keyMatch: preview.doc?.scripted_key_match,
-    crossOk,
-    buildOk,
+    at: `${runID}#${fromStep}`,
+    runtime: runtime?.id,
+    escaped,
   })
+  // The recorded agent, registered: the miss line's "from step 0".
+  const recordedHere =
+    !!sourceAgent &&
+    all.some((r) => r.agents.some((a) => a.name === sourceAgent))
+  const heldID = useId()
   const picker =
     !!pick ||
     check.kind === "unnamed" ||
@@ -753,7 +769,7 @@ function ReplayForm({
       setError(e instanceof Error ? e.message : String(e))
       return
     }
-    if (check.kind === "cross_agent") body.cross_agent = true
+    if (crossAgentOf(check, escaped)) body.cross_agent = true
     setBusy(true)
     try {
       const out = await postPlaygroundRun(body)
@@ -780,8 +796,10 @@ function ReplayForm({
     blocked = `the runtimes could not be read: ${runtimes.error.message}`
   else if (all.length === 0)
     blocked = "no runtime connected · start the app with WEFT_ENV=dev"
-  else if (wantAgent === undefined && source.isPending)
-    blocked = "reading the source run…"
+  // The source's row names the agent: Run waits for it, never a
+  // stand-in on a row that is unread or failed (U18.2-fix).
+  else if (!sourceRow)
+    blocked = sourceUnread(source.isError ? source.error.message : undefined)
   // What holds Run, the command in flight aside: "send again" on a
   // rejected or lost command is held by the same rules.
   const held =
@@ -859,13 +877,10 @@ function ReplayForm({
             options={agentOptions(all, recordedTools)}
             picker={picker}
             picked={pick ? optionValue(pick) : undefined}
-            onPick={(o) => {
-              setPick({ runtime: o.runtime, agent: o.agent })
-              setCrossOk(false)
-            }}
-            onEscape={() =>
-              check.kind === "build" ? setBuildOk(true) : setCrossOk(true)
-            }
+            recorded={recordedTools}
+            heldID={heldID}
+            onPick={(o) => setPick({ runtime: o.runtime, agent: o.agent })}
+            onEscape={() => setEscaped(check.key)}
           />
         </section>
         <EngineRadios
@@ -1040,6 +1055,7 @@ function ReplayForm({
         >
           <Button
             ref={runButton}
+            aria-describedby={check.held ? heldID : undefined}
             onClick={() => void run()}
             disabled={held || Boolean(experiment && !settled(experiment.state))}
             data-run-engine={engine}
@@ -1072,10 +1088,26 @@ function ReplayForm({
             agent={agent?.name}
             runtime={runtime?.id}
             onAgain={held ? undefined : () => void run()}
+            estimate={choice.live.usd}
             onLive={() => {
               setPicked("live")
-              runButton.current?.focus()
+              // Focus moves to Run only when Run can be pressed.
+              requestAnimationFrame(() => {
+                const b = runButton.current
+                if (b && !b.disabled) b.focus()
+              })
             }}
+            onFromZero={
+              recordedHere
+                ? () => {
+                    setPick(undefined)
+                    setFromStep(0)
+                  }
+                : undefined
+            }
+            onSave={
+              caps.includes("export") ? () => void saveTest(runID) : undefined
+            }
           />
         ) : null}
       </div>
@@ -1143,6 +1175,9 @@ function ReplayOutcome({
   runtime,
   onAgain,
   onLive,
+  estimate,
+  onFromZero,
+  onSave,
 }: {
   experiment: Experiment
   sourceRunID: string
@@ -1154,6 +1189,10 @@ function ReplayOutcome({
   onAgain?: () => void
   /** "run again on live" after a scripted miss: the form on live. */
   onLive?: () => void
+  /** The live estimate, and the miss line's other ways on (UX-C-07). */
+  estimate?: string
+  onFromZero?: () => void
+  onSave?: () => void
 }) {
   const e = experiment
   const { has } = useCapabilities()
@@ -1199,7 +1238,14 @@ function ReplayOutcome({
           </button>
         </p>
       ) : miss || gone ? (
-        <MissLine text={miss || gone} again={!!miss} onLive={onLive} />
+        <MissLine
+          text={miss || gone}
+          again={!!miss}
+          estimate={estimate}
+          onLive={onLive}
+          onFromZero={onFromZero}
+          onSave={onSave}
+        />
       ) : e.error ? (
         <p className="text-status-bad">{e.error}</p>
       ) : null}

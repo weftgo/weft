@@ -69,7 +69,10 @@ var missClause = map[string]string{
 // none named) for the given key components, with Studio's sentence —
 // what a command's failed run and the preview's pre-run check both
 // say: "scripted has no recorded answer for step 2: the tool list
-// differs from the recording — re-run on engine live".
+// differs from the recording — run on live" (", or replay from an
+// earlier step" when the source never answered it), the refusals' own
+// suffix (studio/playground.go): one sentence per miss, before and after
+// Run.
 func ScriptedMissReason(step int, components []string) *Reason {
 	at := "this request"
 	if step >= 0 {
@@ -87,7 +90,14 @@ func ScriptedMissReason(step int, components []string) *Reason {
 	if len(clauses) > 0 {
 		msg += ": " + strings.Join(clauses, "; ")
 	}
+	msg += " — run on live"
+	for _, c := range components {
+		if c == "unanswered" {
+			msg += ", or replay from an earlier step"
+			break
+		}
+	}
 	return &Reason{Kind: ReasonScriptedMiss, Step: step,
 		Components: append([]string{}, components...),
-		Message:    msg + " — re-run on engine live"}
+		Message:    msg}
 }

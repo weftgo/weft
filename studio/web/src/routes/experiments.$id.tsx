@@ -22,6 +22,7 @@ import {
   experimentQuery,
   fetchCommand,
   postPlaygroundRun,
+  runQuery,
   runtimesQuery,
   studioToken,
   transcriptQuery,
@@ -32,6 +33,7 @@ import type { CommandStatus, ExperimentRow, RunRow } from "@/lib/api"
 import { absoluteTime, duration, relativeTime } from "@/lib/format"
 import { formatUSD, sumCost } from "@/lib/cost"
 import { pickTarget } from "@/lib/experiment-body"
+import { crossAgentOf, sourceUnread, targetCheck } from "@/lib/target"
 import {
   REPLAY_WORDS,
   VS_CHIP_CELLS,
@@ -157,7 +159,10 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
   const runtimes = useQuery({ ...runtimesQuery(), enabled: mayRun })
   // A cell re-run with no saved engine takes its own choice (U17):
   // the source's step count and own input are what it reads.
-  const srcRun = exp?.source_run_id ?? ""
+  const srcRun =
+    exp?.source_run_id ||
+    exp?.inputs.find((i) => i.source_run_id)?.source_run_id ||
+    ""
   const srcSteps = useSourceSteps(srcRun)
   const srcT = useQuery({ ...transcriptQuery(srcRun), enabled: !!srcRun })
 
@@ -189,6 +194,27 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
   const target = exp
     ? pickTarget(runtimes.data?.runtimes ?? [], { agent: exp.agent })
     : {}
+  // The target check (U18.2-fix): a matrix saved as another agent than
+  // its source's re-runs only once the reader says so again — the
+  // definition keeps the target, the source row names its own agent.
+  const srcRow = useQuery({
+    ...runQuery(srcRun),
+    enabled: !!srcRun && mayRun,
+    staleTime: 30_000,
+  })
+  const [escaped, setEscaped] = useState("")
+  const check =
+    srcRun && srcRow.data && target.agent && !target.mismatch
+      ? targetCheck({
+          source: srcRow.data.agent,
+          agent: target.agent,
+          recordedHash: srcRow.data.manifest_hash,
+          at: srcRun,
+          runtime: target.runtime?.id,
+          escaped,
+        })
+      : undefined
+  const crossAgent = !!check && crossAgentOf(check, escaped)
   const runBlocked = !mayRun
     ? ""
     : runtimes.isPending
@@ -199,7 +225,9 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
           ? "no runtime connected — runtime.Install(...) in your app opens the link"
           : target.mismatch
             ? `no connected runtime registers agent ${target.mismatch}`
-            : ""
+            : srcRun && !srcRow.data
+              ? sourceUnread(srcRow.isError ? srcRow.error.message : undefined)
+              : (check?.held ?? "")
 
   // Follow the re-runs' commands until they settle; each settle reads
   // the experiment again (its runs join under the same id).
@@ -327,6 +355,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
             runtime: target.runtime.id,
             publicID,
             steps: srcSteps.stepCount,
+            crossAgent,
             sourceInput: srcT.data
               ? (turnPrompt(srcT.data.batches) ?? undefined)
               : undefined,
@@ -497,6 +526,19 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
       {runBlocked ? (
         <p className="text-xs text-muted-foreground" data-rerun-blocked>
           re-run: {runBlocked}
+          {check?.escape ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="text-thread-ink hover:underline"
+                data-target-escape={check.kind}
+                onClick={() => setEscaped(check.key)}
+              >
+                {check.escape}
+              </button>
+            </>
+          ) : null}
         </p>
       ) : null}
       {error ? (

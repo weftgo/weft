@@ -15,6 +15,7 @@ import {
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { TARGET_WORDS } from "@/lib/target"
 import { setStudioToken } from "@/lib/api"
 import type {
   ExperimentRow,
@@ -564,6 +565,41 @@ describe("/experiments/{id}", () => {
     expect(studio.calls("POST experiments")).toHaveLength(0)
     await new Promise((r) => setTimeout(r, 200))
     expect(studio.calls("POST playground/runs")).toHaveLength(1)
+  })
+
+  // U18.2-fix: a matrix saved as another agent than its source's
+  // re-runs only once the reader says so again, and then sends the
+  // opt-in the server asks for.
+  it("a cross-agent matrix: the re-run is held with both names until 'replay as … anyway', then the cell posts cross_agent: true (U18.2-fix)", async () => {
+    studio
+      .on("GET runs/r_ok", { ...rOK, agent: "billing", children: [] })
+      .on("POST playground/runs", command("cmd_r1", "queued"))
+      .on(
+        "GET playground/commands/cmd_r1",
+        command("cmd_r1", "finished", "pg_b2_again", "succeeded")
+      )
+    renderApp("/experiments/exp_tone")
+    const held = await waitFor(() => {
+      const el = document.querySelector("[data-rerun-blocked]")
+      expect(el?.textContent).toContain(TARGET_WORDS.cross("billing", "orders"))
+      return el!
+    })
+    expect(
+      within(cell("B×2")).getByRole("button", { name: "re-run cell B×2" })
+    ).toHaveProperty("disabled", true)
+    fireEvent.click(held.querySelector<HTMLElement>("[data-target-escape]")!)
+    const btn = within(cell("B×2")).getByRole("button", {
+      name: "re-run cell B×2",
+    })
+    await waitFor(() => expect(btn).toHaveProperty("disabled", false))
+    fireEvent.click(btn)
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(1)
+    )
+    expect(studio.calls("POST playground/runs")[0].body).toMatchObject({
+      agent: "orders",
+      cross_agent: true,
+    })
   })
 
   // The palette moves /experiments/A → /experiments/B: B is a fresh

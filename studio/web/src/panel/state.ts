@@ -33,7 +33,7 @@ import { serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 import { tokenScope } from "./config"
 import { isHoleRef } from "../lib/api"
-import { recordedToolsOf } from "../lib/target"
+import { crossAgentOf, recordedToolsOf } from "../lib/target"
 import { promptNotRecorded, promptNotServed, promptReadError } from "./badges"
 import { rerun as rerunDraft } from "../lib/replay"
 import type { ReplayDraft } from "../lib/replay"
@@ -73,6 +73,7 @@ import {
   buildRunBody,
   draftProblem,
   engineFor,
+  targetFor,
   experimentLabel,
   foldedWords,
   pickRuntime,
@@ -2244,7 +2245,6 @@ export class PanelModel {
           : d.instructions,
       defaults: a.defaults,
       lab: undefined,
-      crossOk: false,
     })
   }
 
@@ -2533,7 +2533,13 @@ export class PanelModel {
     }
     this.posting = true
     const seq = this.loadSeq
-    const body = buildRunBody(draft, this.publicId, this.state.preview?.doc)
+    const pv = this.state.preview?.doc
+    const body = buildRunBody(draft, this.publicId, pv)
+    // cross_agent only once the reader released the hold for this very
+    // target (lib/target.ts's key), as Studio's drawer; never on the
+    // preview's body.
+    if (crossAgentOf(targetFor(draft, this.state.runtimes, pv), draft.escaped))
+      body.cross_agent = true
     let out: { command_id: string; state: string }
     try {
       out = await postPlaygroundRun(this.ep, body)

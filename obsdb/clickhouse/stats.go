@@ -31,7 +31,7 @@ func statsRuns(q obsdb.StatsQuery, buckets int, width time.Duration, now time.Ti
 	rq := q.RunQuery
 	rq.Before, rq.BeforeID = time.Time{}, ""
 	inner, innerArgs := runsInner(rq, cut)
-	conds := []string{"Derived = 0", "toUnixTimestamp64Nano(Started) >= ?", "toUnixTimestamp64Nano(Started) < ?"}
+	conds := []string{"toUnixTimestamp64Nano(Started) >= ?", "toUnixTimestamp64Nano(Started) < ?"}
 	condArgs := []any{q.Since.UnixNano(), q.Until.UnixNano()}
 	if sc, sa := statusConds(rq.Status, now, cut); len(sc) > 0 {
 		conds = append(conds, sc...)
@@ -66,7 +66,8 @@ func statsChatInt(key string) string {
 // execute_tool span with a run id, never a summarizer's call
 // (weft.chat.role) nor a call a resume denied (weft.tool.denied); a
 // chat span's attempts its attempt children's highest
-// weft.attempt.index (1 without). Binds: runs' twice, then the window's
+// weft.attempt.index (1 without; obsdb.AttemptIndex's rule: decimal
+// digits, anything else no index). Binds: runs' twice, then the window's
 // start.
 func statsSpans(runs string) string {
 	return `SELECT sTrace, sSpan, sRun, sOp, sName, sProvider, sModel, sStep, sDur, sTTFT,
@@ -95,9 +96,42 @@ func statsSpans(runs string) string {
 			AND NOT (sOp = 'execute_tool' AND SpanAttributes['weft.tool.denied'] = 'true')
 			AND Timestamp >= fromUnixTimestamp64Nano(?)
 		LIMIT 1 BY TraceId, SpanId) AS s
-	LEFT JOIN (SELECT TraceId AS aTrace, ParentSpanId AS aParent, max(toInt64OrZero(SpanAttributes['weft.attempt.index'])) AS aMax
+	LEFT JOIN (SELECT TraceId AS aTrace, ParentSpanId AS aParent, max(if(match(SpanAttributes['weft.attempt.index'], '^[0-9]+$'), toInt64OrZero(SpanAttributes['weft.attempt.index']), toInt64(0))) AS aMax
 		FROM otel_traces WHERE SpanName = 'attempt' AND RunId IN (SELECT rid FROM (` + runs + `))
 		GROUP BY TraceId, ParentSpanId) AS a ON a.aTrace = s.sTrace AND a.aParent = s.sSpan`
+}
+
+// statsBelow is the delegated calls of by=agent (obsdb.StatsGroup's
+// Delegated): every chat span of a Subagent descendant — a run id with
+// a '/', its ancestors the ids cut at every <step>/<call> pair — joined
+// to the group's runs among its ancestors, kept when the descendant's
+// own agent is another, each (agent, span) once. SQLite reads the same
+// set as an id range below each run. Binds: the window's start, the
+// public id when pub is set, runs'.
+func statsBelow(runs, pub string) string {
+	scope := ""
+	if pub != "" {
+		scope = " AND PublicId = ?"
+	}
+	return `SELECT DISTINCT ragent AS k, dTrace, dSpan, dRun, dProvider, dModel, dIn, dOut, dCached, dCacheWrite, dReasoning
+	FROM (SELECT dTrace, dSpan, dRun, dProvider, dModel, dIn, dOut, dCached, dCacheWrite, dReasoning, dParent
+		FROM (SELECT TraceId AS dTrace, SpanId AS dSpan, RunId AS dRun,
+			SpanAttributes['gen_ai.provider.name'] AS dProvider, SpanAttributes['gen_ai.request.model'] AS dModel,
+			toInt64OrZero(SpanAttributes['gen_ai.usage.input_tokens']) AS dIn,
+			toInt64OrZero(SpanAttributes['gen_ai.usage.output_tokens']) AS dOut,
+			toInt64OrZero(SpanAttributes['gen_ai.usage.cache_read.input_tokens']) AS dCached,
+			toInt64OrZero(SpanAttributes['gen_ai.usage.cache_creation.input_tokens']) AS dCacheWrite,
+			toInt64OrZero(SpanAttributes['gen_ai.usage.reasoning.output_tokens']) AS dReasoning,
+			arrayMap(i -> arrayStringConcat(arraySlice(splitByChar('/', dRun), 1, i), '/'),
+				range(1, length(splitByChar('/', dRun)), 2)) AS dAnc
+		FROM otel_traces
+		WHERE position(RunId, '/') > 0 AND (` + statsOp + `) = 'chat' AND SpanAttributes['weft.chat.role'] = ''
+			AND Timestamp >= fromUnixTimestamp64Nano(?)` + scope + `
+		LIMIT 1 BY TraceId, SpanId) ARRAY JOIN dAnc AS dParent) AS d
+	INNER JOIN (` + runs + `) AS r ON d.dParent = r.rid
+	INNER JOIN (SELECT RunId AS cid, max(Agent) AS cagent FROM weft_runs WHERE position(RunId, '/') > 0 GROUP BY RunId) AS c
+		ON c.cid = d.dRun
+	WHERE c.cagent != r.ragent`
 }
 
 // statsKeyCH is the group key's column and the span op a span-level
@@ -227,6 +261,37 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 				return err
 			}
 			models = append(models, m)
+			return nil
+		}); err != nil {
+			return obsdb.StatsPage{}, err
+		}
+	}
+	if q.By == obsdb.StatsByAgent {
+		below, bargs := statsBelow(runs, q.PublicID), []any{q.Since.UnixNano()}
+		if q.PublicID != "" {
+			bargs = append(bargs, q.PublicID)
+		}
+		bargs = append(bargs, rargs...)
+		if err := query(`SELECT k, dProvider, dModel, toInt64(sum(dIn)), toInt64(sum(dOut)), toInt64(sum(dCached)),
+			toInt64(sum(dCacheWrite)), toInt64(sum(dReasoning)) FROM (`+below+`) GROUP BY k, dProvider, dModel`, bargs,
+			func(rows driver.Rows) error {
+				m := obsdb.StatsModelPart{Delegated: true}
+				u := &m.Usage
+				if err := rows.Scan(&m.Key, &m.Provider, &m.Model, &u.InputTokens, &u.OutputTokens,
+					&u.CachedInputTokens, &u.CacheWriteTokens, &u.ReasoningTokens); err != nil {
+					return err
+				}
+				models = append(models, m)
+				return nil
+			}); err != nil {
+			return obsdb.StatsPage{}, err
+		}
+		if err := query(`SELECT k, toInt64(uniqExact(dRun)) FROM (`+below+`) GROUP BY k`, bargs, func(rows driver.Rows) error {
+			var c obsdb.StatsCell
+			if err := rows.Scan(&c.Key, &c.DelegatedRuns); err != nil {
+				return err
+			}
+			cells = append(cells, c)
 			return nil
 		}); err != nil {
 			return obsdb.StatsPage{}, err

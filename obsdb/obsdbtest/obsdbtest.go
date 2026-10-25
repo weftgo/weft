@@ -105,6 +105,9 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("Stats", statsTable(open))
 	t.Run("StatsDeleted", statsDeleted(open))
 	t.Run("ErrorCounts", errorCounts(open))
+	t.Run("StatsAttemptSpelling", statsAttemptSpelling(open))
+	t.Run("StatsSpanBeforeRun", statsSpanBeforeRun(open))
+	t.Run("StatsDelegated", statsDelegated(open))
 }
 
 func ctx() context.Context { return context.Background() }

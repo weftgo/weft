@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +33,15 @@ import (
 //	public_id   /api/runs' meaning; a panel token's own is forced
 //	parent      "*" (the default: every run, subagent children
 //	            included — each counted under its own agent) | "" the
-//	            top-level runs | a run id its children
+//	            top-level runs | a run id its children. Note the
+//	            default differs from /api/runs', which lists the
+//	            top-level runs: a group's runs_query says all=1
+//	playground  true | false (default: both, as /api/runs)
+//	experiment_id the runs of one experiment (default: any)
+//	status      /api/runs' status words (default: any); an unknown
+//	            value is 400, as since, until, by and playground are
+//
+// since and until must lie in 1678..2262 (Unix nanoseconds), else 400.
 //
 // A run is in the window when it started in [since, until); its spans
 // count with it, in its bucket. The series has statsBuckets buckets of
@@ -61,6 +70,15 @@ import (
 //	denials             refused tool calls (problems.denied's rule)
 //	series[]            {runs, failed, calls, failed_calls, input_tokens,
 //	                    output_tokens} per bucket, oldest first
+//	delegated           by=agent alone: {runs, input_tokens,
+//	                    output_tokens, cost block} — the model calls of the
+//	                    runs below the agent's runs in their Subagent
+//	                    trees whose agent is another (what its subagents
+//	                    spent for it; never in its own figures above)
+//	runs_query          agent and error_type groups with a key: the
+//	                    /api/search query string (all=1, the window as
+//	                    since/until, every filter read) whose total is
+//	                    the group's runs — what a card links to
 //
 // Percentiles are nearest-rank and exact on both backends. Content-off
 // safe: every number is a span attribute or a run column — no prompt,
@@ -99,6 +117,22 @@ type statsGroup struct {
 	RetryRate  *float64          `json:"retry_rate"`
 	Denials    int64             `json:"denials"`
 	Series     []statsBucket     `json:"series"`
+	// Delegated is by=agent's: what the agent's subagents spent for it
+	// (obsdb.StatsGroup.Delegated), beside its own figures above.
+	Delegated *statsDelegated `json:"delegated,omitempty"`
+	// RunsQuery is the /api/search query string whose total is this
+	// group's runs (agent and error_type groups with a key; absent
+	// otherwise — no runs filter reproduces a model's, tool's or step's).
+	RunsQuery string `json:"runs_query,omitempty"`
+}
+
+// statsDelegated is an agent group's subagent bill: the descendant
+// runs that made a model call, their calls' tokens and the cost block.
+type statsDelegated struct {
+	Runs         int64 `json:"runs"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	costFields
 }
 
 type statsPercentiles struct {
@@ -138,7 +172,7 @@ func windowSince(v string, until time.Time) (time.Time, error) {
 		return t, nil
 	}
 	if days, ok := strings.CutSuffix(v, "d"); ok {
-		if n, err := strconv.Atoi(days); err == nil && n > 0 {
+		if n, err := strconv.Atoi(days); err == nil && n > 0 && n <= 100_000 { // a Duration holds ~292 years
 			return until.Add(-time.Duration(n) * 24 * time.Hour), nil
 		}
 	} else if d, err := time.ParseDuration(v); err == nil && d > 0 {
@@ -164,6 +198,20 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request) {
 	}
 	// The scope first: a foreign public id's 403 wins over any 400.
 	if !scopeRunsQuery(w, r, &query.RunQuery, q.Get("public_id")) {
+		return
+	}
+	// /api/runs' other filters, its words and its defaults: every run,
+	// playground and experiment runs included, any status.
+	query.ExperimentID = q.Get("experiment_id")
+	if v := q.Get("playground"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			badRequest(w, r, "playground must be true or false")
+			return
+		}
+		query.Playground = &b
+	}
+	if query.Status, ok = statusParam(w, r, q); !ok {
 		return
 	}
 	query.Until = time.Now().UTC()
@@ -193,7 +241,9 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request) {
 	out := statsBody{By: string(page.By), Since: page.Since, Until: page.Until, Buckets: page.Buckets,
 		BucketMS: page.Bucket.Milliseconds(), Groups: make([]statsGroup, 0, len(page.Groups)), GroupsCut: page.GroupsCut}
 	for _, g := range page.Groups {
-		out.Groups = append(out.Groups, s.statsGroupOf(page.By, g))
+		sg := s.statsGroupOf(page.By, g)
+		sg.RunsQuery = runsQueryOf(q, query, page.By, g.Key)
+		out.Groups = append(out.Groups, sg)
 	}
 	writeJSON(w, r, http.StatusOK, out)
 }
@@ -228,6 +278,15 @@ func (s *Server) statsGroupOf(by obsdb.StatsBy, g obsdb.StatsGroup) statsGroup {
 	if by != obsdb.StatsByTool {
 		out.RetryRate = ratio(g.Retried, g.Calls)
 	}
+	if by == obsdb.StatsByAgent {
+		d := &statsDelegated{Runs: g.DelegatedRuns, InputTokens: g.Delegated.InputTokens, OutputTokens: g.Delegated.OutputTokens}
+		if g.DelegatedRuns == 0 {
+			d.costFields = cost{known: true, cache: cacheExact}.fields() // nothing delegated: an exact $0
+		} else {
+			d.costFields = s.priceModels(g.DelegatedModels, g.Delegated).fields()
+		}
+		out.Delegated = d
+	}
 	for i, b := range g.Series {
 		out.Series[i] = statsBucket{Runs: b.Runs, Failed: b.Failed, Calls: b.Calls, FailedCalls: b.FailedCalls,
 			InputTokens: b.InputTokens, OutputTokens: b.OutputTokens}
@@ -244,9 +303,15 @@ func (s *Server) statsCost(by obsdb.StatsBy, g obsdb.StatsGroup) cost {
 	if by == obsdb.StatsByTool {
 		return cost{badge: costUnknown, reason: "tool calls carry no model usage to price", cache: cacheExact}
 	}
-	out := cost{known: true, cache: cacheOf(g.Usage)}
+	return s.priceModels(g.Models, g.Usage)
+}
+
+// priceModels prices usage split by model, each part at its own row:
+// statsCost's rule, for a group's own calls and its delegated ones.
+func (s *Server) priceModels(models []obsdb.ModelUsage, usage core.Usage) cost {
+	out := cost{known: true, cache: cacheOf(usage)}
 	var unpriced, parts, scriptedParts int
-	for _, m := range g.Models {
+	for _, m := range models {
 		if m.Usage == (core.Usage{}) {
 			continue
 		}
@@ -279,4 +344,48 @@ func (s *Server) statsCost(by obsdb.StatsBy, g obsdb.StatsGroup) cost {
 		out.badge, out.reason, out.cache = costScripted, scriptedReason, cacheExact
 	}
 	return out
+}
+
+// runsQueryOf is a run-level group's /api/search query string — its
+// key and every filter the stats query read, the window as since/until
+// on the start — whose total is the group's runs; "" for a group no
+// runs filter reproduces (model, tool, step; an unnamed agent, a
+// failure with no error type).
+func runsQueryOf(params url.Values, q obsdb.StatsQuery, by obsdb.StatsBy, key string) string {
+	v := url.Values{}
+	switch {
+	case key == "":
+		return ""
+	case by == obsdb.StatsByAgent:
+		v.Set("agent", key)
+	case by == obsdb.StatsByErrorType:
+		if q.Agent != "" {
+			v.Set("agent", q.Agent)
+		}
+		v.Set("error_type", key)
+		v.Set("status", string(obsdb.StatusFailed))
+	default:
+		return ""
+	}
+	switch q.ParentRunID {
+	case "*":
+		v.Set("all", "1")
+	case "":
+	default:
+		v.Set("parent", q.ParentRunID)
+	}
+	for k, val := range q.Meta {
+		v.Set("tag."+k, val)
+	}
+	for _, k := range []string{"public_id", "experiment_id", "playground"} {
+		if p := params.Get(k); p != "" {
+			v.Set(k, p)
+		}
+	}
+	if q.Status != "" && by != obsdb.StatsByErrorType {
+		v.Set("status", string(q.Status))
+	}
+	v.Set("since", q.Since.UTC().Format(time.RFC3339Nano))
+	v.Set("until", q.Until.UTC().Format(time.RFC3339Nano))
+	return v.Encode()
 }

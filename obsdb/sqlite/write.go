@@ -53,6 +53,8 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	stats := &spanStatWriter{tx: tx}
+	defer stats.close()
 	var stockTraces []string
 	seenTrace := map[string]bool{}
 	for _, s := range b.Spans {
@@ -64,7 +66,7 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 		if inserted && w.RunID != "" {
 			// The span_stats rollup row (0023), in the span's own
 			// transaction: a derived index of what was just stored.
-			if err := insertSpanStat(ctx, tx, s); err != nil {
+			if err := stats.write(ctx, s); err != nil {
 				return err
 			}
 		}
@@ -195,6 +197,7 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 	if err != nil {
 		return err
 	}
+	stats.close()
 	if err := tx.Commit(); err != nil {
 		return err
 	}

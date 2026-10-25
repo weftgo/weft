@@ -2708,6 +2708,22 @@ export interface StatsGroup extends CostFields {
   retry_rate: number | null
   denials: number
   series: StatsBucket[]
+  /** by=agent alone: what the agent's subagents spent for it — the
+   * model calls of the runs below its runs in their Subagent trees
+   * whose agent is another — apart from its own figures above. */
+  delegated?: StatsDelegated
+  /** Agent and error_type groups with a key: the /api/search query
+   * string (all=1, the window as since/until, every filter read) whose
+   * total is this group's runs — /api/stats defaults to parent=* while
+   * /api/runs lists top-level runs, so link through this. */
+  runs_query?: string
+}
+
+/** An agent group's subagent bill (studio/stats.go's statsDelegated). */
+export interface StatsDelegated extends CostFields {
+  runs: number
+  input_tokens: number
+  output_tokens: number
 }
 
 /** GET /api/stats' body (capability "stats"): the window as read, its
@@ -2728,6 +2744,10 @@ export interface StatsPage {
  * run, children included), "" top-level, or a run id. */
 export interface StatsFilters {
   by: StatsBy
+  /** /api/runs' filters with its defaults: both, any. */
+  playground?: boolean
+  experiment_id?: string
+  status?: RunStatusFilter
   since?: string
   until?: string
   agent?: string
@@ -2745,6 +2765,10 @@ export function fetchStats(filters: StatsFilters): Promise<StatsPage> {
   if (filters.agent) params.set("agent", filters.agent)
   if (filters.public_id) params.set("public_id", filters.public_id)
   if (filters.parent !== undefined) params.set("parent", filters.parent)
+  if (filters.playground !== undefined)
+    params.set("playground", String(filters.playground))
+  if (filters.experiment_id) params.set("experiment_id", filters.experiment_id)
+  if (filters.status) params.set("status", filters.status)
   for (const [k, v] of Object.entries(filters.tag ?? {}))
     params.set(`tag.${k}`, v)
   return get<StatsPage>(`stats?${params.toString()}`)

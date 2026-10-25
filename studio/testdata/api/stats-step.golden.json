@@ -7,13 +7,13 @@
   "groups": [
     {
       "key": "0",
-      "runs": 9,
+      "runs": 10,
       "failed": 5,
-      "failure_rate": 0.222222,
-      "calls": 9,
+      "failure_rate": 0.2,
+      "calls": 10,
       "failed_calls": 2,
-      "input_tokens": 1076,
-      "output_tokens": 231,
+      "input_tokens": 1116,
+      "output_tokens": 239,
       "cost_usd": null,
       "cost_known": false,
       "cost_badge": "unpriced",
@@ -25,15 +25,15 @@
       "duration_ms": {
         "p50": 1000,
         "p95": 6000,
-        "n": 9
+        "n": 10
       },
       "ttft_ms": {
-        "p50": 400,
+        "p50": 350,
         "p95": 1100,
-        "n": 7
+        "n": 8
       },
       "retried": 2,
-      "retry_rate": 0.222222,
+      "retry_rate": 0.2,
       "denials": 0,
       "series": [
         {
@@ -109,12 +109,12 @@
           "output_tokens": 0
         },
         {
-          "runs": 2,
+          "runs": 3,
           "failed": 0,
-          "calls": 2,
+          "calls": 3,
           "failed_calls": 0,
-          "input_tokens": 1020,
-          "output_tokens": 210
+          "input_tokens": 1060,
+          "output_tokens": 218
         },
         {
           "runs": 1,

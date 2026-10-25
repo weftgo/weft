@@ -51,6 +51,8 @@ const GROUP_KEYS: Record<Exclude<keyof StatsGroup, keyof CostFields>, true> = {
   retry_rate: true,
   denials: true,
   series: true,
+  delegated: true,
+  runs_query: true,
 }
 const PCT_KEYS: Record<keyof StatsPercentiles, true> = {
   p50: true,
@@ -84,6 +86,15 @@ describe("GET /api/stats' mirror knows every key the goldens carry", () => {
         expect(unknownKeys(g, { ...GROUP_KEYS, ...COST_KEYS })).toEqual([])
         for (const p of [g.duration_ms, g.ttft_ms])
           if (p) expect(unknownKeys(p, PCT_KEYS)).toEqual([])
+        if (g.delegated)
+          expect(
+            unknownKeys(g.delegated, {
+              ...COST_KEYS,
+              runs: true,
+              input_tokens: true,
+              output_tokens: true,
+            })
+          ).toEqual([])
         expect(g.series).toHaveLength(page.buckets)
         for (const b of g.series)
           expect(unknownKeys(b, BUCKET_KEYS)).toEqual([])

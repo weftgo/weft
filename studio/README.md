@@ -2656,12 +2656,15 @@ filters `search` and `runs` to that class),
 `stats` (UX plan A4, under the `stats` capability:
 `?by=agent|model|tool|error_type|step` with `since` (RFC 3339 or
 `90m`/`24h`/`7d` back from `until`, default 24h), `until`, `agent`,
-`tag.<k>=<v>`, `public_id` and `parent` (`*` the default: children
-counted under their own agent) — per group `runs`, `failed`,
+`tag.<k>=<v>`, `public_id`, `playground`, `experiment_id`, `status` and
+`parent` (`*` the default, unlike `runs`' top-level: children counted
+under their own agent) — per group `runs`, `failed`,
 `failure_rate`, `calls`, `failed_calls`, the calls' own tokens, the cost
 block, `duration_ms` and `ttft_ms` `{p50, p95, n}` (nearest-rank, exact
 on both backends), `retry_rate`, `denials` and a 24-bucket `series` for
-sparklines; scoped like `runs`; SQLite reads its `span_stats` rollup
+sparklines; by=agent adds `delegated` (its subagents' calls, apart from
+its own), agent and error_type groups a `runs_query` (the `search`
+query string whose total is the group's runs); scoped like `runs`; SQLite reads its `span_stats` rollup
 (migration 0023, a derived index written at ingest), ClickHouse groups
 `otel_traces` natively),
 `runs/{id}` (the row and the subagent children, each child row with its own `holes` — never events; with

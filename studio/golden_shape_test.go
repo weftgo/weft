@@ -231,7 +231,7 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// The aggregates (A4): the real run is one scripted run of orders
 		// — priced an exact $0, its tool succeeded; the fixture's
 		// unpriced, unknown and failed groups carry what it does not.
-		{"stats-agent.golden.json", "/api/stats?by=agent", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>"}},
+		{"stats-agent.golden.json", "/api/stats?by=agent", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>", ".groups[].delegated.cost_", ".groups[].delegated.unpriced_models[]"}}, // the real run delegates nothing
 		{"stats-model.golden.json", "/api/stats?by=model", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>"}},
 		{"stats-tool.golden.json", "/api/stats?by=tool", nil},
 		{"stats-error-type.golden.json", "/api/stats?by=error_type", []string{".groups[]"}},

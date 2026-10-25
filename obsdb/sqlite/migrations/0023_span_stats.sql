@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS span_stats (
   reasoning_tokens INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (trace_id, span_id)
 ) WITHOUT ROWID;
+-- spans_attempt serves the derivation's attempts subquery — a chat
+-- span's attempt children, by trace and parent — which the statement
+-- names (INDEXED BY): without it, or without ANALYZE to make the
+-- planner pick it, every chat span scans its whole trace (a 30,000-span
+-- trace ingested in 41.7 s, the backfill blocked Open for 46.8 s).
+CREATE INDEX IF NOT EXISTS spans_attempt ON spans(trace_id, parent_span_id) WHERE name = 'attempt';
 CREATE INDEX IF NOT EXISTS span_stats_op ON span_stats(op, name, start_ns);
 CREATE INDEX IF NOT EXISTS span_stats_run ON span_stats(run_id);
 CREATE TRIGGER IF NOT EXISTS span_stats_gone AFTER DELETE ON spans BEGIN

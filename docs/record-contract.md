@@ -1306,23 +1306,30 @@ says what changed, not who changed it.
 **Aggregates** (UX plan D7, A4, A2; UX-E-25, UX-C-37) are derived,
 never recorded: no new attribute, every number read from the spans
 and run rows above (`obsdb.Aggregator`). `Stats` groups the runs a
-query keeps — `/api/runs`' filters, not derived, started in the window
-— by agent, model, tool, error type or step, each group's model calls,
+query keeps — `/api/runs`' filters, started in the window (a derived
+run counts as a run with no calls, so a group's runs are the runs
+list's under the same filters), every span read from the window's
+start on — by agent, model, tool, error type or step, each group's model calls,
 tool calls, usage, durations, TTFT, attempts and denials summed by the
 rules already named here: a call fails on status `Error` (a tool call
 by §6 `problems`' `tool_errors` rule), `denials` is `problems.denied`'s
 rule, a model call's attempts are its `attempt` spans' highest
-`weft.attempt.index` (1 without), its usage its own `chat` span's
+`weft.attempt.index` (1 without; the index an integer or a string of
+decimal digits, anything else none — `obsdb.AttemptIndex`), its usage its own `chat` span's
 `gen_ai.usage.*` (never a run's rolled-up total); a summarizer's call
 (`weft.chat.role`) and a call a resume denied (`weft.tool.denied`) are
-no call. Percentiles are nearest-rank (`obsdb.PercentileRank`), exact
+no call. An agent's group also reads its **delegated** calls: the model
+calls of the runs below its runs in their Subagent trees (core child ids
+`<run>/<step>/<call>`, any depth) whose agent is another, each once —
+what its subagents spent for it, never in its own figures. Percentiles are nearest-rank (`obsdb.PercentileRank`), exact
 on both backends. On SQLite the rows come from **`span_stats`**
 (migration 0023), a **derived index**: one row per stored
 `invoke_agent`, `chat` and `execute_tool` span of a weft run, computed
 from the `spans` row by one derivation the writer runs in the span's
 own transaction and the migration's backfill runs over the spans
 already stored — so the table is rebuildable from `spans` at any time
-and holds nothing a span does not; its rows go with their span
+and holds nothing a span does not (its attempts subquery reads the
+partial index `spans_attempt`, by name); its rows go with their span
 (deletion, sweep, the orphan pass: a trigger on `spans`). ClickHouse
 keeps no such table: the same rules are restated over `otel_traces`
 with native `GROUP BY`. The conformance suite's `Stats` case holds both

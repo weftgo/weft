@@ -7,13 +7,13 @@
   "groups": [
     {
       "key": "researcher",
-      "runs": 4,
+      "runs": 5,
       "failed": 3,
-      "failure_rate": 0.75,
-      "calls": 10,
+      "failure_rate": 0.6,
+      "calls": 11,
       "failed_calls": 0,
-      "input_tokens": 136,
-      "output_tokens": 50,
+      "input_tokens": 176,
+      "output_tokens": 58,
       "cost_usd": null,
       "cost_known": false,
       "cost_badge": "unpriced",
@@ -25,12 +25,12 @@
       "duration_ms": {
         "p50": 3000,
         "p95": 5000,
-        "n": 4
+        "n": 5
       },
       "ttft_ms": {
         "p50": 600,
         "p95": 1100,
-        "n": 10
+        "n": 11
       },
       "retried": 0,
       "retry_rate": 0,
@@ -109,12 +109,12 @@
           "output_tokens": 0
         },
         {
-          "runs": 1,
+          "runs": 2,
           "failed": 0,
-          "calls": 2,
+          "calls": 3,
           "failed_calls": 0,
-          "input_tokens": 50,
-          "output_tokens": 22
+          "input_tokens": 90,
+          "output_tokens": 30
         },
         {
           "runs": 1,
@@ -228,7 +228,16 @@
           "input_tokens": 0,
           "output_tokens": 0
         }
-      ]
+      ],
+      "delegated": {
+        "runs": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0,
+        "cost_known": true,
+        "cache": "exact"
+      },
+      "runs_query": "agent=researcher\u0026all=1\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"
     },
     {
       "key": "director",
@@ -449,7 +458,21 @@
           "input_tokens": 0,
           "output_tokens": 0
         }
-      ]
+      ],
+      "delegated": {
+        "runs": 1,
+        "input_tokens": 40,
+        "output_tokens": 8,
+        "cost_usd": null,
+        "cost_known": false,
+        "cost_badge": "unpriced",
+        "cost_reason": "1 of 1 models unpriced: no price for zai/glm-5.3-flash",
+        "cache": "not_reported",
+        "unpriced_models": [
+          "zai/glm-5.3-flash"
+        ]
+      },
+      "runs_query": "agent=director\u0026all=1\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"
     },
     {
       "key": "orders",
@@ -671,7 +694,16 @@
           "input_tokens": 0,
           "output_tokens": 0
         }
-      ]
+      ],
+      "delegated": {
+        "runs": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0,
+        "cost_known": true,
+        "cache": "exact"
+      },
+      "runs_query": "agent=orders\u0026all=1\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"
     }
   ]
 }

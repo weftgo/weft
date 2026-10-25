@@ -401,3 +401,150 @@ func errorCounts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 	}
 }
+
+// statsAttemptSpelling: weft.attempt.index read one way on every
+// backend (obsdb.AttemptIndex) — an integer or a string of decimal
+// digits, before or after its chat span; a fraction or text is no index.
+func statsAttemptSpelling(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		r := statRun{id: "st-spell", agent: "speller", start: -10 * time.Minute, dur: 5 * time.Second}
+		att := func(chat string, n int, idx any) obsdb.Span {
+			s := r.attempt(chat, int64(n), 1)
+			s.Attrs["weft.attempt.index"] = idx
+			return s
+		}
+		early := []obsdb.Span{
+			att("c0", 2, "2"), // a collector's string, before its chat span
+			att("c2", 9, 2.5), // a fraction: no index
+			att("c3", 3, int64(3)),
+			r.chat("c0", 0, "m", 0, time.Second, 1, 1, -1, 1),
+			r.chat("c1", 1, "m", time.Second, time.Second, 1, 1, -1, 1),
+			r.chat("c2", 2, "m", 2*time.Second, time.Second, 1, 1, -1, 1),
+			r.chat("c3", 3, "m", 3*time.Second, time.Second, 1, 1, -1, 1),
+			r.root(),
+		}
+		late := []obsdb.Span{
+			att("c1", 3, "3"),   // a string after its chat span
+			att("c2", 8, "x8"),  // text: no index
+			att("c3", 4, "04x"), // text: no index
+		}
+		for _, b := range [][]obsdb.Span{early, late} {
+			if err := db.Write(ctx(), obsdb.Batch{Spans: b}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		wantStats(t, aggregator(t, db), statsQ(obsdb.StatsByStep),
+			"0 runs=1/0 calls=1/0 retried=1 denied=0 tok=1/1 dur=1000/1000/1 ttft=0/0/0 models=[p/m 1/1] series=[1/0 1/0 1/1 | 0/0 0/0 0/0]",
+			"1 runs=1/0 calls=1/0 retried=1 denied=0 tok=1/1 dur=1000/1000/1 ttft=0/0/0 models=[p/m 1/1] series=[1/0 1/0 1/1 | 0/0 0/0 0/0]",
+			"2 runs=1/0 calls=1/0 retried=0 denied=0 tok=1/1 dur=1000/1000/1 ttft=0/0/0 models=[p/m 1/1] series=[1/0 1/0 1/1 | 0/0 0/0 0/0]",
+			"3 runs=1/0 calls=1/0 retried=1 denied=0 tok=1/1 dur=1000/1000/1 ttft=0/0/0 models=[p/m 1/1] series=[1/0 1/0 1/1 | 0/0 0/0 0/0]")
+	}
+}
+
+// statsSpanBeforeRun: a model call stored with a start before its
+// run's other spans — and before the window — moves the run's start
+// with it on both backends: the window reads the run as it stands.
+func statsSpanBeforeRun(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		in := statRun{id: "st-in", agent: "edge", start: -50 * time.Minute, dur: time.Second}
+		early := statRun{id: "st-early", agent: "edge", start: -50 * time.Minute, dur: time.Second}
+		writes := [][]obsdb.Span{
+			{in.chat("c0", 0, "m", 0, time.Second, 5, 5, -1, 1), in.root()},
+			{early.chat("c0", 0, "m", 0, time.Second, 7, 7, -1, 1), early.root()},
+			// Later: a call of st-early that started 20 minutes before
+			// the window opens.
+			{early.chat("c1", 1, "m", -30*time.Minute, time.Second, 100, 100, -1, 1)},
+		}
+		for _, b := range writes {
+			if err := db.Write(ctx(), obsdb.Batch{Spans: b}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		a := aggregator(t, db)
+		for _, by := range []obsdb.StatsBy{obsdb.StatsByAgent, obsdb.StatsByModel} {
+			page, err := a.Stats(ctx(), statsQ(by))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := statsLines(page); len(got) != 1 || !strings.Contains(got[0], "runs=1/0 calls=1/0") || !strings.Contains(got[0], "tok=5/5") {
+				t.Errorf("Stats(%s) = %v, want st-in alone: st-early started before the window", by, got)
+			}
+		}
+	}
+}
+
+// statsDelegated: an agent's subagents' calls (by=agent's Delegated) —
+// every Subagent descendant of its runs whose agent is another, each
+// call once — beside its own usage; a descendant of the same agent is
+// its own run, and a panel token's scope leaves out a descendant of
+// another public id.
+func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		run := func(id, agent, public string, at time.Duration, in, out int64) statRun {
+			r := statRun{id: id, agent: agent, public: public, start: at, dur: time.Second}
+			r.spans = func(r statRun) []obsdb.Span {
+				root := r.root()
+				if i := strings.LastIndex(r.id, "/"); i > 0 {
+					p := r.id[:strings.LastIndex(r.id[:i], "/")]
+					root.Attrs["weft.parent.run.id"], root.Attrs["weft.parent.call.id"] = p, r.id[i+1:]
+				}
+				return []obsdb.Span{r.chat("c0", 0, "m-"+agent, 10*time.Millisecond, 100*time.Millisecond, in, out, -1, 1), root}
+			}
+			return r
+		}
+		for _, r := range []statRun{
+			run("dl-p", "boss", "pub_d", -40*time.Minute, 100, 10),
+			run("dl-p/0/call_1", "helper", "pub_d", -40*time.Minute+time.Second, 20, 2),
+			run("dl-p/0/call_1/0/call_2", "boss", "pub_d", -40*time.Minute+2*time.Second, 3, 1),
+			run("dl-p/1/call_3", "helper", "pub_other", -40*time.Minute+3*time.Second, 40, 4),
+			run("dl-q", "boss", "pub_d", -20*time.Minute, 50, 5),
+		} {
+			if err := db.Write(ctx(), obsdb.Batch{Spans: r.spans(r)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		a := aggregator(t, db)
+		delegated := func(q obsdb.StatsQuery) []string {
+			page, err := a.Stats(ctx(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, g := range page.Groups {
+				var ms []string
+				for _, m := range g.DelegatedModels {
+					ms = append(ms, fmt.Sprintf("%s %d/%d", m.Model, m.Usage.InputTokens, m.Usage.OutputTokens))
+				}
+				out = append(out, fmt.Sprintf("%s own=%d/%d delegated=%d/%d runs=%d [%s]", g.Key, g.Usage.InputTokens, g.Usage.OutputTokens,
+					g.Delegated.InputTokens, g.Delegated.OutputTokens, g.DelegatedRuns, strings.Join(ms, ", ")))
+			}
+			return out
+		}
+		// boss: its own three runs' calls (100+3+50); below dl-p the two
+		// helper runs (20+40) — the boss grandchild is boss's own.
+		// helper: below dl-p/0/call_1, the boss grandchild (3).
+		want := []string{"boss own=153/16 delegated=60/6 runs=2 [m-helper 60/6]", "helper own=60/6 delegated=3/1 runs=1 [m-boss 3/1]"}
+		if got := delegated(statsQ(obsdb.StatsByAgent)); !slices.Equal(got, want) {
+			t.Errorf("delegated =\n %v\nwant\n %v", got, want)
+		}
+		q := statsQ(obsdb.StatsByAgent)
+		q.PublicID = "pub_d"
+		want = []string{"boss own=153/16 delegated=20/2 runs=1 [m-helper 20/2]", "helper own=20/2 delegated=3/1 runs=1 [m-boss 3/1]"}
+		if got := delegated(q); !slices.Equal(got, want) {
+			t.Errorf("delegated under pub_d =\n %v\nwant\n %v", got, want)
+		}
+		// Every other by reads none.
+		page, err := a.Stats(ctx(), statsQ(obsdb.StatsByModel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, g := range page.Groups {
+			if g.DelegatedRuns != 0 || g.Delegated.InputTokens != 0 {
+				t.Errorf("by=model %s carries delegated %+v", g.Key, g.Delegated)
+			}
+		}
+	}
+}

@@ -72,6 +72,13 @@ const (
 	MaxStatsGroups = 200
 )
 
+// The window's bounds: the years Unix nanoseconds hold in an int64
+// (2262 up to its April 11th; past that instant a time is refused too).
+const (
+	MinStatsYear = 1678
+	MaxStatsYear = 2262
+)
+
 // ErrInvalidStats is returned by CheckStats and Stats for a query
 // outside its bounds; Studio answers it 400.
 var ErrInvalidStats = errors.New("obsdb: invalid stats query")
@@ -81,8 +88,9 @@ var ErrInvalidStats = errors.New("obsdb: invalid stats query")
 // metadata (tag.<k>), parent ("*" every run, children included; "" the
 // top-level runs only), playground, experiment, status — with the same
 // meaning; RunQuery's Before, BeforeID, Limit and Oldest are not read.
-// A derived run (RunRow.Derived: built from stock spans) is never
-// counted: it has no weft spans to aggregate.
+// A derived run (RunRow.Derived: built from stock spans) counts as a
+// run — so a group's Runs is the runs list's count under the same
+// filters — with no calls: it has no weft spans to aggregate.
 //
 // The window is the runs' start: a run is in when Since ≤ Started <
 // Until, and every span of a run in the window is counted with it, in
@@ -107,6 +115,13 @@ func CheckStats(q StatsQuery) (buckets int, width time.Duration, err error) {
 	}
 	if q.Since.IsZero() || q.Until.IsZero() || !q.Since.Before(q.Until) {
 		return 0, 0, fmt.Errorf("%w: the window needs since before until", ErrInvalidStats)
+	}
+	// The window is compared in Unix nanoseconds: an int64 holds
+	// 1678-2262, and a time outside it would wrap.
+	for _, t := range []time.Time{q.Since, q.Until} {
+		if y := t.UTC().Year(); y < MinStatsYear || y > MaxStatsYear || !time.Unix(0, t.UnixNano()).Equal(t) {
+			return 0, 0, fmt.Errorf("%w: since and until must lie in the years %d..%d", ErrInvalidStats, MinStatsYear, MaxStatsYear)
+		}
 	}
 	buckets = q.Buckets
 	if buckets == 0 {
@@ -164,6 +179,14 @@ type StatsPage struct {
 //     finished) for agent and error_type; the calls' span durations for
 //     model, tool and step. TTFT: the model calls' weft.ttft_ms (none
 //     for tool). Both in milliseconds, nearest-rank percentiles.
+//   - Delegated, DelegatedModels and DelegatedRuns (by=agent alone):
+//     the model calls of the runs below the group's runs in their
+//     Subagent trees (core child ids: <run id>/<step>/<call>, at any
+//     depth) whose own agent is another — what the agent's subagents
+//     spent for it, apart from its own Usage — each call once however
+//     many of the group's runs it sits under, and how many such runs
+//     made a call. A descendant past a panel token's public id is not
+//     read. Zero for every other By.
 //   - Series: the same sums per bucket of the window, Buckets of them.
 type StatsGroup struct {
 	Key                         string
@@ -172,6 +195,9 @@ type StatsGroup struct {
 	Denials                     int64
 	Usage                       core.Usage
 	Models                      []ModelUsage
+	Delegated                   core.Usage
+	DelegatedModels             []ModelUsage
+	DelegatedRuns               int64
 	Duration, TTFT              Percentiles
 	Series                      []StatsBucket
 }
@@ -204,11 +230,15 @@ type StatsCell struct {
 	InputTokens, OutputTokens                 int64
 	CachedInputTokens, CacheWriteTokens       int64
 	ReasoningTokens                           int64
+	// DelegatedRuns is summed into the group, never into a bucket.
+	DelegatedRuns int64
 }
 
-// StatsModelPart is one group's usage on one provider/model.
+// StatsModelPart is one group's usage on one provider/model; with
+// Delegated, its subagents' (StatsGroup.DelegatedModels).
 type StatsModelPart struct {
-	Key string
+	Key       string
+	Delegated bool
 	ModelUsage
 }
 
@@ -216,6 +246,31 @@ type StatsModelPart struct {
 type StatsPercentiles struct {
 	Key            string
 	Duration, TTFT Percentiles
+}
+
+// AttemptIndex is an attempt span's weft.attempt.index as every
+// aggregate reads it: an integer (a whole float64 is one — JSON decodes
+// numbers so), or a string of decimal digits, the spelling a stock
+// collector's stringified attributes carry. Anything else is no index
+// (ok false). SQLite's span_stats derivation and ClickHouse's statsSpans
+// restate the rule; the conformance suite's Stats case pins all three.
+func AttemptIndex(attrs map[string]any) (int64, bool) {
+	switch v := attrs["weft.attempt.index"].(type) {
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case float64:
+		if v == float64(int64(v)) {
+			return int64(v), true
+		}
+	case string:
+		if v != "" && strings.Trim(v, "0123456789") == "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			return n, err == nil
+		}
+	}
+	return 0, false
 }
 
 // PercentileRank is the 1-based nearest rank of percentile p over n
@@ -253,6 +308,7 @@ func BuildStats(q StatsQuery, cells []StatsCell, models []StatsModelPart, pcts [
 		g.Usage.CachedInputTokens += c.CachedInputTokens
 		g.Usage.CacheWriteTokens += c.CacheWriteTokens
 		g.Usage.ReasoningTokens += c.ReasoningTokens
+		g.DelegatedRuns += c.DelegatedRuns
 		b := &g.Series[min(max(c.Bucket, 0), buckets-1)]
 		b.Runs += c.Runs
 		b.Failed += c.Failed
@@ -263,6 +319,10 @@ func BuildStats(q StatsQuery, cells []StatsCell, models []StatsModelPart, pcts [
 	}
 	for _, m := range models {
 		g := group(m.Key)
+		if m.Delegated {
+			g.DelegatedModels = append(g.DelegatedModels, m.ModelUsage)
+			continue
+		}
 		g.Models = append(g.Models, m.ModelUsage)
 	}
 	for _, p := range pcts {
@@ -271,6 +331,7 @@ func BuildStats(q StatsQuery, cells []StatsCell, models []StatsModelPart, pcts [
 	}
 	for _, g := range byKey {
 		_, g.Models = SumModelUsage(g.Models)
+		g.Delegated, g.DelegatedModels = SumModelUsage(g.DelegatedModels)
 		page.Groups = append(page.Groups, *g)
 	}
 	slices.SortFunc(page.Groups, func(a, b StatsGroup) int {

@@ -74,6 +74,10 @@ func (r statsRun) batch() obsdb.Batch {
 	root := attrs("invoke_agent")
 	root["gen_ai.agent.name"], root["gen_ai.provider.name"], root["gen_ai.request.model"] = r.agent, r.provider, r.model
 	root["weft.run.steps"] = int64(len(r.steps))
+	if i := strings.LastIndex(r.id, "/"); i > 0 {
+		root["weft.parent.run.id"] = r.id[:strings.LastIndex(r.id[:i], "/")]
+		root["weft.parent.call.id"] = r.id[i+1:]
+	}
 	status := 1
 	if r.err != "" {
 		status, root["error.type"] = 2, r.errType
@@ -151,6 +155,10 @@ func statsFixtureRuns() []statsRun {
 			tools: []statsTool{{name: "web_search", dur: 300 * time.Millisecond}, {name: "web_search", dur: 300 * time.Millisecond}, {name: "web_search", errType: "timeout", dur: 2 * time.Second}}}),
 		haiku(statsRun{id: "st_d1", at: 9*time.Hour + 30*time.Minute, dur: 2 * time.Second,
 			steps: []statsStep{{in: 1000, out: 200, ttft: 350, dur: 1800 * time.Millisecond}}, attempts: 2}),
+		// director's subagent: a researcher run below st_d1 (its
+		// delegated bill — unpriced, the zai model).
+		zai(statsRun{id: "st_d1/0/call_9", at: 9*time.Hour + 30*time.Minute + 100*time.Millisecond, dur: time.Second,
+			steps: []statsStep{{in: 40, out: 8, ttft: 300, dur: 500 * time.Millisecond}}}),
 		haiku(statsRun{id: "st_d2", at: 13 * time.Hour, dur: 7 * time.Second, errType: "model_error", err: arenaRetry,
 			steps: []statsStep{{dur: 6 * time.Second, failed: true}}, attempts: 3}),
 		haiku(statsRun{id: "st_d3", at: 14 * time.Hour, dur: 500 * time.Millisecond, errType: "model_error", err: arena429,
@@ -195,11 +203,14 @@ func TestStatsGoldens(t *testing.T) {
 	// The numbers the Agents page reads, spot-checked.
 	_, _, body := get(t, h, "/studio/api/stats?by=agent&"+statsWindow)
 	for _, want := range []string{
-		`"key":"researcher","runs":4,"failed":3,"failure_rate":0.75`,
+		`"key":"researcher","runs":5,"failed":3,"failure_rate":0.6`,
 		`"unpriced_models":["zai/glm-5.3-flash"]`,
 		`"key":"director","runs":3,"failed":2`,
 		`"retried":2,"retry_rate":0.666667`,
 		`"key":"orders","runs":2,"failed":0`, `"cost_badge":"scripted"`,
+		// director's subagent bill, apart from its own: unpriced.
+		`"delegated":{"runs":1,"input_tokens":40,"output_tokens":8,"cost_usd":null,"cost_known":false,"cost_badge":"unpriced"`,
+		`"runs_query":"agent=director\u0026all=1\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"`,
 		`"buckets":24,"bucket_ms":3600000`,
 	} {
 		if !strings.Contains(body, want) {
@@ -229,6 +240,13 @@ func TestStatsRoute(t *testing.T) {
 		{"by=agent&public_id=pub_other&" + statsWindow, http.StatusOK, `"groups":[{"key":"orders","runs":1,`},
 		{"by=tool&agent=orders&" + statsWindow, http.StatusOK, `"key":"lookup_order","runs":1,"failed":0,"failure_rate":0,"calls":1`},
 		{"by=agent&parent=&" + statsWindow, http.StatusOK, `"key":"researcher"`},
+		{"by=agent&playground=maybe", http.StatusBadRequest, "playground must be true or false"},
+		{"by=agent&status=nope", http.StatusBadRequest, "status"},
+		{"by=agent&since=1000-01-01T00:00:00Z&until=2020-01-02T00:00:00Z", http.StatusBadRequest, "years 1678..2262"},
+		{"by=agent&since=2020-01-01T00:00:00Z&until=3000-01-01T00:00:00Z", http.StatusBadRequest, "years 1678..2262"},
+		{"by=agent&since=999999999d", http.StatusBadRequest, "since must be"},
+		{"by=agent&experiment_id=exp_none&" + statsWindow, http.StatusOK, `"groups":[]`},
+		{"by=agent&playground=false&status=failed&" + statsWindow, http.StatusOK, `"key":"researcher","runs":3,"failed":3`},
 	} {
 		code, _, body := get(t, h, "/studio/api/stats?"+c.path)
 		if code != c.code || !strings.Contains(body, c.want) {
@@ -245,6 +263,7 @@ func TestStatsRoute(t *testing.T) {
 			t.Errorf("stats?by=tool missing %s:\n%s", want, body)
 		}
 	}
+	checkRunsQueries(t, h)
 	// The meta capability.
 	if _, _, meta := get(t, h, "/studio/api/meta"); !strings.Contains(meta, `"stats"`) {
 		t.Errorf("meta without the stats capability: %s", meta)
@@ -358,5 +377,40 @@ func TestStatsGoldensClickHouse(t *testing.T) {
 	ids, total, _ := searchIDs(t, h, "/studio/api/runs?error_class="+url.QueryEscape(usageClass))
 	if strings.Join(ids, ",") != "st_r3,st_r2" || total != 2 {
 		t.Errorf("ClickHouse runs?error_class=<usage> = %v (total %d), want st_r3,st_r2", ids, total)
+	}
+	checkRunsQueries(t, h)
+}
+
+// checkRunsQueries: every agent and error_type group's runs_query,
+// sent to /api/search, totals the group's runs — the card's link
+// lands on the same N — whatever filters the stats query read.
+func checkRunsQueries(t *testing.T, h http.Handler) {
+	t.Helper()
+	for _, path := range []string{"by=agent&" + statsWindow, "by=error_type&" + statsWindow,
+		"by=agent&parent=&" + statsWindow, "by=agent&status=failed&" + statsWindow} {
+		_, _, body := get(t, h, "/studio/api/stats?"+path)
+		var page struct {
+			Groups []struct {
+				Key       string `json:"key"`
+				Runs      int    `json:"runs"`
+				RunsQuery string `json:"runs_query"`
+			} `json:"groups"`
+		}
+		decode(t, body, &page)
+		for _, g := range page.Groups {
+			if g.RunsQuery == "" {
+				t.Errorf("stats?%s: group %q has no runs_query", path, g.Key)
+				continue
+			}
+			if _, total, _ := searchIDs(t, h, "/studio/api/search?"+g.RunsQuery); total != g.Runs {
+				t.Errorf("stats?%s: group %q counts %d runs, its runs_query %q lists %d", path, g.Key, g.Runs, g.RunsQuery, total)
+			}
+		}
+	}
+	// No runs filter reproduces a model's, tool's or step's group.
+	for _, by := range []string{"model", "tool", "step"} {
+		if _, _, body := get(t, h, "/studio/api/stats?by="+by+"&"+statsWindow); strings.Contains(body, "runs_query") {
+			t.Errorf("stats?by=%s carries a runs_query: %s", by, body)
+		}
 	}
 }

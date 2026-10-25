@@ -33,6 +33,18 @@ func chatInt(key string) string {
 	return `CASE WHEN op = 'chat' THEN COALESCE(CAST(json_extract(attrs, '$."` + key + `"') AS INTEGER), 0) ELSE 0 END`
 }
 
+// attemptIndexSQL is an attempt span's weft.attempt.index the one way
+// every reader reads it (obsdb.AttemptIndex): a JSON integer, or a
+// string of decimal digits — the spelling a collector's stringified
+// attributes carry, which ClickHouse reads — else NULL (no index). The
+// subquery reads it through spans_attempt (0023), named: without
+// ANALYZE the planner scans the whole trace for every chat span.
+const attemptIndexSQL = `CASE json_type(a.attrs, '$."weft.attempt.index"')
+	WHEN 'integer' THEN json_extract(a.attrs, '$."weft.attempt.index"')
+	WHEN 'text' THEN CASE WHEN json_extract(a.attrs, '$."weft.attempt.index"') GLOB '[0-9]*'
+		AND json_extract(a.attrs, '$."weft.attempt.index"') NOT GLOB '*[^0-9]*'
+		THEN CAST(json_extract(a.attrs, '$."weft.attempt.index"') AS INTEGER) END END`
+
 // spanStatsInsert derives span_stats rows from the spans the filter
 // keeps (a condition over spans' own columns, binds after it): the one
 // derivation the writer (one span) and migration 0023's backfill (a
@@ -51,8 +63,9 @@ func spanStatsInsert(filter string) string {
 		COALESCE(json_extract(attrs, '$."gen_ai.request.model"'), ''),
 		step, start_ns, MAX(end_ns - start_ns, 0) / 1e6,
 		CASE WHEN op = 'chat' THEN CAST(json_extract(attrs, '$."weft.ttft_ms"') AS REAL) END,
-		CASE WHEN op = 'chat' THEN MAX(1, COALESCE((SELECT MAX(CAST(json_extract(a.attrs, '$."weft.attempt.index"') AS INTEGER))
-			FROM spans AS a WHERE a.trace_id = x.trace_id AND a.parent_span_id = x.span_id AND a.name = 'attempt'), 1)) ELSE 1 END,
+		CASE WHEN op = 'chat' THEN MAX(1, COALESCE((SELECT MAX(` + attemptIndexSQL + `)
+			FROM spans AS a INDEXED BY spans_attempt
+			WHERE a.trace_id = x.trace_id AND a.parent_span_id = x.span_id AND a.name = 'attempt'), 1)) ELSE 1 END,
 		CASE WHEN status_code = 2 AND NOT (op = 'execute_tool' AND et IN ('DENIED', 'RETRY', 'context.Canceled', 'context.DeadlineExceeded'))
 			THEN 1 ELSE 0 END,
 		et,
@@ -71,13 +84,28 @@ func spanStatsInsert(filter string) string {
 		AND NOT (op = 'execute_tool' AND COALESCE(json_extract(attrs, '$."weft.tool.denied"'), 0) IN (1, 'true'))`
 }
 
-// insertSpanStat is the writer's half: the rollup row of one span just
-// stored (a no-op for a span the rollup skips), and — for an attempt
-// span — its chat span's attempts raised to the attempt's index, when
-// the chat span's row is already there (stored first, its subquery
-// could not see this attempt).
-func insertSpanStat(ctx context.Context, tx *sql.Tx, s obsdb.Span) error {
-	if _, err := tx.ExecContext(ctx, spanStatsInsert(`trace_id = ? AND span_id = ?`), s.TraceID, s.SpanID); err != nil {
+// spanStatWriter is the writer's half, one per Write: the rollup row
+// of each span just stored (a no-op for a span the rollup skips) and —
+// for an attempt span — its chat span's attempts raised to the
+// attempt's index, when the chat span's row is already there (stored
+// first, its subquery could not see this attempt). Both statements are
+// prepared once per Write, on first use: the INSERT … SELECT is long,
+// and parsing it per span was most of a span's cost
+// (BenchmarkSpanStatsIngest pins it).
+type spanStatWriter struct {
+	tx              *sql.Tx
+	insert, attempt *sql.Stmt
+}
+
+func (w *spanStatWriter) write(ctx context.Context, s obsdb.Span) error {
+	if w.insert == nil {
+		st, err := w.tx.PrepareContext(ctx, spanStatsInsert(`trace_id = ? AND span_id = ?`))
+		if err != nil {
+			return err
+		}
+		w.insert = st
+	}
+	if _, err := w.insert.ExecContext(ctx, s.TraceID, s.SpanID); err != nil {
 		return err
 	}
 	if s.Name != "attempt" || s.ParentSpanID == "" {
@@ -86,13 +114,29 @@ func insertSpanStat(ctx context.Context, tx *sql.Tx, s obsdb.Span) error {
 	if op, _ := s.Attrs["gen_ai.operation.name"].(string); op != "" {
 		return nil
 	}
-	idx, ok := attrInt64(s.Attrs, "weft.attempt.index")
+	idx, ok := obsdb.AttemptIndex(s.Attrs)
 	if !ok || idx <= 1 {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE span_stats SET attempts = MAX(attempts, ?)
-		WHERE trace_id = ? AND span_id = ? AND op = 'chat'`, idx, s.TraceID, s.ParentSpanID)
+	if w.attempt == nil {
+		st, err := w.tx.PrepareContext(ctx, `UPDATE span_stats SET attempts = MAX(attempts, ?)
+			WHERE trace_id = ? AND span_id = ? AND op = 'chat'`)
+		if err != nil {
+			return err
+		}
+		w.attempt = st
+	}
+	_, err := w.attempt.ExecContext(ctx, idx, s.TraceID, s.ParentSpanID)
 	return err
+}
+
+// close releases the prepared statements (before the commit).
+func (w *spanStatWriter) close() {
+	for _, st := range []*sql.Stmt{w.insert, w.attempt} {
+		if st != nil {
+			_ = st.Close()
+		}
+	}
 }
 
 // spanStatsBatchSize is the backfill's keyset batch: spans per
@@ -134,7 +178,7 @@ func backfillSpanStats(tx *sql.Tx) error {
 }
 
 // statsRuns is the runs CTE every Stats statement starts from: the
-// runs q keeps (runWhere), not derived, started in the window, each
+// runs q keeps (runWhere), started in the window, each
 // with its bucket b; error_type keeps the failed runs alone.
 func statsRuns(q obsdb.StatsQuery, buckets int, width time.Duration, now time.Time) (string, []any) {
 	rq := q.RunQuery
@@ -149,7 +193,7 @@ func statsRuns(q obsdb.StatsQuery, buckets int, width time.Duration, now time.Ti
 	args = append(args, q.Since.UnixNano(), q.Until.UnixNano())
 	return `WITH r AS (SELECT run_id, agent, error_type, failed, started_ns, finished_ns,
 		MIN(?, (started_ns - ?) / ?) AS b FROM runs
-		WHERE ` + where + ` AND derived = 0 AND started_ns >= ? AND started_ns < ?` + extra + `) `, args
+		WHERE ` + where + ` AND started_ns >= ? AND started_ns < ?` + extra + `) `, args
 }
 
 // statsKey is the group key's SQL and the span op a span-level query
@@ -231,7 +275,7 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 		if err := query(`SELECT `+key+`, r.b, SUM(s.op = 'chat'), SUM(s.op = 'chat' AND s.failed = 1),
 			SUM(s.op = 'chat' AND s.attempts > 1), SUM(s.denied),
 			SUM(s.input_tokens), SUM(s.output_tokens), SUM(s.cached_input_tokens), SUM(s.cache_write_tokens), SUM(s.reasoning_tokens)
-			FROM r JOIN span_stats AS s ON s.run_id = r.run_id GROUP BY 1, 2`, nil, func(rows *sql.Rows) error {
+			FROM r JOIN span_stats AS s ON s.run_id = r.run_id WHERE s.start_ns >= ? GROUP BY 1, 2`, []any{since}, func(rows *sql.Rows) error {
 			var c obsdb.StatsCell
 			if err := cell(rows, &c, &c.Calls, &c.FailedCalls, &c.Retried, &c.Denials,
 				&c.InputTokens, &c.OutputTokens, &c.CachedInputTokens, &c.CacheWriteTokens, &c.ReasoningTokens); err != nil {
@@ -263,7 +307,7 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 	if q.By != obsdb.StatsByTool {
 		if err := query(`SELECT `+key+`, s.provider, s.model, SUM(s.input_tokens), SUM(s.output_tokens),
 			SUM(s.cached_input_tokens), SUM(s.cache_write_tokens), SUM(s.reasoning_tokens)
-			FROM r JOIN span_stats AS s ON s.run_id = r.run_id WHERE s.op = 'chat' GROUP BY 1, 2, 3`, nil, func(rows *sql.Rows) error {
+			FROM r JOIN span_stats AS s ON s.run_id = r.run_id WHERE s.op = 'chat' AND s.start_ns >= ? GROUP BY 1, 2, 3`, []any{since}, func(rows *sql.Rows) error {
 			var m obsdb.StatsModelPart
 			u := &m.Usage
 			if err := rows.Scan(&m.Key, &m.Provider, &m.Model, &u.InputTokens, &u.OutputTokens,
@@ -271,6 +315,45 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 				return err
 			}
 			models = append(models, m)
+			return nil
+		}); err != nil {
+			return obsdb.StatsPage{}, err
+		}
+	}
+	// Delegated (by=agent): the model calls below the group's runs in
+	// their Subagent trees — ids <run>/<step>/<call>, at any depth: the
+	// range (run || '/', run || '0') — whose run is another agent's,
+	// each call once per agent (DISTINCT).
+	if q.By == obsdb.StatsByAgent {
+		scope, sargs := "", []any{since}
+		if q.PublicID != "" {
+			scope, sargs = " AND c.public_id = ?", append(sargs, q.PublicID)
+		}
+		below := `SELECT DISTINCT r.agent AS k, s.trace_id, s.span_id, s.run_id, s.provider, s.model,
+			s.input_tokens, s.output_tokens, s.cached_input_tokens, s.cache_write_tokens, s.reasoning_tokens
+			FROM r JOIN span_stats AS s ON s.run_id > r.run_id || '/' AND s.run_id < r.run_id || '0'
+			JOIN runs AS c ON c.run_id = s.run_id
+			WHERE s.op = 'chat' AND s.start_ns >= ? AND c.agent <> r.agent` + scope
+		if err := query(`SELECT k, provider, model, SUM(input_tokens), SUM(output_tokens),
+			SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens)
+			FROM (`+below+`) GROUP BY 1, 2, 3`, sargs, func(rows *sql.Rows) error {
+			m := obsdb.StatsModelPart{Delegated: true}
+			u := &m.Usage
+			if err := rows.Scan(&m.Key, &m.Provider, &m.Model, &u.InputTokens, &u.OutputTokens,
+				&u.CachedInputTokens, &u.CacheWriteTokens, &u.ReasoningTokens); err != nil {
+				return err
+			}
+			models = append(models, m)
+			return nil
+		}); err != nil {
+			return obsdb.StatsPage{}, err
+		}
+		if err := query(`SELECT k, COUNT(DISTINCT run_id) FROM (`+below+`) GROUP BY 1`, sargs, func(rows *sql.Rows) error {
+			var c obsdb.StatsCell
+			if err := rows.Scan(&c.Key, &c.DelegatedRuns); err != nil {
+				return err
+			}
+			cells = append(cells, c)
 			return nil
 		}); err != nil {
 			return obsdb.StatsPage{}, err

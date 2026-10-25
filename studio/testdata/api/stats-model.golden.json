@@ -7,13 +7,13 @@
   "groups": [
     {
       "key": "glm-5.3-flash",
-      "runs": 4,
+      "runs": 5,
       "failed": 3,
       "failure_rate": 0,
-      "calls": 10,
+      "calls": 11,
       "failed_calls": 0,
-      "input_tokens": 136,
-      "output_tokens": 50,
+      "input_tokens": 176,
+      "output_tokens": 58,
       "cost_usd": null,
       "cost_known": false,
       "cost_badge": "unpriced",
@@ -25,12 +25,12 @@
       "duration_ms": {
         "p50": 1000,
         "p95": 1500,
-        "n": 10
+        "n": 11
       },
       "ttft_ms": {
         "p50": 600,
         "p95": 1100,
-        "n": 10
+        "n": 11
       },
       "retried": 0,
       "retry_rate": 0,
@@ -109,12 +109,12 @@
           "output_tokens": 0
         },
         {
-          "runs": 1,
+          "runs": 2,
           "failed": 0,
-          "calls": 2,
+          "calls": 3,
           "failed_calls": 0,
-          "input_tokens": 50,
-          "output_tokens": 22
+          "input_tokens": 90,
+          "output_tokens": 30
         },
         {
           "runs": 1,

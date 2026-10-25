@@ -169,6 +169,7 @@ func rewindTo22(t *testing.T, path string) {
 	for _, stmt := range []string{
 		`DROP TRIGGER span_stats_gone`, `DROP TABLE span_stats`,
 		`ALTER TABLE experiments DROP COLUMN pass_predicate`,
+		`DROP INDEX spans_attempt`,
 		`DELETE FROM obsdb_migrations WHERE version >= 23`,
 	} {
 		if _, err := raw.Exec(stmt); err != nil {
@@ -309,5 +310,174 @@ func TestSpanStatsBackfillTime(t *testing.T) {
 	}
 	if took > time.Minute {
 		t.Errorf("migration 0023 over %d spans took %v: a Studio over this file would not start", spans, took)
+	}
+}
+
+// longTrace is one run's trace of n spans: model calls, each with an
+// attempt span, under one root — the shape whose attempts subquery
+// once scanned the whole trace per chat span.
+func longTrace(run string, n int, t0 time.Time) []obsdb.Span {
+	trace := fmt.Sprintf("%032x", len(run)+n)
+	out := make([]obsdb.Span, 0, n)
+	root := obsdb.Span{TraceID: trace, SpanID: "f000000000000000", Name: "invoke_agent long", Start: t0, End: t0.Add(time.Hour),
+		StatusCode: 1, Attrs: map[string]any{"weft.run.id": run, "gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "long"}}
+	for i := 0; len(out) < n-1; i++ {
+		chat := fmt.Sprintf("c%015x", i)
+		out = append(out,
+			obsdb.Span{TraceID: trace, SpanID: fmt.Sprintf("a%015x", i), ParentSpanID: chat, Name: "attempt",
+				Start: t0.Add(time.Duration(i) * time.Millisecond), End: t0.Add(time.Duration(i+1) * time.Millisecond), StatusCode: 1,
+				Attrs: map[string]any{"weft.run.id": run, "weft.attempt.index": int64(1)}},
+			obsdb.Span{TraceID: trace, SpanID: chat, ParentSpanID: root.SpanID, Name: "chat m",
+				Start: t0.Add(time.Duration(i) * time.Millisecond), End: t0.Add(time.Duration(i+1) * time.Millisecond), StatusCode: 1,
+				Attrs: map[string]any{"weft.run.id": run, "gen_ai.operation.name": "chat", "weft.step.index": int64(i),
+					"gen_ai.request.model": "m", "gen_ai.usage.input_tokens": int64(1)}})
+	}
+	return append(out[:n-1], root)
+}
+
+// TestSpanStatsLongTrace: a 30,000-span trace ingests and backfills in
+// bounded time — the attempts subquery reads spans_attempt, never the
+// whole trace per chat span (before: 41.7 s to ingest, 46.8 s blocking
+// Open; now well under a second each).
+func TestSpanStatsLongTrace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "long.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := d.(*DB)
+	var plan strings.Builder
+	rows, err := db.reads.Query(`EXPLAIN QUERY PLAN `+spanStatsInsert(`trace_id = ? AND span_id = ?`), "t", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(detail + "\n")
+	}
+	_ = rows.Close()
+	if !strings.Contains(plan.String(), "spans_attempt") {
+		t.Errorf("the derivation's plan does not read spans_attempt:\n%s", plan.String())
+	}
+	spans := longTrace("r_long", 30_000, time.Unix(1_800_000_000, 0))
+	start := time.Now()
+	for i := 0; i < len(spans); i += 500 {
+		if err := db.Write(context.Background(), obsdb.Batch{Spans: spans[i:min(i+500, len(spans))]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ingest := time.Since(start)
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rewindTo22(t, path)
+	start = time.Now()
+	d, err = Open(path)
+	backfill := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	var n int
+	if err := d.(*DB).reads.QueryRow(`SELECT COUNT(*) FROM span_stats`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("a 30,000-span trace: ingest %v, backfill on open %v, %d rollup rows", ingest, backfill, n)
+	if n != 15_000 {
+		t.Errorf("rollup rows = %d, want 15000 (the chat spans and the root)", n)
+	}
+	if !raceEnabled && (ingest > 15*time.Second || backfill > 5*time.Second) {
+		t.Errorf("a 30,000-span trace took %v to ingest and %v to backfill: the attempts subquery is scanning the trace", ingest, backfill)
+	}
+}
+
+// BenchmarkSpanStatsIngest pins the rollup's per-span cost at ingest:
+// the derivation is prepared once per Write (spanStatWriter), not
+// parsed per span. Measured in 450-span batches: 37 µs/span with the
+// rollup off, 54 µs prepared (the review measured 213 µs re-parsed).
+// Reports µs/span; TestSpanStatsIngestCost holds the bound.
+func BenchmarkSpanStatsIngest(b *testing.B) {
+	d, err := Open(filepath.Join(b.TempDir(), "bench.db"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	t0 := time.Unix(1_800_000_000, 0)
+	b.ResetTimer()
+	spans := 0
+	// Batches of 50 runs (450 spans): an exporter's batch, the shape
+	// the prepared statement amortises over.
+	var batch []obsdb.Span
+	flush := func() {
+		if err := d.Write(context.Background(), obsdb.Batch{Spans: batch}); err != nil {
+			b.Fatal(err)
+		}
+		spans += len(batch)
+		batch = batch[:0]
+	}
+	for i := range b.N {
+		first, late := statSpans("r_bench_"+strconv.Itoa(i), t0.Add(time.Duration(i)*time.Second))
+		batch = append(append(batch, first...), late...)
+		if len(batch) >= 450 {
+			flush()
+		}
+	}
+	if len(batch) > 0 {
+		flush()
+	}
+	b.ReportMetric(float64(b.Elapsed().Microseconds())/float64(spans), "µs/span")
+}
+
+// TestSpanStatsIngestCost runs the benchmark briefly and fails on a
+// per-span cost that says the derivation is parsed per span again
+// (213 µs/span then; ~54 now): the bound, 150 µs, leaves room for a
+// loaded machine.
+func TestSpanStatsIngestCost(t *testing.T) {
+	if testing.Short() || raceEnabled {
+		t.Skip("a timing bound: not under -short or -race")
+	}
+	r := testing.Benchmark(BenchmarkSpanStatsIngest)
+	if us := r.Extra["µs/span"]; us > 150 {
+		t.Errorf("span_stats ingest costs %.0f µs/span, want under 150: is the INSERT … SELECT prepared once per Write?", us)
+	}
+}
+
+// TestUpgradeTo0025AddsSpansAttempt: a file that reached 0024 with
+// 0023's first text (no spans_attempt) gets the index at 0025, and a
+// span write — whose derivation names it — works again.
+func TestUpgradeTo0025AddsSpansAttempt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at24.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{`DROP INDEX spans_attempt`, `DELETE FROM obsdb_migrations WHERE version >= 25`} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = raw.Close()
+	d, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	first, late := statSpans("r_25", time.Unix(1_800_000_000, 0))
+	if err := d.Write(context.Background(), obsdb.Batch{Spans: append(first, late...)}); err != nil {
+		t.Fatalf("a span write after 0025: %v", err)
+	}
+	if n := len(spanStatRows(t, d.(*DB).reads, "run_id = 'r_25'")); n != 5 {
+		t.Errorf("rollup rows after 0025 = %d, want 5", n)
 	}
 }

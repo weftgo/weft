@@ -2112,10 +2112,7 @@ export class PanelModel {
     if (!runtimes.some((r) => r.agents.length)) {
       // Nothing to replay it on: say why instead of a button that does
       // nothing.
-      this.setExperimentError(
-        "no connected runtime registers an agent (weft/runtime)",
-        under
-      )
+      this.setExperimentError("no runtime registers an agent", under)
       return
     }
     // A source that names no agent, or one no runtime registers, opens
@@ -2574,6 +2571,10 @@ export class PanelModel {
     res.commandID = out.command_id
     res.engine = body.engine as string
     res.thread = draft.thread
+    // The recorded agent registered: the miss line's "from step 0".
+    res.zero = this.state.runtimes.some((x) =>
+      x.agents.some((a) => a.name == draft.sourceAgent)
+    )
     res.state = "queued"
     this.state.result = res
     this.emit()

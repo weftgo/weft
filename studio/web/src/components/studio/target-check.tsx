@@ -8,8 +8,7 @@ import {
   MISS_FROM_ZERO,
   MISS_SAVE,
   optionValue,
-  recordedLine,
-  TARGET_PICK,
+  pickCaption,
   TARGET_WORDS,
 } from "@/lib/target"
 import type { AgentOption, TargetCheck } from "@/lib/target"
@@ -24,7 +23,7 @@ import type { AgentOption, TargetCheck } from "@/lib/target"
  */
 export function TargetCheckBlock({
   check,
-  options,
+  options = [],
   picker,
   picked,
   recorded,
@@ -33,13 +32,13 @@ export function TargetCheckBlock({
   onEscape,
 }: {
   check: TargetCheck
-  options: AgentOption[]
-  picker: boolean
+  options?: AgentOption[]
+  picker?: boolean
   picked?: string
   /** The tool names the source step was offered (null: unknown). */
   recorded?: string[] | null
   heldID: string
-  onPick: (o: AgentOption) => void
+  onPick?: (o: AgentOption) => void
   onEscape: () => void
 }) {
   const caption = useId()
@@ -85,8 +84,7 @@ export function TargetCheckBlock({
           data-target-picker
         >
           <span id={caption} className="text-[11px] text-faint">
-            {TARGET_PICK}
-            {recorded?.length ? ` · ${recordedLine(recorded)}` : ""}
+            {pickCaption(recorded)}
           </span>
           <ul className="flex flex-wrap gap-1.5">
             {options.map((o) => (
@@ -96,8 +94,7 @@ export function TargetCheckBlock({
                   className="rounded border px-2 py-0.5 text-xs hover:bg-muted aria-pressed:border-foreground"
                   aria-pressed={picked === optionValue(o)}
                   data-target-option={o.agent}
-                  title={`runtime ${o.runtime}`}
-                  onClick={() => onPick(o)}
+                  onClick={() => onPick?.(o)}
                 >
                   {o.label}
                 </button>
@@ -141,35 +138,32 @@ export function MissLine({
   onFromZero?: () => void
   onSave?: () => void
 }) {
-  const verbs = again
-    ? ([
-        [
-          onLive,
-          `${TARGET_WORDS.again}${estimate ? ` (${estimate})` : ""}`,
-          "data-replay-live-again",
-        ],
-        [onFromZero, MISS_FROM_ZERO, "data-replay-from-zero"],
-        [onSave, MISS_SAVE, "data-replay-save-test"],
-      ] as const)
-    : []
   return (
     <p className="text-status-bad" data-replay-miss>
       {text}
-      {verbs.map(([f, words, attr]) =>
-        f ? (
-          <span key={attr}>
-            {" · "}
-            <button
-              type="button"
-              className="text-thread-ink hover:underline"
-              {...{ [attr]: "" }}
-              onClick={f}
-            >
-              {words}
-            </button>
-          </span>
-        ) : null
-      )}
+      {again
+        ? (
+            [
+              [onLive, TARGET_WORDS.again],
+              [onFromZero, MISS_FROM_ZERO],
+              [onSave, MISS_SAVE],
+            ] as const
+          ).map(([f, words]) =>
+            f ? (
+              <span key={words}>
+                {" "}
+                <button
+                  type="button"
+                  className="text-thread-ink hover:underline"
+                  onClick={f}
+                >
+                  {words}
+                </button>
+                {f === onLive && estimate ? ` ${estimate}` : ""}
+              </span>
+            ) : null
+          )
+        : null}
     </p>
   )
 }

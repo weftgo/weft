@@ -7,7 +7,7 @@ import {
   crossAgentOf,
   SCRIPT_EXHAUSTED,
   exhaustedOf,
-  SCRIPT_WORDS,
+  SCRIPT_NOTE,
   scriptNote,
   missOf,
   outcomeWord,
@@ -84,6 +84,22 @@ describe("targetCheck", () => {
       { agent: { ...f.agent, name: "analyst" } },
     ])
       expect(targetCheck({ ...f, ...other, escaped: key }).held).not.toBe("")
+    // A new build of the same agent under the same runtime id asks again.
+    const b = {
+      ...f,
+      source: "researcher",
+      recordedHash: H9,
+      recordedTools: ["search_docs"],
+    }
+    const bk = targetCheck(b).key
+    expect(targetCheck({ ...b, escaped: bk }).held).toBe("")
+    expect(
+      targetCheck({
+        ...b,
+        agent: { ...b.agent, manifest_hash: "c0ffee00" + "2".repeat(56) },
+        escaped: bk,
+      }).held
+    ).not.toBe("")
   })
 
   it("an unnamed source with an agent picked: the build line names no recorder it does not know, the hold's escape names the target (U18.2-fix)", () => {
@@ -145,7 +161,7 @@ describe("targetCheck", () => {
   })
 
   it("a wefttest agent's live is its test script (UX-C-09)", () => {
-    expect(scriptNote({ model_provider: "wefttest" })).toBe(SCRIPT_WORDS.note)
+    expect(scriptNote({ model_provider: "wefttest" })).toBe(SCRIPT_NOTE)
     expect(scriptNote({ model_provider: "zai" })).toBe("")
   })
 })

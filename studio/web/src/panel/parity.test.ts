@@ -5115,7 +5115,7 @@ describe("the engine per command on both drawers (U17)", () => {
     }
     const r = await bothDrawers(() => replayFromStep(2), undefined, pv, fx)
     expect(r.build).toBe(
-      `! ${TARGET_WORDS.build("acme-support", "9b5997a3", "acme-support", "a59ce89e")} · tools differ: search_docs → web_search · scripted will miss at step 2`
+      `! ${TARGET_WORDS.cross("acme-support", "acme-support", "9b5997a3", "a59ce89e")} · tools differ: search_docs → web_search · scripted will miss at step 2`
     )
     expect(r.held).toBe(true)
     expect(r.engine).toBe("live")

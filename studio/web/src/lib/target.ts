@@ -24,12 +24,13 @@ import { STATUS } from "./status"
 /** The words, both surfaces. */
 export const TARGET_WORDS = {
   unnamed: "the source run names no agent: pick one",
-  /** Another agent than the source's ("" none registers it). */
-  cross: (source: string, target: string) =>
-    `the source run is agent ${source}; ${target ? `this replays it as ${target}` : "no runtime registers it: pick one, or start its app"}`,
+  /** The source's agent against the target: another agent ("" none
+   * registers it), or — with both builds' hashes — another build. */
+  cross: (source: string, target: string, was?: string, now?: string) =>
+    was
+      ? `recorded by ${source}@${was} · registered now ${target}@${now}`
+      : `the source run is agent ${source}; ${target ? `this replays it as ${target}` : "no runtime registers it: pick one, or start its app"}`,
   crossEscape: (target: string) => `replay as ${target} anyway`,
-  build: (was: string, wasHash: string, now: string, nowHash: string) =>
-    `recorded by ${was}@${wasHash} · registered now ${now}@${nowHash}`,
   /** The recorder of an unnamed source run, in the build line. */
   noName: "an unnamed agent",
   tools: (removed: string[], added: string[]) =>
@@ -41,32 +42,28 @@ export const TARGET_WORDS = {
 
 /** UX-C-09's words (Studio's): the registered model is a wefttest
  * script, so live calls the script, not a provider. */
-export const SCRIPT_WORDS = {
-  note: "live calls this agent's wefttest script, not a provider, and runs out of turns: scripted replays the recording",
-} as const
+export const SCRIPT_NOTE =
+  "live calls this agent's wefttest script, which runs out: scripted replays the recording"
 /** A wefttest script's exhaustion (both surfaces). */
-export const SCRIPT_EXHAUSTED = "the agent's wefttest script ran out"
+export const SCRIPT_EXHAUSTED = "the wefttest script ran out"
 
 /** scriptNote is UX-C-09's note beside the engine ("" none). */
 export const scriptNote = (a?: Pick<AgentView, "model_provider">): string =>
-  a?.model_provider === "wefttest" ? SCRIPT_WORDS.note : ""
+  a?.model_provider === "wefttest" ? SCRIPT_NOTE : ""
 
 /** The miss line's other ways on (UX-C-07): step 0 (both surfaces)
  * and the save (Studio's; the panel's result head has its own). */
 export const MISS_FROM_ZERO = "replay from step 0 with the recorded agent"
 export const MISS_SAVE = "save the recording as a test"
 
-/** The picker's caption and the recorded tools beside it (Studio's). */
-export const TARGET_PICK = "pick the agent"
-export const recordedLine = (tools: string[]) =>
-  `the source step was offered: ${tools.join(", ")}`
+/** The picker's caption, the recorded tools beside it (Studio's). */
+export const pickCaption = (tools?: string[] | null) =>
+  `pick the agent${tools?.length ? ` · recorded: ${tools.join(", ")}` : ""}`
 
 /** A source run set but not read (Studio's): Run waits for its row —
  * the agent it names decides the target. */
 export const sourceUnread = (why?: string) =>
-  why
-    ? `the source run could not be read (${why}): Run waits until it is`
-    : "reading the source run…"
+  why ? `the source run could not be read: ${why}` : "reading the source run…"
 
 /** The length a manifest hash is shown at. */
 const HASH = 8
@@ -141,20 +138,26 @@ export function recordedToolsOf(
   return t ? t.map((x) => x.name) : null
 }
 
-/** targetKey is what an escape is taken for (TargetCheck.key). */
-export const targetKey = (
-  at?: string,
-  source?: string,
-  runtime?: string,
-  agent?: string
-) => `${at}|${source}|${runtime}|${agent}`
+/** registers says a connected runtime registers the agent named
+ * ("" none): the miss line's "from step 0" (the recorded agent). */
+export const registers = (
+  runtimes: Pick<RuntimeView, "agents">[],
+  name?: string
+): boolean =>
+  !!name && runtimes.some((r) => r.agents.some((a) => a.name == name))
+
+/** targetKey is what an escape is taken for (TargetCheck.key): the
+ * source position, its agent, the runtime, the target and its build — a
+ * new build registered under the same runtime id asks again. */
+const targetKey = (f: TargetFacts) =>
+  `${f.at}|${f.source}|${f.runtime}|${f.agent?.name}@${f.agent?.manifest_hash}`
 
 /** targetCheck is the rule (see the header). A cross-agent kind sends
  * cross_agent: true once released (crossAgentOf). */
 export function targetCheck(f: TargetFacts): TargetCheck {
   const W = TARGET_WORDS
   const a = f.agent
-  const key = targetKey(f.at, f.source, f.runtime, a?.name)
+  const key = targetKey(f)
   const ok = f.escaped === key
   const c = (
     kind: TargetKind,
@@ -180,10 +183,10 @@ export function targetCheck(f: TargetFacts): TargetCheck {
   const differ = !!d && d.removed.length + d.added.length > 0
   const k = f.keyMatch
   const build = [
-    W.build(
+    W.cross(
       f.source || W.noName,
-      was.slice(0, HASH),
       a.name,
+      was.slice(0, HASH),
       now.slice(0, HASH)
     ),
     differ && W.tools(d.removed, d.added),
@@ -235,13 +238,9 @@ export function agentOptions(
     .sort((x, y) => +y.matches - +x.matches)
 }
 
-/** The option value of a pick, and back. */
+/** The option value of a pick. */
 export const optionValue = (o: Pick<AgentOption, "runtime" | "agent">) =>
   `${o.runtime}\u0000${o.agent}`
-export function optionOf(v: string): { runtime: string; agent: string } {
-  const i = v.indexOf("\u0000")
-  return { runtime: v.slice(0, i), agent: v.slice(i + 1) }
-}
 
 /** The command's lifecycle as its result head says it: the run's
  * status word (lib/status.ts) once the command finished — "failed",

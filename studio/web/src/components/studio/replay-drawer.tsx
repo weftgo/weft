@@ -85,6 +85,7 @@ import {
   scriptNote,
   outcomeWord,
   recordedToolsOf,
+  registers,
   sourceUnread,
   targetCheck,
 } from "@/lib/target"
@@ -715,9 +716,7 @@ function ReplayForm({
     escaped,
   })
   // The recorded agent, registered: the miss line's "from step 0".
-  const recordedHere =
-    !!sourceAgent &&
-    all.some((r) => r.agents.some((a) => a.name === sourceAgent))
+  const recordedHere = registers(all, sourceAgent)
   const heldID = useId()
   const picker =
     !!pick ||

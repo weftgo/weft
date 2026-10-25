@@ -132,6 +132,7 @@ import {
   optionValue,
   outcomeWord,
   recordedToolsOf,
+  registers,
   sourceUnread,
   targetCheck,
 } from "@/lib/target"
@@ -1110,7 +1111,7 @@ function Playground({ caps }: { caps: string[] }) {
   // waits for it, and its refusal holds Run (UX-D-03).
   const previewHold = previewBody
     ? preview.refused
-      ? (preview.error ?? "the preview refused the command")
+      ? (preview.error ?? "")
       : preview.pending
         ? "previewing…"
         : ""
@@ -1118,9 +1119,7 @@ function Playground({ caps }: { caps: string[] }) {
   const heldID = useId()
   const runHeld = check.held || sourceHold || previewHold
   // The recorded agent, registered: the miss line's "from step 0".
-  const recordedHere = all.some((r) =>
-    r.agents.some((a) => !!sourceRow?.agent && a.name === sourceRow.agent)
-  )
+  const recordedHere = registers(all, sourceRow?.agent)
   const picker =
     check.kind === "unnamed" ||
     check.kind === "unregistered" ||
@@ -1432,11 +1431,13 @@ function Playground({ caps }: { caps: string[] }) {
                     {restored.text}
                   </p>
                 ) : null}
-                {sourceHold || (previewHold && !preview.pending) ? (
+                {sourceHold || previewHold ? (
+                  // Run's aria-describedby names this line, "previewing…"
+                  // included (U18.2-fix2).
                   <p
                     id={check.held ? undefined : heldID}
-                    className="text-xs text-status-bad"
-                    role="alert"
+                    className={`text-xs ${!sourceHold && preview.pending ? "text-faint" : "text-status-bad"}`}
+                    role={!sourceHold && preview.pending ? "status" : "alert"}
                     data-run-held
                   >
                     {sourceHold || previewHold}
@@ -1719,7 +1720,11 @@ function Playground({ caps }: { caps: string[] }) {
                             )
                             if (i === 0) write({ engine: "live" })
                           }}
-                          estimate={choice.live.usd}
+                          // The estimate is the active variant's choice:
+                          // another card's miss line names none.
+                          estimate={
+                            v.key === variant.key ? choice.live.usd : undefined
+                          }
                           onFromZero={
                             recordedHere
                               ? () => {

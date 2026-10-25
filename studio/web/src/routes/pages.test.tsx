@@ -811,6 +811,62 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     )
   })
 
+  it("while the preview is pending Run names the 'previewing…' line it waits on (U18.2-fix2)", async () => {
+    studio
+      .on("GET meta", meta(["live", "playground", "runtimes", "preview"]))
+      .on("POST playground/preview", () => new Promise<never>(() => {}))
+    renderApp("/playground?run=r_ok")
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
+    await waitFor(() => {
+      const id = runButton.getAttribute("aria-describedby")
+      expect(id).toBeTruthy()
+      expect(document.getElementById(id!)?.textContent).toBe("previewing…")
+    })
+    expect(runButton).toHaveProperty("disabled", true)
+  })
+
+  it("a miss line's estimate is the active variant's: another variant's card names none (U18.2-fix2)", async () => {
+    const priced = {
+      ...golden<Record<string, unknown>>("step-0"),
+      run_id: "r_ok",
+      usage: { input_tokens: 600, output_tokens: 150 },
+      cost_usd: 0.0002,
+      cost_known: true,
+      cache: "exact",
+    }
+    studio
+      .on("GET meta", meta(["live", "playground", "runtimes", "steps"]))
+      .on("POST playground/runs", command("cmd_1", "queued"))
+      .on("GET playground/commands/cmd_1", {
+        ...command("cmd_1", "finished", "pg_1"),
+        status: "failed",
+        error: "no recorded turn",
+        reason: {
+          kind: "scripted_miss",
+          step: 0,
+          components: ["messages"],
+          message: "scripted has no recorded answer for step 0 — run on live",
+        },
+      })
+      .on("GET runs/pg_1", { ...source, id: "pg_1", status: "failed" })
+    for (let n = 0; n < 4; n++)
+      studio.on(`GET runs/r_ok/steps/${n}`, { ...priced, step: n })
+    renderApp("/playground?run=r_ok")
+    const runButton = await screen.findByRole("button", { name: /^Run A / })
+    await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
+    fireEvent.click(runButton)
+    const line = () =>
+      document.querySelector('[data-variant="A"] [data-replay-miss]')
+    await waitFor(() => expect(line()?.textContent).toContain("≈ $"))
+    fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
+    fireEvent.click(
+      document.querySelector<HTMLElement>(
+        '[data-variant-switcher] button[aria-pressed="false"]'
+      )!
+    )
+    await waitFor(() => expect(line()?.textContent).not.toContain("≈ $"))
+  })
+
   it("Run waits for the preview, and its refusal holds Run with the server's words (U18.2-fix, UX-D-03)", async () => {
     studio
       .on(

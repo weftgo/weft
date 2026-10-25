@@ -5321,27 +5321,26 @@ export class WeftDevtools extends HTMLElement {
       const dr = s.drawer
       const mine = dr?.runId == r.sourceRunID && dr
       const usd = mine && engineFor(mine, s.preview?.doc).live.usd
-      const live = () => this.model?.setDraft({ engine: "live" })
+      // Live only on this result's own drawer, whatever else opened.
+      const live = () =>
+        this.model?.state.drawer?.runId == r.sourceRunID &&
+        this.model.setDraft({ engine: "live" })
+      // From step 0 only while the recorded agent is registered.
       if (miss)
-        for (const v of [1, 0]) {
+        for (const v of r.zero ? [1, 0] : [1])
           m.append(
             " ",
-            clickBtn(
-              v
-                ? TARGET_WORDS.again + (usd ? ` (${usd})` : "")
-                : MISS_FROM_ZERO,
-              () =>
-                mine && v
-                  ? live()
-                  : void this.model
-                      ?.openExperiment(r.sourceRunID, v && r.fromStep, {
-                        under: r.under,
-                      })
-                      .then(() => v && live()),
-              { "data-weft-miss-verb": v ? "live" : "zero" }
-            )
+            clickBtn(v ? TARGET_WORDS.again : MISS_FROM_ZERO, () =>
+              mine && v
+                ? live()
+                : void this.model
+                    ?.openExperiment(r.sourceRunID, v && r.fromStep, {
+                      under: r.under,
+                    })
+                    .then(() => v && live())
+            ),
+            v && usd ? ` ${usd}` : ""
           )
-        }
       body.append(m)
     } else if (r.error) body.append(el("div", "weft-note weft-warn", r.error))
     // The link back (plan F1): the new run, the source step it replays.

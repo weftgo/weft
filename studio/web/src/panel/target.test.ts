@@ -80,6 +80,11 @@ type Fx = {
   rowError?: boolean
 }
 
+/** The panel's miss line's verb by its words. */
+const missVerb = (el: Parameters<typeof all>[0], words: string) =>
+  all(el, "[data-weft-miss] button").find((b) => b.textContent === words) as
+    HTMLElement | undefined
+
 /** Studio's replay drawer over the fixture. */
 async function studio(draft: ReplayDraft, fx: Fx = {}) {
   stubBrowser()
@@ -285,9 +290,13 @@ describe("a scripted miss after Run (UX-D-03, UX-C-07)", () => {
     // The server's sentence and the ways on (UX-C-07): live with its
     // estimate, from step 0 with the recorded agent.
     const line = (await s.q("[data-replay-miss]")).textContent
-    expect(line.startsWith(`${MISS} · ${TARGET_WORDS.again}`)).toBe(true)
+    expect(line.startsWith(`${MISS} ${TARGET_WORDS.again}`)).toBe(true)
     expect(line).toContain(MISS_FROM_ZERO)
-    fireEvent.click(await s.q("[data-replay-live-again]"))
+    fireEvent.click(
+      [...(await s.q("[data-replay-miss]")).querySelectorAll("button")].find(
+        (b) => b.textContent === TARGET_WORDS.again
+      )!
+    )
     await waitFor(() =>
       expect(s.run().getAttribute("data-run-engine")).toBe("live")
     )
@@ -306,7 +315,7 @@ describe("a scripted miss after Run (UX-D-03, UX-C-07)", () => {
     expect(text(p.el, "[data-weft-miss]")).toBe(
       `${MISS} ${TARGET_WORDS.again} ${MISS_FROM_ZERO}`
     )
-    ;($(p.el, '[data-weft-miss-verb="live"]') as HTMLElement).click()
+    missVerb(p.el, TARGET_WORDS.again)!.click()
     await settle(60)
     expect(p.run().getAttribute("data-run-engine")).toBe("live")
     expect(p.run().textContent).toMatch(/^Run live on /)
@@ -343,7 +352,7 @@ describe("the target check's escapes and holds (U18.2-fix)", () => {
     await waitFor(() =>
       expect(
         s.container.querySelector("[data-replay-blocked]")?.textContent
-      ).toContain(sourceUnread("x").split("(")[0])
+      ).toContain(sourceUnread("x").split(":")[0])
     )
     expect(s.run().disabled).toBe(true)
     expect(s.fake.calls("POST playground/runs")).toHaveLength(0)
@@ -393,10 +402,43 @@ describe("the target check's escapes and holds (U18.2-fix)", () => {
     await settle(200)
     p.model.closeExperiment()
     await settle(60)
-    ;($(p.el, '[data-weft-miss-verb="live"]') as HTMLElement).click()
+    missVerb(p.el, TARGET_WORDS.again)!.click()
     await settle(200)
     expect(p.model.state.drawer?.runId).toBe(RK.RUN)
     expect(p.model.state.drawer?.engine).toBe("live")
     expect(p.fake.posts("playground/runs")).toHaveLength(1)
+  })
+})
+
+describe("the panel's miss verbs (U18.2-fix2)", () => {
+  it("'from step 0' only while the recorded agent is registered", async () => {
+    const p = await panel(replayFromStep(2), {
+      row: { agent: "orders" },
+      command: missed,
+    })
+    ;($(p.el, '[data-target-option="analyst"]') as HTMLElement).click()
+    await settle(60)
+    ;($(p.el, '[data-target-escape="cross_agent"]') as HTMLElement).click()
+    await settle(60)
+    p.run().click()
+    await settle(200)
+    expect(missVerb(p.el, TARGET_WORDS.again)).toBeTruthy()
+    expect(missVerb(p.el, MISS_FROM_ZERO)).toBeUndefined()
+  })
+
+  it("'run again on live' never flips another source's drawer when the reopen does not land", async () => {
+    const p = await panel(replayFromStep(2), { command: missed })
+    p.run().click()
+    await settle(200)
+    p.model.state.drawer = {
+      ...p.model.state.drawer!,
+      runId: "r_other",
+      engine: undefined,
+    }
+    p.model.openExperiment = async () => {}
+    missVerb(p.el, TARGET_WORDS.again)!.click()
+    await settle(60)
+    expect(p.model.state.drawer).toMatchObject({ runId: "r_other" })
+    expect(p.model.state.drawer).not.toHaveProperty("engine", "live")
   })
 })

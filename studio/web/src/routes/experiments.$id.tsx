@@ -15,7 +15,7 @@
 // (formFromExperiment).
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
   diffQuery,
@@ -34,6 +34,7 @@ import { absoluteTime, duration, relativeTime } from "@/lib/format"
 import { formatUSD, sumCost } from "@/lib/cost"
 import { pickTarget } from "@/lib/experiment-body"
 import { crossAgentOf, sourceUnread, targetCheck } from "@/lib/target"
+import { TargetCheckBlock } from "@/components/studio/target-check"
 import {
   REPLAY_WORDS,
   VS_CHIP_CELLS,
@@ -203,6 +204,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
     staleTime: 30_000,
   })
   const [escaped, setEscaped] = useState("")
+  const heldID = useId()
   const check =
     srcRun && srcRow.data && target.agent && !target.mismatch
       ? targetCheck({
@@ -523,22 +525,17 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
             : "the form: the saved definition, its modes and step read from the runs"}
         </span>
       </div>
-      {runBlocked ? (
+      {check?.held ? (
+        <div className="space-y-1 text-xs" data-rerun-blocked>
+          <TargetCheckBlock
+            check={check}
+            heldID={heldID}
+            onEscape={() => setEscaped(check.key)}
+          />
+        </div>
+      ) : runBlocked ? (
         <p className="text-xs text-muted-foreground" data-rerun-blocked>
           re-run: {runBlocked}
-          {check?.escape ? (
-            <>
-              {" "}
-              <button
-                type="button"
-                className="text-thread-ink hover:underline"
-                data-target-escape={check.kind}
-                onClick={() => setEscaped(check.key)}
-              >
-                {check.escape}
-              </button>
-            </>
-          ) : null}
         </p>
       ) : null}
       {error ? (

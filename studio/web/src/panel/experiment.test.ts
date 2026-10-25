@@ -841,9 +841,7 @@ describe("the drawer", () => {
     routes.runtimes = { runtimes: [] }
     const { el } = await openDrawer(routes)
     expect($(el, ".weft-drawer")).toBeNull()
-    expect(text(el, ".weft-xres")).toContain(
-      "no connected runtime registers an agent"
-    )
+    expect(text(el, ".weft-xres")).toContain("no runtime registers an agent")
   })
 
   it.each([

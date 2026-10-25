@@ -122,6 +122,8 @@ export interface ExperimentResult {
   label: string
   /** The engine its command ran on. */
   engine?: string
+  /** The source's recorded agent is registered (from step 0 offered). */
+  zero?: boolean
   /** The finished run's status and a scripted miss's reason (the
    * command row's): the head's word, the miss line. */
   status?: CommandStatus["status"]

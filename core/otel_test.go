@@ -9,6 +9,8 @@ package core_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"iter"
@@ -1026,5 +1028,36 @@ func TestSpansMetadataDroppedCounted(t *testing.T) {
 	}
 	if survived > 64 {
 		t.Errorf("%d metadata keys on the span, want at most 64", survived)
+	}
+}
+
+// infoHidingModel wraps a model without forwarding its Info (and
+// without Unwrap): what a user's WrapModel middleware often is.
+type infoHidingModel struct{ inner core.Model }
+
+func (m infoHidingModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "mine", Name: "wrapped"}
+}
+func (m infoHidingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return m.inner.Stream(ctx, req)
+}
+
+// TestManifestHashAfterTheModelChain: the run's weft.manifest.hash is
+// sha256 of Manifest(agent) — what weft/runtime registers — even when a
+// WrapModel middleware does not forward Info (U18.1-fix item 3): the
+// hash is computed after the chain is built, so both read one model.
+func TestManifestHashAfterTheModelChain(t *testing.T) {
+	tp := newRecProvider()
+	agt := spanAgent(tp, core.WrapModel(func(next core.Model) core.Model { return infoHidingModel{next} }))
+	if _, err := agt.Generate(context.Background(), core.RunID("run-mw"), core.Prompt("hello")); err != nil {
+		t.Fatal(err)
+	}
+	b, err := core.Manifest(agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(b)
+	if got, want := tp.find(t, "invoke_agent demo").attrsMap()["weft.manifest.hash"], hex.EncodeToString(sum[:]); got != want {
+		t.Errorf("weft.manifest.hash = %s, want sha256(Manifest(agent)) = %s", got, want)
 	}
 }

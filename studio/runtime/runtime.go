@@ -150,15 +150,18 @@ type AgentRegistration struct {
 // default), the sampling knobs its core.Params set (absent: the
 // adapter's own) and its tool choice (mode "auto" when none was set).
 type AgentDefaults struct {
-	MaxSteps    int        `json:"max_steps"`
-	Parallelism int        `json:"parallelism"`
-	Thinking    string     `json:"thinking"`
-	Temperature *float64   `json:"temperature,omitempty"`
-	TopP        *float64   `json:"top_p,omitempty"`
-	MaxTokens   *int       `json:"max_tokens,omitempty"`
-	Seed        *int64     `json:"seed,omitempty"`
-	Stop        []string   `json:"stop,omitempty"`
-	ToolChoice  ToolChoice `json:"tool_choice"`
+	MaxSteps    int    `json:"max_steps"`
+	Parallelism int    `json:"parallelism"`
+	Thinking    string `json:"thinking"`
+	// ThinkingBudget is the agent's default thinking budget in tokens
+	// (absent: none): a budget alone sets the request's thinking.
+	ThinkingBudget int64      `json:"thinking_budget,omitempty"`
+	Temperature    *float64   `json:"temperature,omitempty"`
+	TopP           *float64   `json:"top_p,omitempty"`
+	MaxTokens      *int       `json:"max_tokens,omitempty"`
+	Seed           *int64     `json:"seed,omitempty"`
+	Stop           []string   `json:"stop,omitempty"`
+	ToolChoice     ToolChoice `json:"tool_choice"`
 }
 
 // AgentLimits are the agent's own lower-only bounds.
@@ -473,6 +476,19 @@ type Ack struct {
 	RunID     string `json:"run_id,omitempty"`
 	Status    string `json:"status,omitempty"`
 	Error     string `json:"error,omitempty"`
+	// Reason is a finished ack's failure typed by the runtime (absent
+	// from a runtime older than the field, and for any failure it does
+	// not type): kind "scripted_miss", the source step, the key
+	// components. CommandStatus.Reason prefers it to reading Error.
+	Reason *AckReason `json:"reason,omitempty"`
+}
+
+// AckReason is Ack.Reason: what the runtime knows of why its run
+// failed — Reason's fields without Studio's sentence.
+type AckReason struct {
+	Kind       string   `json:"kind"`
+	Step       int      `json:"step"`
+	Components []string `json:"components"`
 }
 
 // Command states (§10.5).
@@ -867,6 +883,10 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusBadRequest, "bad_request", "register body: no agents")
 		return
 	}
+	// Whatever a client sends, the dialled URL is kept without its
+	// userinfo, query and fragment: a token must never be stored or
+	// served from here (a non-Go runtime may send it raw).
+	reg.StudioURL = cleanStudioURL(reg.StudioURL)
 	src, hasManifest := registrationManifest(reg)
 	rs.mu.Lock()
 	rs.pruneLocked()
@@ -1863,10 +1883,49 @@ func (row *commandRow) view() CommandStatus {
 		RunID:     row.runID,
 		Status:    row.status,
 		Error:     err,
-		Reason:    ReasonOf(row.errText),
+		Reason:    row.reason(),
 		Created:   row.created,
 		Updated:   row.updated,
 	}
+}
+
+// cleanStudioURL is a registration's studio_url as kept: scheme, host
+// and path only (userinfo, query and fragment dropped, no trailing
+// slash); "" for one that does not parse as an absolute http(s) URL.
+func cleanStudioURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
+	}
+	u.User, u.RawQuery, u.Fragment, u.RawFragment, u.ForceQuery = nil, "", "", "", false
+	return strings.TrimRight(u.String(), "/")
+}
+
+// reason is the row's failure read: the finished ack's typed reason
+// when the runtime sent one (the stored ack, so a restart keeps it),
+// else the error text read by ReasonOf — a runtime older than the
+// typed field.
+func (row *commandRow) reason() *Reason {
+	if row.state == StateFinished && len(row.ack) > 0 {
+		var a Ack
+		if json.Unmarshal(row.ack, &a) == nil && a.Reason != nil && a.Reason.Kind == ReasonScriptedMiss {
+			// The components are the closed vocabulary only: a word
+			// Studio has no clause for never reaches the sentence.
+			var known []string
+			for _, c := range a.Reason.Components {
+				if _, ok := missClause[c]; ok {
+					known = append(known, c)
+				}
+			}
+			if len(known) > 0 {
+				return ScriptedMissReason(max(a.Reason.Step, -1), known)
+			}
+		}
+	}
+	return ReasonOf(row.errText)
 }
 
 func orDefault(s, def string) string {

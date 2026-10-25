@@ -50,6 +50,14 @@ type scriptedModel struct {
 	// which key component (scriptedMiss).
 	tools   []string
 	entries []scriptedEntry
+	// full is the whole recorded transcript (input and steps) as JSON
+	// messages, steps the source's step count, and calls each step's
+	// recorded tool-call names: a request that extends full asks the
+	// step the source never answered, and a recorded call to a tool
+	// outside tools got no recorded result at replay.
+	full  []string
+	steps int
+	calls [][]string
 }
 
 // scriptedEntry is one recorded turn's request side: the source step
@@ -83,8 +91,16 @@ func newScriptedModel(src *sourceRun, tools []string) *scriptedModel {
 		key := scriptedKey(msgs[:i], names)
 		m.byKey[key] = append(m.byKey[key], eventsOf(msgs[i]))
 		m.entries = append(m.entries, scriptedEntry{step: step, msgs: encodeMessages(msgs[:i])})
+		var names []string
+		for _, p := range msgs[i].Content {
+			if c, ok := p.(core.ToolCallPart); ok {
+				names = append(names, c.Name)
+			}
+		}
+		m.calls = append(m.calls, names)
 		step++
 	}
+	m.full, m.steps = encodeMessages(msgs), step
 	// A replay from a step whose request carried a compaction view is
 	// fed what the model saw there (ADR 0029): from that step on, the
 	// replay's requests hold the view's messages where the record holds
@@ -319,6 +335,14 @@ func (m *scriptedModel) miss(req core.ModelRequest, key string) error {
 		return e
 	}
 	got := encodeMessages(req.Messages)
+	// The request carries the whole recording and asks past it: the
+	// source ended on a tool call (failed or canceled mid-run), so the
+	// step it never answered is the one asked.
+	if len(m.full) > 0 && len(got) >= len(m.full) && slices.Equal(got[:len(m.full)], m.full) {
+		e.step = m.steps
+		e.components = append(e.components, missUnanswered)
+		return e
+	}
 	best, bestShared, bestGap, exact := 0, -1, 0, false
 	for i, en := range m.entries {
 		shared := 0
@@ -338,6 +362,16 @@ func (m *scriptedModel) miss(req core.ModelRequest, key string) error {
 		}
 	}
 	e.step = m.entries[best].step
+	// A recorded call before this step to a tool the replay does not
+	// offer: its result at replay is not the recorded one, so the
+	// messages differ because of the tool list — said as tools, as the
+	// preview says it.
+	if !exact && m.callsOutside(e.step) {
+		if !slices.Contains(e.components, missTools) {
+			e.components = append([]string{missTools}, e.components...)
+		}
+		return e
+	}
 	switch {
 	case !exact:
 		e.components = append(e.components, missMessages)
@@ -345,6 +379,19 @@ func (m *scriptedModel) miss(req core.ModelRequest, key string) error {
 		e.components = append(e.components, missExhausted)
 	}
 	return e
+}
+
+// callsOutside reports whether a recorded step before step called a
+// tool outside the list the record is keyed with.
+func (m *scriptedModel) callsOutside(step int) bool {
+	for k := 0; k < step && k < len(m.calls); k++ {
+		for _, name := range m.calls[k] {
+			if !slices.Contains(m.tools, name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // encodeMessages is each message as JSON — the key document's own

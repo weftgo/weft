@@ -2491,16 +2491,40 @@ none) and each runtime `studio_url` under `cwd`'s rule. A run whose
 another build. `POST /api/playground/runs` refuses a source run recorded
 by another agent than `agent` (400, both agents named) unless the body
 sends `cross_agent: true`, and a command naming no agent (400: Studio
-never picks one). `POST /api/playground/preview` answers `scripted_hit`
+never picks one). The check is Studio's alone: commands reach a runtime
+only through Studio, and the source the runtime resolves is the
+transcript, which carries no agent name. `POST /api/playground/preview` answers `scripted_hit`
 (per step from `from_step` through the first miss: `{step, hit,
 because[]}`) and `scripted_key_match` (`{ok, because[], step, message}`)
 — whether the scripted engine holds a recorded answer, read from the
 record and the registration with the engine's own key (tools, thinking,
-tool_choice, sequential, messages; never the system prompt). A failed
+tool_choice, sequential, messages; never the system prompt). A hit on a
+step past `from_step` assumes the earlier steps' tools return what they
+recorded: a substituted call does (its recorded result is pasted in),
+but a `weft.Replay(weft.ReplaySafe)` or `AllowSideEffects` tool runs for
+real, and a different answer misses that step at run time though the
+preview said hit. A source that ended on a tool call (a failure or a
+cancel, not a park, `max_steps` or a StopWhen) misses at the step it
+never answered (`unanswered`). A failed
 scripted command's `GET /api/playground/commands/{id}` carries `reason`
 `{kind: "scripted_miss", step, components, message}` beside the runtime's
 `error`: the step is the source run's own, the message the sentence both
-surfaces render (`studio/runtime.ReasonOf`).
+surfaces render — from the finished ack's typed `reason` when the
+runtime sent one, else read from `error` (`studio/runtime.ReasonOf`).
+
+**Wire: the scripted miss.** A finished ack may carry `reason`
+`{kind: "scripted_miss", step, components}` (step −1: the source
+recorded no turn); Studio prefers it to the text and keeps only the
+known components. The error text's grammar, for a client that sends no
+`reason` (Studio reads it): `… no recorded turn for step <N> (scripted
+engine, key <hex>): <clause>[; <clause>…] [<component>[, <component>…]];
+the scripted engine answers only what the source recorded: re-run on
+engine live`, or `for this request` in place of `for step <N>`; the
+components are `tools`, `thinking`, `tool_choice`, `sequential`,
+`messages`, `unanswered`, `exhausted`. The registration's agent
+`defaults` gain `thinking_budget` (tokens, absent for none), each agent
+`manifest_hash`, and the runtime `studio_url` (Studio strips userinfo,
+query and fragment).
 
 **Wire (for the TS/Python runtime clients).** The registration gains
 `cwd` (string, optional) and `instance` (string: a random value per link,

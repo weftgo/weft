@@ -105,6 +105,7 @@ type link struct {
 	inFlight    map[string]context.CancelCauseFunc
 	tally       map[string]*budgetState      // per experiment_id
 	parked      map[string]*parkedRun        // run id → the parked run this runtime started
+	misses      map[string]*ackReason        // run id → its scripted miss, until the finished ack carries it
 	parkOrder   []string                     // parked run ids, oldest first
 	forks       map[string]*thread.Session   // sessions this runtime forked (their turns continue in place)
 	forkCmd     map[string]command           // fork session id → the command its latest turn ran (a rebuilt park's shaping)
@@ -135,6 +136,7 @@ func newLink(c *config, reg *registry, url, token string) *link {
 		inFlight:    map[string]context.CancelCauseFunc{},
 		tally:       map[string]*budgetState{},
 		parked:      map[string]*parkedRun{},
+		misses:      map[string]*ackReason{},
 		forks:       map[string]*thread.Session{},
 		forkCmd:     map[string]command{},
 		breakpoints: map[string]bool{},
@@ -840,6 +842,14 @@ func (l *link) postAck(a ack) ackResult {
 // postAckCtx is postAck under parent: canceling it abandons the POST
 // (a heartbeat's stop), quietly — the result is then ackUnconfirmed.
 func (l *link) postAckCtx(parent context.Context, a ack) ackResult {
+	if a.State == "finished" && a.Reason == nil && a.RunID != "" {
+		// The run's scripted miss, typed (outcome kept it by run id): the
+		// error text below may be cut at maxAckError, the reason never is.
+		l.mu.Lock()
+		a.Reason = l.misses[a.RunID]
+		delete(l.misses, a.RunID)
+		l.mu.Unlock()
+	}
 	if len(a.Error) > maxAckError {
 		a.Error = a.Error[:maxAckError] + "…"
 	}

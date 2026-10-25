@@ -455,10 +455,14 @@ func (s *Server) assemblePreview(ctx context.Context, doc *previewDoc, req runRe
 	if err != nil {
 		return &cmdError{http.StatusInternalServerError, "internal", "read requests of run " + run + " failed"}
 	}
-	doc.ScriptedHit, doc.ScriptedKeyMatch = checkScripted(scriptedInputs{
+	in := scriptedInputs{
 		from: from, own: own, will: will, was: was, willSend: doc.WillSend,
 		agent: agent, req: req, first: rec, answering: answering,
-	})
+	}
+	if det, err := s.db.Run(ctx, run); err == nil {
+		in.stoppedBy, in.pending = det.StoppedBy, det.Pending
+	}
+	doc.ScriptedHit, doc.ScriptedKeyMatch = checkScripted(in)
 
 	// Hidden from a read-scoped panel token (readsPrompts): the system
 	// prompt and the catalog always, the messages when a view is in

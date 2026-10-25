@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -246,5 +247,135 @@ func TestRuntimesViewCarriesManifestHash(t *testing.T) {
 	_, out = pt.get(t, "/api/runtimes")
 	if !strings.Contains(out, `"manifest_hash":"feedface"`) || !strings.Contains(out, `"studio_url":"http://127.0.0.1:7342"`) {
 		t.Errorf("runtimes view = %s, want the registered hash and studio_url", out)
+	}
+}
+
+// TestPreviewScriptedPastTheRecordedEnd (U18.1-fix item 1): a source
+// whose last recorded step called a tool and then failed — no answer
+// recorded after the call — hits every recorded step and misses the
+// step it never answered: scripted_hit ends {step: count, unanswered}
+// and the key match is not ok (the engine names the same step and
+// component: runtime's TestScriptedMissPastTheRecordedEnd and
+// TestScriptedEngineEndToEnd).
+func TestPreviewScriptedPastTheRecordedEnd(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	withPipeline(t, pt.ts.URL, true, func(prov []core.Option) {
+		lookup := core.Tool("lookup_order", "Look up.", func(context.Context, struct{}) (string, error) { return "shipped", nil })
+		agent := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{}`, ID: "c1"}),
+			wefttest.Fail(errors.New("provider down")),
+		), append([]core.Option{core.Name("acme-support"), lookup}, prov...)...)
+		if _, err := agent.Generate(context.Background(), core.RunID("r_cut"), core.Prompt("where is it?")); err == nil {
+			t.Fatal("the source run did not fail")
+		}
+	})
+	fetchJSON(t, pt.ts, "/api/runs/r_cut", func(b string) bool { return strings.Contains(b, `"status":"failed"`) })
+	code, out := previewPost(t, pt, "/api/playground/preview", "",
+		`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_cut","from_step":0},"engine":"scripted"}`)
+	if code != http.StatusOK {
+		t.Fatalf("preview = %d %s", code, out)
+	}
+	var d scriptedDocT
+	decode(t, out, &d)
+	if len(d.Hit) != 2 || !d.Hit[0].Hit || d.Hit[1].Step != 1 || d.Hit[1].Hit || strings.Join(d.Hit[1].Because, ",") != "unanswered" {
+		t.Errorf("scripted_hit = %+v, want step 0 hit, step 1 [unanswered]", d.Hit)
+	}
+	if d.Match.OK || d.Match.Step == nil || *d.Match.Step != 1 ||
+		d.Match.Message != "scripted has no recorded answer for step 1: the source never answered it — re-run on engine live" {
+		t.Errorf("scripted_key_match = %+v, want the step-1 unanswered miss", d.Match)
+	}
+}
+
+// TestPreviewScriptedBudgetOnlyThinking (U18.1-fix item 2): an agent
+// whose default thinking is a budget with no level still sends a
+// thinking config, which the scripted engine keys on — the preview
+// reads the registered budget and says thinking.
+func TestPreviewScriptedBudgetOnlyThinking(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	recordPreviewRun(t, pt, "r_budget")
+	reg, _ := pt.rs.Registration("rt_test")
+	reg.Agents[0].Defaults.ThinkingBudget = 2048
+	b, _ := json.Marshal(reg)
+	req, _ := http.NewRequest(http.MethodPost, pt.ts.URL+"/api/runtime/register", strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "application/json")
+	if code, out := pt.do(t, req); code != http.StatusOK {
+		t.Fatalf("re-register = %d %s", code, out)
+	}
+	code, out := previewPost(t, pt, "/api/playground/preview", "",
+		`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_budget","from_step":0},"engine":"scripted"}`)
+	if code != http.StatusOK {
+		t.Fatalf("preview = %d %s", code, out)
+	}
+	var d scriptedDocT
+	decode(t, out, &d)
+	if d.Match.OK || strings.Join(d.Match.Because, ",") != "thinking" {
+		t.Errorf("budget-only thinking: scripted_key_match = %+v, want a thinking miss", d.Match)
+	}
+}
+
+// TestRegisterStripsStudioURLCredentials (U18.1-fix item 9): whatever
+// a runtime client sends, Studio keeps studio_url without userinfo,
+// query or fragment, and drops one that is not an http(s) URL.
+func TestRegisterStripsStudioURLCredentials(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	for _, c := range []struct{ sent, want string }{
+		{"https://user:s3cret@studio.example:7341/studio/?token=abc#frag", `"studio_url":"https://studio.example:7341/studio"`},
+		{"javascript:alert(1)", ""},
+	} {
+		reg, _ := pt.rs.Registration("rt_test")
+		reg.StudioURL = c.sent
+		b, _ := json.Marshal(reg)
+		req, _ := http.NewRequest(http.MethodPost, pt.ts.URL+"/api/runtime/register", strings.NewReader(string(b)))
+		req.Header.Set("Content-Type", "application/json")
+		if code, out := pt.do(t, req); code != http.StatusOK {
+			t.Fatalf("register = %d %s", code, out)
+		}
+		_, out := pt.get(t, "/api/runtimes")
+		if strings.Contains(out, "s3cret") || strings.Contains(out, "token=abc") || strings.Contains(out, "frag") || strings.Contains(out, "javascript") {
+			t.Errorf("studio_url kept a credential or a bad scheme: %s", out)
+		}
+		if c.want != "" && !strings.Contains(out, c.want) {
+			t.Errorf("runtimes = %s, want %s", out, c.want)
+		}
+		if got, _ := pt.rs.Registration("rt_test"); got.StudioURL != strings.TrimSuffix(strings.TrimPrefix(c.want, `"studio_url":"`), `"`) {
+			t.Errorf("stored studio_url = %q", got.StudioURL)
+		}
+	}
+}
+
+// TestPlaygroundRunNamesNoAgentWithoutASource (U18.1-fix item 10): a
+// command with neither an agent nor a source is refused 400 asking for
+// one — Studio never picks it.
+func TestPlaygroundRunNamesNoAgentWithoutASource(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	if code, out := pt.post(t, `{"runtime":"rt_test","input":"go"}`); code != http.StatusBadRequest ||
+		!strings.Contains(out, "a run needs an agent (the connected runtimes view lists each runtime's)") {
+		t.Errorf("no agent, no source = %d %s, want 400 asking for an agent", code, out)
+	}
+}
+
+// TestCommandReasonPrefersTheTypedAck (U18.1-fix item 5): a finished
+// ack's typed reason wins over reading the error — whose text may be
+// cut, or worded by another client — and its components are the
+// closed vocabulary only; without one, the text is read (an older
+// runtime, TestCommandReasonNamesScriptedMiss).
+func TestCommandReasonPrefersTheTypedAck(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	if code, out := pt.post(t, `{"runtime":"rt_test","agent":"acme-support","command_id":"cmd_typed","input":"go"}`); code != http.StatusAccepted {
+		t.Fatalf("enqueue = %d %s", code, out)
+	}
+	pt.waitCommand(t, "cmd_typed")
+	pt.ack(t, `{"command_id":"cmd_typed","state":"accepted","run_id":"pg_typed"}`)
+	pt.ack(t, `{"command_id":"cmd_typed","state":"finished","run_id":"pg_typed","status":"failed",`+
+		`"error":"weft: run failed at step 0: model stream: weft/runtime: no recorded turn for step 3 (scripted engine, key 0a): the tool li…",`+
+		`"reason":{"kind":"scripted_miss","step":3,"components":["tools","<b>injected</b>"]}}`)
+	_, out := pt.get(t, "/api/playground/commands/cmd_typed")
+	var st struct {
+		Reason *linkruntime.Reason `json:"reason"`
+	}
+	decode(t, out, &st)
+	if st.Reason == nil || st.Reason.Step != 3 || strings.Join(st.Reason.Components, ",") != "tools" ||
+		st.Reason.Message != "scripted has no recorded answer for step 3: the tool list differs from the recording — re-run on engine live" {
+		t.Errorf("reason = %+v, want the typed step-3 tools miss", st.Reason)
 	}
 }

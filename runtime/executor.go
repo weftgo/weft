@@ -1094,6 +1094,17 @@ func (l *link) outcome(cmd command, runID string, res *core.RunResult, err error
 		status, errText = "failed", err.Error()
 		slog.Warn("weft/runtime: playground run failed",
 			"command_id", cmd.CommandID, "run_id", runID, "err", err)
+		var miss *scriptedMiss
+		if errors.As(err, &miss) {
+			// Carried typed on the finished ack (postAckCtx), beside the
+			// text: Studio reads the step and components from it.
+			l.mu.Lock()
+			if len(l.misses) >= maxParked {
+				clear(l.misses) // never posted: a bound, not a cache
+			}
+			l.misses[runID] = &ackReason{Kind: "scripted_miss", Step: miss.step, Components: append([]string{}, miss.components...)}
+			l.mu.Unlock()
+		}
 	}
 	// The budget tally counts what this command spent (§6 rule 6:
 	// "counted from each command's OnRunEnd usage" — this link is the

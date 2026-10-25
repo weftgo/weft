@@ -707,22 +707,25 @@ func New(m Model, opts ...Option) *Agent {
 	// the agent a no-op one (providerpanic.go).
 	a.obs.tracer = a.obs.resolveTracer(tp, &a.tapPanics)
 	a.obs.elog = a.obs.resolveLogger(lp, &a.tapPanics)
-	// The manifest hash is computed once, here, for the named agent: the
-	// agent is immutable after this, so one hash serves every run (the
-	// store used to recompute it per run through AgentFromContext; ADR
-	// 0024 moves it onto the emitter).
-	if a.name != "" {
-		if b, err := Manifest(a); err == nil {
-			sum := sha256.Sum256(b)
-			a.manifestHash = hex.EncodeToString(sum[:])
-		}
-	}
 	a.instructionsHash = hashText(a.system)
 	// The model chain is built once, here: first registered = outermost.
 	for i := len(a.modelMW) - 1; i >= 0; i-- {
 		a.model = a.modelMW[i](a.model)
 		if isNilModel(a.model) {
 			panic("weft: model middleware returned a nil Model")
+		}
+	}
+	// The manifest hash is computed once, here, for the named agent,
+	// after the model chain is built: Manifest(a) reads the model's Info
+	// through the chain, so the hash is the one every later Manifest(a)
+	// hashes to — weft/runtime's registration included — even when a
+	// middleware does not forward Info. The agent is immutable after
+	// this, so one hash serves every run (ADR 0024 moves it onto the
+	// emitter).
+	if a.name != "" {
+		if b, err := Manifest(a); err == nil {
+			sum := sha256.Sum256(b)
+			a.manifestHash = hex.EncodeToString(sum[:])
 		}
 	}
 	return a

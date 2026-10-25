@@ -98,15 +98,16 @@ func defaultsOf(a *core.Agent, limits agentLimits) agentDefaults {
 	p := a.Params()
 	tc := a.ToolChoice()
 	return agentDefaults{
-		MaxSteps:    limits.MaxSteps,
-		Parallelism: limits.Parallelism,
-		Thinking:    thinkingWord(a.Thinking().Level),
-		Temperature: p.Temperature,
-		TopP:        p.TopP,
-		MaxTokens:   p.MaxTokens,
-		Seed:        p.Seed,
-		Stop:        p.Stop,
-		ToolChoice:  toolChoiceWire{Mode: toolChoiceWord(tc.Mode), Name: tc.Name},
+		MaxSteps:       limits.MaxSteps,
+		Parallelism:    limits.Parallelism,
+		Thinking:       thinkingWord(a.Thinking().Level),
+		ThinkingBudget: a.Thinking().Budget,
+		Temperature:    p.Temperature,
+		TopP:           p.TopP,
+		MaxTokens:      p.MaxTokens,
+		Seed:           p.Seed,
+		Stop:           p.Stop,
+		ToolChoice:     toolChoiceWire{Mode: toolChoiceWord(tc.Mode), Name: tc.Name},
 	}
 }
 

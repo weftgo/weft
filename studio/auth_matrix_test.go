@@ -1169,6 +1169,40 @@ func TestAuthMatrix(t *testing.T) {
 		}
 	}
 
+	// U18.1: a failed scripted command's reason (the server's sentence
+	// for both surfaces) is part of its row: every identity that may
+	// read the row — inside its public id — reads it.
+	{
+		body := `{"runtime":"rt_test","agent":"acme-support","command_id":"cmd_reason","input":"go","public_id":"pub_a"}`
+		if code := do(http.MethodPost, "/api/playground/runs", body, server); code != http.StatusAccepted {
+			t.Fatalf("enqueue cmd_reason: %d", code)
+		}
+		for _, a := range []string{
+			`{"command_id":"cmd_reason","state":"accepted","run_id":"pg_reason"}`,
+			`{"command_id":"cmd_reason","state":"finished","run_id":"pg_reason","status":"failed","error":"weft/runtime: no recorded turn for step 1 (scripted engine, key 0a): x [tools]; y","reason":{"kind":"scripted_miss","step":1,"components":["tools"]}}`,
+		} {
+			if code := do(http.MethodPost, "/api/runtime/acks", a, server); code != http.StatusOK {
+				t.Fatalf("ack cmd_reason: %d", code)
+			}
+		}
+	}
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/playground/commands/cmd_reason", nil)
+		req.Header.Set("Authorization", "Bearer "+id.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || !strings.Contains(string(b), `"reason":{"kind":"scripted_miss","step":1,"components":["tools"],"message":"scripted has no recorded answer for step 1: the tool list differs from the recording — re-run on engine live"}`) {
+			t.Errorf("GET /api/playground/commands/{id} as %s = %d, want the reason: %s", id.name, resp.StatusCode, b)
+		}
+	}
+
 	// U18.1: the preview's scripted check names key components, never
 	// their content, so every identity inside the source's public id —
 	// a read-scoped token too — gets scripted_hit and

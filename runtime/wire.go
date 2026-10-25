@@ -100,15 +100,19 @@ type agentRegistration struct {
 // sampling knobs its core.Params set (absent: the adapter's own), and
 // its tool choice (mode "auto" when none was set).
 type agentDefaults struct {
-	MaxSteps    int            `json:"max_steps"`
-	Parallelism int            `json:"parallelism"`
-	Thinking    string         `json:"thinking"`
-	Temperature *float64       `json:"temperature,omitempty"`
-	TopP        *float64       `json:"top_p,omitempty"`
-	MaxTokens   *int           `json:"max_tokens,omitempty"`
-	Seed        *int64         `json:"seed,omitempty"`
-	Stop        []string       `json:"stop,omitempty"`
-	ToolChoice  toolChoiceWire `json:"tool_choice"`
+	MaxSteps    int    `json:"max_steps"`
+	Parallelism int    `json:"parallelism"`
+	Thinking    string `json:"thinking"`
+	// ThinkingBudget is the agent's default thinking budget (tokens; 0:
+	// none). A budget with no level still sets the request's thinking —
+	// what the scripted engine's key reads (U18.1-fix).
+	ThinkingBudget int64          `json:"thinking_budget,omitempty"`
+	Temperature    *float64       `json:"temperature,omitempty"`
+	TopP           *float64       `json:"top_p,omitempty"`
+	MaxTokens      *int           `json:"max_tokens,omitempty"`
+	Seed           *int64         `json:"seed,omitempty"`
+	Stop           []string       `json:"stop,omitempty"`
+	ToolChoice     toolChoiceWire `json:"tool_choice"`
 }
 
 // agentLimits are the agent's own caps — the lower-only bounds a
@@ -303,4 +307,16 @@ type ack struct {
 	RunID     string `json:"run_id,omitempty"`
 	Status    string `json:"status,omitempty"` // succeeded | failed (finished only)
 	Error     string `json:"error,omitempty"`  // why: a rejection's reason, a failed run's error
+	// Reason is the failed run's error typed, when the runtime knows it
+	// (finished only): today the scripted engine's miss — kind
+	// "scripted_miss", the source step (-1: none) and the key
+	// components (scriptedMiss). Studio prefers it to reading Error.
+	Reason *ackReason `json:"reason,omitempty"`
+}
+
+// ackReason is ack.Reason.
+type ackReason struct {
+	Kind       string   `json:"kind"`
+	Step       int      `json:"step"`
+	Components []string `json:"components"`
 }

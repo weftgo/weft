@@ -2440,3 +2440,56 @@ func TestScriptedReplayFromStepOneIsKeptSame(t *testing.T) {
 		t.Errorf("replay fixtures = %v, want the source's step 0 then the replay's step", fixtures)
 	}
 }
+
+// TestScriptedPastTheEndAgreesEndToEnd (U18.1-fix item 1), both sides
+// real: a source whose model failed right after a tool call replays
+// its recorded step and then asks the step it never answered. The
+// preview says so before Run (step 1, unanswered) and the run's
+// command, read from the finished ack's typed reason, says the same.
+func TestScriptedPastTheEndAgreesEndToEnd(t *testing.T) {
+	e := newE2E(t)
+	lookup := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+		OrderID string `json:"order_id"`
+	}) (string, error) {
+		return "shipped", nil
+	}, core.Replay(core.ReplaySafe))
+	e.agent = core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"4411"}`, ID: "c1"}),
+		wefttest.Fail(errors.New("provider down")),
+	), core.Name("acme-support"), lookup,
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()))
+	if _, err := e.agent.Generate(context.Background(), core.RunID("r_cut"), core.Prompt("where is my order #4411?")); err == nil {
+		t.Fatal("the source run did not fail")
+	}
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.waitTranscript(t, "r_cut", "shipped")
+
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true))
+	defer shutdown()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+	body := fmt.Sprintf(`{"command_id": "cmd_cut", "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": "r_cut", "from_step": 0}, "engine": "scripted", "side_effects": "substitute"}`, runtimes.Runtimes[0].ID)
+	const sentence = "scripted has no recorded answer for step 1: the source never answered it — re-run on engine live"
+	if _, pv := e.api(t, http.MethodPost, "/api/playground/preview", body); !strings.Contains(pv,
+		`"scripted_key_match":{"ok":false,"because":["unanswered"],"step":1,"message":"`+sentence+`"}`) {
+		t.Errorf("preview = %s, want the step-1 unanswered miss", pv)
+	}
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", body); code != http.StatusAccepted {
+		t.Fatalf("run = %d %s", code, resp)
+	}
+	row := e.waitCommand(t, "cmd_cut", "finished")
+	if !strings.Contains(row, `"reason":{"kind":"scripted_miss","step":1,"components":["unanswered"],"message":"`+sentence+`"}`) {
+		t.Errorf("command row = %s, want the same step and component as the preview", row)
+	}
+}

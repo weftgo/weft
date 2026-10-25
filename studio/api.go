@@ -1063,6 +1063,15 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.Limit = limit
+	if class := q.Get("error_class"); class != "" {
+		// A failure class (/api/search's facet value): its texts among
+		// the runs the other filters keep (capability stats).
+		sq := obsdb.SearchQuery{RunQuery: query}
+		if _, ok := s.errorClasses(w, r, &sq, class, false); !ok {
+			return
+		}
+		query.Errs = sq.Errs
+	}
 
 	page, err := s.db.Runs(r.Context(), query)
 	if err != nil {

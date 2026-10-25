@@ -270,6 +270,7 @@ describe("/experiments", () => {
       "agent",
       "variants",
       "inputs",
+      "pass_predicate",
       "engine",
       "side_effects",
       "thread",

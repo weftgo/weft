@@ -2647,7 +2647,23 @@ keeps (migration 0004: `run_search`, `run_tools`, `runs_fts`, runs
 stored before it indexed when it applies); ClickHouse derives the fields at
 read — once per search, for the runs the other filters leave, joined to
 the run rows — and tests every term with `positionCaseInsensitiveUTF8`,
-no migration),
+no migration; with the `stats` capability the body adds
+`facets.error_class` — the match's failures grouped by their error text
+with numbers and ids normalised (`obsdb.ErrorClass`: numbers `N`, ids
+`<id>`, quoted strings kept), most runs first, at most 20, counted
+without the request's own `error_class` — and `error_class=<class>`
+filters `search` and `runs` to that class),
+`stats` (UX plan A4, under the `stats` capability:
+`?by=agent|model|tool|error_type|step` with `since` (RFC 3339 or
+`90m`/`24h`/`7d` back from `until`, default 24h), `until`, `agent`,
+`tag.<k>=<v>`, `public_id` and `parent` (`*` the default: children
+counted under their own agent) — per group `runs`, `failed`,
+`failure_rate`, `calls`, `failed_calls`, the calls' own tokens, the cost
+block, `duration_ms` and `ttft_ms` `{p50, p95, n}` (nearest-rank, exact
+on both backends), `retry_rate`, `denials` and a 24-bucket `series` for
+sparklines; scoped like `runs`; SQLite reads its `span_stats` rollup
+(migration 0023, a derived index written at ingest), ClickHouse groups
+`otel_traces` natively),
 `runs/{id}` (the row and the subagent children, each child row with its own `holes` — never events; with
 `delta_count` (the streamed deltas, counted and never stored),
 `instructions_hash`, `catalog_hash`, `request_count` and, for a run

@@ -259,6 +259,15 @@ func runsInner(q obsdb.RunQuery, cut runsCut) (string, []any) {
 	if q.ErrorType != "" {
 		eq("ErrorType", q.ErrorType)
 	}
+	if q.Errs != nil {
+		// RunQuery.Errs over the collapsed Err: the set, or nothing.
+		if len(q.Errs) == 0 {
+			conds = append(conds, "0 = 1")
+		} else {
+			conds = append(conds, "Err IN ("+placeholders(len(q.Errs))+")")
+			args = append(args, anys(q.Errs)...)
+		}
+	}
 	if q.IDPrefix != "" {
 		// RunId is the grouping key: narrowing on it is the whole filter.
 		narrow = append(narrow, "startsWith(RunId, ?)")

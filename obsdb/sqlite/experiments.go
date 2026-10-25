@@ -10,8 +10,8 @@ import (
 )
 
 // The experiments table (WEFT-PLAYGROUND §10.4, PQ4): the definition
-// rows — name, variants, inputs and (0005) the command's JSON document
-// — keyed by the id the runs carry as
+// rows — name, variants, inputs, (0005) the command's JSON document and
+// (0024) the pass predicate — keyed by the id the runs carry as
 // weft.experiment.id. Upserted by id; the runs stay in runs and join
 // by experiment_id (RunQuery.ExperimentID).
 
@@ -39,16 +39,17 @@ func (d *DB) SaveExperiment(ctx context.Context, e obsdb.Experiment) (err error)
 		return err
 	}
 	_, err = d.writer.ExecContext(ctx, `INSERT INTO experiments
-		(id, name, agent, created_ns, updated_ns, variants, inputs, command)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		(id, name, agent, created_ns, updated_ns, variants, inputs, command, pass_predicate)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 		  name = excluded.name,
 		  agent = excluded.agent,
 		  updated_ns = excluded.updated_ns,
 		  variants = excluded.variants,
 		  inputs = excluded.inputs,
-		  command = excluded.command`,
-		e.ID, e.Name, e.Agent, now.UnixNano(), now.UnixNano(), variants, inputs, command)
+		  command = excluded.command,
+		  pass_predicate = excluded.pass_predicate`,
+		e.ID, e.Name, e.Agent, now.UnixNano(), now.UnixNano(), variants, inputs, command, e.PassPredicate)
 	return err
 }
 
@@ -59,7 +60,7 @@ func (d *DB) Experiments(ctx context.Context) (_ []obsdb.Experiment, err error) 
 	}
 	defer d.closedErr(&err)
 	rows, err := d.reads.QueryContext(ctx,
-		`SELECT id, name, agent, created_ns, updated_ns, variants, inputs, command
+		`SELECT id, name, agent, created_ns, updated_ns, variants, inputs, command, pass_predicate
 		 FROM experiments ORDER BY updated_ns DESC, id`)
 	if err != nil {
 		return nil, err
@@ -83,7 +84,7 @@ func (d *DB) Experiment(ctx context.Context, id string) (_ obsdb.Experiment, err
 	}
 	defer d.closedErr(&err)
 	rows, err := d.reads.QueryContext(ctx,
-		`SELECT id, name, agent, created_ns, updated_ns, variants, inputs, command
+		`SELECT id, name, agent, created_ns, updated_ns, variants, inputs, command, pass_predicate
 		 FROM experiments WHERE id = ?`, id)
 	if err != nil {
 		return obsdb.Experiment{}, err
@@ -103,7 +104,7 @@ func scanExperiment(rows *sql.Rows) (obsdb.Experiment, error) {
 	var e obsdb.Experiment
 	var created, updated int64
 	var variants, inputs, command string
-	if err := rows.Scan(&e.ID, &e.Name, &e.Agent, &created, &updated, &variants, &inputs, &command); err != nil {
+	if err := rows.Scan(&e.ID, &e.Name, &e.Agent, &created, &updated, &variants, &inputs, &command, &e.PassPredicate); err != nil {
 		return e, err
 	}
 	e.Created = time.Unix(0, created).UTC()

@@ -185,6 +185,13 @@ func (s *Server) registerGroups() {
 			},
 		})
 	}
+	// Aggregates (UX plan A4, D7): GET /api/stats, and the error_class
+	// facet and filter on /api/search and /api/runs. Present when the
+	// database aggregates (obsdb.Aggregator — both first-party
+	// backends); otherwise meta.capabilities_off says why.
+	if _, ok := s.db.(obsdb.Aggregator); ok {
+		s.addGroup(statsGroupRoute())
+	}
 	// The manifest store (U27): GET /api/manifests/{hash}, the agent
 	// configuration a run's manifest_hash names. Present when the
 	// database stores manifests (obsdb.ManifestStore — both first-party

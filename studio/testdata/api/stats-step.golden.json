@@ -1,0 +1,685 @@
+{
+  "by": "step",
+  "since": "2020-01-01T00:00:00Z",
+  "until": "2020-01-02T00:00:00Z",
+  "buckets": 24,
+  "bucket_ms": 3600000,
+  "groups": [
+    {
+      "key": "0",
+      "runs": 9,
+      "failed": 5,
+      "failure_rate": 0.222222,
+      "calls": 9,
+      "failed_calls": 2,
+      "input_tokens": 1076,
+      "output_tokens": 231,
+      "cost_usd": null,
+      "cost_known": false,
+      "cost_badge": "unpriced",
+      "cost_reason": "1 of 3 models unpriced: no price for zai/glm-5.3-flash",
+      "cache": "not_reported",
+      "unpriced_models": [
+        "zai/glm-5.3-flash"
+      ],
+      "duration_ms": {
+        "p50": 1000,
+        "p95": 6000,
+        "n": 9
+      },
+      "ttft_ms": {
+        "p50": 400,
+        "p95": 1100,
+        "n": 7
+      },
+      "retried": 2,
+      "retry_rate": 0.222222,
+      "denials": 0,
+      "series": [
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 2,
+          "failed": 0,
+          "calls": 2,
+          "failed_calls": 0,
+          "input_tokens": 1020,
+          "output_tokens": 210
+        },
+        {
+          "runs": 1,
+          "failed": 1,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        {
+          "runs": 1,
+          "failed": 1,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 21,
+          "output_tokens": 4
+        },
+        {
+          "runs": 1,
+          "failed": 1,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 5,
+          "output_tokens": 2
+        },
+        {
+          "runs": 1,
+          "failed": 1,
+          "calls": 1,
+          "failed_calls": 1,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 1,
+          "failed": 1,
+          "calls": 1,
+          "failed_calls": 1,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 1,
+          "failed": 0,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        {
+          "runs": 1,
+          "failed": 0,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      ]
+    },
+    {
+      "key": "1",
+      "runs": 5,
+      "failed": 3,
+      "failure_rate": 0,
+      "calls": 5,
+      "failed_calls": 0,
+      "input_tokens": 75,
+      "output_tokens": 27,
+      "cost_usd": null,
+      "cost_known": false,
+      "cost_badge": "unpriced",
+      "cost_reason": "1 of 2 models unpriced: no price for zai/glm-5.3-flash",
+      "cache": "not_reported",
+      "unpriced_models": [
+        "zai/glm-5.3-flash"
+      ],
+      "duration_ms": {
+        "p50": 1000,
+        "p95": 1200,
+        "n": 5
+      },
+      "ttft_ms": {
+        "p50": 500,
+        "p95": 800,
+        "n": 5
+      },
+      "retried": 0,
+      "retry_rate": 0,
+      "denials": 0,
+      "series": [
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 1,
+          "failed": 0,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 30,
+          "output_tokens": 12
+        },
+        {
+          "runs": 1,
+          "failed": 1,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        {
+          "runs": 1,
+          "failed": 1,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 20,
+          "output_tokens": 3
+        },
+        {
+          "runs": 1,
+          "failed": 1,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 5,
+          "output_tokens": 2
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 1,
+          "failed": 0,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      ]
+    },
+    {
+      "key": "2",
+      "runs": 2,
+      "failed": 2,
+      "failure_rate": 0,
+      "calls": 2,
+      "failed_calls": 0,
+      "input_tokens": 15,
+      "output_tokens": 7,
+      "cost_usd": null,
+      "cost_known": false,
+      "cost_badge": "unpriced",
+      "cost_reason": "1 of 1 models unpriced: no price for zai/glm-5.3-flash",
+      "cache": "not_reported",
+      "unpriced_models": [
+        "zai/glm-5.3-flash"
+      ],
+      "duration_ms": {
+        "p50": 900,
+        "p95": 1000,
+        "n": 2
+      },
+      "ttft_ms": {
+        "p50": 400,
+        "p95": 600,
+        "n": 2
+      },
+      "retried": 0,
+      "retry_rate": 0,
+      "denials": 0,
+      "series": [
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 1,
+          "failed": 1,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 1,
+          "failed": 1,
+          "calls": 1,
+          "failed_calls": 0,
+          "input_tokens": 5,
+          "output_tokens": 2
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        {
+          "runs": 0,
+          "failed": 0,
+          "calls": 0,
+          "failed_calls": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      ]
+    }
+  ]
+}
+

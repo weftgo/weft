@@ -86,6 +86,7 @@ const SEARCH_KEYS: Record<keyof SearchPage, true> = {
   sort: true,
   next_offset: true,
   cost_sort_cap: true,
+  facets: true,
 }
 
 /** The cost-ish keys an object carries that the mirror does not know. */

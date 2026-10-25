@@ -226,6 +226,11 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		conds = append(conds, "error_type = ?")
 		args = append(args, q.ErrorType)
 	}
+	if q.Errs != nil {
+		cond, cargs := errsCond(q.Errs)
+		conds = append(conds, cond)
+		args = append(args, cargs...)
+	}
 	if q.IDPrefix != "" {
 		// A prefix as a byte range (no LIKE wildcard, no case folding):
 		// every id with the prefix sorts at or after it and before its

@@ -191,7 +191,8 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd", ".runs[].cost_usd=<nil>", ".runs[].unpriced_models[]"}},
 		// Search (plan A7): run rows, prompt_preview included, from the
 		// real run's prompt "where is order 42?".
-		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".runs[].children_count", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
+		// The real run failed nothing: its error_class facet is empty.
+		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".facets.error_class[]", ".runs[].children_count", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
 		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},
 		{"events-ok-paged.golden.json", "/api/runs/" + res.ID + "/events?after=2&limit=3", nil},
 		{"transcript-ok.golden.json", "/api/runs/" + res.ID + "/transcript", nil},
@@ -227,6 +228,14 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// no change, no instructions (system ""), the golden's lookup a
 		// result of its own.
 		{"diff.golden.json", "/api/diff?a=" + res.ID + "&b=" + res.ID, []string{".summary.first_changed", ".summary.changed_steps[]", ".steps[].changes[]"}},
+		// The aggregates (A4): the real run is one scripted run of orders
+		// — priced an exact $0, its tool succeeded; the fixture's
+		// unpriced, unknown and failed groups carry what it does not.
+		{"stats-agent.golden.json", "/api/stats?by=agent", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>"}},
+		{"stats-model.golden.json", "/api/stats?by=model", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>"}},
+		{"stats-tool.golden.json", "/api/stats?by=tool", nil},
+		{"stats-error-type.golden.json", "/api/stats?by=error_type", []string{".groups[]"}},
+		{"stats-step.golden.json", "/api/stats?by=step", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>"}},
 		// This server has no manifest (manifest_check is null).
 		{"meta.golden.json", "/api/meta", []string{".manifest_check"}},
 	} {

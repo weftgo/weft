@@ -229,6 +229,11 @@ type RunQuery struct {
 	// ErrorType keeps the runs whose RunRow.ErrorType is exactly this
 	// ("" any): max_steps, cancelled, model_error, …
 	ErrorType string
+	// Errs keeps the runs whose RunRow.Err is exactly one of these
+	// texts: nil any, an empty non-nil slice none. The error_class
+	// filter resolves a class to its texts (ErrorClassTexts) and reads
+	// them through it.
+	Errs []string
 	// IDPrefix keeps the runs whose ID starts with it, byte for byte
 	// ("" any; no wildcard, no case folding): a pasted short id.
 	IDPrefix string
@@ -328,6 +333,11 @@ type Experiment struct {
 	Created, Updated time.Time
 	Variants         []ExperimentVariant
 	Inputs           []ExperimentInput
+	// PassPredicate is the experiment's pass predicate (UX plan D8), as
+	// the playground sent it: obsdb stores and returns it verbatim and
+	// reads nothing into it (Studio bounds its length). "" when none,
+	// and on an experiment saved before obsdb kept it.
+	PassPredicate string
 	// ExperimentCommand is the rest of the §5.1 command the matrix
 	// sent, so a saved experiment reopens as the form that ran it.
 	// Zero on an experiment saved before obsdb kept it.

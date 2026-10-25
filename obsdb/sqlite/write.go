@@ -57,8 +57,16 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 	seenTrace := map[string]bool{}
 	for _, s := range b.Spans {
 		w := obsdb.DeriveSpan(s)
-		if _, err := insertSpan(ctx, tx, s, w); err != nil {
+		inserted, err := insertSpan(ctx, tx, s, w)
+		if err != nil {
 			return err
+		}
+		if inserted && w.RunID != "" {
+			// The span_stats rollup row (0023), in the span's own
+			// transaction: a derived index of what was just stored.
+			if err := insertSpanStat(ctx, tx, s); err != nil {
+				return err
+			}
 		}
 		if w.RunID != "" {
 			// A summarizer span (weft/thread's compaction or branch-summary

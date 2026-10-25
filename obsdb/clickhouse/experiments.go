@@ -58,9 +58,9 @@ func (d *DB) SaveExperiment(ctx context.Context, e obsdb.Experiment) (err error)
 	// work around), which floored Created and Updated — the SQLite
 	// backend keeps the nanoseconds.
 	return d.conn.Exec(ctx, `INSERT INTO experiments
-		(Id, Name, Agent, Created, Updated, Variants, Inputs, Command)
-		VALUES (?, ?, ?, fromUnixTimestamp64Nano(?), fromUnixTimestamp64Nano(?), ?, ?, ?)`,
-		e.ID, e.Name, e.Agent, created.UnixNano(), now.UnixNano(), string(variants), string(inputs), string(command))
+		(Id, Name, Agent, Created, Updated, Variants, Inputs, Command, PassPredicate)
+		VALUES (?, ?, ?, fromUnixTimestamp64Nano(?), fromUnixTimestamp64Nano(?), ?, ?, ?, ?)`,
+		e.ID, e.Name, e.Agent, created.UnixNano(), now.UnixNano(), string(variants), string(inputs), string(command), e.PassPredicate)
 }
 
 // Experiments lists the saved definitions, newest update first.
@@ -74,7 +74,7 @@ func (d *DB) Experiments(ctx context.Context) (_ []obsdb.Experiment, err error) 
 	// list order and the surviving row can never disagree. (Updated was
 	// also written at whole seconds until the nanosecond bind; rows
 	// from before it still tie there.)
-	rows, err := d.conn.Query(ctx, `SELECT Id, Name, Agent, Created, Updated, Variants, Inputs, Command
+	rows, err := d.conn.Query(ctx, `SELECT Id, Name, Agent, Created, Updated, Variants, Inputs, Command, PassPredicate
 		FROM experiments FINAL ORDER BY InsertTime DESC, Id`)
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func (d *DB) Experiment(ctx context.Context, id string) (_ obsdb.Experiment, err
 		return obsdb.Experiment{}, err
 	}
 	defer d.closedErr(&err)
-	rows, err := d.conn.Query(ctx, `SELECT Id, Name, Agent, Created, Updated, Variants, Inputs, Command
+	rows, err := d.conn.Query(ctx, `SELECT Id, Name, Agent, Created, Updated, Variants, Inputs, Command, PassPredicate
 		FROM experiments FINAL WHERE Id = ? ORDER BY InsertTime DESC`, id)
 	if err != nil {
 		return obsdb.Experiment{}, err
@@ -120,7 +120,7 @@ func (d *DB) Experiment(ctx context.Context, id string) (_ obsdb.Experiment, err
 func scanExperiment(rows driver.Rows) (obsdb.Experiment, error) {
 	var e obsdb.Experiment
 	var variants, inputs, command string
-	if err := rows.Scan(&e.ID, &e.Name, &e.Agent, &e.Created, &e.Updated, &variants, &inputs, &command); err != nil {
+	if err := rows.Scan(&e.ID, &e.Name, &e.Agent, &e.Created, &e.Updated, &variants, &inputs, &command, &e.PassPredicate); err != nil {
 		return e, err
 	}
 	if err := json.Unmarshal([]byte(variants), &e.Variants); err != nil {

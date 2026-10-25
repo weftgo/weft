@@ -102,6 +102,9 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("SessionsOldDated", sessionsOldDated(open))
 	t.Run("SessionsPartlyExpired", sessionsPartlyExpired(open))
 	t.Run("HeldMarker", heldMarker(open))
+	t.Run("Stats", statsTable(open))
+	t.Run("StatsDeleted", statsDeleted(open))
+	t.Run("ErrorCounts", errorCounts(open))
 }
 
 func ctx() context.Context { return context.Background() }
@@ -1604,6 +1607,8 @@ func experiments(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 				{Key: "1", SourceRunID: "s_1-t1"},
 				{Key: "2", Text: "angry user"},
 			},
+			// The pass predicate (D8): stored and returned verbatim.
+			PassPredicate: `status = succeeded AND answer ~ /\d+ units/`,
 			ExperimentCommand: obsdb.ExperimentCommand{
 				Engine: "live", SideEffects: "substitute", Thread: "fork", FromStep: &fromStep,
 				SourceRunID:     "s_1-t1",
@@ -1624,6 +1629,9 @@ func experiments(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		}
 		if got.Name != "tracking-link prompt v2" || got.Agent != "acme-support" {
 			t.Errorf("experiment = %+v, want the refreshed definition", got)
+		}
+		if got.PassPredicate != e.PassPredicate {
+			t.Errorf("pass predicate = %q, want %q verbatim", got.PassPredicate, e.PassPredicate)
 		}
 		if len(got.Variants) != 2 || got.Variants[1].Key != "B" || string(got.Variants[1].Overrides) != `{"instructions":"new"}` {
 			t.Errorf("variants = %+v, want the wire shapes verbatim", got.Variants)

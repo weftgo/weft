@@ -53,11 +53,20 @@ type experimentBody struct {
 	Agent    string                    `json:"agent"`
 	Variants []obsdb.ExperimentVariant `json:"variants"`
 	Inputs   []obsdb.ExperimentInput   `json:"inputs"`
+	// PassPredicate is the matrix's pass predicate (UX plan D8,
+	// UX-C-38), kept verbatim: Studio bounds its length
+	// (maxPassPredicateBytes) and reads nothing into it — the language
+	// is the playground's. Omitted when none.
+	PassPredicate string `json:"pass_predicate,omitempty"`
 	obsdb.ExperimentCommand
 }
 
+// maxPassPredicateBytes bounds an experiment's pass predicate.
+const maxPassPredicateBytes = 4096
+
 func bodyOf(e obsdb.Experiment) experimentBody {
-	return experimentBody{ID: e.ID, Name: e.Name, Agent: e.Agent, Variants: e.Variants, Inputs: e.Inputs, ExperimentCommand: e.ExperimentCommand}
+	return experimentBody{ID: e.ID, Name: e.Name, Agent: e.Agent, Variants: e.Variants, Inputs: e.Inputs,
+		PassPredicate: e.PassPredicate, ExperimentCommand: e.ExperimentCommand}
 }
 
 // experimentSummary is what the history and the detail both carry
@@ -155,6 +164,9 @@ func checkExperiment(b experimentBody) string {
 	if !jsonIs(b.TranscriptEdits, '[') {
 		return "transcript_edits must be a list"
 	}
+	if len(b.PassPredicate) > maxPassPredicateBytes {
+		return fmt.Sprintf("pass_predicate is %d bytes, at most %d", len(b.PassPredicate), maxPassPredicateBytes)
+	}
 	return ""
 }
 
@@ -231,7 +243,7 @@ func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
 		if err := s.db.SaveExperiment(r.Context(), obsdb.Experiment{
 			ID: body.ID, Name: body.Name, Agent: body.Agent,
 			Variants: body.Variants, Inputs: body.Inputs,
-			ExperimentCommand: body.ExperimentCommand,
+			PassPredicate: body.PassPredicate, ExperimentCommand: body.ExperimentCommand,
 		}); err != nil {
 			dbError(w, r, "experiment", body.ID, err)
 			return

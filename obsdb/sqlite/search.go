@@ -270,11 +270,37 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 		return obsdb.RunPage{}, err
 	}
 	defer d.closedErr(&err)
-	terms, err := obsdb.CheckSearch(q)
+	now := time.Now()
+	full, args, err := searchWhere(q, now)
 	if err != nil {
 		return obsdb.RunPage{}, err
 	}
-	now := time.Now()
+	var total int
+	if err := d.reads.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE `+full, args...).Scan(&total); err != nil {
+		return obsdb.RunPage{}, err
+	}
+	order := "started_ns DESC, run_id DESC"
+	switch q.Sort {
+	case obsdb.SortDuration:
+		order = "(COALESCE(finished_ns, last_seen_ns) - started_ns) DESC, " + order
+	case obsdb.SortTokens:
+		order = "(input_tokens + output_tokens) DESC, " + order
+	}
+	rows, err := d.queryRunRows(ctx, full+" ORDER BY "+order+" LIMIT ? OFFSET ?",
+		append(append([]any{}, args...), obsdb.LimitOf(q.Limit), q.Offset), now)
+	if err != nil {
+		return obsdb.RunPage{}, err
+	}
+	return obsdb.RunPage{Runs: rows, Total: total}, nil
+}
+
+// searchWhere is a search's match as a condition over runs with its
+// binds — Search's and ErrorCounts' one reading of a SearchQuery.
+func searchWhere(q obsdb.SearchQuery, now time.Time) (string, []any, error) {
+	terms, err := obsdb.CheckSearch(q)
+	if err != nil {
+		return "", nil, err
+	}
 	rq := q.RunQuery
 	rq.Before, rq.BeforeID = time.Time{}, ""
 	where, args := runWhere(rq, now)
@@ -309,24 +335,7 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 		conds = append(conds, c)
 		args = append(args, a...)
 	}
-	full := strings.Join(conds, " AND ")
-	var total int
-	if err := d.reads.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE `+full, args...).Scan(&total); err != nil {
-		return obsdb.RunPage{}, err
-	}
-	order := "started_ns DESC, run_id DESC"
-	switch q.Sort {
-	case obsdb.SortDuration:
-		order = "(COALESCE(finished_ns, last_seen_ns) - started_ns) DESC, " + order
-	case obsdb.SortTokens:
-		order = "(input_tokens + output_tokens) DESC, " + order
-	}
-	rows, err := d.queryRunRows(ctx, full+" ORDER BY "+order+" LIMIT ? OFFSET ?",
-		append(append([]any{}, args...), obsdb.LimitOf(q.Limit), q.Offset), now)
-	if err != nil {
-		return obsdb.RunPage{}, err
-	}
-	return obsdb.RunPage{Runs: rows, Total: total}, nil
+	return strings.Join(conds, " AND "), args, nil
 }
 
 // ftsCond is one term's condition over the named runs_fts columns: a

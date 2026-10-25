@@ -265,6 +265,12 @@ func TestRetainSweeper(t *testing.T) {
 	// The timer sweeps again: a run that turns old after start goes too.
 	seedAt(t, db, "later_old", "", "", now.Add(-2*time.Hour), true)
 	waitGone("later_old")
+	// The sweep that took it logs after its passes and their trailing
+	// cleanups: wait for its line before Close, whose cancel would
+	// otherwise fail a sweep still finishing (no line) under load.
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && !strings.Contains(logs.String(), "deleted_runs=1"); {
+		time.Sleep(10 * time.Millisecond)
+	}
 	for _, id := range []string{"recent", "running"} {
 		if _, err := db.Run(context.Background(), id); err != nil {
 			t.Errorf("%s was swept: %v", id, err)

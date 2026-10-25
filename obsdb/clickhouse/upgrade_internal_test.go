@@ -204,7 +204,10 @@ func TestUpgradeFrom0007AddsCommandStore(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := (&DB{conn: conn}).SaveExperiment(ctx, obsdb.Experiment{ID: "exp_1", Name: "tone"}); err != nil {
+	// The experiment as a 0007 writer saved it: its columns then (a
+	// SaveExperiment of this build writes 0028's PassPredicate too).
+	if err := conn.Exec(ctx, `INSERT INTO experiments (Id, Name, Agent, Created, Updated, Variants, Inputs, Command)
+		VALUES ('exp_1', 'tone', '', now64(9), now64(9), 'null', 'null', '{}')`); err != nil {
 		t.Fatal(err)
 	}
 	var tables uint64

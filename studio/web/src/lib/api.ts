@@ -1258,6 +1258,10 @@ export interface RunsFilters {
   turn_above?: number
   /** Oldest first (the cursor pages forward). /api/runs only. */
   oldest?: boolean
+  /** A failure class, exact: the error_class facet's class string
+   * (the error text with numbers and ids normalised, UX-C-37) —
+   * capability "stats". /api/runs and /api/search. */
+  error_class?: string
 }
 
 export function runsSearch(filters: RunsFilters): string {
@@ -1283,6 +1287,7 @@ export function runsSearch(filters: RunsFilters): string {
   if (filters.turn_below) params.set("turn_below", String(filters.turn_below))
   if (filters.turn_above) params.set("turn_above", String(filters.turn_above))
   if (filters.oldest) params.set("oldest", "1")
+  if (filters.error_class) params.set("error_class", filters.error_class)
   const qs = params.toString()
   return qs ? `?${qs}` : ""
 }
@@ -1301,6 +1306,19 @@ export interface SearchPage {
   sort: string
   next_offset: number | null
   cost_sort_cap?: number
+  /** The match's facets (capability "stats"; absent without it). */
+  facets?: SearchFacets
+}
+
+/** /api/search's facets (UX plan A2, UX-C-37): error_class is the
+ * match's failures grouped by their normalised error text, most runs
+ * first, at most 20 — counted without the request's own error_class
+ * filter; each class is that filter's value as it stands.
+ * error_class_capped: the match held more distinct error texts than
+ * the server reads (obsdb.MaxErrorTexts), the rarest left out. */
+export interface SearchFacets {
+  error_class: { class: string; count: number }[]
+  error_class_capped?: boolean
 }
 
 /** A search over /api/runs' filters, in an order (sort=cost: the
@@ -2647,6 +2665,91 @@ export interface CancelAccepted {
   state: "cancelling"
 }
 
+/** What GET /api/stats groups by (UX plan A4). */
+export type StatsBy = "agent" | "model" | "tool" | "error_type" | "step"
+
+/** Nearest-rank percentiles over n values, in milliseconds. */
+export interface StatsPercentiles {
+  p50: number
+  p95: number
+  n: number
+}
+
+/** One bucket of a group's series: the runs that started in it. */
+export interface StatsBucket {
+  runs: number
+  failed: number
+  calls: number
+  failed_calls: number
+  input_tokens: number
+  output_tokens: number
+}
+
+/** One group of GET /api/stats (studio/stats.go's table): runs and
+ * failed; failure_rate failed / runs for agent and error_type,
+ * failed_calls / calls otherwise (null with nothing to divide); calls
+ * are model calls (tool calls for by=tool); the tokens are the calls'
+ * own; the cost block prices each model's usage (unknown, never $0, for
+ * an unpriced model; null for by=tool); duration_ms is run durations
+ * for agent and error_type, call durations otherwise; retry_rate the
+ * model calls that took more than one attempt (null for by=tool). */
+export interface StatsGroup extends CostFields {
+  key: string
+  runs: number
+  failed: number
+  failure_rate: number | null
+  calls: number
+  failed_calls: number
+  input_tokens: number
+  output_tokens: number
+  duration_ms: StatsPercentiles | null
+  ttft_ms: StatsPercentiles | null
+  retried: number
+  retry_rate: number | null
+  denials: number
+  series: StatsBucket[]
+}
+
+/** GET /api/stats' body (capability "stats"): the window as read, its
+ * buckets (24, bucket_ms each, oldest first), the groups — most runs
+ * first (by=step: by step index) — and how many were cut. */
+export interface StatsPage {
+  by: StatsBy
+  since: string
+  until: string
+  buckets: number
+  bucket_ms: number
+  groups: StatsGroup[]
+  groups_cut?: number
+}
+
+/** GET /api/stats' parameters: since is RFC 3339 or a duration back
+ * from until (90m, 24h, 7d; default 24h); parent "*" (the default: every
+ * run, children included), "" top-level, or a run id. */
+export interface StatsFilters {
+  by: StatsBy
+  since?: string
+  until?: string
+  agent?: string
+  tag?: Record<string, string>
+  public_id?: string
+  parent?: string
+}
+
+/** GET /api/stats?…: numbers across runs (UX-E-25, UX-A-14). */
+export function fetchStats(filters: StatsFilters): Promise<StatsPage> {
+  const params = new URLSearchParams()
+  params.set("by", filters.by)
+  if (filters.since) params.set("since", filters.since)
+  if (filters.until) params.set("until", filters.until)
+  if (filters.agent) params.set("agent", filters.agent)
+  if (filters.public_id) params.set("public_id", filters.public_id)
+  if (filters.parent !== undefined) params.set("parent", filters.parent)
+  for (const [k, v] of Object.entries(filters.tag ?? {}))
+    params.set(`tag.${k}`, v)
+  return get<StatsPage>(`stats?${params.toString()}`)
+}
+
 /** POST /api/runs/{id}/cancel (capability "cancel", plan H6): ask the
  * runtime that started a run to stop it. Best effort: a frame lost to a
  * stream reconnect is not retried — cancel again. A 409 names why not
@@ -2688,6 +2791,9 @@ export interface ExperimentRow extends CostFields {
     thread?: string
   }[]
   inputs: { key: string; source_run_id?: string; text?: string }[]
+  /** The matrix's pass predicate (UX plan D8), stored and returned
+   * verbatim — its language is the playground's; at most 4096 bytes. */
+  pass_predicate?: string
   /** The command the matrix sent (F5.1, obsdb.ExperimentCommand): absent
    * on a definition saved before it — the form is then read back from
    * the runs (lib/form-state.ts's recovery). */

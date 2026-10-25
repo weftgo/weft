@@ -57,6 +57,7 @@
           "text": "angry user"
         }
       ],
+      "pass_predicate": "status = succeeded AND answer ~ /shipped/",
       "engine": "live",
       "side_effects": "substitute",
       "thread": "ephemeral",

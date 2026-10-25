@@ -34,6 +34,9 @@ import (
 //	            model_error, …)
 //	min_cost    USD at least (a non-negative number): the run's whole bill,
 //	            own + delegated (pricing.go); an unpriced run never matches
+//	error_class a failure class, exact (the facet's class string: the
+//	            error text with numbers and ids normalised, obsdb.ErrorClass);
+//	            capability stats
 //	sort        started (default, newest first) | duration (longest first) |
 //	            tokens (most first) | cost (own + delegated, most first;
 //	            unpriced runs after every priced one, newest first)
@@ -70,6 +73,72 @@ type searchPage struct {
 	// CostSortCap is costSortCap when min_cost or sort=cost read a match
 	// larger than it: the runs past it were neither priced nor listed.
 	CostSortCap *int `json:"cost_sort_cap,omitempty"`
+	// Facets are the match's facets (absent when the database cannot
+	// aggregate: capability stats).
+	Facets *searchFacets `json:"facets,omitempty"`
+}
+
+// searchFacets is /api/search's facets block (UX plan A2, UX-C-37).
+// error_class is the match's failures grouped by their normalised
+// error text (obsdb.ErrorClass: numbers N, ids <id>, quoted strings
+// kept), most runs first, at most errorClassFacetMax classes — counted
+// over the match without its own error_class filter, so the facet
+// lists the classes a click could switch to. Each class string is the
+// error_class filter's value as it stands. error_class_capped is true
+// when the match held more than obsdb.MaxErrorTexts distinct error
+// texts: the rarest were not read, so the counts (and a class filter)
+// cover the most frequent texts only.
+type searchFacets struct {
+	ErrorClass       []errorClassCount `json:"error_class"`
+	ErrorClassCapped bool              `json:"error_class_capped,omitempty"`
+}
+
+type errorClassCount struct {
+	Class string `json:"class"`
+	Count int64  `json:"count"`
+}
+
+// errorClassFacetMax caps the facet's classes.
+const errorClassFacetMax = 20
+
+// errorClasses reads the error texts of query's match once
+// (obsdb.Aggregator.ErrorCounts) and, when class is set, narrows
+// query to the texts of that class (RunQuery.Errs: a class no text
+// folds into matches no run); with facet it returns the error_class
+// facet too. A database that cannot aggregate has no facet and answers
+// a class filter 501. ok false: the answer was written.
+func (s *Server) errorClasses(w http.ResponseWriter, r *http.Request, query *obsdb.SearchQuery, class string, facet bool) (*searchFacets, bool) {
+	agg, isAgg := s.db.(obsdb.Aggregator)
+	if !isAgg {
+		if class != "" {
+			writeError(w, r, http.StatusNotImplemented, "not_implemented", offStats)
+			return nil, false
+		}
+		return nil, true
+	}
+	if !facet && class == "" {
+		return nil, true
+	}
+	counts, capped, err := agg.ErrorCounts(r.Context(), *query)
+	if errors.Is(err, obsdb.ErrInvalidSearch) {
+		badRequest(w, r, err.Error())
+		return nil, false
+	}
+	if err != nil {
+		dbError(w, r, "error classes", "", err)
+		return nil, false
+	}
+	if class != "" {
+		query.Errs = obsdb.ErrorClassTexts(counts, class)
+	}
+	if !facet {
+		return nil, true
+	}
+	out := &searchFacets{ErrorClass: []errorClassCount{}, ErrorClassCapped: capped}
+	for _, c := range obsdb.ErrorClasses(counts, errorClassFacetMax) {
+		out.ErrorClass = append(out.ErrorClass, errorClassCount{Class: c.Class, Count: c.Count})
+	}
+	return out, true
 }
 
 // costSortCap bounds the runs min_cost / sort=cost price per request.
@@ -180,8 +249,12 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.Limit = limit
+	facets, ok := s.errorClasses(w, r, &query, q.Get("error_class"), true)
+	if !ok {
+		return
+	}
 	if byCost || minCost != nil {
-		s.serveCostSearch(w, r, srch, query, byCost, minCost)
+		s.serveCostSearch(w, r, srch, query, byCost, minCost, facets)
 		return
 	}
 	page, err := srch.Search(r.Context(), query)
@@ -193,7 +266,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		dbError(w, r, "search", "", err)
 		return
 	}
-	out := searchPage{Total: page.Total, Runs: make([]runRow, 0, len(page.Runs)), Sort: string(obsdb.SortStarted)}
+	out := searchPage{Total: page.Total, Runs: make([]runRow, 0, len(page.Runs)), Sort: string(obsdb.SortStarted), Facets: facets}
 	if query.Sort != "" {
 		out.Sort = string(query.Sort)
 	}
@@ -214,7 +287,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 // ties keep the newest-first order; unpriced runs last), then paged by
 // query's offset and limit.
 func (s *Server) serveCostSearch(w http.ResponseWriter, r *http.Request, srch obsdb.Searcher,
-	query obsdb.SearchQuery, byCost bool, minCost *float64) {
+	query obsdb.SearchQuery, byCost bool, minCost *float64, facets *searchFacets) {
 	offset, limit := query.Offset, obsdb.LimitOf(query.Limit)
 	scan := query
 	scan.Offset, scan.Limit = 0, 500
@@ -273,7 +346,7 @@ func (s *Server) serveCostSearch(w http.ResponseWriter, r *http.Request, srch ob
 			return 0
 		})
 	}
-	out := searchPage{Total: len(hits), Runs: []runRow{}, Sort: string(obsdb.SortStarted)}
+	out := searchPage{Total: len(hits), Runs: []runRow{}, Sort: string(obsdb.SortStarted), Facets: facets}
 	switch {
 	case byCost:
 		out.Sort = sortCost

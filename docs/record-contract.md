@@ -1303,6 +1303,36 @@ Naming the hook on the request record (`request.body.prepared[]`) is
 U25's, and the middleware onion on the step U23's; until then the record
 says what changed, not who changed it.
 
+**Aggregates** (UX plan D7, A4, A2; UX-E-25, UX-C-37) are derived,
+never recorded: no new attribute, every number read from the spans
+and run rows above (`obsdb.Aggregator`). `Stats` groups the runs a
+query keeps — `/api/runs`' filters, not derived, started in the window
+— by agent, model, tool, error type or step, each group's model calls,
+tool calls, usage, durations, TTFT, attempts and denials summed by the
+rules already named here: a call fails on status `Error` (a tool call
+by §6 `problems`' `tool_errors` rule), `denials` is `problems.denied`'s
+rule, a model call's attempts are its `attempt` spans' highest
+`weft.attempt.index` (1 without), its usage its own `chat` span's
+`gen_ai.usage.*` (never a run's rolled-up total); a summarizer's call
+(`weft.chat.role`) and a call a resume denied (`weft.tool.denied`) are
+no call. Percentiles are nearest-rank (`obsdb.PercentileRank`), exact
+on both backends. On SQLite the rows come from **`span_stats`**
+(migration 0023), a **derived index**: one row per stored
+`invoke_agent`, `chat` and `execute_tool` span of a weft run, computed
+from the `spans` row by one derivation the writer runs in the span's
+own transaction and the migration's backfill runs over the spans
+already stored — so the table is rebuildable from `spans` at any time
+and holds nothing a span does not; its rows go with their span
+(deletion, sweep, the orphan pass: a trigger on `spans`). ClickHouse
+keeps no such table: the same rules are restated over `otel_traces`
+with native `GROUP BY`. The conformance suite's `Stats` case holds both
+to the same answers. The **error class** of a failed run is its `err`
+normalised at read time (`obsdb.ErrorClass`: numbers `N`, hex ids,
+UUIDs and mixed ids `<id>`, quoted strings kept) — nothing stored —
+and the experiment definition's `pass_predicate` (SQLite 0024,
+ClickHouse 0028) is the playground's text, kept verbatim: neither is a
+record.
+
 ## 7. Badges
 
 Every place a record is missing, cut or derived is shown with a badge

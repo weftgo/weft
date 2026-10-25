@@ -22,6 +22,7 @@
     "diff",
     "traces",
     "search",
+    "stats",
     "manifests",
     "spans_tree",
     "timeline",

@@ -49,6 +49,7 @@ var migrations = func() map[int]string {
 var postMigrations = map[int]func(*sql.Tx) error{
 	4:  backfillSearch,
 	22: backfillRunlessSessionEvents,
+	23: backfillSpanStats,
 }
 
 func highestMigration() int {

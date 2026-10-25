@@ -92,14 +92,50 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 		return obsdb.RunPage{}, err
 	}
 	defer d.closedErr(&err)
-	terms, err := obsdb.CheckSearch(q)
+	now := time.Now()
+	cut := d.runsCut(ctx) // one instant: the match, its parked filter, its resumers
+	from, args, where, condArgs, err := searchFrom(q, now, cut)
 	if err != nil {
 		return obsdb.RunPage{}, err
 	}
-	now := time.Now()
+	order := "Started DESC, RunId DESC"
+	switch q.Sort {
+	case obsdb.SortDuration:
+		order = "(toUnixTimestamp64Nano(ifNull(Finished, LastSeen)) - toUnixTimestamp64Nano(Started)) DESC, " + order
+	case obsdb.SortTokens:
+		order = "(InputTokens + OutputTokens) DESC, " + order
+	}
+	all := append(append([]any{}, args...), condArgs...)
+	rows, total, err := d.searchRows(ctx, now,
+		"SELECT "+runColumns+", count() OVER () FROM "+from+" WHERE "+where+" ORDER BY "+order+" LIMIT ? OFFSET ?",
+		append(all, obsdb.LimitOf(q.Limit), q.Offset)...)
+	if err != nil {
+		return obsdb.RunPage{}, err
+	}
+	if len(rows) == 0 && q.Offset > 0 {
+		// Past the match: no row carried the total.
+		if total, err = d.countRows(ctx, "SELECT count() FROM "+from+" WHERE "+where, args, condArgs); err != nil {
+			return obsdb.RunPage{}, err
+		}
+	}
+	if err := d.fillCounts(ctx, rowPtrs(rows), cut); err != nil {
+		return obsdb.RunPage{}, err
+	}
+	return obsdb.RunPage{Runs: rows, Total: total}, nil
+}
+
+// searchFrom is a search's match — Search's and ErrorCounts' one
+// reading of a SearchQuery: the row source (the cheap filters over the
+// run list, joined to the search fields when a term or the tool filter
+// reads them) with its binds, and the term conditions over it with
+// theirs.
+func searchFrom(q obsdb.SearchQuery, now time.Time, cut runsCut) (from string, args []any, where string, condArgs []any, err error) {
+	terms, err := obsdb.CheckSearch(q)
+	if err != nil {
+		return "", nil, "", nil, err
+	}
 	rq := q.RunQuery
 	rq.Before, rq.BeforeID = time.Time{}, ""
-	cut := d.runsCut(ctx) // one instant: the match, its parked filter, its resumers
 	inner, innerArgs := runsInner(rq, cut)
 
 	// The cheap filters, over the grouped rows.
@@ -133,9 +169,8 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 	runsArgs := append(append([]any{}, innerArgs...), cheapArgs...)
 
 	// The search fields, only when a term or the tool filter reads them.
-	from, args := "("+runs+")", runsArgs
+	from, args = "("+runs+")", runsArgs
 	var conds []string
-	var condArgs []any
 	if len(terms) > 0 || q.Tool != "" {
 		cand := " AND RunId IN (SELECT RunId FROM (" + runs + "))"
 		from = "(SELECT " + joinedRunColumns + ", f.Prompt AS SPrompt, f.Answer AS SAnswer, t.Tools AS STools FROM (" + runs + ") AS r" +
@@ -155,31 +190,7 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 			condArgs = append(condArgs, t, t, t, t)
 		}
 	}
-	where := strings.Join(or1(conds), " AND ")
-	order := "Started DESC, RunId DESC"
-	switch q.Sort {
-	case obsdb.SortDuration:
-		order = "(toUnixTimestamp64Nano(ifNull(Finished, LastSeen)) - toUnixTimestamp64Nano(Started)) DESC, " + order
-	case obsdb.SortTokens:
-		order = "(InputTokens + OutputTokens) DESC, " + order
-	}
-	all := append(append([]any{}, args...), condArgs...)
-	rows, total, err := d.searchRows(ctx, now,
-		"SELECT "+runColumns+", count() OVER () FROM "+from+" WHERE "+where+" ORDER BY "+order+" LIMIT ? OFFSET ?",
-		append(all, obsdb.LimitOf(q.Limit), q.Offset)...)
-	if err != nil {
-		return obsdb.RunPage{}, err
-	}
-	if len(rows) == 0 && q.Offset > 0 {
-		// Past the match: no row carried the total.
-		if total, err = d.countRows(ctx, "SELECT count() FROM "+from+" WHERE "+where, args, condArgs); err != nil {
-			return obsdb.RunPage{}, err
-		}
-	}
-	if err := d.fillCounts(ctx, rowPtrs(rows), cut); err != nil {
-		return obsdb.RunPage{}, err
-	}
-	return obsdb.RunPage{Runs: rows, Total: total}, nil
+	return from, args, strings.Join(or1(conds), " AND "), condArgs, nil
 }
 
 // searchRows is queryRunRows for Search's page: each row also carries

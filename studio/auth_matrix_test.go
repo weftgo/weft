@@ -539,6 +539,22 @@ func TestAuthMatrix(t *testing.T) {
 				}
 				return forbidden403
 			}},
+		// The aggregates (UX plan A4): /api/runs' scoping exactly — a
+		// panel token's numbers are its own public id's runs (pinned
+		// below), a foreign public_id 403 before by is read; the
+		// error_class facet and filter (A2) ride search's and the runs
+		// list's scoping.
+		{name: "GET /api/stats", method: "GET", path: fixed("/api/stats?by=agent"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/stats?by=tool&parent=*", method: "GET", path: fixed("/api/stats?by=tool&parent=*&since=7d"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/stats?public_id=", method: "GET", path: func(res string) string { return "/api/stats?by=model&public_id=" + public[res] },
+			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
+		{name: "GET /api/search?error_class=", method: "GET", path: fixed("/api/search?error_class=boom"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/runs?error_class=", method: "GET", path: fixed("/api/runs?error_class=boom&all=1"), resources: one, want: anyValid(ok)},
 		// The pricing table (plan A5): every valid identity reads it.
 		{name: "GET /api/settings/pricing", method: "GET", path: fixed("/api/settings/pricing"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/runs?parent=<B's run>", method: "GET", path: fixed("/api/runs?parent=run_b"), resources: one, want: anyValid(ok)}, // forced onto the token's public id: empty for a panel token (pinned below)
@@ -1544,6 +1560,53 @@ func TestAuthMatrix(t *testing.T) {
 				}
 			}
 		}
+	}
+
+	// The aggregates count inside the identity's scope: a panel token's
+	// stats are its public id's runs alone — as many as its runs list —
+	// while the server token's count every run.
+	countedBy := map[string]int{}
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		read := func(path string, v any) {
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+			req.Header.Set("Authorization", "Bearer "+id.token)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			b, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("%s as %s: %d %s", path, id.name, resp.StatusCode, b)
+			}
+			if err := json.Unmarshal(b, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var stats struct {
+			Groups []struct {
+				Runs int `json:"runs"`
+			} `json:"groups"`
+		}
+		read("/api/stats?by=agent&since=2000-01-01T00:00:00Z&until=2100-01-01T00:00:00Z", &stats)
+		var runs struct {
+			Total int `json:"total"`
+		}
+		read("/api/runs?all=1&limit=500", &runs)
+		counted := 0
+		for _, g := range stats.Groups {
+			counted += g.Runs
+		}
+		if counted != runs.Total || counted == 0 {
+			t.Errorf("GET /api/stats as %s counts %d runs, its runs list %d: want equal, and some", id.name, counted, runs.Total)
+		}
+		countedBy[id.kind] = counted
+	}
+	if countedBy["read"] >= countedBy["server"] {
+		t.Errorf("GET /api/stats counts %d runs for a read token, %d for the server: want the token's scope narrower", countedBy["read"], countedBy["server"])
 	}
 
 	// The short-id lookup (U26) finds inside the identity's scope: the

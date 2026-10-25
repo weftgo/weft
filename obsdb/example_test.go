@@ -405,3 +405,69 @@ func ExampleSessionEventReader() {
 	// 3
 	// 2
 }
+
+// An Aggregator answers numbers across runs: here, per agent over a
+// day, from the spans the writer stored — SQLite's span_stats rollup
+// (ClickHouse groups otel_traces natively). The error class folds the
+// failures that differ only in their numbers.
+func ExampleAggregator() {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	t0 := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	run := func(id string, at time.Duration, in int64, failure string) {
+		root := map[string]any{"weft.run.id": id, "gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "researcher"}
+		chat := map[string]any{"weft.run.id": id, "gen_ai.operation.name": "chat", "weft.step.index": int64(0),
+			"gen_ai.provider.name": "zai", "gen_ai.request.model": "glm-5.3-flash",
+			"gen_ai.usage.input_tokens": in, "gen_ai.usage.output_tokens": int64(5), "weft.ttft_ms": int64(400)}
+		status := 1
+		if failure != "" {
+			status, root["error.type"] = 2, "usage_limit"
+		}
+		trace := fmt.Sprintf("%032x", at)
+		if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{
+			{TraceID: trace, SpanID: "0000000000000002", ParentSpanID: "0000000000000001", Name: "chat glm-5.3-flash",
+				Start: t0.Add(at), End: t0.Add(at + time.Second), StatusCode: 1, Attrs: chat},
+			{TraceID: trace, SpanID: "0000000000000001", Name: "invoke_agent researcher",
+				Start: t0.Add(at), End: t0.Add(at + 2*time.Second), StatusCode: status, StatusMessage: failure, Attrs: root},
+		}}); err != nil {
+			log.Fatal(err)
+		}
+	}
+	run("run_1", 0, 20, "")
+	run("run_2", time.Hour, 30, "weft: run exceeded its usage limit (input 30/25, output 5/0)")
+	run("run_3", 2*time.Hour, 41, "weft: run exceeded its usage limit (input 41/25, output 5/0)")
+
+	agg := db.(obsdb.Aggregator)
+	page, err := agg.Stats(context.Background(), obsdb.StatsQuery{RunQuery: obsdb.RunQuery{ParentRunID: "*"},
+		By: obsdb.StatsByAgent, Since: t0, Until: t0.Add(24 * time.Hour)})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, g := range page.Groups {
+		fmt.Printf("%s: %d runs, %d failed, %d input tokens, p50 %gms, TTFT p50 %gms\n",
+			g.Key, g.Runs, g.Failed, g.Usage.InputTokens, g.Duration.P50, g.TTFT.P50)
+	}
+	counts, _, err := agg.ErrorCounts(context.Background(), obsdb.SearchQuery{RunQuery: obsdb.RunQuery{ParentRunID: "*"}})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, c := range obsdb.ErrorClasses(counts, 0) {
+		fmt.Println(c.Count, c.Class)
+	}
+	// Output:
+	// researcher: 3 runs, 2 failed, 91 input tokens, p50 2000ms, TTFT p50 400ms
+	// 2 weft: run exceeded its usage limit (input N/N, output N/N)
+}
+
+// ErrorClass reads an error text as its class: numbers N, ids <id>,
+// quoted strings and names kept.
+func ExampleErrorClass() {
+	fmt.Println(obsdb.ErrorClass("weft: run failed at step 2: weft: run exceeded its usage limit (input 30/25, output 15/0)"))
+	fmt.Println(obsdb.ErrorClass(`tool "lookup_42" retried 3 times, past MaxModelRetries(2)`))
+	// Output:
+	// weft: run failed at step N: weft: run exceeded its usage limit (input N/N, output N/N)
+	// tool "lookup_42" retried N times, past MaxModelRetries(N)
+}

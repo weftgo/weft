@@ -186,7 +186,11 @@ type StatsPage struct {
 //     spent for it, apart from its own Usage — each call once however
 //     many of the group's runs it sits under, and how many such runs
 //     made a call. A descendant past a panel token's public id is not
-//     read. Zero for every other By.
+//     read. Zero for every other By. A call can sit in several groups'
+//     delegated figures (boss → helper → boss: the grandchild's call is
+//     helper's delegated, and the helper's call boss's), so delegated
+//     figures are never summed across groups — the groups' own Usage
+//     sums to the true total.
 //   - Series: the same sums per bucket of the window, Buckets of them.
 type StatsGroup struct {
 	Key                         string

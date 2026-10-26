@@ -213,6 +213,16 @@ func statsKey(by obsdb.StatsBy) (key, op string) {
 	}
 }
 
+// statsBelowSQL is by=agent's delegated calls over the r CTE (Stats'
+// comment above its use); scope is the panel token's condition, if any.
+func statsBelowSQL(scope string) string {
+	return `SELECT DISTINCT r.agent AS k, s.trace_id, s.span_id, s.run_id, s.provider, s.model,
+			s.input_tokens, s.output_tokens, s.cached_input_tokens, s.cache_write_tokens, s.reasoning_tokens
+			FROM r CROSS JOIN span_stats AS s INDEXED BY span_stats_run ON s.run_id > r.run_id || '/' AND s.run_id < r.run_id || '0'
+			JOIN runs AS c ON c.run_id = s.run_id
+			WHERE s.op = 'chat' AND s.start_ns >= ? AND c.agent <> r.agent` + scope
+}
+
 // percentileSQL wraps a (k, v) value query in obsdb.PercentileRank's
 // nearest-rank percentiles per k: k, n, p50, p95.
 func percentileSQL(values string) string {
@@ -323,17 +333,17 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 	// Delegated (by=agent): the model calls below the group's runs in
 	// their Subagent trees — ids <run>/<step>/<call>, at any depth: the
 	// range (run || '/', run || '0') — whose run is another agent's,
-	// each call once per agent (DISTINCT).
+	// each call once per agent (DISTINCT). CROSS JOIN keeps r driving
+	// and INDEXED BY span_stats_run makes each run's range one index
+	// seek: left to itself the planner drove from span_stats_op and
+	// re-scanned r per chat span (15.5 s at 4,000 runs;
+	// TestStatsDelegatedScale guards it).
 	if q.By == obsdb.StatsByAgent {
 		scope, sargs := "", []any{since}
 		if q.PublicID != "" {
 			scope, sargs = " AND c.public_id = ?", append(sargs, q.PublicID)
 		}
-		below := `SELECT DISTINCT r.agent AS k, s.trace_id, s.span_id, s.run_id, s.provider, s.model,
-			s.input_tokens, s.output_tokens, s.cached_input_tokens, s.cache_write_tokens, s.reasoning_tokens
-			FROM r JOIN span_stats AS s ON s.run_id > r.run_id || '/' AND s.run_id < r.run_id || '0'
-			JOIN runs AS c ON c.run_id = s.run_id
-			WHERE s.op = 'chat' AND s.start_ns >= ? AND c.agent <> r.agent` + scope
+		below := statsBelowSQL(scope)
 		if err := query(`SELECT k, provider, model, SUM(input_tokens), SUM(output_tokens),
 			SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens)
 			FROM (`+below+`) GROUP BY 1, 2, 3`, sargs, func(rows *sql.Rows) error {

@@ -2710,7 +2710,8 @@ export interface StatsGroup extends CostFields {
   series: StatsBucket[]
   /** by=agent alone: what the agent's subagents spent for it — the
    * model calls of the runs below its runs in their Subagent trees
-   * whose agent is another — apart from its own figures above. */
+   * whose agent is another — apart from its own figures above. Never
+   * summed across groups (StatsDelegated). */
   delegated?: StatsDelegated
   /** Agent and error_type groups with a key: the /api/search query
    * string (all=1, the window as since/until, every filter read) whose
@@ -2719,7 +2720,10 @@ export interface StatsGroup extends CostFields {
   runs_query?: string
 }
 
-/** An agent group's subagent bill (studio/stats.go's statsDelegated). */
+/** An agent group's subagent bill (studio/stats.go's statsDelegated).
+ * A call can sit in several groups' delegated figures (boss → helper →
+ * boss), so never sum delegated across groups: the groups' own
+ * input_tokens / output_tokens / cost_usd sum to the true total. */
 export interface StatsDelegated extends CostFields {
   runs: number
   input_tokens: number

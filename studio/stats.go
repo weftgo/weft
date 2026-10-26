@@ -74,7 +74,9 @@ import (
 //	                    output_tokens, cost block} — the model calls of the
 //	                    runs below the agent's runs in their Subagent
 //	                    trees whose agent is another (what its subagents
-//	                    spent for it; never in its own figures above)
+//	                    spent for it; never in its own figures above;
+//	                    a call can be in several groups' delegated, so
+//	                    never sum delegated across groups)
 //	runs_query          agent and error_type groups with a key: the
 //	                    /api/search query string (all=1, the window as
 //	                    since/until, every filter read) whose total is

@@ -481,3 +481,108 @@ func TestUpgradeTo0025AddsSpansAttempt(t *testing.T) {
 		t.Errorf("rollup rows after 0025 = %d, want 5", n)
 	}
 }
+
+// TestStatsDelegatedScale: by=agent's delegated query drives from the
+// runs and seeks each one's descendants on span_stats_run — its plan
+// names the index with r first — and 4,000 runs with three model
+// calls each (a subagent under every tenth) answer under a bound
+// (before: 15.5 s, the planner re-scanning r per chat span).
+func TestStatsDelegatedScale(t *testing.T) {
+	d, err := Open(filepath.Join(t.TempDir(), "scale.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	db := d.(*DB)
+	t0 := time.Unix(1_800_000_000, 0).UTC()
+	q := obsdb.StatsQuery{RunQuery: obsdb.RunQuery{ParentRunID: "*"}, By: obsdb.StatsByAgent,
+		Since: t0.Add(-time.Hour), Until: t0.Add(24 * time.Hour)}
+	buckets, width, _ := obsdb.CheckStats(q)
+	with, wargs := statsRuns(q, buckets, width, time.Now())
+	rows, err := db.reads.Query(`EXPLAIN QUERY PLAN `+with+statsBelowSQL(""), append(wargs, t0.UnixNano())...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	_ = rows.Close()
+	joined := strings.Join(plan, "\n")
+	runsAt, indexAt := -1, -1
+	for i, p := range plan {
+		if runsAt < 0 && strings.Contains(p, "runs") && !strings.Contains(p, "AS c") {
+			runsAt = i
+		}
+		if strings.Contains(p, "span_stats_run") {
+			indexAt = i
+		}
+	}
+	if indexAt < 0 || runsAt < 0 || runsAt > indexAt {
+		t.Errorf("the delegated query's plan must drive from the runs and seek span_stats_run:\n%s", joined)
+	}
+	if testing.Short() || raceEnabled {
+		return
+	}
+	const n = 4000
+	var b obsdb.Batch
+	flush := func() {
+		if err := d.Write(context.Background(), b); err != nil {
+			t.Fatal(err)
+		}
+		b = obsdb.Batch{}
+	}
+	span := func(run, trace, id, parent, name string, at time.Duration, attrs map[string]any) obsdb.Span {
+		attrs["weft.run.id"] = run
+		return obsdb.Span{TraceID: trace, SpanID: id, ParentSpanID: parent, Name: name, StatusCode: 1,
+			Start: t0.Add(at), End: t0.Add(at + time.Second), Attrs: attrs}
+	}
+	for i := range n {
+		run := fmt.Sprintf("%016x", i+1)
+		agent := []string{"a", "b", "c", "d"}[i%4]
+		trace := fmt.Sprintf("%032x", i+1)
+		at := time.Duration(i) * time.Second
+		for c := range 3 {
+			b.Spans = append(b.Spans, span(run, trace, fmt.Sprintf("c%015x", i*4+c), "r000000000000000", "chat m", at,
+				map[string]any{"gen_ai.operation.name": "chat", "weft.step.index": int64(c), "gen_ai.request.model": "m",
+					"gen_ai.usage.input_tokens": int64(10)}))
+		}
+		b.Spans = append(b.Spans, span(run, trace, "r000000000000000", "", "invoke_agent "+agent, at,
+			map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": agent}))
+		if i%10 == 0 {
+			child := run + "/0/call_1"
+			b.Spans = append(b.Spans,
+				span(child, trace, fmt.Sprintf("k%015x", i), "r000000000000000", "chat m", at,
+					map[string]any{"gen_ai.operation.name": "chat", "weft.step.index": int64(0), "gen_ai.request.model": "m",
+						"gen_ai.usage.input_tokens": int64(7)}),
+				span(child, trace, fmt.Sprintf("q%015x", i), "r000000000000000", "invoke_agent helper", at,
+					map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "helper", "weft.parent.run.id": run}))
+		}
+		if len(b.Spans) >= 2000 {
+			flush()
+		}
+	}
+	flush()
+	start := time.Now()
+	page, err := db.Stats(context.Background(), q)
+	took := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var delegated int64
+	for _, g := range page.Groups {
+		delegated += g.Delegated.InputTokens
+	}
+	t.Logf("by=agent over %d runs (+%d subagents, 3 calls each): %v", n, n/10, took)
+	if delegated != int64(n/10)*7 {
+		t.Errorf("delegated input tokens = %d, want %d", delegated, (n/10)*7)
+	}
+	if took > 3*time.Second {
+		t.Errorf("by=agent over %d runs took %v: is the delegated query driving from the runs on span_stats_run?", n, took)
+	}
+}

@@ -62,7 +62,12 @@ const KEY_CALLS =
 
 /** Object keys whose value is an identifier, never a word on screen. */
 const HIDDEN_KEY =
-  /^(key|id|kind|value|to|href|className|type|name|cap|capability|view|verb)$/
+  /^(key|id|kind|value|to|href|className|type|name|cap|capability)$/
+
+/** Keys whose value is an id in one place and words in another
+ * (VIEWS' view: "timeline" vs COMPACTION_CHIP_TITLE.view, a hover
+ * title): hidden only when the value has no white space — an id. */
+const ID_KEY = /^(view|verb)$/
 
 const COMPARE = new Set([
   ts.SyntaxKind.EqualsEqualsEqualsToken,
@@ -106,7 +111,11 @@ function visible(node: ts.Node): boolean {
   if (
     ts.isPropertyAssignment(p) &&
     (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
-    HIDDEN_KEY.test(p.name.text)
+    (HIDDEN_KEY.test(p.name.text) ||
+      (ID_KEY.test(p.name.text) &&
+        (ts.isStringLiteral(node) ||
+          ts.isNoSubstitutionTemplateLiteral(node)) &&
+        !/\s/.test(node.text)))
   )
     return false
   if (ts.isElementAccessExpression(p) && p.argumentExpression === node)

@@ -1,5 +1,5 @@
 {
-  "about": "The vocabulary audit's allowlist (scripts/vocab-audit.ts, U21.3): files that are not screen text, and retired words that may stay where they are, each with its reason. An entry matches a hit by file (relative to src/), alias and a substring of the visible text; an entry no hit matches fails the audit.",
+  "about": "The vocabulary audit's allowlist (scripts/vocab-audit.ts, U21.3): files that are not screen text, and retired words that may stay where they are, each with its reason. An entry matches a hit by file (relative to src/), alias and the literal's whole visible text (white space collapsed, an interpolation read as \" … \") — never a substring, so a new sentence in the same file is audited; an entry no hit matches fails the audit.",
   "skip": [
     {
       "file": "lib/vocab-scan.ts",
@@ -24,16 +24,34 @@
       "why": "the session page's timeline view, not the run's waterfall"
     },
     {
+      "file": "lib/conversation.ts",
+      "alias": "Timeline",
+      "text": "the session's own page: its timeline, marks and views",
+      "why": "the session page's timeline view, not the run's waterfall"
+    },
+    {
       "file": "lib/timeline.ts",
       "alias": "Timeline",
       "text": "timeline",
-      "why": "the session page's timeline view: its switcher word, its default view and the capability named timeline, not the run's waterfall"
+      "why": "the session page's timeline view: its switcher word and its default view (pageView's fallback), not the run's waterfall"
     },
     {
-      "file": "lib/conversation.ts",
+      "file": "lib/timeline.ts",
       "alias": "Timeline",
-      "text": "its timeline, marks and views",
-      "why": "the session page's timeline view, not the run's waterfall"
+      "text": "this Studio does not read a session's state log (capability timeline is off): the turns are drawn without their marks",
+      "why": "names the meta capability called timeline, the session page's view"
+    },
+    {
+      "file": "lib/timeline.ts",
+      "alias": "Timeline",
+      "text": "a newer message (weft/thread's Interrupt or Rollback busy policy) cancelled this turn: its context was cancelled on purpose, not a failure — the session's timeline names which",
+      "why": "the session page's timeline view (its turns and marks in lanes), not the run's waterfall the alias retires"
+    },
+    {
+      "file": "lib/timeline.ts",
+      "alias": "Timeline",
+      "text": "weft/thread mints a turn number for every input it accepts while a turn runs; a steer delivered into that turn, or dropped, never runs as its own turn — the timeline names the receipt that took each number",
+      "why": "the session page's timeline view (its turns and marks in lanes), not the run's waterfall the alias retires"
     },
     {
       "file": "lib/timeline.ts",
@@ -56,7 +74,7 @@
     {
       "file": "lib/glossary.ts",
       "alias": "ttft",
-      "text": "(TTFT)",
+      "text": "first token — how long the model took to send its first token (TTFT)",
       "why": "the first-token entry names the abbreviation it retires, so a reader who knows TTFT finds it"
     }
   ]

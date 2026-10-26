@@ -110,6 +110,38 @@ describe("turn or run (U21.3, UX-F-13)", () => {
       "runs, newest first"
     )
   })
+
+  it("a public id mixing harness and session runs says runs (U21.3-fix: every run has a session, or run)", async () => {
+    const routes = baseRoutes()
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 2,
+      runs: [runRow({ id: "h_01", session_id: "", turn: 0 }), runRow({})],
+      next_before: null,
+    }
+    fakeStudio(routes)
+    const el = await mount()
+    expect(text(el, "[data-weft-stats]")).toMatch(/^2 runs · /)
+    expect(($(el, ".weft-turn-q") as HTMLInputElement).placeholder).toBe(
+      "/ filter runs"
+    )
+  })
+
+  it("the turn view's words follow the noun: a session's turn views, a harness run's run views", async () => {
+    fakeStudio(baseRoutes())
+    let el = await mount()
+    expect($(el, ".weft-tabs")?.getAttribute("aria-label")).toBe("turn views")
+    teardown()
+    setup()
+    const routes = baseRoutes()
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 1,
+      runs: [runRow({ session_id: "", turn: 0 })],
+      next_before: null,
+    }
+    fakeStudio(routes)
+    el = await mount()
+    expect($(el, ".weft-tabs")?.getAttribute("aria-label")).toBe("run views")
+  })
 })
 
 describe("the empty states (UX-F-33)", () => {
@@ -151,7 +183,7 @@ describe("the empty states (UX-F-33)", () => {
     )
     expect(
       ($(el, ".weft-splash a") as HTMLAnchorElement).getAttribute("href")
-    ).toBe("http://studio.test/studio/settings#connect")
+    ).toBe("http://studio.test/studio/settings#settings-connect")
     expect(text(el, ".weft-main")).not.toContain("select a turn")
   })
 })

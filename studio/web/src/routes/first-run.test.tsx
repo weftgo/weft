@@ -14,6 +14,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
+import { connectLink } from "@/lib/links"
 import { GROUPS, TERMS } from "@/lib/glossary"
 import { FIRST_RUN_KEY } from "@/components/studio/empty-state"
 import { renderApp, stubBrowser } from "@/test/app"
@@ -169,6 +170,18 @@ describe("/settings' Connect an app (U21.2-fix, UX-S5a-10)", () => {
     ).toEqual(["app", "panel", "mcp"])
     expect(section.textContent).toContain(`WEFT_STUDIO_URL=${url}`)
     expect(section.textContent).toContain(`weft mcp --url ${url}`)
+  })
+
+  it("the panel's 'how to connect ⤢' (lib/links.ts connectLink, U21.3-fix) lands on this section", async () => {
+    studio.on("GET settings/pricing", golden<object>("settings-pricing"))
+    const link = connectLink()
+    renderApp(`/settings#${link.hash}`)
+    const h = await screen.findByRole("heading", {
+      level: 2,
+      name: "Connect an app",
+    })
+    expect(document.getElementById(link.hash!)).toBe(h)
+    expect(h.closest("section")?.getAttribute("data-section")).toBe("connect")
   })
 })
 

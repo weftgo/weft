@@ -89,3 +89,19 @@ export const STATUS_TEXT = {
   tool: TONE_TEXT.tool,
   result: TONE_TEXT.result,
 } as const
+
+/** The solid border of a field whose value is refused (U21.3-fix): an
+ * invalid predicate or source, an edit the editor refuses — a status's
+ * mark (status-bad) or the error-as-data tone's (ev-error), never a
+ * literal in the renderer (palette.test.ts). */
+export const STATUS_BORDER = {
+  bad: "border-status-bad",
+  error: "border-ev-error",
+} as const
+
+/** A status's text on hover (U21.3-fix): a control that turns bad when
+ * pointed at (the run header's delete). Tailwind needs the variant
+ * spelled whole, so it lives here beside STATUS_TEXT. */
+export const STATUS_HOVER = {
+  bad: "hover:text-status-bad",
+} as const

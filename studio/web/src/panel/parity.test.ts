@@ -5373,21 +5373,24 @@ describe("the shared libs on both surfaces (U21.1)", () => {
       })
     )
     await settle()
-    expect(
-      all(el, ".weft-keys dl:first-child dt").map((n) => n.textContent)
-    ).toEqual(PANEL_KEYMAP.map(keyText))
-    expect(
-      all(el, ".weft-keys dl:first-child dd").map((n) => n.textContent)
-    ).toEqual(PANEL_KEYMAP.map((b) => b.action))
+    expect(all(el, ".weft-keys > dl dt").map((n) => n.textContent)).toEqual(
+      PANEL_KEYMAP.map(keyText)
+    )
+    expect(all(el, ".weft-keys > dl dd").map((n) => n.textContent)).toEqual(
+      PANEL_KEYMAP.map((b) => b.action)
+    )
     // The words (U21.3, UX-D-22, UX-F-10): the glossary's eight core
     // one-liners, word and line — the same text Studio's <Term> shows —
     // and the hand-off to Studio's Concepts for the rest.
     expect(
-      all(el, ".weft-keys dl:last-child dt").map(
+      all(el, ".weft-keys .weft-words dt").map(
         (n) => `${n.textContent} — ${n.nextElementSibling?.textContent}`
       )
     ).toEqual(CORE_TERMS.map((k) => TERMS[k].short))
-    const wordsLink = $(el, ".weft-keys dl:last-child a") as HTMLAnchorElement
+    const wordsLink = $(el, ".weft-keys .weft-words > a") as HTMLAnchorElement
+    // After the list, never inside it (U21.3-fix): a <dl> holds only
+    // its dt / dd groups.
+    expect($(el, ".weft-keys .weft-words dl a")).toBeNull()
     expect(wordsLink.textContent).toBe("all words in Studio ⤢")
     expect(wordsLink.getAttribute("href")).toMatch(/\/settings#concepts$/)
     await done(el)

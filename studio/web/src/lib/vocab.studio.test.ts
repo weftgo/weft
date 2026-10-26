@@ -25,13 +25,13 @@ describe("retired words (U21.2, U21.3)", () => {
     const files = sources(src)
     for (const d of AUDIT_DIRS)
       expect(
-        files.some((f) => f.path.startsWith(`${d}/`)),
+        files.some((f) => f.path === d || f.path.startsWith(`${d}/`)),
         d
       ).toBe(true)
     expect(report(audit(files, loadAllowlist()))).toEqual([])
   })
 
-  it("the audit fails on an alias injected into each of the four trees", () => {
+  it("the audit fails on an alias injected into each tree it reads", () => {
     const files = sources(src)
     const list = loadAllowlist()
     const inject: Record<
@@ -53,6 +53,14 @@ describe("retired words (U21.2, U21.3)", () => {
       panel: {
         path: "panel/x.ts",
         text: 'el("button", "weft-btn", "✎ Experiment")',
+      },
+      hooks: {
+        path: "hooks/x.ts",
+        text: 'toast.error("the thread could not be read")',
+      },
+      "router.tsx": {
+        path: "router.tsx",
+        text: "export const X = () => <p>no such thread</p>",
       },
     }
     for (const d of AUDIT_DIRS) {
@@ -76,6 +84,39 @@ describe("retired words (U21.2, U21.3)", () => {
     const r = audit(sources(src), { ...list, allow: [...list.allow, stale] })
     expect(r.stale).toEqual([stale])
     expect(report(r)).toHaveLength(1)
+  })
+
+  it("an allowlist entry matches its literal exactly, never a sentence that contains it (U21.3-fix)", () => {
+    const list = loadAllowlist()
+    const inject = [
+      {
+        path: "lib/timeline.ts",
+        text: 'export const X = "open the thread in a new tab"',
+      },
+      {
+        path: "lib/timeline.ts",
+        text: 'export const Y = "the timeline of this run"',
+      },
+    ]
+    const r = audit([...sources(src), ...inject], list)
+    expect(r.hits.map((h) => [h.alias, h.text])).toEqual([
+      ["thread", "open the thread in a new tab"],
+      ["Timeline", "the timeline of this run"],
+    ])
+  })
+
+  it("a view / verb value is hidden only when it is an id: words under the key are screen text (U21.3-fix)", () => {
+    const code = [
+      'export const A = { view: "timeline", verb: "continue" }',
+      'export const B = { view: "the thread compacted this run" }',
+      'export const C = { verb: "skip this thread" }',
+    ].join("\n")
+    expect(
+      scanVocab("v.ts", code, ALIASES).map((h) => [h.line, h.alias])
+    ).toEqual([
+      [2, "thread"],
+      [3, "thread"],
+    ])
   })
 
   it("a glossary entry's aliases list is not screen text", () => {

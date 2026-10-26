@@ -17,7 +17,7 @@ export const SHORT = {
     "attempt — one try of this step's model call; retries and fallbacks add attempts",
   turn: "turn N — one exchange of a session: a run with the session's history",
   session:
-    "session — a conversation your app keeps (weft/thread): its turns in order",
+    "session — the history your app keeps (weft/thread): its turns, in order",
   scope: "scope — which conversation the panel follows on this page",
   flow: "flow — the run's weft.flow: the scope's flow=, stamped on each run; it filters lists",
   replay:

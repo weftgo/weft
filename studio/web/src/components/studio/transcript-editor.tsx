@@ -38,7 +38,7 @@ import {
 import type { PreviewDoc, PreviewRow } from "@/lib/preview"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Button } from "@/components/ui/button"
-import { STATUS_TEXT } from "@/lib/status-class"
+import { STATUS_BORDER, STATUS_TEXT } from "@/lib/status-class"
 
 /** The editor as the run page provides it: the edits so far, the
  * fields whose text is refused (by key), put (null: revert), the
@@ -207,7 +207,7 @@ export function Editable({
         rows={k === "tool_args" ? 4 : 2}
         aria-label={`edit ${label}`}
         aria-invalid={err ? true : undefined}
-        className={`w-full rounded border bg-transparent px-2 py-1 font-mono text-xs ${err ? "border-ev-error" : cur ? "border-ev-error/50" : ""}`}
+        className={`w-full rounded border bg-transparent px-2 py-1 font-mono text-xs ${err ? STATUS_BORDER.error : cur ? "border-ev-error/50" : ""}`}
         value={shown}
         // A fresh editor opens on its text: the textarea takes focus.
         autoFocus={!cur && !err}

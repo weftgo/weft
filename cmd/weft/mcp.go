@@ -58,7 +58,7 @@ const mcpInstructions = `weft mcp is READ-ONLY: it reads a weft Studio's recorde
 	`empty, zero, false and null fields omitted, hashes cut to 12 characters, cost reasons said once in cost_reasons — ` +
 	`full=true gives the route's JSON as served. A cut output says so in a final note (raise max_bytes or narrow the query). ` +
 	`Badges and holes ("not_recorded", "stripped", "hidden", "gap", ...) mean the data is absent for that reason — never empty. ` +
-	`A 403 means this token may not read that (a read-scoped panel token).`
+	`A 403 means this token may not read that (a read-only panel token).`
 
 // mcpTool is one registered tool: its name and the paths it reads,
 // for the usage text and the tests.
@@ -436,13 +436,13 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 	addTool(srv, "request", `The exact model input (GET /api/runs/{id}/requests): one row per model-call attempt with the system prompt, `+
 		`tool catalog, params and the messages it carried by reference; step narrows to one step. transcript=true (with step) `+
 		`also returns GET /api/runs/{id}/transcript?step=N: the messages step N's model call carried. `+
-		`Refused (403) to a read-scoped panel token.`,
+		`Refused (403) to a read-only panel token.`,
 		m.request)
 	addTool(srv, "events", `The run's durable event stream (GET /api/runs/{id}/events): run_start, step_start, tool_start/finish, `+
 		`step_finish, run_finish, … in order. Paged: pass after=<next_after> from the previous answer.`,
 		m.events)
 	addTool(srv, "tools", `The tool catalogs the run offered the model, by hash (GET /api/runs/{id}/tools): names, descriptions, `+
-		`input schemas. Refused (403) to a read-scoped panel token.`,
+		`input schemas. Refused (403) to a read-only panel token.`,
 		m.tools)
 	addTool(srv, "diff", `Compare two runs step by step (GET /api/diff?a=&b=): per step ordinal what changed (system, tool_calls, `+
 		`tool_results, text, usage) and what is not comparable (unknown), with a summary {changed_steps, first_changed}. `+
@@ -460,7 +460,7 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 		m.session)
 	addTool(srv, "logs", `The app's own log lines under a run's spans (GET /api/runs/{id}/logs): time order, severity at or above `+
 		`(trace|debug|info|warn|error|fatal), paged with from=<next_from>. A run without the slog bridge answers a not_recorded hole naming otel.Slog(). `+
-		`Refused (403) to a read-scoped panel token.`,
+		`Refused (403) to a read-only panel token.`,
 		m.logs)
 	addTool(srv, "spans", `A run's spans (GET /api/runs/{id}/spans), compact: name, start_ms / dur_ms from the first span, status, `+
 		`model, tokens, tool, step, attempt and error attributes (content left out; full=true: as served). tree=true adds every `+

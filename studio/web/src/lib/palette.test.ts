@@ -511,18 +511,6 @@ describe("no status or kind colour literal outside the palette (U21.1-fix, UX-F-
     "components/studio/hole-badge.tsx": [
       ["text-ev-error", "the loss badge: HOLE_STUDIO.loss, pinned below"],
     ],
-    "components/studio/run-header.tsx": [
-      ["hover:text-status-bad", "a variant: Tailwind needs the literal class"],
-    ],
-    "components/studio/source-matrix.tsx": [
-      ["border-status-bad", "an invalid field's border (no border helper)"],
-    ],
-    "components/studio/pass-predicate.tsx": [
-      ["border-status-bad", "an invalid field's border (no border helper)"],
-    ],
-    "components/studio/transcript-editor.tsx": [
-      ["border-ev-error", "an invalid field's border (no border helper)"],
-    ],
   }
   const WASH: Record<string, number> = {
     "components/studio/agent-stats.tsx": 1,

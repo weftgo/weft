@@ -428,7 +428,7 @@ export interface SettingsLink {
   to: "/settings"
   search: { price?: string }
   /** concepts, or concept-<term> (U21.2): the Concepts section, or one
-   * term's entry in it; connect: the connect card (U21.3). */
+   * term's entry in it; settings-<section>: a section (connectLink, U21.3). */
   hash?: string
 }
 
@@ -670,7 +670,7 @@ export function settingsLink(price?: string): SettingsLink {
  * lines: an app, a page, a coding agent to this Studio) — where the
  * panel's empty list sends a first run (U21.3, UX-F-11). */
 export function connectLink(): SettingsLink {
-  return { to: "/settings", search: {}, hash: "connect" }
+  return { to: "/settings", search: {}, hash: "settings-connect" }
 }
 
 /** conceptLink is the Settings page's Concepts section (U21.2): with a

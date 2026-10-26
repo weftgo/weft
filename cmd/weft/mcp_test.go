@@ -722,7 +722,7 @@ func TestMCPTruncation(t *testing.T) {
 	}
 }
 
-// TestMCPPanelToken pins a read-scoped panel token: what it may read
+// TestMCPPanelToken pins a read-only panel token: what it may read
 // answers, what it may not is the route's 403 as the tool's error text
 // (with Studio's body), never an empty result.
 func TestMCPPanelToken(t *testing.T) {

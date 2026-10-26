@@ -322,7 +322,7 @@ from a step, edit a result or delete the run.
 | Token | Where it comes from | What `weft mcp` reads with it |
 |---|---|---|
 | the dev token | `weft studio`/`weft dev`: `<db>.token` beside the SQLite file (0600, never printed), in the discovery file; `--token`/`WEFT_STUDIO_TOKEN` override it | everything every tool offers |
-| a read-scoped panel token | minted for one public id (`/api/panel-tokens`, setup C) | that public id's runs only; system prompts, request records and app logs `hidden`; session reverse lookups refused |
+| a read-only panel token | minted for one public id (`/api/panel-tokens`, setup C) | that public id's runs only; system prompts, request records and app logs `hidden`; session reverse lookups refused |
 
 A route a token may not read answers 403, and the tool returns it as an
 error (`isError`): Studio's own line, then its body — the error, the

@@ -112,7 +112,7 @@ import { ForkOfLine } from "@/components/studio/fork-of"
 import { isPlainShortcut } from "@/lib/keys"
 import type { ToolFactsMap } from "@/lib/error-kind"
 import { Term, TermWrap } from "@/components/studio/term"
-import { STATUS_TEXT } from "@/lib/status-class"
+import { STATUS_HOVER, STATUS_TEXT } from "@/lib/status-class"
 
 /** TurnStepper walks a session turn by turn (UX-B-21): "‹ t3 · turn 4
  * of 5 · t5 ›", { and } its keys (the run page's [ ] walk steps). Its
@@ -846,7 +846,7 @@ export function RunHeader({
           <CopyButton
             text={doc.err}
             label="copy error"
-            className="text-status-bad/70 hover:text-status-bad"
+            className={`text-status-bad/70 ${STATUS_HOVER.bad}`}
           />
         </div>
       ) : null}

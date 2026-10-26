@@ -299,7 +299,7 @@ ${decisionRules()}
   position: absolute; inset: 0; z-index: 3; background: var(--weft-scrim);
   display: flex; align-items: center; justify-content: center; flex-wrap: wrap; overflow: auto;
 }
-.weft-keys dl { background: var(--weft-bg2); border: 1px solid var(--weft-line); border-radius: var(--weft-radius);
+.weft-keys > * { background: var(--weft-bg2); border: 1px solid var(--weft-line); border-radius: var(--weft-radius);
   padding: 14px 18px; min-width: 260px; }
 .weft-keys dt { color: var(--weft-accent); margin-top: 8px; }
 .weft-keys dt:first-child { margin-top: 0; }

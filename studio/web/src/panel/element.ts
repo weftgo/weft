@@ -2922,9 +2922,7 @@ export class WeftDevtools extends HTMLElement {
           "weft-fab-cost",
           ` · ${known ? tokenPair(r.usage.input_tokens, r.usage.output_tokens) : "—"}`,
           {
-            title: known
-              ? "the current turn's tokens"
-              : "the current turn's usage: known when it finishes",
+            title: `the current ${this.noun(s)}'s ${known ? "tokens" : "usage: known when it finishes"}`,
           }
         )
       )
@@ -2975,11 +2973,13 @@ export class WeftDevtools extends HTMLElement {
   }
 
   /** noun is the list's word (UX-F-13, lib/glossary.ts TURN): "turn"
-   * only for one conversation's turns whose runs have a session; a
-   * public id's harness runs, a page of runs and the fallback say
+   * only for one conversation's turns whose runs all have a session (a
+   * public id mixing harness runs says "run"); a public id's harness runs, a page of runs and the fallback say
    * "run". The header, the list, the filter and the picker read it. */
   private noun(s: PanelState): "turn" | "run" {
-    return this.turnish() && (s.session || s.turns.some((r) => r.session_id))
+    return this.turnish() &&
+      s.turns.length &&
+      s.turns.every((r) => r.session_id)
       ? "turn"
       : "run"
   }
@@ -3167,7 +3167,11 @@ export class WeftDevtools extends HTMLElement {
           "",
           [
             costText(
-              atLeastCost(s.turns, loadedOnly(s, s.turns.length, noun), noun)
+              atLeastCost(
+                s.turns,
+                loadedOnly(s, s.turns.length, noun, noun),
+                noun
+              )
             ),
           ],
           { "data-weft-cost-total": "" }
@@ -3556,7 +3560,7 @@ export class WeftDevtools extends HTMLElement {
       )
     else if (s.paged)
       list.append(
-        el("div", "weft-tq-n weft-all", `all ${s.turns.length} turns loaded`)
+        el("div", "weft-tq-n weft-all", `all ${s.turns.length} ${noun}s loaded`)
       )
     return list
   }
@@ -4271,7 +4275,7 @@ export class WeftDevtools extends HTMLElement {
   private tabs(): HTMLElement {
     const bar = el("div", "weft-tabs", "", {
       role: "tablist",
-      "aria-label": "turn views",
+      "aria-label": `${this.noun(this.last)} views`,
       "data-key": "tabs",
     })
     for (const id of TABS) {
@@ -4500,7 +4504,8 @@ export class WeftDevtools extends HTMLElement {
     if (!s.turn) {
       // Only when there is a turn to select (UX-F-33): the list's own
       // empty line says the rest.
-      if (s.turns.length) main.append(el("div", "weft-splash", "select a turn"))
+      if (s.turns.length)
+        main.append(el("div", "weft-splash", `select a ${this.noun(s)}`))
       return main
     }
     // The turn's tabs (D4): Story (the step story and the playground),
@@ -4785,7 +4790,7 @@ export class WeftDevtools extends HTMLElement {
       )
     )
     const again = el("button", "weft-btn", "↻ Re-run", {
-      title: "the whole turn from step 0, edits dropped — Run after the ack",
+      title: `the whole ${this.noun(s)} from step 0, edits dropped — Run after the ack`,
     })
     on(again, "click", () => {
       this.edSync(this.edKey, true)
@@ -5387,11 +5392,12 @@ export class WeftDevtools extends HTMLElement {
       const xs = s.experiments.get(r.sourceRunID) ?? []
       if (xs.length) {
         // Older pages may hold more of them: the header's loaded-only words.
-        const more = loadedOnly(s, xs.length, "replay")
+        const noun = this.noun(s)
+        const more = loadedOnly(s, xs.length, "replay", noun)
         const x = el(
           "span",
           "",
-          `${xs.length} replay${xs.length > 1 ? "s" : ""} of this turn${more ? " (loaded only)" : ""}: `,
+          `${xs.length} replay${xs.length > 1 ? "s" : ""} of this ${noun}${more ? " (loaded only)" : ""}: `,
           { "data-weft-experiment-cost": "" }
         )
         x.append(costText(atLeastCost(xs, more)))
@@ -6291,8 +6297,12 @@ export class WeftDevtools extends HTMLElement {
       const [w, d] = SHORT[k].split(" — ")
       words.append(el("dt", "", w), el("dd", "", d))
     }
-    words.append(
-      el("dd", "", [
+    // The hand-off after the list, not in it: a <dl> holds only its
+    // term / definition groups.
+    box.append(
+      dl,
+      el("div", "weft-words", [
+        words,
         this.studioA(
           "",
           "all words in Studio ⤢",
@@ -6300,7 +6310,6 @@ export class WeftDevtools extends HTMLElement {
         ),
       ])
     )
-    box.append(dl, words)
     return box
   }
 
@@ -6673,7 +6682,7 @@ function stepVerbs(n: number, r: ReplayCtx): HTMLElement {
       editPromptAndReplay(n),
       r
     ),
-    verb("re-run the whole turn", "↻", rerun(), r),
+    verb(`re-run the whole ${r.fork ? "turn" : "run"}`, "↻", rerun(), r),
   ]
   if (r.fork)
     list.push(verb("continue here with a new message", "⎇", continueHere(), r))
@@ -7736,10 +7745,11 @@ function argsText(call: FoldedToolCall): string {
 function loadedOnly(
   s: PanelState,
   n: number,
-  what: string
+  what: string,
+  older: string
 ): string | undefined {
   return s.turnsCapped
-    ? `the ${n} loaded ${what}${n > 1 ? "s" : ""} only — load older turns for more`
+    ? `the ${n} loaded ${what}${n > 1 ? "s" : ""} only — load older ${older}s for more`
     : undefined
 }
 

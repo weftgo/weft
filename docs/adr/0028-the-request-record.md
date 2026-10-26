@@ -571,7 +571,7 @@ this ADR.
 | `gap` | a hole in a contiguous counter: a lost batch | check the exporter's drops |
 | `not_recorded` | the record kind did not exist in the version that wrote the run (`instructions_hash = ''`) | upgrade weft and re-run |
 | `derived` | the value was computed by the reader, not recorded (e.g. a ClickHouse row from before `0004` with `step = -1`) | — |
-| `hidden` | the reader's scope may not see it (a read-scoped token and a system prompt) | use a playground-scoped token |
+| `hidden` | the reader's token does not reach it (a read-only token and a system prompt) | use a playground token |
 | `compacted` | the model saw a compacted view (§8) | open the compaction record |
 
 The table's words — each badge's one-line reason and fix — live in one

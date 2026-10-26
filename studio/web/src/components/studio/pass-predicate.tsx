@@ -26,7 +26,7 @@ import {
   summarize,
 } from "@/lib/predicate"
 import type { ColumnTally, Judged, Predicate } from "@/lib/predicate"
-import { VERDICT_TEXT, STATUS_TEXT } from "@/lib/status-class"
+import { STATUS_BORDER, STATUS_TEXT, VERDICT_TEXT } from "@/lib/status-class"
 import { testRegex } from "@/lib/regex-run"
 
 /** The summary's words. */
@@ -242,7 +242,7 @@ export function PredicateField({
         <span className="text-muted-foreground">pass:</span>
         <input
           aria-label="pass predicate"
-          className={`min-w-64 flex-1 rounded border bg-transparent px-2 py-1 font-mono ${parsed.ok ? "" : "border-status-bad"}`}
+          className={`min-w-64 flex-1 rounded border bg-transparent px-2 py-1 font-mono ${parsed.ok ? "" : STATUS_BORDER.bad}`}
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />

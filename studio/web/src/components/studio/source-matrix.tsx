@@ -44,7 +44,7 @@ import type { MatrixColumn } from "@/lib/matrix"
 import { DEFAULT_PREDICATE, parsePredicate } from "@/lib/predicate"
 import { canReplay } from "@/lib/replay"
 import { statusOf } from "@/lib/status"
-import { statusClass, STATUS_TEXT } from "@/lib/status-class"
+import { STATUS_BORDER, statusClass, STATUS_TEXT } from "@/lib/status-class"
 import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select-field"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -398,7 +398,7 @@ export function SourceMatrix({
         </span>
         <input
           aria-label="pass predicate"
-          className={`w-full rounded border bg-transparent px-2 py-1 font-mono ${parsed.ok ? "" : "border-status-bad"}`}
+          className={`w-full rounded border bg-transparent px-2 py-1 font-mono ${parsed.ok ? "" : STATUS_BORDER.bad}`}
           value={predicate}
           onChange={(e) => setPredicate(e.target.value)}
         />

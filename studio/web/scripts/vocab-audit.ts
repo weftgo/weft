@@ -13,15 +13,25 @@
 // with an alias injected into each of the four.
 
 import { readFileSync, readdirSync, statSync } from "node:fs"
-import { dirname, join, relative, resolve } from "node:path"
+import { basename, dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { TERMS } from "../src/lib/glossary"
 import { aliasesOf, scanVocab } from "../src/lib/vocab-scan"
 import type { VocabHit } from "../src/lib/vocab-scan"
 
-/** The trees the audit reads, relative to src/. */
-export const AUDIT_DIRS = ["components", "routes", "lib", "panel"] as const
+/** The trees (and files) the audit reads, relative to src/: every
+ * source whose strings reach a screen — Studio's components, routes,
+ * hooks (their toasts) and router (its error and not-found pages), the
+ * shared lib/ and the panel. */
+export const AUDIT_DIRS = [
+  "components",
+  "routes",
+  "hooks",
+  "router.tsx",
+  "lib",
+  "panel",
+] as const
 
 /** One file the audit reads: its path relative to src/ and its text. */
 export interface Source {
@@ -39,18 +49,18 @@ export interface Allowlist {
 const ALIASES = aliasesOf(TERMS)
 const here = dirname(fileURLToPath(import.meta.url))
 
-/** sources reads every renderer file under src/'s AUDIT_DIRS: .ts and
+/** sources reads every renderer file of src/'s AUDIT_DIRS: .ts and
  * .tsx, tests and the test kit left out (they say the retired words to
  * prove they are gone). */
 export function sources(src: string): Source[] {
-  const walk = (dir: string): string[] =>
-    readdirSync(dir).flatMap((f) => {
-      const p = join(dir, f)
-      if (statSync(p).isDirectory()) return walk(p)
-      if (!/\.tsx?$/.test(f) || /\.test\.tsx?$/.test(f) || f === "testkit.ts")
-        return []
-      return [p]
-    })
+  const walk = (p: string): string[] => {
+    if (statSync(p).isDirectory())
+      return readdirSync(p).flatMap((f) => walk(join(p, f)))
+    const f = basename(p)
+    if (!/\.tsx?$/.test(f) || /\.test\.tsx?$/.test(f) || f === "testkit.ts")
+      return []
+    return [p]
+  }
   return AUDIT_DIRS.flatMap((d) =>
     walk(join(src, d)).map((p) => ({
       path: relative(src, p),
@@ -69,7 +79,7 @@ export interface AuditResult {
 const matches = (
   a: Allowlist["allow"][number],
   h: { path: string; alias: string; text: string }
-) => h.path === a.file && h.alias === a.alias && h.text.includes(a.text)
+) => h.path === a.file && h.alias === a.alias && h.text === a.text
 
 /** audit scans the files against the allowlist. */
 export function audit(files: readonly Source[], list: Allowlist): AuditResult {

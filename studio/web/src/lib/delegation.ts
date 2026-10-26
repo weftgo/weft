@@ -144,7 +144,7 @@ export function childKind(row: {
 /** The chip and eyebrow words per kind, singular and plural. */
 export const CHILD_WORDS: Record<ChildKind, { one: string; many: string }> = {
   subagent: { one: "child run", many: "child runs" }, // UX-F-15: subagent = the agent, child run = its run
-  delegated: { one: "delegated session", many: "delegated sessions" },
+  delegated: { one: "pool session", many: "pool sessions" },
   started: { one: "run started by a call", many: "runs started by its calls" },
 }
 
@@ -152,7 +152,7 @@ export const CHILD_WORDS: Record<ChildKind, { one: string; many: string }> = {
  * panel's call badge). */
 export const CHILD_EYEBROW: Record<ChildKind, string> = {
   subagent: "subagent",
-  delegated: "delegated session",
+  delegated: "pool session",
   started: "run started by a call",
 }
 
@@ -163,9 +163,9 @@ export const OPEN_RUN = "open run"
 /** What a kind means, for a title. */
 export const CHILD_TITLES: Record<ChildKind, string> = {
   subagent:
-    "a subagent run: core.Subagent ran this agent inside the parent's turn — same session, its usage in the parent's",
+    "a child run: core.Subagent ran this agent inside the parent's turn — same session, its usage in the parent's",
   delegated:
-    "a delegated session: thread/pool ran this agent as a session of its own — its own turns, history and approvals; its cost is its own",
+    "a pool session: thread/pool ran this agent as a session of its own — its own turns, history and approvals; its cost is its own",
   started:
     "a run a tool call started (weft.caller.run.id): linked, not a child — its usage is its own",
 }
@@ -239,13 +239,13 @@ export const STARTED_BY = {
 
 /** The session page's delegated block. */
 export const DELEGATED_BLOCK = {
-  eyebrow: "delegated sessions",
+  eyebrow: "pool sessions",
   usage: (inTok: string, outTok: string) =>
     `delegated ${inTok} in · ${outTok} out`,
   usageTitle:
     "every session delegated under this one, any depth — beside the session's own usage, never folded into it",
-  more: "more delegated sessions than are listed here: the first 100, newest first (the delegated figures count every one)",
-  unknown: "the delegated sessions could not be read",
+  more: "more pool sessions than are listed here: the first 100, newest first (the delegated figures count every one)",
+  unknown: "the pool sessions could not be read",
 } as const
 
 /** A run page's caller_linked holes' words (linkedHoles; the panel's
@@ -300,7 +300,7 @@ export const delegatedHoles = (d: {
     h.hole === "hidden" && h.count
       ? {
           ...h,
-          note: `${count_floor ? "≥ " : ""}${plural(h.count, "delegated session")}`,
+          note: `${count_floor ? "≥ " : ""}${plural(h.count, "pool session")}`,
         }
       : h
   ),

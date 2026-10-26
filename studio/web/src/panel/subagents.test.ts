@@ -271,7 +271,7 @@ describe("the panel's subagent badge (A10)", () => {
     const block = await openChild(el)
     const line = block.querySelector('[data-weft-request="0"]')!
     expect(line.querySelector(".weft-badge")?.textContent).toBe(
-      "request: hidden by your token scope"
+      "request: hidden by your token's access"
     )
     expect(studio.gets(`runs/${CHILD}/requests`)).toEqual([])
     expect(el.shadowRoot!.innerHTML).not.toContain(CHILD_PROMPT)
@@ -366,13 +366,13 @@ describe("a delegated session in the panel's story (U14)", () => {
     const row = $(el, `[data-weft-child="${CSS.escape(`${POOL}-t1`)}"]`)!
     expect(row).toBeTruthy()
     expect(row.querySelector("summary")?.textContent).toBe(
-      "delegated session market-analyst · succeeded · 10 in · 5 out"
+      "pool session market-analyst · succeeded · 10 in · 5 out"
     )
     const badge = $(
       el,
       `[data-weft-subagent-link="${CSS.escape(`${POOL}-t1`)}"]`
     )
-    expect(badge?.textContent).toBe("delegated session")
+    expect(badge?.textContent).toBe("pool session")
     // U14-fix (UX-B-06): its primary link is the delegated session.
     expect(badge?.getAttribute("href")).toContain(`/sessions/${POOL}`)
   })

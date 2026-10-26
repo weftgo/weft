@@ -10,10 +10,11 @@
 // that is a common English word ("continue", "skip") only hits when it
 // is the whole label — a button or a chip — never inside a sentence.
 //
-// Studio's vitest (vocab.studio.test.ts) runs it over src/components and
-// src/routes; U21.3 lifts it into scripts/vocab-audit.mjs over both
-// renderers. It imports nothing but the TypeScript parser, so it lifts
-// as it is.
+// scripts/vocab-audit.ts (U21.3) runs it over both renderers —
+// components/, routes/, lib/ and panel/ — against one reasoned allowlist
+// (scripts/vocab-allow.json), inside `make studio-check`; vocab.studio
+// .test.ts is the scanner's unit test and the audit's. It imports
+// nothing but the TypeScript parser.
 import ts from "typescript"
 
 /** One retired word, the concept it belongs to and how it matches. */
@@ -61,7 +62,7 @@ const KEY_CALLS =
 
 /** Object keys whose value is an identifier, never a word on screen. */
 const HIDDEN_KEY =
-  /^(key|id|kind|value|to|href|className|type|name|cap|capability)$/
+  /^(key|id|kind|value|to|href|className|type|name|cap|capability|view|verb)$/
 
 const COMPARE = new Set([
   ts.SyntaxKind.EqualsEqualsEqualsToken,
@@ -91,6 +92,15 @@ function visible(node: ts.Node): boolean {
     if (KEY_CALLS.test(callee)) return false
   }
   if (ts.isPropertyAssignment(p) && p.name === node) return false
+  // A glossary entry's retired words (aliases: [...]) are the list the
+  // audit reads, never a label.
+  if (
+    ts.isArrayLiteralExpression(p) &&
+    ts.isPropertyAssignment(p.parent) &&
+    ts.isIdentifier(p.parent.name) &&
+    p.parent.name.text === "aliases"
+  )
+    return false
   // A value under a key that never reaches the screen ({ key: "ttft" },
   // cmdk's search value).
   if (

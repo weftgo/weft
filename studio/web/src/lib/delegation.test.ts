@@ -192,8 +192,8 @@ describe("linkedHoles / delegatedHoles (U14-fix)", () => {
           { hole: "hidden", reason: "r", count: 2, count_floor },
         ],
       })[0]
-    expect(h().note).toBe("2 delegated sessions")
-    expect(h(true).note).toBe("≥ 2 delegated sessions")
+    expect(h().note).toBe("2 pool sessions")
+    expect(h(true).note).toBe("≥ 2 pool sessions")
     expect(h(true)).not.toHaveProperty("count_floor")
   })
 })

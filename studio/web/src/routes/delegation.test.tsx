@@ -138,7 +138,7 @@ describe("the delegating turn (the parent's run page)", () => {
   it("words the pool child a delegated session, opening its session first", async () => {
     runPage({ ...leadTurn, children: [], caller_linked: [childTurn] })
     const { container } = renderApp(`/runs/${encodeURIComponent(leadTurn.id)}`)
-    const block = await screen.findByText("delegated session", {
+    const block = await screen.findByText("pool session", {
       selector: ".eyebrow",
     })
     expect(block).toBeTruthy()
@@ -196,7 +196,7 @@ describe("the delegating session's page", () => {
       container.querySelector("[data-delegated-usage]")?.textContent
     ).toContain("delegated")
     expect(
-      screen.getByText("delegated sessions", { selector: ".eyebrow" })
+      screen.getByText("pool sessions", { selector: ".eyebrow" })
     ).toBeTruthy()
   })
 

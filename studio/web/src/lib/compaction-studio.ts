@@ -23,9 +23,9 @@ export function compactionChip(c: RunCompaction): string {
 export const COMPACTION_CHIP_TITLE = {
   view: "PrepareStep rewrote the transcript for this step's request: open the step's compaction card (show original) in the story",
   session:
-    "thread compacted the session after this run: the next turn starts from the summary — the marker closes the story",
+    "weft/thread compacted the session after this run: the next turn starts from the summary — the marker closes the story",
   started:
-    "this turn's requests ran on a session context thread compacted before it: the card opens the story",
+    "this turn's requests ran on a session context weft/thread compacted before it: the card opens the story",
 }
 
 /** startedChip: the header's chip of a turn that started on a

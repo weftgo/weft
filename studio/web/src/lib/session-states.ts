@@ -82,7 +82,7 @@ export function cancelledWords(n: number | undefined) {
 export const COUNT_TITLES = {
   failed: "turns whose loop returned an error",
   ended:
-    "turns a newer message ended on purpose (thread's Interrupt or Rollback busy policy): not failures",
+    "turns a newer message ended on purpose (weft/thread's Interrupt or Rollback busy policy): not failures",
   cancelled:
     "turns whose context was cancelled for another reason (the session closed, a cancel from Studio, a deadline): not failures of the agent",
 }
@@ -119,7 +119,7 @@ export const SESSION_FILTERS: {
     key: "compacted",
     word: "⌗ compacted",
     title:
-      "sessions thread compacted (a compaction marker in the session's state log)",
+      "sessions weft/thread compacted (a compaction marker in the session's state log)",
   },
   {
     key: "child",
@@ -266,7 +266,7 @@ export const SESSION_ACTIONS = {
   export: {
     label: "export jsonl",
     title:
-      "download the conversation as JSON lines: a session line, every turn's run export in turn order (at most 200), then the session's state log and its holes",
+      "download the conversation as JSON lines: a session line, every turn's run export in turn order (at most 200), then the session's state log and its gaps",
   },
   exported: (file: string) => `saved ${file}`,
   exportRefused: (m: string) => `export refused: ${m}`,
@@ -276,7 +276,7 @@ export const SESSION_ACTIONS = {
   delete: "delete session…",
   deleteTitle: (id: string) => `Delete session ${id}?`,
   deleteBody: (turns: number) =>
-    `Its ${plural(turns, "turn")} — their spans, records, app logs, search index and the session's state log — are removed from studio's database only. The app's thread store (the jsonl file or sqlite database the session lives in) is untouched: the conversation itself goes on. This cannot be undone.`,
+    `Its ${plural(turns, "turn")} — their spans, records, app logs, search index and the session's state log — are removed from studio's database only. The app's weft/thread store (the jsonl file or sqlite database the session lives in) is untouched: the conversation itself goes on. This cannot be undone.`,
   deleteAction: "delete session",
   deleted: (id: string) => `deleted session ${id}`,
   deleteRefused: (m: string) => `delete refused: ${m}`,

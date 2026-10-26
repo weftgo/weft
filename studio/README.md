@@ -1180,8 +1180,8 @@ data-token (the dev token) or a panel token (POST /api/panel-tokens)
 itself signed in). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 288,025 B raw / 97,275 B gzip
-(95.0 KiB, the bundle of the ledger's row "I4"; 9,221 B — 9.0 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 288,917 B raw / 97,873 B gzip
+(95.6 KiB, the bundle of the ledger's row "U21.3"; 8,623 B — 8.4 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

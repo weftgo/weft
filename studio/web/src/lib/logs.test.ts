@@ -66,7 +66,7 @@ describe("fetchLogs", () => {
       },
       badge: "hidden",
       reason: "your token's scope may not read this",
-      fix: "use a playground-scoped token",
+      fix: "use a playground token",
     }
     vi.stubGlobal(
       "fetch",
@@ -76,7 +76,7 @@ describe("fetchLogs", () => {
       logs: [],
       badge: "hidden",
       reason: "your token's scope may not read this",
-      fix: "use a playground-scoped token",
+      fix: "use a playground token",
     })
   })
 

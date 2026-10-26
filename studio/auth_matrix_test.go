@@ -1318,7 +1318,7 @@ func TestAuthMatrix(t *testing.T) {
 			}
 			b, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
-			for _, want := range []string{`"code":"forbidden"`, `"badge":"hidden"`, `"fix":"use a playground-scoped token"`} {
+			for _, want := range []string{`"code":"forbidden"`, `"badge":"hidden"`, `"fix":"use a playground token"`} {
 				if resp.StatusCode != forbidden403 || !strings.Contains(string(b), want) {
 					t.Errorf("%s as %s = %d %s, want 403 with %s", path, id.name, resp.StatusCode, b, want)
 				}

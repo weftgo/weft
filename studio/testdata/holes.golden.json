@@ -69,7 +69,7 @@
         "fix": "wire the logs too: pass weft.LoggerProvider(lp) beside weft.TracerProvider, or use otel.Install (it wires both)"
       },
       "no_public_id": {
-        "reason": "the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)",
+        "reason": "the session's turns carry no weft.public_id (the session was created without thread.PublicID)",
         "fix": "thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn"
       },
       "no_spans": {
@@ -98,8 +98,8 @@
   },
   {
     "hole": "hidden",
-    "reason": "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
-    "fix": "use a playground-scoped token",
+    "reason": "your token's access does not reach this: a read-only panel token reads no system prompt or tool catalog",
+    "fix": "use a playground token",
     "causes": {
       "dev_token_only": {
         "reason": "a panel token reads its one public id, never a session's: this route answers the dev token only",

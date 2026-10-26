@@ -1,78 +1,91 @@
-// The retired words (U21.2): no glossary alias reaches the screen from
-// Studio's components or routes, outside the reasoned allowlist below.
-// lib/vocab-scan.ts is the scanner (U21.3 lifts it into
-// scripts/vocab-audit.mjs over both renderers).
-import { readFileSync, readdirSync, statSync } from "node:fs"
-import { join, relative, resolve } from "node:path"
+// The retired words (U21.2, U21.3): no glossary alias reaches the
+// screen from either renderer — Studio's components/ and routes/, the
+// shared lib/, the panel's panel/ — outside the reasoned allowlist
+// (scripts/vocab-allow.json). scripts/vocab-audit.ts is the audit `make
+// studio-check` runs; lib/vocab-scan.ts is its scanner, unit-tested
+// below.
+import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
+import {
+  AUDIT_DIRS,
+  audit,
+  loadAllowlist,
+  report,
+  sources,
+} from "../../scripts/vocab-audit"
 import { TERMS } from "./glossary"
 import { aliasesOf, scanVocab } from "./vocab-scan"
 
 const src = resolve(process.cwd(), "src")
 const ALIASES = aliasesOf(TERMS)
 
-function files(dir: string): string[] {
-  return readdirSync(dir).flatMap((f) => {
-    const p = join(dir, f)
-    if (statSync(p).isDirectory()) return files(p)
-    if (!/\.tsx?$/.test(f) || /\.test\.tsx?$/.test(f)) return []
-    return [p]
-  })
-}
-
-/** Where a retired word may stay, and why: file (relative to src/),
- * alias, a substring of the text, the reason. */
-const SESSION_TIMELINE =
-  "the session page's timeline view (its turns and marks in lanes), not the run's waterfall the alias retires"
-const ALLOW: { file: string; alias: string; text: string; why: string }[] = [
-  {
-    file: "components/studio/session-approvals.tsx",
-    alias: "Timeline",
-    text: "open the mark on the timeline",
-    why: SESSION_TIMELINE,
-  },
-  {
-    file: "components/studio/session-tree.tsx",
-    alias: "Timeline",
-    text: "open the mark on the timeline",
-    why: SESSION_TIMELINE,
-  },
-]
-
-const allowed = (h: { path: string; alias: string; text: string }) =>
-  ALLOW.some(
-    (a) => h.path === a.file && h.alias === a.alias && h.text.includes(a.text)
-  )
-
-function scanTree() {
-  return ["components", "routes"].flatMap((d) =>
-    files(join(src, d)).flatMap((p) =>
-      scanVocab(relative(src, p), readFileSync(p, "utf8"), ALIASES)
-    )
-  )
-}
-
-describe("retired words (U21.2)", () => {
-  it("no alias reaches the screen from components/ or routes/", () => {
-    const hits = scanTree().filter((h) => !allowed(h))
-    expect(
-      hits.map(
-        (h) => `${h.path}:${h.line} "${h.alias}" (${h.term}) in "${h.text}"`
-      )
-    ).toEqual([])
-  })
-
-  it("every allowlist entry still matches a hit", () => {
-    const hits = scanTree()
-    for (const a of ALLOW)
+describe("retired words (U21.2, U21.3)", () => {
+  it("the audit passes on the tree: no alias reaches the screen, no stale allowlist entry", () => {
+    const files = sources(src)
+    for (const d of AUDIT_DIRS)
       expect(
-        hits.some(
-          (h) =>
-            h.path === a.file && h.alias === a.alias && h.text.includes(a.text)
-        ),
-        `${a.file} ${a.alias}: ${a.why}`
+        files.some((f) => f.path.startsWith(`${d}/`)),
+        d
       ).toBe(true)
+    expect(report(audit(files, loadAllowlist()))).toEqual([])
+  })
+
+  it("the audit fails on an alias injected into each of the four trees", () => {
+    const files = sources(src)
+    const list = loadAllowlist()
+    const inject: Record<
+      (typeof AUDIT_DIRS)[number],
+      { path: string; text: string }
+    > = {
+      components: {
+        path: "components/studio/x.tsx",
+        text: "export const X = () => <p>3 threads</p>",
+      },
+      routes: {
+        path: "routes/x.tsx",
+        text: 'export const X = () => <button title="the trace view">go</button>',
+      },
+      lib: {
+        path: "lib/x.ts",
+        text: "export const X = (n: number) => `${n} delegated session`",
+      },
+      panel: {
+        path: "panel/x.ts",
+        text: 'el("button", "weft-btn", "✎ Experiment")',
+      },
+    }
+    for (const d of AUDIT_DIRS) {
+      const r = audit([...files, inject[d]], list)
+      expect(
+        r.hits.map((h) => h.path),
+        d
+      ).toEqual([inject[d].path])
+      expect(r.stale, d).toEqual([])
+    }
+  })
+
+  it("an allowlist entry no hit matches fails the audit", () => {
+    const list = loadAllowlist()
+    const stale = {
+      file: "panel/element.ts",
+      alias: "thread",
+      text: "thread: ephemeral",
+      why: "gone",
+    }
+    const r = audit(sources(src), { ...list, allow: [...list.allow, stale] })
+    expect(r.stale).toEqual([stale])
+    expect(report(r)).toHaveLength(1)
+  })
+
+  it("a glossary entry's aliases list is not screen text", () => {
+    const code = [
+      'export const T = { term: "x", aliases: ["thread", "holes"] }',
+      'export const U = { term: "x", short: "one thread" }',
+    ].join("\n")
+    expect(
+      scanVocab("g.ts", code, ALIASES).map((h) => [h.line, h.alias])
+    ).toEqual([[2, "thread"]])
   })
 
   it("fails on an injected alias", () => {

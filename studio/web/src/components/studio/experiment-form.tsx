@@ -26,6 +26,7 @@ import {
   DRAWER_TITLES,
   SIDE_EFFECT_TOOL,
   SIDE_EFFECT_WORDS,
+  WRITE_TO,
 } from "@/lib/drawer-spec"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import { bytes } from "@/lib/summarize"
@@ -260,16 +261,16 @@ export function ModeFields({
         <SelectField
           caption={
             <Term name="fork" portal>
-              Write to
+              {WRITE_TO.label}
             </Term>
           }
-          label="Write to"
+          label={WRITE_TO.label}
           className="w-full"
           value={variant.thread}
           onValueChange={(v) => patch({ thread: v as VariantFields["thread"] })}
           options={[
-            { value: "ephemeral", label: "nowhere (ephemeral)" },
-            { value: "fork", label: "a new session (fork)" },
+            { value: "ephemeral", label: WRITE_TO.ephemeral },
+            { value: "fork", label: WRITE_TO.fork },
           ]}
         />
       </div>

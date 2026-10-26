@@ -33,7 +33,7 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = [
     format: "json",
     label: "json",
     title:
-      "download the whole run as one JSON document: the run, its events, transcript, compactions, requests, spans and holes",
+      "download the whole run as one JSON document: the run, its events, transcript, compactions, requests, spans and gaps",
     prompts: false,
   },
   {

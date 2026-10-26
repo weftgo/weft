@@ -233,16 +233,14 @@ describe("the run page's request section (A1.4)", () => {
     await story()
     await waitFor(() =>
       expect(
-        within(section(0)).getByText("hidden by your token scope")
+        within(section(0)).getByText("hidden by your token's access")
       ).toBeTruthy()
     )
     for (const step of [0, 1, 2]) {
       expect(
-        within(section(step)).getByText("hidden by your token scope")
+        within(section(step)).getByText("hidden by your token's access")
       ).toBeTruthy()
-      expect(section(step).textContent).toContain(
-        "use a playground-scoped token"
-      )
+      expect(section(step).textContent).toContain("use a playground token")
     }
     expect(document.body.textContent).not.toContain(PROMPT0)
     expect(document.querySelector("[data-prompt]")).toBeNull()

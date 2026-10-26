@@ -347,7 +347,7 @@ describe("E1 Done, in the panel", () => {
       "hidden",
     ])
     expect(tp(el).querySelector('[data-hole="hidden"]')?.textContent).toBe(
-      "request: hidden by your token scope"
+      "request: hidden by your token's access"
     )
     // The badge and its words, nothing else: no step picker, no rows.
     expect(
@@ -383,7 +383,7 @@ describe("E1 Done, in the panel", () => {
     fakeStudio(r, META_R)
     const el = await openTab()
     expect(tp(el).querySelector('[data-hole="hidden"]')).not.toBeNull()
-    expect(tp(el).textContent).toContain("fix: use a playground-scoped token")
+    expect(tp(el).textContent).toContain("fix: use a playground token")
     expect(el.shadowRoot!.innerHTML).not.toContain(PROMPT0)
   })
 

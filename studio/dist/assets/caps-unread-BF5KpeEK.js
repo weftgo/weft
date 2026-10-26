@@ -1,0 +1,1 @@
+import{So as e,di as t,y as n}from"./preload-helper-ezJjYBi0.js";var r=e();function i({error:e}){return(0,r.jsx)(`div`,{className:`mx-auto max-w-lg space-y-2 py-24 text-center`,"data-caps-unread":!0,children:(0,r.jsx)(`p`,{className:`text-sm ${n.error}`,children:`${t}: ${e}`})})}export{i as t};

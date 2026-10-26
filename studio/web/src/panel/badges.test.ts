@@ -404,7 +404,7 @@ describe("no panel-only badge strings", () => {
   const LIB_WORDS: Record<string, string> = {
     "compaction: compacted into ":
       "compactionLine — the run page's compaction marker",
-    "compaction:thread compacted the session context this run belongs to:  of its messages were replaced by ; the next run starts on the compacted context (":
+    "compaction:weft/thread compacted the session context this run belongs to:  of its messages were replaced by ; the next run starts on the compacted context (":
       "sessionNote — the run page's session marker",
     "requests:not recorded (stripped)":
       "paramFields — the run page's params of a content-off request",

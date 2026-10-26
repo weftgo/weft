@@ -20,6 +20,8 @@
 // comments mark where a group starts, not every member it holds; a new
 // method goes beside its kin.
 import {
+  conceptLink,
+  connectLink,
   conversationLink,
   href,
   logsLink,
@@ -33,6 +35,7 @@ import {
   VIEWS,
 } from "../lib/links"
 import { keyText, PANEL_KEYMAP, VIEW_KEYS } from "../lib/keys"
+import { CORE_TERMS, SHORT } from "../lib/glossary-core"
 import { installMarkerRung, markerOf } from "./markers"
 import {
   keepEditedTitle,
@@ -167,8 +170,11 @@ import {
   prefixLine,
   replayFromStep,
   replayVerdicts,
+  REPLAY_OPEN,
+  REPLAY_TITLE,
   rerun,
   tokenScopeOf,
+  VERB_TITLES,
 } from "../lib/replay"
 import type { CatalogTool, ReplayDraft } from "../lib/replay"
 import type { ReplayEdit, UserMessage } from "../lib/edits"
@@ -207,6 +213,7 @@ import {
   DRAWER_TITLES,
   SIDE_EFFECT_TOOL,
   SIDE_EFFECT_WORDS,
+  WRITE_TO,
 } from "../lib/drawer-spec"
 import type { DrawerSection } from "../lib/drawer-spec"
 import { RUNS_IN, registering, runsInLine } from "../lib/runs-in"
@@ -2397,13 +2404,13 @@ export class WeftDevtools extends HTMLElement {
 
   /** turnFilter is the box above the turn list (D4): free text, a
    * status, has error — this session only, never stored. */
-  private turnFilter(): HTMLElement {
+  private turnFilter(noun: string): HTMLElement {
     const f = this.tq
     const box = el("div", "weft-tq", "", { "data-key": "tq" })
     const q = el("input", "weft-input weft-turn-q", "", {
       type: "search",
-      "aria-label": "filter turns",
-      placeholder: "/ filter turns",
+      "aria-label": `filter ${noun}s`,
+      placeholder: `/ filter ${noun}s`,
     }) as HTMLInputElement
     q.value = f.text
     on(q, "input", (_, n) => {
@@ -2938,6 +2945,21 @@ export class WeftDevtools extends HTMLElement {
     dock.classList.toggle("weft-narrow", g.width < NARROW_W)
   }
 
+  /** studioA is a link into Studio that opens through the hand-off (a
+   * Studio tab already open takes it, G3.2), else in a new tab. */
+  private studioA(
+    cls: string,
+    text: string,
+    url: string,
+    attrs: Record<string, string> = {}
+  ): HTMLElement {
+    const a = el("a", cls, text, { href: url, ...NEW_TAB, ...attrs })
+    on(a, "click", (e) => {
+      if (this.handoff((a as HTMLAnchorElement).href)) e.preventDefault()
+    })
+    return a
+  }
+
   /** say draws the API's honest line. */
   /** The endpoint the panel's own fetches go to. */
   private get ep() {
@@ -2950,6 +2972,16 @@ export class WeftDevtools extends HTMLElement {
   private turnish(): boolean {
     const m = this.model
     return !!m?.publicId && !Object.keys(m.q).length
+  }
+
+  /** noun is the list's word (UX-F-13, lib/glossary.ts TURN): "turn"
+   * only for one conversation's turns whose runs have a session; a
+   * public id's harness runs, a page of runs and the fallback say
+   * "run". The header, the list, the filter and the picker read it. */
+  private noun(s: PanelState): "turn" | "run" {
+    return this.turnish() && (s.session || s.turns.some((r) => r.session_id))
+      ? "turn"
+      : "run"
   }
 
   /** howToBox is the fallback's expander: the one-line fixes. */
@@ -2994,7 +3026,7 @@ export class WeftDevtools extends HTMLElement {
     )
     if (!rows.length) return null
     const sel = el("select", "weft-turn-pick", "", {
-      "aria-label": "turn",
+      "aria-label": this.noun(s),
       "data-weft-k": "turnpick",
     }) as HTMLSelectElement
     for (const r of rows) {
@@ -3064,7 +3096,7 @@ export class WeftDevtools extends HTMLElement {
         {
           type: "button",
           "aria-expanded": String(this.howTo),
-          title: "the one-line ways to scope the panel to your conversation",
+          title: SHORT.scope,
         }
       )
       on(how, "click", () => {
@@ -3083,13 +3115,13 @@ export class WeftDevtools extends HTMLElement {
           "span",
           "weft-chip weft-scope-chip",
           `session ${narrowing.session}`,
-          { title: "the turn list is narrowed to this session" }
+          { title: SHORT.session }
         )
       )
     if (narrowing.flow && title != `flow ${narrowing.flow}`)
       h.append(
         el("span", "weft-chip weft-scope-chip", `flow ${narrowing.flow}`, {
-          title: "the list is narrowed to this flow (weft.flow)",
+          title: SHORT.flow,
         })
       )
     // Every tag the title does not name (U22-fix): a scope's tags
@@ -3115,7 +3147,8 @@ export class WeftDevtools extends HTMLElement {
     const all = !scope && q ? s.total : undefined
     const count = all ?? s.turns.length
     const more = all == null && s.turnsCapped
-    const stats = `${count}${more ? "+" : ""} ${s.session && this.turnish() ? "turn" : "run"}${count - 1 || more ? "s" : ""} · ${tok}`
+    const noun = this.noun(s)
+    const stats = `${count}${more ? "+" : ""} ${noun}${count - 1 || more ? "s" : ""} · ${tok}`
     h.append(
       el("span", "", stats, {
         title: unknown ? `${stats} — ${unknown.cost_reason ?? ""}` : stats,
@@ -3134,56 +3167,50 @@ export class WeftDevtools extends HTMLElement {
           "",
           [
             costText(
-              atLeastCost(
-                s.turns,
-                loadedOnly(s, s.turns.length, "turn"),
-                "turn"
-              )
+              atLeastCost(s.turns, loadedOnly(s, s.turns.length, noun), noun)
             ),
           ],
           { "data-weft-cost-total": "" }
         )
       )
-      const u = unpricedLine(s.turns, "turn", s.turnsCapped)
+      const u = unpricedLine(s.turns, noun, s.turnsCapped)
       if (u) {
-        const a = el("a", "weft-chip weft-tag weft-unp", u.text, {
-          href: href(this.base, settingsLink(u.models[0])),
-          ...NEW_TAB,
-          title: `${u.title} · price in Studio`,
-          "data-weft-unpriced": "",
-        })
-        on(a, "click", (e, n) => {
-          if (this.handoff((n as HTMLAnchorElement).href)) e.preventDefault()
-        })
-        h.append(a)
+        h.append(
+          this.studioA(
+            "weft-chip weft-tag weft-unp",
+            u.text,
+            href(this.base, settingsLink(u.models[0])),
+            { title: `${u.title} · price in Studio`, "data-weft-unpriced": "" }
+          )
+        )
       }
     }
     if (s.turns.length && s.selected) {
-      const a = el("a", "weft-btn", "⤢", {
-        href: studioLink(this.base, s.selected, this.stepNow(s)),
-        ...NEW_TAB,
-        title: "open in Studio (run, and the step you are reading)",
-        "aria-label": "open in Studio",
-        "data-w": "Studio",
-      })
-      on(a, "click", (e, n) => {
-        if (this.handoff((n as HTMLAnchorElement).href)) e.preventDefault()
-      })
-      h.append(a)
+      h.append(
+        this.studioA(
+          "weft-btn",
+          "⤢",
+          studioLink(this.base, s.selected, this.stepNow(s)),
+          {
+            title: "open in Studio (run, and the step you are reading)",
+            "aria-label": "open in Studio",
+            "data-w": "Studio",
+          }
+        )
+      )
     }
     // The conversation's page in Studio (U16): the session's timeline,
     // else the public id's conversation page — through the hand-off.
     const sid = narrowing.session || s.session?.id
     if (sid || scope) {
-      const a = el("a", "weft-btn", `${sid ? "timeline" : "conversation"} ⤢`, {
-        href: href(this.base, sid ? sessionLink(sid) : conversationLink(scope)),
-        ...NEW_TAB,
-        "data-weft-conv": "",
-      })
-      on(a, "click", (e, n) => {
-        if (this.handoff((n as HTMLAnchorElement).href)) e.preventDefault()
-      })
-      h.append(a)
+      h.append(
+        this.studioA(
+          "weft-btn",
+          `${sid ? "session" : "conversation"} ⤢`,
+          href(this.base, sid ? sessionLink(sid) : conversationLink(scope)),
+          { "data-weft-conv": "" }
+        )
+      )
     }
     const where = this.lay.mode === "float" ? "float" : `dock ${this.lay.side}`
     const lay = el("button", "weft-btn weft-layout", "⇆", {
@@ -3421,21 +3448,31 @@ export class WeftDevtools extends HTMLElement {
           `live: newest agent only (${s.devAgent}) · the others every ${DEV_DISCOVERY_MS / 1000} s`
         )
       )
-    // A page of runs (U22) and the fallback say "run"; a conversation
-    // "turn".
-    const noun = this.turnish() ? "turn" : "run"
+    // A page of runs (U22), a public id's sessionless runs and the
+    // fallback say "run"; a session's conversation "turn" (noun).
+    const noun = this.noun(s)
     if (!s.turns.length && !s.experiments.size) {
-      const empty = session
-        ? `no turns of session ${session} yet`
-        : this.model?.scoped
-          ? `no ${noun}s yet — run your app`
-          : "no runs yet — connect your app (otel.Install)"
-      list.append(el("div", "weft-splash", empty))
+      const splash = el(
+        "div",
+        "weft-splash",
+        session
+          ? `no turns of session ${session} yet`
+          : this.model?.scoped
+            ? `no ${noun}s yet — run your app`
+            : // How to connect, to THIS Studio (UX-F-11): its URL, and
+              // Studio's connect lines through the hand-off.
+              `no runs yet — run your app with WEFT_STUDIO_URL=${this.base.replace(/\/+$/, "")} go run . · `
+      )
+      if (!session && !this.model?.scoped)
+        splash.append(
+          this.studioA("", "how to connect ⤢", href(this.base, connectLink()))
+        )
+      list.append(splash)
       return list
     }
     // The filter (D4): text over the id, the error and the row's
     // prompt_preview; a status; has error. Applied to the loaded rows.
-    list.append(this.turnFilter())
+    list.append(this.turnFilter(noun))
     const turns = s.turns.filter((r) => this.match(r))
     // The fallback groups its rows by agent (UX-D-06), each group where
     // its newest run is, newest first inside.
@@ -3450,7 +3487,7 @@ export class WeftDevtools extends HTMLElement {
         el(
           "div",
           "weft-tq-n",
-          `${turns.length} of ${s.turns.length} ${s.turnsCapped ? "loaded" : "turns"}${s.turnsCapped ? " · the filter applies to the loaded turns" : ""}`
+          `${turns.length} of ${s.turns.length} ${s.turnsCapped ? "loaded" : `${noun}s`}${s.turnsCapped ? ` · the filter applies to the loaded ${noun}s` : ""}`
         )
       )
     // One list (D3): a listitem per run, keyed by its id; one row
@@ -3617,7 +3654,7 @@ export class WeftDevtools extends HTMLElement {
       el(
         "span",
         "",
-        `Experiment · ${d.agent}${child ? ` · child run ${d.runId}` : ""}${d.step > 0 ? ` · continue from step ${d.step}` : ""}`,
+        `${REPLAY_TITLE} · ${d.agent}${child ? ` · child run ${d.runId}` : ""}${d.step > 0 ? ` · from step ${d.step}` : ""}`,
         { "data-drawer-section": "source" }
       ),
       el("span", "weft-grow"),
@@ -4147,10 +4184,12 @@ export class WeftDevtools extends HTMLElement {
     // with lineage, the input its next turn). Fork needs an input —
     // the runtime refuses the command otherwise.
     const thrSel = el("select", "weft-input", "", {
-      "aria-label": "thread",
+      "aria-label": WRITE_TO.label,
     }) as HTMLSelectElement
-    option(thrSel, "thread: ephemeral", { value: "ephemeral" })
-    option(thrSel, "fork (new session)", { value: "fork" })
+    option(thrSel, `${WRITE_TO.label}: ${WRITE_TO.ephemeral}`, {
+      value: "ephemeral",
+    })
+    option(thrSel, WRITE_TO.fork, { value: "fork" })
     thrSel.value = d.thread
     on(thrSel, "change", (_, n) => {
       const thread = (n as HTMLSelectElement).value as ExperimentDraft["thread"]
@@ -4729,7 +4768,7 @@ export class WeftDevtools extends HTMLElement {
     return box
   }
 
-  /** actions is §3's row: ✎ Experiment (the drawer), ↻ Re-run (the
+  /** actions is §3's row: ✎ Replay… (the drawer), ↻ Re-run (the
    * drawer as the rerun() draft — the whole turn, its prompt, tools and
    * model kept, its transcript edits dropped — posted only by Run after
    * the ack preview), ⎇ Continue from
@@ -4740,17 +4779,13 @@ export class WeftDevtools extends HTMLElement {
     const row = el("div", "weft-actions")
     row.append(
       clickBtn(
-        "✎ Experiment",
+        REPLAY_OPEN,
         () => this.go(this.model?.openExperiment(t.id, 0)),
-        {
-          title:
-            "open the experiment drawer, pre-filled from the registered config",
-        }
+        { title: SHORT.replay }
       )
     )
     const again = el("button", "weft-btn", "↻ Re-run", {
-      title:
-        "re-run the whole turn from step 0: the drawer keeps its prompt, tools and model, drops transcript edits — Run after the ack",
+      title: "the whole turn from step 0, edits dropped — Run after the ack",
     })
     on(again, "click", () => {
       this.edSync(this.edKey, true)
@@ -4761,8 +4796,7 @@ export class WeftDevtools extends HTMLElement {
     const from = readStep(t.folded, s.selectedStep)
     if (from > 0) {
       const cont = el("button", "weft-btn", `⎇ Continue from step ${from}`, {
-        title:
-          "keep the transcript through the previous step (edits apply) and run this step fresh",
+        title: SHORT.replay,
       })
       on(cont, "click", () =>
         this.go(this.model?.openExperiment(t.id, replayFromStep(from)))
@@ -5425,8 +5459,7 @@ export class WeftDevtools extends HTMLElement {
     // UX-F-06: the playground, so named — "compare in Studio" is the
     // /compare link's (compare.ts) alone.
     const compare = el("a", "weft-btn", "open in playground ⤢", {
-      title:
-        "open the Studio playground with this run, step and the current overrides carried over",
+      title: "this run, step and overrides in the playground",
     })
     // Built when it is used: the drawer's text fields patch the draft
     // without a redraw, and the link must carry what they say now.
@@ -5903,7 +5936,7 @@ export class WeftDevtools extends HTMLElement {
       wrap.append(
         this.derived(t)
           ? el("div", "weft-actions", [
-              refusedVerb("✎ Experiment"),
+              refusedVerb(REPLAY_OPEN),
               refusedVerb("↻ Re-run"),
             ])
           : this.actions(s)
@@ -6006,11 +6039,7 @@ export class WeftDevtools extends HTMLElement {
       if (c && dec) row.append(this.decision(c, dec, dec.run))
       else if (kind === "experiment")
         row.append(
-          el(
-            "div",
-            "weft-res",
-            "an experiment's run — its decision controls are in the result pane of the turn that ran it"
-          )
+          el("div", "weft-res", "a replay: decide it in its result pane")
         )
       else if (!next && !waiting && !unread)
         row.append(
@@ -6165,7 +6194,7 @@ export class WeftDevtools extends HTMLElement {
     pending: ToolCallPart[],
     decided: Record<string, string>,
     act = (id: string, d: "approve" | "deny" | "resolve", text: string) =>
-      this.go(this.model?.decide(id, d, d === "resolve" ? text : undefined)),
+      this.go(this.model?.decide(id, d, text)),
     status?: (id: string) => HTMLElement | null,
     t?: TurnView
   ): HTMLElement {
@@ -6180,7 +6209,7 @@ export class WeftDevtools extends HTMLElement {
         el(
           "div",
           "weft-note",
-          `waiting for ${plural(left, "more decision")} — the run resumes once every parked call is decided`
+          `waiting for ${plural(left, "more decision")} — the run resumes once all are decided`
         )
       )
     }
@@ -6248,14 +6277,30 @@ export class WeftDevtools extends HTMLElement {
 
   /** shortcuts is §5.2's ? overlay: the keys, and the collision Q4
    * records (Alt+W is the primary because Chrome eats Ctrl+Shift+W
-   * as close-window before any page can see it). */
+   * as close-window before any page can see it); then the words
+   * (U21.3, UX-D-22, UX-F-10): the glossary's eight core one-liners
+   * and the hand-off to Studio's Concepts for the rest. */
   private shortcuts(): HTMLElement {
     const box = el("div", "weft-keys")
     const dl = el("dl")
     for (const [k, v] of SHORTCUTS) {
       dl.append(el("dt", "", k), el("dd", "", v))
     }
-    box.append(dl)
+    const words = el("dl")
+    for (const k of CORE_TERMS) {
+      const [w, d] = SHORT[k].split(" — ")
+      words.append(el("dt", "", w), el("dd", "", d))
+    }
+    words.append(
+      el("dd", "", [
+        this.studioA(
+          "",
+          "all words in Studio ⤢",
+          href(this.base, conceptLink())
+        ),
+      ])
+    )
+    box.append(dl, words)
     return box
   }
 
@@ -6361,16 +6406,6 @@ export class WeftDevtools extends HTMLElement {
   private resolveNow() {
     return resolveTheme(this.cfg.theme, this.lay.theme, this.themeWatch.host)
   }
-}
-
-/** The replay drawer's title per verb (Studio's VERB_TITLES). */
-const VERB_TITLES: Record<ReplayDraft["verb"], string> = {
-  from_step: "Replay from this step",
-  edit_result: "Edit this result and replay",
-  edit_prompt: "Edit the prompt and replay",
-  rerun: "Re-run",
-  continue: "Continue here with a new message",
-  edit: "Edit the transcript and replay",
 }
 
 /** turnHoles is a turn's holes, from the shared table: the run

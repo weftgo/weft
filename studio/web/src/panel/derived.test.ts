@@ -107,7 +107,7 @@ describe("a derived turn in the panel", () => {
     // No verb that would replay or edit it …
     expect(story.querySelector("[data-weft-verb]")).toBeNull()
     expect(story.querySelector("textarea")).toBeNull()
-    for (const label of ["✎ Experiment", "↻ Re-run"]) {
+    for (const label of ["✎ Replay…", "↻ Re-run"]) {
       const b = all(el, "#weft-tp-story button[data-weft-refused]").find(
         (n) => n.firstChild?.textContent === label
       ) as HTMLButtonElement

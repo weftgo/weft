@@ -103,7 +103,7 @@ async function rawOpen(el: WeftDevtools) {
 async function drawer(el: WeftDevtools) {
   ;(
     Array.from(el.shadowRoot!.querySelectorAll("button")).find(
-      (b) => b.textContent === "✎ Experiment"
+      (b) => b.textContent === "✎ Replay…"
     ) as HTMLElement
   ).click()
   await settle()
@@ -453,7 +453,7 @@ const MODES: {
     name: "the experiment drawer open",
     width: 1024,
     attrs: { "data-open": "true", "data-position": "right-dock" },
-    sel: ".weft-drawer select[aria-label=thread]",
+    sel: '.weft-drawer select[aria-label="Write to"]',
     act: drawer,
   },
   {

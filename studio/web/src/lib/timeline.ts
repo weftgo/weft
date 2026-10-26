@@ -447,13 +447,13 @@ export function markLine(
     case "pool.delegate":
       return {
         icon: "↳",
-        text: `delegated session ${str(f.child_session)}${str(f.call_id) ? ` · call ${str(f.call_id)}` : ""}`,
+        text: `pool session ${str(f.child_session)}${str(f.call_id) ? ` · call ${str(f.call_id)}` : ""}`,
         tone: "tool",
       }
     case "pool.retire":
       return {
         icon: "↳",
-        text: `delegated session ${str(f.child_session)} · ${str(f.state)}`,
+        text: `pool session ${str(f.child_session)} · ${str(f.state)}`,
         tone: str(f.state) === "done" ? "result" : "error",
       }
   }
@@ -882,7 +882,7 @@ export const LANES: { lane: string; word: string; title: string }[] = [
     word: "branch / fork",
     title: "branches, forks and labels",
   },
-  { lane: "pool", word: "pool", title: "delegated sessions (thread/pool)" },
+  { lane: "pool", word: "pool", title: "pool sessions (thread/pool)" },
   {
     lane: "other",
     word: "other",
@@ -939,7 +939,7 @@ export const END_WORDS = {
   /** A call the cancel cut off (the story's "never completed"). */
   call: "cut off",
   callTitle:
-    "tool_start was recorded but no tool_finish: a newer message ended the turn (thread's busy policy) while the call ran",
+    "tool_start was recorded but no tool_finish: a newer message ended the turn (weft/thread's busy policy) while the call ran",
 }
 
 /** The branch mark's words (UX-B-08): a Branch that moved the leaf,
@@ -983,7 +983,7 @@ export const UNNAMED_END: TurnEnd = {
   kind: "interrupted",
   text: END_WORDS.byNewer,
   title:
-    "a newer message (thread's Interrupt or Rollback busy policy) cancelled this turn: its context was cancelled on purpose, not a failure — the session's timeline names which",
+    "a newer message (weft/thread's Interrupt or Rollback busy policy) cancelled this turn: its context was cancelled on purpose, not a failure — the session's timeline names which",
   mark: "",
 }
 
@@ -1025,9 +1025,9 @@ export function busyEndSpans<
 /** The hovers: what an interrupt and a rollback did. */
 export const END_TITLES = {
   interrupted:
-    "a newer message (thread's Interrupt busy policy) cancelled this turn: its context was cancelled on purpose, not a failure — its entries stay on the path",
+    "a newer message (weft/thread's Interrupt busy policy) cancelled this turn: its context was cancelled on purpose, not a failure — its entries stay on the path",
   rolled_back:
-    "a newer message (thread's Rollback busy policy) cancelled this turn and took its entries off the path: the model's later turns do not see it",
+    "a newer message (weft/thread's Rollback busy policy) cancelled this turn and took its entries off the path: the model's later turns do not see it",
 }
 
 /** turnEnds reads the interrupt marks (thread's weft.thread.interrupt,
@@ -1085,7 +1085,7 @@ export function turnIdsWords(
 
 /** The turn-number line's hover. */
 export const TURN_IDS_TITLE =
-  "thread mints a turn number for every input it accepts while a turn runs; a steer delivered into that turn, or dropped, never runs as its own turn — the timeline names the receipt that took each number"
+  "weft/thread mints a turn number for every input it accepts while a turn runs; a steer delivered into that turn, or dropped, never runs as its own turn — the timeline names the receipt that took each number"
 
 /** forkWords is a fork's state as the origin reads it (UX-B-07). */
 export function forkWords(f: {
@@ -1102,7 +1102,7 @@ export function forkWords(f: {
 
 /** The forked session's page cannot open before it runs a turn. */
 export const FORK_NO_PAGE =
-  "the fork ran no turn yet: this Studio has no page for it until it does (thread records the fork on the origin only)"
+  "the fork ran no turn yet: this Studio has no page for it until it does (weft/thread records the fork on the origin only)"
 
 /** forkOf reads a fork's lineage, weft.session.forked_from
  * (`<origin session>#<entry id>`, record contract §2). */

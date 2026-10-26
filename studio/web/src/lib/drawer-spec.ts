@@ -41,6 +41,15 @@ export const DRAWER_TITLES: Record<DrawerSection, string> = {
   run: "",
 }
 
+/** The Write to field's words, both drawers (UX-F-12): where a replay
+ * writes — nowhere (ephemeral), or a new session (fork). The panel's
+ * select has no caption: its first option carries the label. */
+export const WRITE_TO = {
+  label: "Write to",
+  ephemeral: "nowhere (ephemeral)",
+  fork: "a new session (fork)",
+} as const
+
 /** The side-effect modes' words, both drawers (the panel's select has
  * no caption: its first option says what it is). */
 export const SIDE_EFFECT_WORDS = {

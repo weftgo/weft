@@ -91,10 +91,10 @@ export const HOLES: Record<Hole, HoleNote> = {
     tone: "note",
   },
   hidden: {
-    label: "hidden by your token scope",
+    label: "hidden by your token's access",
     reason:
-      "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
-    fix: "use a playground-scoped token",
+      "your token's access does not reach this: a read-only panel token reads no system prompt or tool catalog",
+    fix: "use a playground token",
     tone: "note",
   },
   compacted: {
@@ -136,7 +136,7 @@ export const CAUSES: Partial<
   not_recorded: {
     no_public_id: {
       reason:
-        "the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)",
+        "the session's turns carry no weft.public_id (the session was created without thread.PublicID)",
       fix: "thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn",
     },
     no_spans: {
@@ -543,7 +543,7 @@ export const PLAYGROUND_OFF_FIX =
 /** A session turn of a thread session created without thread.PublicID:
  * appturn.go's 403 words (its fix is APP_RUN_FIX, which names it). */
 export const noPublicIDWords = (runID: string) =>
-  `${APP_OWNED}: run ${runID} is not a turn of a thread session with a public id`
+  `${APP_OWNED}: run ${runID} is not a turn of a session with a public id`
 /** A subagent's child run (`<parent>/<step>/<call>`, its session and
  * public id inherited): its park surfaces on the parent turn as a
  * SUBAGENT_PENDING call, and only that call is pending on the session

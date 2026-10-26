@@ -132,7 +132,7 @@ describe("the header's hand-off to Studio's conversation views (U16)", () => {
     fakeStudio(baseRoutes())
     const el = await mount()
     const a = $(el, "[data-weft-conv]") as HTMLAnchorElement
-    expect(a.textContent).toBe("timeline ⤢")
+    expect(a.textContent).toBe("session ⤢")
     expect(a.getAttribute("href")).toBe(
       "http://studio.test/studio/sessions/s_01"
     )

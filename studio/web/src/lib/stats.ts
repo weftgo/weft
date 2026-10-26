@@ -33,7 +33,7 @@ export const STATS_WORDS = {
   cutFailed: (n: number, err: string) =>
     `the page's cap left this one out (${n} agents past it), and its own read failed: ${err}`,
   appRuns:
-    "the app's own runs (subagent children counted under their own agent); playground and scripted replays left out",
+    "the app's own runs (child runs counted under their own agent); playground and scripted replays left out",
   delegated:
     "delegated: what this agent's subagents spent for it — never summed across agents: one subagent call can sit under several agents' delegated figures (boss → helper → boss), so the cards' own figures alone add up to the total",
   unregistered:
@@ -125,7 +125,7 @@ export function groupMetrics(g: StatsGroup, runLevel = true): Metric[] {
     },
     {
       key: "ttft",
-      label: "ttft",
+      label: "first token",
       value: g.ttft_ms ? `p50 ${spanMs(g.ttft_ms.p50)}` : "—",
       title: g.ttft_ms
         ? `${STATS_WORDS.ttft}: p50 ${g.ttft_ms.p50} ms, p95 ${g.ttft_ms.p95} ms over ${g.ttft_ms.n}`

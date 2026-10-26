@@ -458,7 +458,7 @@ async function open(
   const routes = { ...baseRoutes(), runtimes, ...extra }
   const studio = fakeStudio(routes)
   const el = await mount(ATTRS)
-  click(button(el, "✎ Experiment"))
+  click(button(el, "✎ Replay…"))
   await settle()
   return { el, studio }
 }

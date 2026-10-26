@@ -82,7 +82,7 @@ const hidden403 = () =>
       badge: "hidden",
       reason:
         "a read-scoped panel token reads no system prompt or tool catalog",
-      fix: "use a playground-scoped token",
+      fix: "use a playground token",
     },
     403
   )
@@ -95,11 +95,11 @@ describe("the panel's request line (A1.4)", () => {
     expect(lines.length).toBe(3)
     for (const l of lines) {
       expect(l.querySelector(".weft-badge")?.textContent).toBe(
-        "request: hidden by your token scope"
+        "request: hidden by your token's access"
       )
       // The hole says why and what to do, with nothing asked.
       expect(l.querySelector(".weft-reason")?.textContent).toBe(
-        "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog — fix: use a playground-scoped token"
+        "your token's access does not reach this: a read-only panel token reads no system prompt or tool catalog — fix: use a playground token"
       )
     }
     expect(studio.gets(`runs/${RUN}/requests`)).toEqual([])
@@ -118,10 +118,10 @@ describe("the panel's request line (A1.4)", () => {
       expect(lines.length).toBe(3)
       for (const l of lines) {
         expect(l.querySelector(".weft-badge")?.textContent).toBe(
-          "request: hidden by your token scope"
+          "request: hidden by your token's access"
         )
         expect(l.querySelector(".weft-reason")?.textContent).toContain(
-          "fix: use a playground-scoped token"
+          "fix: use a playground token"
         )
       }
       expect(el.shadowRoot!.innerHTML).not.toContain(PROMPT0)
@@ -232,7 +232,7 @@ describe("the panel's request line (A1.4)", () => {
         "request could not be read: token is scoped to public id pub_other"
       )
       expect(el.shadowRoot!.innerHTML).not.toContain(
-        "hidden by your token scope"
+        "hidden by your token's access"
       )
       // Words in the view, nothing into the host page.
       expect(caught.escaped).toEqual([])

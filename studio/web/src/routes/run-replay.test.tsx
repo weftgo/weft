@@ -2279,7 +2279,7 @@ describe("the engine is chosen per command (U17; UX-C-01, UX-C-05)", () => {
     // 5 tokens each, a scripted model's exact $0 — the bare figure).
     await waitFor(() =>
       expect(drawer()!.querySelector("[data-engine-live]")!.textContent).toBe(
-        "live · calls wefttest/script · ~30 tok ≈ $0.00 for steps 2–3"
+        "live · calls wefttest/script · ~30 tokens ≈ $0.00 for steps 2–3"
       )
     )
     fireEvent.click(runBtn(d))

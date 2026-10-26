@@ -5,13 +5,16 @@
 // words it retires (aliases: what a renderer must stop saying).
 //
 // Studio's <Term> tooltips and its Concepts tab (U21.2) read TERMS; the
-// panel's ? overlay (U21.3) reads the eight core one-liners only. Each
-// term is its own export so the panel bundles the ones it imports and
-// nothing else — never TERMS whole (panel-budget.json).
+// panel's ? overlay and scope chips (U21.3) read lib/glossary-core.ts's
+// SHORT lines only — the entries below take their short from there — so
+// the panel bundles no entry here (panel-budget.json).
 //
 // The status words' tooltips are lib/status.ts's hints: the one place
 // both renderers already read them from, so the words cannot drift.
 import { STATUS } from "./status"
+import { SHORT } from "./glossary-core"
+
+export { CORE_TERMS, SHORT } from "./glossary-core"
 
 /** One concept: word, tooltip, glossary text, docs anchor, retired words. */
 export interface Term {
@@ -53,8 +56,7 @@ const said = (k: keyof typeof STATUS) => `${STATUS[k].word} — ${STATUS[k].hint
 
 export const RUN: Term = {
   term: "run",
-  short:
-    "run — one execution of an agent: a prompt in, an answer out, its steps, tokens and cost",
+  short: SHORT.run,
   long: [
     "A run is one pass of the agent loop. It has steps; each step may call tools.",
     "A tool may be a subagent, whose run is a run of its own: a child run.",
@@ -68,8 +70,7 @@ export const RUN: Term = {
 
 export const STEP: Term = {
   term: "step",
-  short:
-    "step N — one model call and the tools it asked for; steps count from 0",
+  short: SHORT.step,
   long: [
     "A step is one request to the model, its answer, and the tool calls that answer asked for.",
     "A run stops when a step asks for no tool (stop), hits a limit, or fails.",
@@ -82,8 +83,7 @@ export const STEP: Term = {
 
 export const ATTEMPT: Term = {
   term: "attempt",
-  short:
-    "attempt — one try of this step's model call; retries and fallbacks add attempts",
+  short: SHORT.attempt,
   long: [
     "When mw.Retry or mw.Fallback wraps the model, one step can call the provider several times.",
     "Each try is an attempt; the one that answered is the step's response.",
@@ -96,7 +96,7 @@ export const ATTEMPT: Term = {
 
 export const TURN: Term = {
   term: "turn",
-  short: "turn N — one exchange of a session: a run with the session's history",
+  short: SHORT.turn,
   long: [
     "A session is a sequence of turns. Each turn is a run that starts from the session's history.",
     "A turn parked on an approval continues as a resume turn.",
@@ -109,12 +109,11 @@ export const TURN: Term = {
 
 export const SESSION: Term = {
   term: "session",
-  short:
-    "session — a conversation your app keeps (weft/thread): its turns in order",
+  short: SHORT.session,
   long: [
     "A session is a conversation your app stores with weft/thread: an id s_…, its turns,",
     "its history, its compactions and branches. Studio's Sessions page lists them.",
-    "thread is the Go package's name; the UI says session.",
+    "weft/thread is the Go package's name; the UI says session.",
   ].join("\n"),
   docs: `${THREAD}#1-what-is-on-disk`,
   aliases: ["thread", "threads"],
@@ -148,7 +147,7 @@ export const CONVERSATION: Term = {
 
 export const SCOPE: Term = {
   term: "scope",
-  short: "scope — which conversation the panel follows on this page",
+  short: SHORT.scope,
   long: [
     "The panel's scope names the conversation it follows: a public id, a session, a run.",
     "A page declares it (data-scope, the Weft-Scope header, #weft_scope=) or the panel asks.",
@@ -161,8 +160,7 @@ export const SCOPE: Term = {
 
 export const FLOW: Term = {
   term: "flow",
-  short:
-    "flow — the run's weft.flow: the scope's flow=, stamped on each run; it filters lists",
+  short: SHORT.flow,
   long: [
     "A flow is run metadata (weft.flow): scope.Header stamps the scope's flow= on every run",
     "its handler starts (scope.WithFlow in code). Studio's lists and the panel filter by it.",
@@ -220,10 +218,10 @@ export const DELEGATED: Term = {
     "delegated — what this run's child runs spent: tokens and cost, apart from its own",
   long: [
     "Delegated is a cost and usage word only: the child runs' part of a run's bill.",
-    "A session a thread pool started for a call is a pool session, not delegated.",
+    "A session thread/pool started for a call is a pool session, not delegated.",
   ].join("\n"),
   docs: `${RC}#6-the-run-row-what-a-reader-derives`,
-  aliases: ["delegated session"],
+  aliases: ["delegated session", "delegated sessions"],
   group: "delegation",
 }
 
@@ -244,8 +242,7 @@ export const PLAYBACK: Term = {
 
 export const REPLAY: Term = {
   term: "replay",
-  short:
-    "replay — run the agent again from this step in your app; earlier steps are kept",
+  short: SHORT.replay,
   long: [
     "A replay is a new run in your app (through weft/runtime) that keeps the transcript",
     "up to a step and runs the rest again, live or scripted, with your edits.",
@@ -274,7 +271,7 @@ export const FORK: Term = {
   short:
     "fork — a new session that continues this one from a point; the original is untouched",
   long: [
-    "A thread fork is a new session that continues an existing one from an entry",
+    "A fork (thread.Fork) is a new session that continues an existing one from an entry",
     '(weft.session.forked_from = <session>#<entry>). Its rows say "fork of s_…#12".',
   ].join("\n"),
   docs: `${RC}#thread--the-sessions-state-log`,
@@ -359,7 +356,7 @@ export const INTERRUPTED: Term = {
 
 export const PARKED: Term = {
   term: "parked",
-  short: said("parked"),
+  short: SHORT.parked,
   long: [
     "The run finished its step, but tool calls await a decision: an approval or a breakpoint.",
     'Approve or deny on its page; a resume turn continues it ("parked → t4").',
@@ -621,15 +618,3 @@ export const TERMS = {
 } as const satisfies Record<string, Term>
 
 export type TermName = keyof typeof TERMS
-
-/** The panel's ? overlay's core one-liners (U21.3), in order. */
-export const CORE_TERMS: readonly TermName[] = [
-  "run",
-  "step",
-  "attempt",
-  "turn",
-  "session",
-  "scope",
-  "replay",
-  "parked",
-]

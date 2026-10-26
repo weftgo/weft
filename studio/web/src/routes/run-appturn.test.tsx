@@ -508,7 +508,7 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
     const fake = await open({}, NOPUB)
     expect(parked().getAttribute("data-parked")).toBe("no-public-id")
     expect(line("no-public-id")).toBe(
-      `app-owned turn · read-only: run ${NOPUB} is not a turn of a thread session with a public id — fix: ${APP_RUN_FIX}`
+      `app-owned turn · read-only: run ${NOPUB} is not a turn of a session with a public id — fix: ${APP_RUN_FIX}`
     )
     expect(verb("approve")?.hasAttribute("disabled")).toBe(true)
     expect(fake.calls(`POST runs/${NOPUB}/approvals`)).toHaveLength(0)

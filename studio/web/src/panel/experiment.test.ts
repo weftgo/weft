@@ -116,7 +116,7 @@ async function openDrawer(
 ) {
   const studio = fakeStudio(routes, meta)
   const el = await mount(attrs)
-  click(button(el, "✎ Experiment"))
+  click(button(el, "✎ Replay…"))
   await settle()
   return { studio, el }
 }
@@ -196,12 +196,17 @@ describe("the result pane follows the command to its run", () => {
       state: "queued",
     }
     routes["playground/commands/cmd_2"] = command("cmd_2", "queued")
+    // The field beside the verbs is a deny's optional reason (UX-H-20),
+    // sent as Studio's and the app turn's: reason, never content.
+    const why = $(el, ".weft-xres .weft-resolve") as HTMLInputElement
+    why.value = "needs a manager"
     click(button(el, "deny", ".weft-xres"))
     await settle()
     expect(studio.posts("runs/")[0].path).toBe("runs/pg_b/approvals")
     expect(studio.posts("runs/")[0].body).toEqual({
       call_id: "call_b",
       decision: "deny",
+      reason: "needs a manager",
     })
   })
 
@@ -259,7 +264,7 @@ describe("the result pane follows the command to its run", () => {
     steer()!.dispatchEvent(new Event("input", { bubbles: true }))
     el.setAttribute("data-public-id", "pub_other")
     await settle()
-    click(button(el, "✎ Experiment"))
+    click(button(el, "✎ Replay…"))
     await settle()
     await run(el)
     expect(steer()?.value).toBe("")
@@ -621,7 +626,7 @@ describe("the approval controls (P2-16)", () => {
       decision: "approve",
     })
     expect(text(el, ".weft-xres")).toContain(
-      "waiting for 1 more decision — the run resumes once every parked call is decided"
+      "waiting for 1 more decision — the run resumes once all are decided"
     )
     expect(
       all(el, ".weft-xres .weft-call")[0].querySelector(".weft-badge")
@@ -695,7 +700,7 @@ describe("the approval controls (P2-16)", () => {
     expect($(reader, ".weft-actions")).toBeNull()
     reader.remove()
     const actor = await mount({ ...ATTRS, "data-token": claims("playground") })
-    click(button(actor, "✎ Experiment"))
+    click(button(actor, "✎ Replay…"))
     await settle()
     expect($(actor, ".weft-drawer")).toBeTruthy()
     // Breakpoints are runtime-wide: no panel token sets them.
@@ -715,7 +720,7 @@ describe("the drawer", () => {
     // A drawer turned into a fork with a message: ↻ makes it a re-run.
     const thread = $(
       el,
-      '.weft-drawer select[aria-label="thread"]'
+      '.weft-drawer select[aria-label="Write to"]'
     ) as HTMLSelectElement
     thread.value = "fork"
     thread.dispatchEvent(new Event("change", { bubbles: true }))
@@ -781,7 +786,7 @@ describe("the drawer", () => {
     const { el, studio } = await openDrawer(routes)
     click(button(el, "–", ".weft-drawer"))
     routes.runtimes = { runtimes: [{ ...RUNTIMES.runtimes[0], id: "rt_02" }] }
-    click(button(el, "✎ Experiment"))
+    click(button(el, "✎ Replay…"))
     await settle()
     await run(el)
     expect(

@@ -97,7 +97,7 @@ describe("a turn of a longer conversation", () => {
     const el = await mount()
     click(row(el, "s_01-t2"))
     await settle()
-    click(button(el, "✎ Experiment"))
+    click(button(el, "✎ Replay…"))
     await settle()
     const input = all(el, ".weft-drawer textarea")[1] as HTMLTextAreaElement
     expect(input.value).toBe("and the refund?")
@@ -763,9 +763,9 @@ describe("the open turn", () => {
     expect(text(el, ".weft-step .weft-call")).not.toContain("running…")
     expect(FakeEventSource.live("run=pg_x1")).toHaveLength(0)
     // …and its own verbs work: the drawer opens on it.
-    click(button(el, "✎ Experiment"))
+    click(button(el, "✎ Replay…"))
     await settle()
-    expect(text(el, ".weft-drawer")).toContain("Experiment · acme-support")
+    expect(text(el, ".weft-drawer")).toContain("Replay · acme-support")
   })
 
   it("the step being read is the turn's: another turn starts with none, and each turn keeps its own drawer", async () => {
@@ -781,7 +781,7 @@ describe("the open turn", () => {
     fakeStudio(routes)
     const el = await mount()
     click($(el, "[data-weft-step]"))
-    click(button(el, "✎ Experiment"))
+    click(button(el, "✎ Replay…"))
     await settle()
     expect($(el, ".weft-head a")?.getAttribute("href")).toContain(
       "s_01-t2?step=0"

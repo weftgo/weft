@@ -24,7 +24,7 @@ import { setStudioToken } from "../lib/api"
 import { queryClient } from "../lib/query"
 import { INK, ROLE } from "../lib/palette"
 import { BILL_TITLE, costLine } from "../lib/cost"
-import { TERMS } from "../lib/glossary"
+import { CORE_TERMS, TERMS } from "../lib/glossary"
 import { keyText, PANEL_KEYMAP, STUDIO_KEYMAP, VIEW_KEYS } from "../lib/keys"
 import { rowView } from "../lib/run-row"
 import { FIRST_TOKEN, tokenPair } from "../lib/format"
@@ -1674,7 +1674,7 @@ describe("a derived run on both surfaces (I1.3)", () => {
     expect(panel.verbs).toBe(0)
     expect(studio.verbs).toBe(0)
     expect(panel.saveLink).toBe(0)
-    expect(panel.refused).toBe(3) // ✎ Experiment, ↻ Re-run, save as test
+    expect(panel.refused).toBe(3) // ✎ Replay…, ↻ Re-run, save as test
     expect(studio.refused).toBe(2) // replay, save as test
     // The steps: the panel hands off with the count the page draws cards for.
     expect(panel.handoff).toBe(`${studio.steps} steps · open in Studio ⤢`)
@@ -2045,7 +2045,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
         ])
       if (c.kind === "no-public-id")
         expect(panel.line).toContain(
-          `run ${APP_NOPUB} is not a turn of a thread session with a public id`
+          `run ${APP_NOPUB} is not a turn of a session with a public id`
         )
     })
 
@@ -5137,7 +5137,7 @@ describe("the engine per command on both drawers (U17)", () => {
       )
     )
     expect(r.live).toBe(
-      "live · calls wefttest/script · ~1.5k tok ≈ $0.0004 for steps 2–3"
+      "live · calls wefttest/script · ~1.5k tokens ≈ $0.0004 for steps 2–3"
     )
     expect(r.order).toEqual(DRAWER_ORDER.filter((k) => r.order.includes(k)))
   })
@@ -5373,12 +5373,23 @@ describe("the shared libs on both surfaces (U21.1)", () => {
       })
     )
     await settle()
-    expect(all(el, ".weft-keys dt").map((n) => n.textContent)).toEqual(
-      PANEL_KEYMAP.map(keyText)
-    )
-    expect(all(el, ".weft-keys dd").map((n) => n.textContent)).toEqual(
-      PANEL_KEYMAP.map((b) => b.action)
-    )
+    expect(
+      all(el, ".weft-keys dl:first-child dt").map((n) => n.textContent)
+    ).toEqual(PANEL_KEYMAP.map(keyText))
+    expect(
+      all(el, ".weft-keys dl:first-child dd").map((n) => n.textContent)
+    ).toEqual(PANEL_KEYMAP.map((b) => b.action))
+    // The words (U21.3, UX-D-22, UX-F-10): the glossary's eight core
+    // one-liners, word and line — the same text Studio's <Term> shows —
+    // and the hand-off to Studio's Concepts for the rest.
+    expect(
+      all(el, ".weft-keys dl:last-child dt").map(
+        (n) => `${n.textContent} — ${n.nextElementSibling?.textContent}`
+      )
+    ).toEqual(CORE_TERMS.map((k) => TERMS[k].short))
+    const wordsLink = $(el, ".weft-keys dl:last-child a") as HTMLAnchorElement
+    expect(wordsLink.textContent).toBe("all words in Studio ⤢")
+    expect(wordsLink.getAttribute("href")).toMatch(/\/settings#concepts$/)
     await done(el)
     // Studio's ? dialog draws STUDIO_KEYMAP.
     const { container } = await renderWithRouter(createElement(KbdHelpBody))

@@ -968,7 +968,9 @@ describe("the keyboard (only inside the panel, except Alt+W)", () => {
     dock(el).focus()
     key(dock(el), { key: "?" })
     await settle()
-    const keys = all(el, ".weft-keys dt").map((n) => n.textContent)
+    const keys = all(el, ".weft-keys dl:first-child dt").map(
+      (n) => n.textContent
+    )
     expect(keys).toEqual(SHORTCUTS.map(([k]) => k))
     expect(
       all(el, ".weft-keys dt")

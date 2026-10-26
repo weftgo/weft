@@ -240,7 +240,7 @@ type entriesDoc struct {
 const (
 	timelineNotRecordedReason = "no thread record or compaction marker of this session was stored: its state log never reached this Studio (an agent without the pipeline's LoggerProvider, a destination that dropped them, or a weft older than the thread record family)"
 	timelineNotRecordedFix    = "give the agent the pipeline's LoggerProvider — weft.LoggerProvider(lp), or otel.Install, which wires it — and thread reports its state log through it; thread.WithRunMetadata stamps the session's tags on every turn"
-	timelineHiddenFix         = "use a playground-scoped token, or the dev token"
+	timelineHiddenFix         = "use a playground token, or the dev token"
 )
 
 // sessionEventsFor checks the database reads session events: 501 with

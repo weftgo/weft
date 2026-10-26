@@ -54,9 +54,9 @@ export const TREE = {
   continues: (n: number) =>
     n ? `⑂ continues t${n}` : "⑂ continues a line with no turn",
   continuesTitle:
-    "thread stamped weft.turn.parent: this turn's line continues an older turn, not the one before it",
+    "weft/thread stamped weft.turn.parent: this turn's line continues an older turn, not the one before it",
   branch: (b: string) => `branch ${b}`,
-  note: "the tree places each turn by weft.turn.parent (the turn whose line it continues) — the session file's entry tree is not drawn; a turn recorded before thread stamped it continues the turn before it",
+  note: "the tree places each turn by weft.turn.parent (the turn whose line it continues) — the session file's entry tree is not drawn; a turn recorded before weft/thread stamped it continues the turn before it",
   empty: "no turn of this session recorded: there is no tree to draw",
 }
 

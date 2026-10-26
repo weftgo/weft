@@ -5,7 +5,7 @@
 // failures), exchanges beside turns, a fork's lineage, the state filter
 // chips — the session header's "decide…" and its conversation link, and
 // the conversation page /conversations/$id: every run of a public id
-// with its experiments nested, for a public id no thread session holds.
+// with its experiments nested, for a public id no session holds.
 import { cleanup, configure, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -236,7 +236,7 @@ describe("the session header", () => {
 })
 
 describe("the conversation page", () => {
-  it("a public id with no thread session: its runs newest first (the panel's order, UX-S3-16), an experiment nested, live", async () => {
+  it("a public id with no session: its runs newest first (the panel's order, UX-S3-16), an experiment nested, live", async () => {
     const pub = "arena:cli-1:rw.support-desk"
     const t1 = row({
       id: "r1",

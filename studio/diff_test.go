@@ -448,7 +448,7 @@ func TestDiffPanelTokens(t *testing.T) {
 	for i, row := range read.Steps {
 		for j, side := range []*diffSideT{row.A, row.B} {
 			fs := []*diffSideT{full.Steps[i].A, full.Steps[i].B}[j]
-			if side.System != nil || !slices.Equal(side.holes(), []string{"hidden"}) || side.Holes[0].Fix != "use a playground-scoped token" ||
+			if side.System != nil || !slices.Equal(side.holes(), []string{"hidden"}) || side.Holes[0].Fix != "use a playground token" ||
 				side.SystemHash == "" || side.SystemHash != fs.SystemHash {
 				t.Errorf("read token step %d side = system %v hash %q holes %v, want null, the hash, hidden", row.Step, side.System, side.SystemHash, side.holes())
 			}

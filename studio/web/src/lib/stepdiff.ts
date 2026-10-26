@@ -201,7 +201,7 @@ export const CELL_REASONS: Record<CellState, string> = {
   same: "both runs recorded this column and it is the same",
   changed: "both runs recorded this column and it differs",
   unknown:
-    "a side did not record this column (its holes say why): the two were not compared",
+    "a side did not record this column (its gaps say why): the two were not compared",
   missing: "one run has no such step",
   kept: "not re-run: the source's, kept",
   differs: "0 tokens on a side: not counted",

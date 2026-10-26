@@ -855,13 +855,13 @@ describe("the Request pane under a read-scoped token (E1 Done (c))", () => {
     await story(false)
     await waitFor(() =>
       expect(
-        within(pane(0)).getByText("hidden by your token scope")
+        within(pane(0)).getByText("hidden by your token's access")
       ).toBeTruthy()
     )
     for (const step of [0, 1, 2]) {
       const p = pane(step)
-      expect(within(p).getByText("hidden by your token scope")).toBeTruthy()
-      expect(p.textContent).toContain("use a playground-scoped token")
+      expect(within(p).getByText("hidden by your token's access")).toBeTruthy()
+      expect(p.textContent).toContain("use a playground token")
       // Nothing else: no opener, no chips, no rows.
       expect(p.querySelector("button")).toBeNull()
       expect(p.querySelector("[data-mark]")).toBeNull()
@@ -878,7 +878,7 @@ describe("the Request pane under a read-scoped token (E1 Done (c))", () => {
       expect(r.status).toBe(403)
       expect(JSON.parse(r.body)).toMatchObject({
         badge: "hidden",
-        fix: "use a playground-scoped token",
+        fix: "use a playground token",
       })
     }
     for (const r of all) {

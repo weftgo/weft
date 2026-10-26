@@ -83,10 +83,10 @@ export const CONVERSATION = {
   delegated: "delegated",
   delegatedTitle:
     "what the turns' subagents cost, apart: never folded into the own figure",
-  sessions: "thread sessions of this public id:",
+  sessions: "sessions of this public id:",
   sessionTitle: "the session's own page: its timeline, marks and views",
   noSession:
-    "no thread session carries this public id — the runs are its conversation",
+    "no session carries this public id — the runs are its conversation",
   orphans: (n: number) => `${plural(n, "experiment")} of runs not on this page`,
   capped: (n: number) =>
     `showing the newest ${n.toLocaleString()} runs of this public id — the runs list pages through all of them`,

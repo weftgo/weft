@@ -504,11 +504,11 @@ describe("the drawer against a fake Studio", () => {
     // Without the capability nothing write-shaped renders.
     expect($(el, ".weft-actions")).toBeTruthy() // meta reports playground here
     const btn = all(el, ".weft-actions .weft-btn").find(
-      (b) => b.textContent === "✎ Experiment"
+      (b) => b.textContent === "✎ Replay…"
     )
     btn!.dispatchEvent(new Event("click"))
     await settle()
-    expect(text(el, ".weft-drawer")).toContain("Experiment · acme-support")
+    expect(text(el, ".weft-drawer")).toContain("Replay · acme-support")
     const ta = $(el, ".weft-drawer textarea") as HTMLTextAreaElement
     expect(ta.value).toBe("You are Acme's support agent.") // the registered words
     const tools = all(el, ".weft-tool").map((n) => n.textContent)
@@ -601,7 +601,7 @@ describe("the drawer against a fake Studio", () => {
       "data-open": "true",
     })
     const btn = all(el, ".weft-actions .weft-btn").find(
-      (b) => b.textContent === "✎ Experiment"
+      (b) => b.textContent === "✎ Replay…"
     )
     btn!.dispatchEvent(new Event("click"))
     await settle()
@@ -715,7 +715,7 @@ describe("the drawer against a fake Studio", () => {
       "data-open": "true",
     })
     const btn = all(el, ".weft-actions .weft-btn").find(
-      (b) => b.textContent === "✎ Experiment"
+      (b) => b.textContent === "✎ Replay…"
     )
     btn!.dispatchEvent(new Event("click"))
     await settle()
@@ -789,14 +789,14 @@ describe("the drawer against a fake Studio", () => {
       "data-open": "true",
     })
     const btn = all(el, ".weft-actions .weft-btn").find(
-      (b) => b.textContent === "✎ Experiment"
+      (b) => b.textContent === "✎ Replay…"
     )
     btn!.dispatchEvent(new Event("click"))
     await settle()
     // The thread select sits beside the engine select: ephemeral by
     // default, fork selectable.
     const thread = all(el, ".weft-drawer select").find((s) =>
-      s.textContent.includes("fork (new session)")
+      s.textContent.includes("a new session (fork)")
     ) as HTMLSelectElement
     expect(thread).toBeTruthy()
     expect(thread.value).toBe("ephemeral")
@@ -824,7 +824,7 @@ describe("the drawer against a fake Studio", () => {
       "data-open": "true",
     })
     const btn = all(el, ".weft-actions .weft-btn").find(
-      (b) => b.textContent === "✎ Experiment"
+      (b) => b.textContent === "✎ Replay…"
     )
     btn!.dispatchEvent(new Event("click"))
     await settle()

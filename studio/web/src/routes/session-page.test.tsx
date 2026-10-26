@@ -295,7 +295,7 @@ describe("the session header's verbs (UX-B-29) and storage (UX-S3-21)", () => {
       within(actions).getByRole("button", { name: SESSION_ACTIONS.delete })
     )
     const dialog = await screen.findByRole("dialog")
-    expect(dialog.textContent).toContain("The app's thread store")
+    expect(dialog.textContent).toContain("The app's weft/thread store")
     expect(dialog.textContent).toContain("untouched")
     fireEvent.click(
       within(dialog).getByRole("button", {

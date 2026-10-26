@@ -539,7 +539,7 @@ func TestStepPanelTokens(t *testing.T) {
 	var d stepDocT
 	decode(t, body, &d)
 	checkHoles(t, "read token", d)
-	if d.Request == nil || d.Request.Badge != "hidden" || d.Request.Fix != "use a playground-scoped token" || d.Request.Prompt != nil || strings.Contains(body, "You are a support agent.") {
+	if d.Request == nil || d.Request.Badge != "hidden" || d.Request.Fix != "use a playground token" || d.Request.Prompt != nil || strings.Contains(body, "You are a support agent.") {
 		t.Errorf("read token request = %+v, want the hidden badge and no system prompt", d.Request)
 	}
 	if len(d.Attempts) != 1 || len(d.Events) == 0 || len(d.ToolCalls) != 1 || len(d.Children) != 1 || d.MessagesIn.Count != 3 {

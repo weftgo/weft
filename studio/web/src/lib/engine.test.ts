@@ -56,12 +56,12 @@ describe("engineChoice", () => {
     const c = engineChoice(plain)
     expect(c.live).toEqual({
       model: "wefttest/script",
-      estimate: "~1.2k tok ≈ $0.0004 for step 1",
+      estimate: "~1.2k tokens ≈ $0.0004 for step 1",
       usd: "≈ $0.0004",
     })
     expect(runLabel(c, "live")).toBe("Run live on wefttest/script · ≈ $0.0004")
     expect(ENGINE_WORDS.live(c.live.model, c.live.estimate)).toBe(
-      "live · calls wefttest/script · ~1.2k tok ≈ $0.0004 for step 1"
+      "live · calls wefttest/script · ~1.2k tokens ≈ $0.0004 for step 1"
     )
   })
 
@@ -72,7 +72,7 @@ describe("engineChoice", () => {
       steps: 2,
       costs: [step(100, 50, 0.0001), step(900, 300, 0.0004)],
     })
-    expect(all.live.estimate).toBe("~1.4k tok ≈ $0.0005 for steps 0–1")
+    expect(all.live.estimate).toBe("~1.4k tokens ≈ $0.0005 for steps 0–1")
     expect(all.live.usd).toBe("≈ $0.0005")
     const one = engineChoice({
       ...plain,
@@ -80,7 +80,7 @@ describe("engineChoice", () => {
       costs: [step(100, 50, 0.0001), null],
     })
     expect(one.live.estimate).toBe(
-      "~150 tok ≈ $0.0001 for step 0 · later steps also run live"
+      "~150 tokens ≈ $0.0001 for step 0 · later steps also run live"
     )
     expect(runLabel(one, "live")).toBe(
       "Run live on wefttest/script · ≥ $0.0001"
@@ -186,7 +186,7 @@ describe("engineChoice", () => {
         },
       ],
     })
-    expect(off.estimate).toBe("~15 tok ≈ $0.00 for step 1")
+    expect(off.estimate).toBe("~15 tokens ≈ $0.00 for step 1")
     expect(off.usd).toBe("≈ $0.00")
   })
 })

@@ -326,7 +326,7 @@ describe("ARIA", () => {
     expect($(el, ".weft-dock")?.getAttribute("aria-label")).toBe(
       "weft devtools"
     )
-    click(all(el, "button").find((b) => b.textContent === "✎ Experiment"))
+    click(all(el, "button").find((b) => b.textContent === "✎ Replay…"))
     await settle()
     const controls = all(el, "button, a")
     expect(controls.length).toBeGreaterThan(5)

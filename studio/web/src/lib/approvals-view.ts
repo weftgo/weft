@@ -41,7 +41,7 @@ export const APPROVALS = {
   pending: AWAITING,
   refused: (n: number) => `${plural(n, "signed decision")} refused`,
   refusedTitle:
-    "decisions thread refused before they counted — a bad or replayed signature, a retired key, changed arguments",
+    "decisions weft/thread refused before they counted — a bad or replayed signature, a retired key, changed arguments",
   heads: {
     call: "call",
     tool: "tool",
@@ -58,7 +58,7 @@ export const APPROVALS = {
     uses: "uses",
     state: "state",
   },
-  note: "the trail is thread's state log, an index of the session file, not evidence — ADR 0021",
+  note: "the trail is weft/thread's state log, an index of the session file, not evidence — ADR 0021",
 }
 
 /** One decision row (or a parked call no decision answered yet). */

@@ -68,7 +68,7 @@ export function lineageOf(
     out.push({
       kind: "fork",
       text: `${LINEAGE_GLYPH.fork} fork of ${fork}`,
-      title: `weft.session.forked_from = ${fork}: a thread fork's run (<session>#<entry>)`,
+      title: `weft.session.forked_from = ${fork}: a session fork's run (<session>#<entry>)`,
     })
   const src = forkSource(r)
   if (src)

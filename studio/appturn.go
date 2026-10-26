@@ -68,7 +68,7 @@ func (s *Server) appTurnRuntime(w http.ResponseWriter, r *http.Request, rs *link
 	}
 	if row.SessionID == "" || row.PublicID == "" {
 		refuseAppOwned(w, r,
-			appOwned+" · read-only: run "+row.ID+" is not a turn of a thread session with a public id",
+			appOwned+" · read-only: run "+row.ID+" is not a turn of a session with a public id",
 			"run the agent through weft/thread with thread.PublicID(...): runtime.Sessions resolves a session by its public id")
 		return "", false
 	}

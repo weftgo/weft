@@ -325,7 +325,7 @@ describe("nothing escapes into the host page", () => {
     )
     fakeStudio(routes)
     const el = await mount()
-    click(button(el, "✎ Experiment"))
+    click(button(el, "✎ Replay…"))
     await settle()
     click(runBtn(el))
     await settle()
@@ -351,7 +351,7 @@ describe("the keyboard never takes the page's keys", () => {
   async function withDrawer() {
     fakeStudio(baseRoutes())
     const el = await mount()
-    click(button(el, "✎ Experiment"))
+    click(button(el, "✎ Replay…"))
     await settle()
     return el
   }
@@ -443,7 +443,7 @@ describe("the redraw keeps what is the user's", () => {
   it("typing in the drawer keeps focus and caret, and a frame arriving mid-edit does not take them", async () => {
     fakeStudio(baseRoutes())
     const el = await mount()
-    click(button(el, "✎ Experiment"))
+    click(button(el, "✎ Replay…"))
     await settle()
     const prompt = $(el, ".weft-drawer textarea") as HTMLTextAreaElement
     prompt.focus()
@@ -503,7 +503,7 @@ describe("the redraw keeps what is the user's", () => {
   it("a composition that never reports its end (the field lost focus) does not freeze the dock", async () => {
     fakeStudio(baseRoutes())
     const el = await mount()
-    click(button(el, "✎ Experiment"))
+    click(button(el, "✎ Replay…"))
     await settle()
     const prompt = $(el, ".weft-drawer textarea") as HTMLTextAreaElement
     prompt.focus()
@@ -748,7 +748,7 @@ describe("the token goes to data-endpoint and nowhere else (§6)", () => {
     )
     const studio = fakeStudio(routes)
     const el = await mount({ ...ATTRS, "data-token": "dev_secret_tok" })
-    click(button(el, "✎ Experiment"))
+    click(button(el, "✎ Replay…"))
     await settle()
     click(runBtn(el))
     await settle()
@@ -777,7 +777,7 @@ describe("the token goes to data-endpoint and nowhere else (§6)", () => {
     // and trace are links), and the answer's Raw OTel ⤢ on the step it
     // lands on (P8-fix-a: step 0 when nothing failed) — no save as test:
     // the refused run has no id to save (UX-C-29) — and the loop line's
-    // graph ⤢ (U34) — and the header's session timeline ⤢ (U16) — and
+    // graph ⤢ (U34) — and the header's session session ⤢ (U16) — and
     // the drawer's Runs in line's runtimes ⤢ (U20.1)
     expect(links.length).toBe(8)
     for (const href of links) {

@@ -181,7 +181,7 @@ function liveEstimate(f: EngineFacts): { estimate: string; usd: string } {
   const all = k === docs.length
   const text = formatUSD(usd)
   return {
-    estimate: `~${tokens(tok)} tok ≈ ${text} for ${k > 1 ? `steps ${n}–${n + k - 1}` : `step ${n}`}${all ? "" : " · later steps also run live"}`,
+    estimate: `~${tokens(tok)} tokens ≈ ${text} for ${k > 1 ? `steps ${n}–${n + k - 1}` : `step ${n}`}${all ? "" : " · later steps also run live"}`,
     usd: `${all ? "≈" : "≥"} ${text}`,
   }
 }

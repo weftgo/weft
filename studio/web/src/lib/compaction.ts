@@ -62,7 +62,7 @@ export const STARTED_COMPACTED = "started on a compacted context"
 /** What "show original" says for a session marker: it carries counts,
  * not a range — the context it replaced is not a seq range of this run. */
 export function sessionNote(c: RunCompaction): string {
-  return `thread compacted the session context this run belongs to: ${c.replaced} of its messages were replaced by ${c.entries}; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages. (For entries appended by hand that no run produced, thread files the marker under the run that follows, which starts on the compacted context.)`
+  return `weft/thread compacted the session context this run belongs to: ${c.replaced} of its messages were replaced by ${c.entries}; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages. (For entries appended by hand that no run produced, weft/thread files the marker under the run that follows, which starts on the compacted context.)`
 }
 
 /** The original messages of a view, or why they cannot be shown. */

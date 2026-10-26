@@ -351,7 +351,7 @@ describe("the app turn's kinds and refusal words", () => {
       fix: APP_RUN_FIX,
     })
     expect(go("appturn.go")).toContain(
-      `appOwned+" · read-only: run "+row.ID+" is not a turn of a thread session with a public id"`
+      `appOwned+" · read-only: run "+row.ID+" is not a turn of a session with a public id"`
     )
     // Outside a session it stays the plain Generate's line.
     expect(parkedKind({ ...turn, session_id: "", public_id: "" }, [rt()])).toBe(

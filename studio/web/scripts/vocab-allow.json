@@ -1,0 +1,63 @@
+{
+  "about": "The vocabulary audit's allowlist (scripts/vocab-audit.ts, U21.3): files that are not screen text, and retired words that may stay where they are, each with its reason. An entry matches a hit by file (relative to src/), alias and a substring of the visible text; an entry no hit matches fails the audit.",
+  "skip": [
+    {
+      "file": "lib/vocab-scan.ts",
+      "why": "the scanner itself: LABEL_ONLY lists the retired words it matches only as a whole label"
+    },
+    {
+      "file": "panel/replaykit.ts",
+      "why": "the panel tests' recorded runs (a steer's user message \"continue\"): imported by tests only, never bundled"
+    }
+  ],
+  "allow": [
+    {
+      "file": "components/studio/session-tree.tsx",
+      "alias": "Timeline",
+      "text": "open the mark on the timeline",
+      "why": "the session page's timeline view (its turns and marks in lanes), not the run's waterfall the alias retires"
+    },
+    {
+      "file": "components/studio/session-approvals.tsx",
+      "alias": "Timeline",
+      "text": "open the mark on the timeline",
+      "why": "the session page's timeline view, not the run's waterfall"
+    },
+    {
+      "file": "lib/timeline.ts",
+      "alias": "Timeline",
+      "text": "timeline",
+      "why": "the session page's timeline view: its switcher word, its default view and the capability named timeline, not the run's waterfall"
+    },
+    {
+      "file": "lib/conversation.ts",
+      "alias": "Timeline",
+      "text": "its timeline, marks and views",
+      "why": "the session page's timeline view, not the run's waterfall"
+    },
+    {
+      "file": "lib/timeline.ts",
+      "alias": "thread",
+      "text": "thread",
+      "why": "DecisionDoc.source = \"thread\": a discriminant (lib/decisions.ts compares it with \"spans\"), never drawn"
+    },
+    {
+      "file": "lib/links.ts",
+      "alias": "continue",
+      "text": "continue",
+      "why": "REPLAY_VERBS: the ?verb= search key's values, never drawn"
+    },
+    {
+      "file": "panel/state.ts",
+      "alias": "skip",
+      "text": "skip",
+      "why": "foldLive's return value (\"folded\" | \"skip\" | \"gap\"), never drawn"
+    },
+    {
+      "file": "lib/glossary.ts",
+      "alias": "ttft",
+      "text": "(TTFT)",
+      "why": "the first-token entry names the abbreviation it retires, so a reader who knows TTFT finds it"
+    }
+  ]
+}

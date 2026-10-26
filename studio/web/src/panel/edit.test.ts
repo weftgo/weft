@@ -129,9 +129,7 @@ describe("the Story's editor (F2's Done line, panel half)", () => {
         n.getAttribute("data-weft-edit-kind")
       )
     ).toEqual(["user", "tool_args", "tool_result", "insert"])
-    expect(text(el, ".weft-drawer .weft-step-h")).toContain(
-      "continue from step 2"
-    )
+    expect(text(el, ".weft-drawer .weft-step-h")).toContain("from step 2")
     // Edits run live: scripted is disabled with its reason (U17).
     expect(
       $(el, ".weft-drawer [data-drawer-section=engine]")!.getAttribute(
@@ -403,9 +401,7 @@ describe("a steer is its step's user message (review 2)", () => {
       "user:3::0",
       "stop here"
     )
-    expect(text(el, ".weft-drawer .weft-step-h")).toContain(
-      "continue from step 4"
-    )
+    expect(text(el, ".weft-drawer .weft-step-h")).toContain("from step 4")
     await settle(400)
     click(runBtn(el))
     await settle(80)
@@ -457,7 +453,7 @@ describe("a fork carries no edits (review 4)", () => {
     await edit(el, C2, "tool_result:1:c2:0", "x")
     const thr = $(
       el,
-      '.weft-drawer select[aria-label="thread"]'
+      '.weft-drawer select[aria-label="Write to"]'
     ) as HTMLSelectElement
     thr.value = "fork"
     thr.dispatchEvent(new Event("change", { bubbles: true }))
@@ -470,9 +466,7 @@ describe("a fork carries no edits (review 4)", () => {
     )
     expect(text(el, "[data-weft-fork-edits]")).toBe(FORK_EDITS)
     expect($(el, "[data-weft-live]")).toBeNull()
-    expect(text(el, ".weft-drawer .weft-step-h")).not.toContain(
-      "continue from step"
-    )
+    expect(text(el, ".weft-drawer .weft-step-h")).not.toContain("from step")
     expect(runBtn(el).disabled).toBe(true)
   })
 })
@@ -569,7 +563,7 @@ describe("review fixes (session 8)", () => {
   const thread = async (el: WeftDevtools, v: string) => {
     const thr = $(
       el,
-      '.weft-drawer select[aria-label="thread"]'
+      '.weft-drawer select[aria-label="Write to"]'
     ) as HTMLSelectElement
     thr.value = v
     thr.dispatchEvent(new Event("change", { bubbles: true }))
@@ -604,9 +598,7 @@ describe("review fixes (session 8)", () => {
     await edit(el, C2, "tool_result:1:c2:0", "x")
     await thread(el, "fork")
     await thread(el, "ephemeral")
-    expect(text(el, ".weft-drawer .weft-step-h")).toContain(
-      "continue from step 2"
-    )
+    expect(text(el, ".weft-drawer .weft-step-h")).toContain("from step 2")
     await settle(400)
     click(runBtn(el))
     await settle(80)
@@ -672,7 +664,7 @@ describe("review fixes (session 8)", () => {
     await settle()
     el.scope("pub_orders")
     await settle()
-    click(all(el, "button").find((b) => b.textContent === "✎ Experiment"))
+    click(all(el, "button").find((b) => b.textContent === "✎ Replay…"))
     await settle(400)
     expect($(el, ".weft-drawer")).not.toBeNull()
     expect($(el, "[data-weft-ed-held]")).toBeNull()

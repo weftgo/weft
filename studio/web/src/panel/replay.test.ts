@@ -121,9 +121,7 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
     expect($(el, "[data-weft-drawer-verb]")?.textContent).toBe(
       "Edit this result and replay"
     )
-    expect(text(el, ".weft-drawer .weft-step-h")).toContain(
-      "continue from step 3"
-    )
+    expect(text(el, ".weft-drawer .weft-step-h")).toContain("from step 3")
     // The field on that call opens empty, the recording its
     // placeholder, and focused (UX-C-05): no edit yet, so the drawer
     // opens on scripted and Run names it.
@@ -227,9 +225,7 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
     expect(($(el, '[data-weft-step="1"]') as HTMLElement).style.outline).toBe(
       ""
     )
-    expect(text(el, ".weft-drawer .weft-step-h")).toContain(
-      "continue from step 1"
-    )
+    expect(text(el, ".weft-drawer .weft-step-h")).toContain("from step 1")
     expect(text(el, "[data-weft-prefix]")).toBe("step 0 kept")
     // Closing hands focus back to the verb that opened it.
     click($(el, '.weft-drawer button[aria-label="close the drawer"]'))
@@ -290,7 +286,7 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
     click(verbIn(el, '[data-weft-step="3"] > .weft-step-h', "continue"))
     await settle()
     expect(
-      ($(el, '.weft-drawer select[aria-label="thread"]') as HTMLSelectElement)
+      ($(el, '.weft-drawer select[aria-label="Write to"]') as HTMLSelectElement)
         .value
     ).toBe("fork")
     const input = $(
@@ -321,11 +317,9 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
     const el = await mount()
     click(verbIn(el, '[data-weft-step="2"] > .weft-step-h', "from_step"))
     await settle()
-    select(el, "thread", "fork")
+    select(el, "Write to", "fork")
     await settle()
-    expect(text(el, ".weft-drawer .weft-step-h")).not.toContain(
-      "continue from step"
-    )
+    expect(text(el, ".weft-drawer .weft-step-h")).not.toContain("from step")
     expect(text(el, "[data-weft-prefix]")).toBe(
       "nothing kept · the whole turn runs again"
     )
@@ -532,7 +526,7 @@ describe("a child replays as its own run (A10)", () => {
     click(verbIn(el, step, "from_step"))
     await settle()
     expect(text(el, ".weft-drawer .weft-step-h")).toContain(
-      `Experiment · researcher · child run ${CHILD} · continue from step 1`
+      `Replay · researcher · child run ${CHILD} · from step 1`
     )
     click(
       all(el, ".weft-drawer button").find((b) =>

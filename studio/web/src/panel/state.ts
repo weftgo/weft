@@ -2416,7 +2416,7 @@ export class PanelModel {
   async decide(
     callID: string,
     decision: "approve" | "deny" | "resolve",
-    content?: string
+    text = ""
   ) {
     const res = this.state.result
     if (!res || !res.runID || !res.ready || this.deciding) return
@@ -2442,10 +2442,13 @@ export class PanelModel {
       }
       let out: { command_id: string; state: string }
       try {
+        // The field beside the verbs (UX-H-20): a deny's optional
+        // reason, a resolve's result — as the app turn's decideApp.
         out = await postApproval(this.ep, res.runID, {
           call_id: callID,
           decision,
-          content,
+          ...(decision === "deny" && text ? { reason: text } : {}),
+          ...(decision === "resolve" ? { content: text } : {}),
         })
       } catch (err) {
         // Refused (a read-only token is a 403, a call that is not

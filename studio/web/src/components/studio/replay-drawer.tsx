@@ -64,6 +64,7 @@ import {
   breakpointsFor,
   prefixLine,
   replayVerdicts,
+  VERB_TITLES,
 } from "@/lib/replay"
 import type {
   CatalogTool,
@@ -141,15 +142,6 @@ export const ReplayContext = createContext<((r: ReplayRequest) => void) | null>(
 /** useReplay is the opener, or null when the verbs are hidden. */
 export function useReplay(): ((r: ReplayRequest) => void) | null {
   return useContext(ReplayContext)
-}
-
-const VERB_TITLES: Record<ReplayDraft["verb"], string> = {
-  from_step: "Replay from this step",
-  edit_result: "Edit this result and replay",
-  edit_prompt: "Edit the prompt and replay",
-  rerun: "Re-run",
-  continue: "Continue here with a new message",
-  edit: "Edit the transcript and replay",
 }
 
 export function ReplayDrawer({

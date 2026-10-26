@@ -175,7 +175,7 @@ func TestNestedSessionTurnIsNotTheEnclosingPublicIDs(t *testing.T) {
 	approve := `{"call_id":"call_1","decision":"approve"}`
 	code, body = b4Do(t, http.MethodPost, ts.URL+"/api/runs/"+innerID+"/approvals", serverTok, approve)
 	if code != http.StatusForbidden ||
-		!strings.Contains(body, "app-owned turn · read-only: run "+innerID+" is not a turn of a thread session with a public id") {
+		!strings.Contains(body, "app-owned turn · read-only: run "+innerID+" is not a turn of a session with a public id") {
 		t.Errorf("server approval of the inner turn = %d %s, want 403: not a turn of a thread session with a public id", code, body)
 	}
 	if code, body := b4Do(t, http.MethodPost, ts.URL+"/api/runs/"+innerID+"/approvals", m.Token, approve); code != http.StatusForbidden {

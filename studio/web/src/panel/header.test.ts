@@ -8,6 +8,7 @@ import {
   baseRoutes,
   fakeStudio,
   mount,
+  runRow,
   setup,
   teardown,
   text,
@@ -78,6 +79,39 @@ describe("a turn row's accessible name (UX-F-32)", () => {
   })
 })
 
+describe("turn or run (U21.3, UX-F-13)", () => {
+  it("a public id's session turns are turns, in the header, the filter and the picker", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mount()
+    expect(text(el, "[data-weft-stats]")).toMatch(/^1 turn · /)
+    const q = $(el, ".weft-turn-q") as HTMLInputElement
+    expect(q.placeholder).toBe("/ filter turns")
+  })
+
+  it("a public id's harness runs (no session) are runs, never '1 turns'", async () => {
+    const routes = baseRoutes()
+    routes["sessions?public_id=pub_orders"] = {
+      total: 0,
+      sessions: [],
+      next_before: null,
+    }
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 1,
+      runs: [runRow({ session_id: "", turn: 0 })],
+      next_before: null,
+    }
+    fakeStudio(routes)
+    const el = await mount()
+    expect(text(el, "[data-weft-stats]")).toMatch(/^1 run · /)
+    const q = $(el, ".weft-turn-q") as HTMLInputElement
+    expect(q.placeholder).toBe("/ filter runs")
+    expect(q.getAttribute("aria-label")).toBe("filter runs")
+    expect($(el, ".weft-rows")!.getAttribute("aria-label")).toBe(
+      "runs, newest first"
+    )
+  })
+})
+
 describe("the empty states (UX-F-33)", () => {
   const empty = () => {
     const routes = baseRoutes()
@@ -98,7 +132,7 @@ describe("the empty states (UX-F-33)", () => {
     fakeStudio(empty())
     const el = await mount()
     expect(text(el, "[data-weft-stats]")).toBe("0 runs · —")
-    expect(text(el, ".weft-turns")).toContain("no turns yet — run your app")
+    expect(text(el, ".weft-turns")).toContain("no runs yet — run your app")
     expect(text(el, ".weft-main")).not.toContain("select a turn")
   })
 
@@ -110,9 +144,14 @@ describe("the empty states (UX-F-33)", () => {
       "data-endpoint": "http://studio.test/studio/",
       "data-open": "true",
     })
+    // How to connect, to this Studio (UX-F-11): its URL, and the
+    // connect card through the hand-off.
     expect(text(el, ".weft-turns")).toContain(
-      "no runs yet — connect your app (otel.Install)"
+      "no runs yet — run your app with WEFT_STUDIO_URL=http://studio.test/studio go run . · how to connect ⤢"
     )
+    expect(
+      ($(el, ".weft-splash a") as HTMLAnchorElement).getAttribute("href")
+    ).toBe("http://studio.test/studio/settings#connect")
     expect(text(el, ".weft-main")).not.toContain("select a turn")
   })
 })

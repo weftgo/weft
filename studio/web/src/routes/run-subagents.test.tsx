@@ -243,7 +243,7 @@ describe("subagents on the run page (A10)", () => {
     )
     await waitFor(() => {
       const sec = block.querySelector<HTMLElement>('[data-child-request="0"]')
-      expect(sec?.textContent).toContain("hidden by your token scope")
+      expect(sec?.textContent).toContain("hidden by your token's access")
     })
     expect(block.querySelector("[data-prompt]")).toBeNull()
   })

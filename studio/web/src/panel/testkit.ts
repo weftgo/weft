@@ -555,7 +555,7 @@ export function stepDiffRoutes(doc: unknown): Record<string, Route> {
 
 /** runExperiment opens the drawer and runs it, as the user does. */
 export async function runExperiment(el: WeftDevtools) {
-  click(button(el, "✎ Experiment"))
+  click(button(el, "✎ Replay…"))
   await settle()
   click(runBtn(el))
   await settle(60)

@@ -504,3 +504,18 @@ export const REPLAY_WORDS = {
   /** A replay's name: the n-th of its source turn. */
   head: (n: number, src: string) => `Replay ${n} of ${src}`,
 } as const
+
+/** The replay drawer's title per verb, both drawers (UX-F-17, UX-C-22):
+ * a drawer opened with no verb (the turn's ✎ Replay…) says REPLAY_TITLE. */
+export const VERB_TITLES: Record<ReplayVerb, string> = {
+  from_step: "Replay from this step",
+  edit_result: "Edit this result and replay",
+  edit_prompt: "Edit the prompt and replay",
+  rerun: "Re-run",
+  continue: "Continue here with a new message",
+  edit: "Edit the transcript and replay",
+}
+
+/** The turn's drawer button and the drawer it opens with no verb. */
+export const REPLAY_OPEN = "✎ Replay…"
+export const REPLAY_TITLE = "Replay"

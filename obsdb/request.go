@@ -160,7 +160,7 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 			"install a tracer (otel.Install records spans)",
 		},
 		CauseNoPublicID: {
-			"the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)",
+			"the session's turns carry no weft.public_id (the session was created without thread.PublicID)",
 			"thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn",
 		},
 		CauseRawOff: {
@@ -267,8 +267,8 @@ var holeNotes = map[Hole]holeNote{
 		"",
 	},
 	HoleHidden: {
-		"your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
-		"use a playground-scoped token",
+		"your token's access does not reach this: a read-only panel token reads no system prompt or tool catalog",
+		"use a playground token",
 	},
 	HoleCompacted: {
 		"the model saw a compacted view: compaction replaced part of the transcript for this request",

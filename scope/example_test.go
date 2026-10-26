@@ -77,3 +77,29 @@ func ExamplePageURLFromContext() {
 	// handler: https://app.example/support
 	// run: https://app.example/support
 }
+
+// A page of unrelated runs — a test batch — is a tag scope: no public
+// id, the runs whose metadata carries every pair.
+func ExampleScope_tags() {
+	s := scope.Parse("tag.arena.batch=cli-20261012-115753")
+	fmt.Printf("%q %q\n", s.PublicID, s.Tags["arena.batch"])
+	fmt.Println(scope.Scope{Agent: "director", Tags: map[string]string{"ci.job": "1234"}})
+	// Output:
+	// "" "cli-20261012-115753"
+	// ;agent=director;tag.ci.job=1234
+}
+
+// WithFlow stamps a flow on every run started under the context, as
+// Header does for a scope with a flow: Studio's reads filter on it
+// (flow=f_checkout).
+func ExampleWithFlow() {
+	agt := core.New(wefttest.Script(wefttest.Say("hi")),
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			if _, ok := ev.(core.RunStart); ok {
+				fmt.Println(core.MetadataFromContext(ctx)[scope.FlowKey])
+			}
+		}))
+	_, _ = agt.Generate(scope.WithFlow(context.Background(), "f_checkout"), core.Prompt("hi"))
+	// Output:
+	// f_checkout
+}

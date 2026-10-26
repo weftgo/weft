@@ -604,12 +604,26 @@ describe("the fallback: no conversation detected", () => {
     expect(studio.posts("live-grant")).toHaveLength(1) // a 403 is not asked again
   })
 
-  it("a panel token never asks for an agent's stream: it polls and says so", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true })
+  it("a panel token's public id is the scope when no rung names one (UX-D-09): no fallback", async () => {
     const studio = fakeStudio(routesFor("pub_a"))
     const el = await mountWith({
       "data-endpoint": REMOTE,
       "data-token": PANEL_TOKEN,
+      "data-open": "true",
+    })
+    expect(following(el).publicId).toBe("pub_a")
+    expect(text(el, ".weft-title")).toContain("pub_a")
+    expect(text(el, ".weft-head")).not.toContain("how to scope")
+    expect($(el, ".weft-dev-poll")).toBeNull()
+    expect(studio.gets("runs?public_id=pub_a&limit=50")).toHaveLength(1)
+  })
+
+  it("a panel token without a public id never asks for an agent's stream: it polls and says so in its own words", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const studio = fakeStudio(routesFor("pub_a"))
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-token": `weft_pt.${btoa(JSON.stringify({ scope: "read" }))}.sig`,
       "data-open": "true",
     })
     expect(
@@ -617,8 +631,9 @@ describe("the fallback: no conversation detected", () => {
         .posts("live-grant")
         .filter((g) => (g.body as { agent?: string }).agent)
     ).toEqual([])
+    // Never the server token's advice on a setup C page.
     expect(text(el, ".weft-dev-poll")).toBe(
-      "streaming needs the server token · polling"
+      "live updates every 10 s (panel tokens poll)"
     )
     await vi.advanceTimersByTimeAsync(11_000)
     await settle()

@@ -988,8 +988,8 @@ const (
 // is below / above it: with session and limit=1, a turn's neighbour and
 // total how many lie that side — the run page's turn stepper, O(1)
 // rows), oldest (true: oldest first, the cursor paging forward),
-// tag.<k>=<v> metadata matches, before (the
-// RFC 3339 paging cursor on started) with before_id (the cursor's run
+// tag.<k>=<v> metadata matches and flow= (the run's weft.flow, U22),
+// before (the RFC 3339 paging cursor on started) with before_id (the cursor's run
 // id: exact inside a tie) and limit. next_before / next_before_id are
 // the next page's before / before_id, null on the last page.
 func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
@@ -1283,19 +1283,34 @@ func parentParam(q map[string][]string) string {
 
 // tagParams collects the tag.<k>=<v> metadata matches (the row's
 // metadata — what the store era called tags; core.Metadata and
-// thread's session keys land here).
+// thread's session keys land here) and flow=<f>, the run's weft.flow
+// (scope.FlowKey: a scope's flow is run metadata, U22). An empty value
+// is no filter.
 func tagParams(q map[string][]string) map[string]string {
 	var meta map[string]string
-	for k, vs := range q {
-		if name, ok := strings.CutPrefix(k, "tag."); ok && name != "" {
-			if meta == nil {
-				meta = map[string]string{}
-			}
-			meta[name] = vs[0]
+	add := func(k, v string) {
+		if v == "" {
+			return
 		}
+		if meta == nil {
+			meta = map[string]string{}
+		}
+		meta[k] = v
+	}
+	for k, vs := range q {
+		if name, ok := strings.CutPrefix(k, "tag."); ok && name != "" && len(vs) > 0 {
+			add(name, vs[0])
+		}
+	}
+	if vs := q["flow"]; len(vs) > 0 {
+		add(flowKey, vs[0])
 	}
 	return meta
 }
+
+// flowKey is scope.FlowKey, the metadata key a scope's flow is
+// stamped under (TestFlowKeyIsScopes pins the two together).
+const flowKey = "weft.flow"
 
 // limitParam parses the shared limit parameter: a non-negative
 // integer, 0 for the default.

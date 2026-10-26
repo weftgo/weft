@@ -29,7 +29,7 @@
 // ?weft_scope= / #weft_scope= (rung 4, urlScope) comes next, then the
 // marker and header rungs (markers.ts, detect.ts) — each supplies a
 // scope only when no rung above it names one.
-import { tokenScopeOf } from "../lib/replay"
+import { tokenClaimsOf, tokenScopeOf } from "../lib/replay"
 import { parseScope, serializeScope } from "../lib/scope"
 import { migrateDebug } from "./layout"
 import { themeSetting } from "./theme"
@@ -427,6 +427,15 @@ export function readConfig(
     }
   }
   scope ??= weftScope()
+  const token = pick("token") ?? ""
+  // Rung 1b (UX-D-09): no scope named, a panel token's public id is the
+  // scope — the one conversation it can read anyway (a hint; Studio
+  // enforces the token).
+  // Below every detected rung: the element follows a detected scope
+  // first (scopeNow), so it is not explicit.
+  const scopeExplicit = !!serializeScope(scope)
+  const claim = tokenClaimsOf(token)?.public_id
+  if (!scopeExplicit && typeof claim == "string") scope = { publicId: claim }
   const detect = pick("detect")
   const mode = pick("mode") ?? ""
   const z = (pick("z-index") ?? "").trim()
@@ -436,14 +445,9 @@ export function readConfig(
     configURL: raw === null && dir ? dir + "panel-config.json" : "",
     publicId: scope.publicId,
     scope,
-    scopeExplicit: !!(
-      scope.publicId ||
-      scope.session ||
-      scope.flow ||
-      scope.run
-    ),
+    scopeExplicit,
     urlScope: urlScope(),
-    token: pick("token") ?? "",
+    token,
     detect: detectSetting(detect),
     position: POSITIONS.includes(position as PanelPlacement)
       ? (position as PanelPlacement)
@@ -593,7 +597,7 @@ export function debugForced(): boolean {
 /** urlScope is detection rung 4 (plan C3.4): the host page's
  * ?weft_scope= (read first), else its #weft_scope= — the serialised
  * Scope (lib/scope.ts), URL-decoded once, as Studio's dev links write
- * it. null when neither names a public id (or names one still holding
+ * it. null when neither names a scope (or names a public id still holding
  * ";" or "=": encoded twice). Reads the page's URL, never
  * writes it; never throws. page defaults to pageURL.href(). */
 export function urlScope(page: string = pageURL.href()): Scope | null {
@@ -604,8 +608,13 @@ export function urlScope(page: string = pageURL.href()): Scope | null {
       if (v === null) continue
       const sc = parseScope(v)
       // A ";" or "=" left in the public id is a value encoded twice
-      // (pub_x%253Bflow…): no conversation has that id.
-      if (sc.publicId && !/[;=]/.test(sc.publicId)) return sc
+      // (pub_x%253Bflow…): no conversation has that id. A tag, agent or
+      // flow scope stands alone (U22).
+      if (
+        (sc.publicId || sc.agent || sc.flow || sc.tags) &&
+        !/[;=]/.test(sc.publicId)
+      )
+        return sc
     }
   } catch {
     // not a URL: no scope

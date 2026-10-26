@@ -1,18 +1,29 @@
 // Package scope is the Go side of the devtools' Scope (plan §13.3):
 // the unit every discovery rung, deep link and API call carries — one
 // conversation's public id and, optionally, the session, flow and run
-// inside it — and the net/http middleware that hands it to the page.
+// inside it, or a page of unrelated runs named by an agent and run
+// metadata tags (a test batch, U22) — and the net/http middleware
+// that hands it to the page.
 //
 // A Scope has one string form, shared byte for byte with the web
 // client's lib/scope.ts (the golden studio/testdata/scope.golden.json
 // pins both):
 //
-//	pub_…;session=s_…;flow=f_…;run=r_…
+//	pub_…;session=s_…;flow=f_…;run=r_…;agent=…;tag.<k>=<v>
 //
 // the public id first and bare, the rest optional, in that fixed
-// order, empty fields omitted, each value percent-encoded with
-// encodeURIComponent's rules. Parse reads it back and never fails: a
-// newer writer's field is not this reader's to reject.
+// order (the tags by key), empty fields omitted, each value — and a
+// tag's key — percent-encoded with encodeURIComponent's rules. A scope
+// without a public id starts with ";" (";tag.arena.batch=b_1"); Parse
+// also reads a first segment that is a known key=value
+// ("tag.arena.batch=b_1", what a page writes in data-scope). Parse
+// reads the form back and never fails: a newer writer's field is not
+// this reader's to reject.
+//
+// The flow is run metadata (weft.flow, FlowKey): Header stamps it on
+// every run its handler starts, as it stamps the page URL, and
+// WithFlow does the same for any context. Studio's run, session,
+// search, trace and live reads filter on it (flow=).
 //
 // The response header is the development rung: thread has no HTTP
 // layer, so the app's own handler sets it, in one line —
@@ -39,8 +50,10 @@ package scope
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -56,67 +69,141 @@ const HeaderName = "Weft-Scope"
 // and records, and on Studio's run row).
 const PageURLKey = "weft.page_url"
 
+// FlowKey is the metadata key a scope's flow is stamped under (Header,
+// WithFlow): the run's flow, which Studio's reads filter on (flow=)
+// and the devtools panel narrows its list by.
+const FlowKey = "weft.flow"
+
 // maxPageURL bounds a page URL: core's metadata value limit (1024
 // bytes). A longer one is dropped, never truncated — a cut URL names
 // another page.
 const maxPageURL = 1024
 
 // Scope names what the devtools follow. PublicID is the join key the
-// app hands out ("" is the dev list: no conversation); the other
-// fields narrow it. The JSON names are the web client's.
+// app hands out ("" is the dev list: no conversation); the session,
+// flow and run narrow it. Agent and Tags name a page of runs that
+// share no conversation (a test harness, a batch: U22): the runs of
+// that agent whose metadata carries every tag pair (ANDed); they may
+// stand without a public id, and narrow it when one is set. The JSON
+// names are the web client's.
 type Scope struct {
 	PublicID  string `json:"publicId"`
 	SessionID string `json:"session,omitempty"`
 	FlowID    string `json:"flow,omitempty"`
 	RunID     string `json:"run,omitempty"`
+	Agent     string `json:"agent,omitempty"`
+	// Tags are run metadata pairs (core.WithMetadata's keys:
+	// "arena.batch" → "cli-20261012-115753"), each written tag.<k>=<v>.
+	Tags map[string]string `json:"tags,omitempty"`
 }
 
 // IsZero reports whether every field is empty.
-func (s Scope) IsZero() bool { return s == Scope{} }
+func (s Scope) IsZero() bool {
+	return s.PublicID == "" && s.SessionID == "" && s.FlowID == "" && s.RunID == "" && s.Agent == "" && len(s.Tags) == 0
+}
+
+// Equal reports whether s and o name the same scope: every field
+// equal, a nil and an empty Tags alike.
+func (s Scope) Equal(o Scope) bool {
+	return s.PublicID == o.PublicID && s.SessionID == o.SessionID && s.FlowID == o.FlowID &&
+		s.RunID == o.RunID && s.Agent == o.Agent && maps.Equal(s.Tags, o.Tags)
+}
 
 // String is the scope's one string form: the public id first and bare,
-// then session=, flow=, run= for each field set, joined by ";", every
-// value percent-encoded. The zero Scope is "".
+// then session=, flow=, run=, agent= for each field set and
+// tag.<k>=<v> for each tag in key order (an empty key or value is
+// left out), joined by ";", every key and value percent-encoded. The
+// zero Scope is "".
 func (s Scope) String() string {
 	var b strings.Builder
 	b.WriteString(encode(s.PublicID))
-	for _, f := range [...]struct{ k, v string }{{"session", s.SessionID}, {"flow", s.FlowID}, {"run", s.RunID}} {
+	for _, f := range [...]struct{ k, v string }{{"session", s.SessionID}, {"flow", s.FlowID}, {"run", s.RunID}, {"agent", s.Agent}} {
 		if f.v != "" {
 			b.WriteString(";" + f.k + "=" + encode(f.v))
+		}
+	}
+	for _, k := range slices.Sorted(maps.Keys(s.Tags)) {
+		if v := s.Tags[k]; k != "" && v != "" {
+			b.WriteString(";" + tagPrefix + encode(k) + "=" + encode(v))
 		}
 	}
 	return b.String()
 }
 
+// tagPrefix starts a tag segment's key.
+const tagPrefix = "tag."
+
 // Parse reads a scope's string form back. The first ";"-segment is the
-// public id; each later one is key=value. A key it does not know, a
-// segment without "=", an empty value and a repeat of a key already
-// read are ignored; a value that does not percent-decode is kept raw.
-// Parse never fails.
+// public id — unless it is a known key=value (session, flow, run,
+// agent or tag.<k>, a raw "=": String encodes a public id's), which is
+// read as a later segment is and leaves the public id "". Each later
+// segment is key=value. A key it does not know, a segment without "=",
+// an empty value (or tag key) and a repeat of a key already read are
+// ignored; a value that does not percent-decode is kept raw. Parse
+// never fails.
 func Parse(str string) Scope {
 	segs := strings.Split(str, ";")
-	out := Scope{PublicID: decode(trim(segs[0]))}
+	out := Scope{}
+	if k, _, ok := strings.Cut(segs[0], "="); ok && knownKey(trim(k)) {
+		segs = append([]string{""}, segs...)
+	}
+	out.PublicID = decode(trim(segs[0]))
 	for _, seg := range segs[1:] {
 		k, v, ok := strings.Cut(seg, "=")
 		if !ok {
 			continue
 		}
+		k, v = trim(k), decode(trim(v))
+		if name, ok := strings.CutPrefix(k, tagPrefix); ok {
+			if name = decode(name); name != "" && v != "" {
+				if _, dup := out.Tags[name]; !dup {
+					if out.Tags == nil {
+						out.Tags = map[string]string{}
+					}
+					out.Tags[name] = v
+				}
+			}
+			continue
+		}
 		var dst *string
-		switch trim(k) {
+		switch k {
 		case "session":
 			dst = &out.SessionID
 		case "flow":
 			dst = &out.FlowID
 		case "run":
 			dst = &out.RunID
+		case "agent":
+			dst = &out.Agent
 		default:
 			continue
 		}
-		if v = decode(trim(v)); v != "" && *dst == "" {
+		if v != "" && *dst == "" {
 			*dst = v
 		}
 	}
 	return out
+}
+
+// knownKey reports whether k names a field of the string form.
+func knownKey(k string) bool {
+	switch k {
+	case "session", "flow", "run", "agent":
+		return true
+	}
+	return strings.HasPrefix(k, tagPrefix) && len(k) > len(tagPrefix)
+}
+
+// WithFlow returns a copy of ctx whose runs carry flow as their
+// weft.flow metadata (FlowKey; core.WithMetadata, so a run's own
+// core.Metadata option wins). An empty flow returns ctx. It is what
+// Header does for a scope with a flow, for code that starts runs
+// without that middleware (a queue consumer, a test).
+func WithFlow(ctx context.Context, flow string) context.Context {
+	if flow == "" {
+		return ctx
+	}
+	return core.WithMetadata(ctx, map[string]string{FlowKey: flow})
 }
 
 // Header sets the Weft-Scope response header to scopeOf(r) on every
@@ -136,12 +223,22 @@ func Parse(str string) Scope {
 //
 // Header also puts the request's page URL (PageURL) on the request's
 // context, for PageURLFromContext and — through core.WithMetadata — as
-// weft.page_url on every run next starts under that context. A run's
-// own core.Metadata option wins over it.
+// weft.page_url on every run next starts under that context; and the
+// scope's flow — scopeOf's, else the request's own Weft-Scope header's
+// (a client that forwards the page's scope) — as weft.flow (WithFlow).
+// A run's own core.Metadata option wins over both.
 func Header(next http.Handler, scopeOf func(*http.Request) Scope) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s := scopeOf(r); !s.IsZero() {
+		s := scopeOf(r)
+		if !s.IsZero() {
 			Set(w, s)
+		}
+		flow := s.FlowID
+		if flow == "" {
+			flow = Parse(r.Header.Get(HeaderName)).FlowID
+		}
+		if flow != "" {
+			r = r.WithContext(WithFlow(r.Context(), flow))
 		}
 		if page := PageURL(r); page != "" {
 			ctx := context.WithValue(r.Context(), pageURLKey{}, page)

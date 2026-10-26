@@ -1,0 +1,51 @@
+{
+  "case": "flow_scope",
+  "description": "a run started under scope.WithFlow (what scope.Header does for a Weft-Scope with flow=, U22) with a batch tag through core.Metadata: weft.flow and arena.batch in meta — the pairs /api/runs?flow= and ?tag.arena.batch= filter on",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "checkout",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "arena.batch": "b_contract",
+        "weft.flow": "f_checkout"
+      },
+      "started": "2026-10-01T09:39:00Z",
+      "finished": "2026-10-01T09:39:00.008Z",
+      "last_seen": "2026-10-01T09:39:00.008Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "15d8a0ecfc36e7fa929525f08827757c371719026fd01c73fe1c1531da700d37",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    }
+  ]
+}

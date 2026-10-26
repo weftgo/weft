@@ -40,6 +40,14 @@ func weftAttrs(run, public, op string) map[string]any {
 	return map[string]any{"gen_ai.operation.name": op, "weft.run.id": run, "weft.public_id": public, "gen_ai.agent.name": "conf"}
 }
 
+// withMeta adds run metadata pairs (k, v, …) to a span's attributes.
+func withMeta(attrs map[string]any, kv ...string) map[string]any {
+	for i := 0; i+1 < len(kv); i += 2 {
+		attrs[kv[i]] = kv[i+1]
+	}
+	return attrs
+}
+
 func traceFixture() []obsdb.Span {
 	const s = time.Second
 	return []obsdb.Span{
@@ -50,10 +58,12 @@ func traceFixture() []obsdb.Span {
 			map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": "tr_parent/0/call_1", "weft.public_id": "pub_conf",
 				"weft.parent.run.id": "tr_parent", "weft.parent.call.id": "call_1", "gen_ai.agent.name": "researcher"}),
 		traceSpan(trB, "b200000000000001", "", "POST /chat", "edge-svc", 10*s, 13*s, 0, map[string]any{"http.method": "POST"}),
-		traceSpan(trB, "b200000000000002", "b200000000000001", "invoke_agent conf", "conf-svc", 10*s+s/2, 12*s, 1, weftAttrs("tr_web", "pub_conf", "invoke_agent")),
+		traceSpan(trB, "b200000000000002", "b200000000000001", "invoke_agent conf", "conf-svc", 10*s+s/2, 12*s, 1,
+			withMeta(weftAttrs("tr_web", "pub_conf", "invoke_agent"), "arena.batch", "b1")),
 		traceSpan(trC, "c300000000000002", "c3000000000000ff", "work", "orphan-svc", 21*s, 22*s, 2, map[string]any{"job": "x"}),
 		traceSpan(trC, "c300000000000001", "c3000000000000ff", "work", "orphan-svc", 20*s, 23*s, 0, map[string]any{"job": "x"}),
-		traceSpan(trD, "d400000000000001", "", "invoke_agent conf", "conf-svc", 30*s, 31*s, 1, weftAttrs("tr_other", "pub_other", "invoke_agent")),
+		traceSpan(trD, "d400000000000001", "", "invoke_agent conf", "conf-svc", 30*s, 31*s, 1,
+			withMeta(weftAttrs("tr_other", "pub_other", "invoke_agent"), "arena.batch", "b1", "weft.flow", "f_checkout")),
 	}
 }
 
@@ -62,7 +72,8 @@ func traceFixture() []obsdb.Span {
 // retried batch repeated; the runs a trace holds (a subagent child
 // beside its parent); a missing root is nil with the earliest span's
 // service; error from any span; the since/until/service/public-id
-// filters and the (Before, BeforeID) cursor.
+// filters, the run metadata filter (Meta) and the (Before, BeforeID)
+// cursor.
 func traces(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -132,6 +143,14 @@ func traces(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"public id", obsdb.TraceQuery{PublicID: "pub_conf"}, []string{trA}, 1},
 			{"another public id", obsdb.TraceQuery{PublicID: "pub_other"}, []string{trD}, 1},
 			{"an unknown public id", obsdb.TraceQuery{PublicID: "pub_nobody"}, []string{}, 0},
+			// Run metadata (U22: tag.<k>=<v>, flow=): a trace holding a
+			// span that carries each pair — trB's run span under its
+			// non-weft root counts.
+			{"a tag", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b1"}}, []string{trD, trB}, 2},
+			{"two pairs, ANDed", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b1", "weft.flow": "f_checkout"}}, []string{trD}, 1},
+			{"a tag and a public id", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b1"}, PublicID: "pub_other"}, []string{trD}, 1},
+			{"a tag and since", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b1"}, Since: at(15 * s)}, []string{trD}, 1},
+			{"a tag's value is exact", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b"}}, []string{}, 0},
 		} {
 			got, err := db.Traces(ctx(), c.q)
 			if err != nil {

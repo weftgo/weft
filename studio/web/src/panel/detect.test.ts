@@ -34,6 +34,7 @@ import {
   assistant,
 } from "./testkit"
 import type { Route } from "./testkit"
+import type { RunsPage } from "../lib/api"
 
 /** The page's own origin under jsdom: loopback (vitest's default URL). */
 const HERE = location.origin
@@ -850,8 +851,20 @@ describe("the panel follows the scope (rung 1)", () => {
     expect($(el, ".weft-pin-missing")).toBeNull()
   })
 
-  it("session narrows the turn list when the runs carry a session id; flow is a chip that filters nothing", async () => {
-    fakeStudio(demoRoutes())
+  it("session narrows the turn list when the runs carry a session id; flow (weft.flow, U22) filters every read", async () => {
+    const routes = demoRoutes()
+    const r1 = (routes["runs?public_id=pub_demo&limit=50"] as RunsPage).runs[1]
+    routes["runs?session=s_a&flow=f_1&limit=50"] = {
+      total: 1,
+      runs: [r1],
+      next_before: null,
+    }
+    routes["runs?public_id=pub_demo&flow=f_1&limit=50"] = {
+      total: 1,
+      runs: [r1],
+      next_before: null,
+    }
+    const studio = fakeStudio(routes)
     const el = await mountWith({
       "data-endpoint": REMOTE,
       "data-scope": "pub_demo;session=s_a;flow=f_1",
@@ -864,7 +877,13 @@ describe("the panel follows the scope (rung 1)", () => {
     ])
     el.setAttribute("data-scope", "pub_demo;flow=f_1")
     await settle()
-    expect(ids(el)).toEqual(["r_2", "r_1"]) // flow alone filters nothing
+    // The flow alone narrows the public id's list (r_2 is not stamped
+    // f_1), and its live lane asks the same.
+    expect(ids(el)).toEqual(["r_1"])
+    expect(
+      studio.gets("runs?public_id=pub_demo&flow=f_1&limit=50")
+    ).toHaveLength(1)
+    expect(FakeEventSource.last("public_id=pub_demo&flow=f_1")).toBeTruthy()
   })
 
   it("a session the runs do not record is said, and the list is not narrowed", async () => {

@@ -49,12 +49,20 @@ const KINDS = ["event", "delta", "messages", "run", "attempt"]
 function streamOf(
   q: URLSearchParams
 ): { stream: string; sel: string; value: string } | { error: string } {
+  // The run metadata filter (U22: tag.<k>, flow — live.go's liveMeta):
+  // part of the stream, and a selector of its own when alone.
+  const meta = [...q.entries()]
+    .filter(([k, v]) => (k.startsWith("tag.") || k === "flow") && v)
+    .map(([k, v]) => `${k === "flow" ? "weft.flow" : k.slice(4)}=${v}`)
+    .sort()
   const named = SELECTORS.filter((k) => q.has(k))
-  if (named.length !== 1)
+  if (named.length !== 1 && !(named.length === 0 && meta.length))
     return { error: "exactly one of run, session, public_id, agent or all" }
-  const sel = named[0]
+  // The filter alone is the zero selector (livegrant.go's liveStream
+  // names it "agent" with no value).
+  const sel: string = named.length ? named[0] : ""
   let value = q.get(sel) ?? ""
-  if (!value || q.getAll(sel).length !== 1)
+  if (named.length && (!value || q.getAll(sel).length !== 1))
     return { error: `${sel} must name one id` }
   // live.go's liveSelector: all takes 1 or true, one stream either way.
   if (sel === "all") {
@@ -80,7 +88,16 @@ function streamOf(
       error:
         "kinds must name at least one of event, delta, messages, run, attempt",
     }
-  return { stream: JSON.stringify([sel, value, kinds.join(",")]), sel, value }
+  return {
+    stream: JSON.stringify([
+      named.length ? sel : "agent",
+      value,
+      kinds.join(","),
+      ...meta,
+    ]),
+    sel,
+    value,
+  }
 }
 
 interface PanelClaims {
@@ -137,8 +154,13 @@ export function answerLiveGrant(
       return refuse(400, "bad_request", "body must be JSON")
     }
     q = new URLSearchParams()
-    for (const k of [...SELECTORS, "kinds"])
-      if (typeof doc[k] === "string" && doc[k]) q.set(k, doc[k])
+    for (const k of Object.keys(doc))
+      if (
+        ([...SELECTORS, "kinds", "flow"].includes(k) || k.startsWith("tag.")) &&
+        typeof doc[k] === "string" &&
+        doc[k]
+      )
+        q.set(k, doc[k])
     // The body's form of all=1 is {"all": true} (livegrant.go).
     if (doc.all === true) q.set("all", "1")
   }

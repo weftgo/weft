@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -99,7 +101,7 @@ func liveGrantKey(token string) []byte {
 // selector's name and value, and the kinds set sorted and
 // comma-joined — so "run,event" and "event,run" (and the omitted
 // default) name the same stream, and anything else does not.
-func liveStream(sel obsdb.Selector, kinds map[string]bool) []byte {
+func liveStream(sel obsdb.Selector, kinds map[string]bool, meta map[string]string) []byte {
 	name, value := "agent", sel.Agent
 	switch {
 	case sel.RunID != "":
@@ -116,7 +118,13 @@ func liveStream(sel obsdb.Selector, kinds map[string]bool) []byte {
 		ks = append(ks, k)
 	}
 	sort.Strings(ks)
-	b, _ := json.Marshal([]string{name, value, strings.Join(ks, ",")})
+	stream := []string{name, value, strings.Join(ks, ",")}
+	// The metadata filter (U22) is part of the stream: key=value pairs
+	// in key order after the kinds; none, the stream as before.
+	for _, k := range slices.Sorted(maps.Keys(meta)) {
+		stream = append(stream, k+"="+meta[k])
+	}
+	b, _ := json.Marshal(stream)
 	return b
 }
 
@@ -226,11 +234,21 @@ func (s *Server) verifyLiveGrant(r *http.Request, sig string) (identity, error) 
 	if err != nil {
 		return identity{}, errBadGrant
 	}
-	claims, err := parseLiveGrant(s.grantKey, sig, liveStream(sel, kinds), s.now())
+	claims, err := parseLiveGrant(s.grantKey, sig, liveStream(sel, kinds, liveMeta(q)), s.now())
 	if err != nil {
 		return identity{}, err
 	}
 	return claims.identity(), nil
+}
+
+// liveStreamParam reports whether k is a parameter naming a live
+// stream: the selector, kinds, and the metadata filter (flow, tag.<k>).
+func liveStreamParam(k string) bool {
+	switch k {
+	case "run", "session", "public_id", "agent", "all", "kinds", "flow":
+		return true
+	}
+	return strings.HasPrefix(k, "tag.")
 }
 
 // badGrant is the refusal of a sig: it never echoes the sig, and says
@@ -259,37 +277,47 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(strings.TrimSpace(string(body))) > 0 {
-		for _, k := range []string{"run", "session", "public_id", "agent", "all", "kinds"} {
-			if _, ok := q[k]; ok {
+		for k := range q {
+			if liveStreamParam(k) {
 				badRequest(w, r, "name the stream in the body or in the query, not both")
 				return
 			}
 		}
-		var req struct {
-			Run      string `json:"run"`
-			Session  string `json:"session"`
-			PublicID string `json:"public_id"`
-			Agent    string `json:"agent"`
-			// All is the every-run selector: true (the body's form of
-			// the query's all=1).
-			All   bool   `json:"all"`
-			Kinds string `json:"kinds"`
+		// The body's members are the query's parameters (run, session,
+		// public_id, agent, kinds, flow and tag.<k>: strings), all a
+		// boolean (the query's all=1); any other member is ignored.
+		var req map[string]json.RawMessage
+		bad := func() {
+			badRequest(w, r, "body must be JSON: {\"run\"|\"session\"|\"public_id\"|\"agent\": \"…\" or \"all\": true, \"tag.<k>\"|\"flow\": \"…\", \"kinds\": \"event,run\"}")
 		}
-		if err := json.Unmarshal(body, &req); err != nil {
-			badRequest(w, r, "body must be JSON: {\"run\"|\"session\"|\"public_id\"|\"agent\": \"…\" or \"all\": true, \"kinds\": \"event,run\"}")
+		if err := json.Unmarshal(body, &req); err != nil || req == nil {
+			bad()
 			return
 		}
 		q = url.Values{}
-		for k, v := range map[string]string{
-			"run": req.Run, "session": req.Session, "public_id": req.PublicID,
-			"agent": req.Agent, "kinds": req.Kinds,
-		} {
+		for k, raw := range req {
+			if !liveStreamParam(k) {
+				continue
+			}
+			if k == "all" {
+				var all bool
+				if err := json.Unmarshal(raw, &all); err != nil {
+					bad()
+					return
+				}
+				if all {
+					q["all"] = []string{"1"}
+				}
+				continue
+			}
+			var v string
+			if err := json.Unmarshal(raw, &v); err != nil {
+				bad()
+				return
+			}
 			if v != "" {
 				q[k] = []string{v}
 			}
-		}
-		if req.All {
-			q["all"] = []string{"1"}
 		}
 	}
 	sel, err := liveSelector(q)
@@ -302,7 +330,7 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, r, err.Error())
 		return
 	}
-	if !s.scopeLive(w, r, sel) {
+	if !s.scopeLive(w, r, resolveLive(r, sel)) {
 		return
 	}
 	id := idFrom(r)
@@ -318,7 +346,7 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	claims.Exp = exp
-	sig, err := signLiveGrant(s.grantKey, claims, liveStream(sel, kinds))
+	sig, err := signLiveGrant(s.grantKey, claims, liveStream(sel, kinds, liveMeta(q)))
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "internal", "sign the live grant")
 		return

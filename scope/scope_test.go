@@ -42,7 +42,7 @@ func TestGoldenRoundTrip(t *testing.T) {
 		if got := c.Scope.String(); got != c.String {
 			t.Errorf("%#v.String() = %q, want %q", c.Scope, got, c.String)
 		}
-		if got := Parse(c.String); got != c.Scope {
+		if got := Parse(c.String); !got.Equal(c.Scope) {
 			t.Errorf("Parse(%q) = %#v, want %#v", c.String, got, c.Scope)
 		}
 		flow = flow || c.Scope.FlowID != ""
@@ -62,7 +62,7 @@ func TestGoldenSerializeOnly(t *testing.T) {
 
 func TestGoldenParseIsLenient(t *testing.T) {
 	for _, c := range readGolden(t).Parse {
-		if got := Parse(c.String); got != c.Scope {
+		if got := Parse(c.String); !got.Equal(c.Scope) {
 			t.Errorf("Parse(%q) = %#v, want %#v", c.String, got, c.Scope)
 		}
 	}
@@ -76,7 +76,7 @@ func TestInvalidUTF8EncodesOnlyTheDelimiters(t *testing.T) {
 	if got, want := s.String(), "a%3B\xff;run=%3D%25"; got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
-	if got := Parse(s.String()); got != s {
+	if got := Parse(s.String()); !got.Equal(s) {
 		t.Errorf("round trip = %#v, want %#v", got, s)
 	}
 }
@@ -93,7 +93,7 @@ func TestInvalidUTF8EncodesControlBytes(t *testing.T) {
 			t.Fatalf("String() = %q carries the control byte %#x", s.String(), c)
 		}
 	}
-	if got := Parse(s.String()); got != s {
+	if got := Parse(s.String()); !got.Equal(s) {
 		t.Errorf("round trip = %#v, want %#v", got, s)
 	}
 }

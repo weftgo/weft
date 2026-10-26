@@ -1,5 +1,5 @@
 {
-  "//": "The Scope string form (plan §13.3), shared by scope/scope_test.go (Go: scope.Scope.String, scope.Parse) and studio/web/src/lib/scope.test.ts (web: serializeScope, parseScope). roundtrip: serialise scope to string, parse string back to scope. serialize: serialise only (the parse side drops what it wrote as unset). parse: parse only (the lenient reader). Keys are the web Scope's: publicId, session, flow, run.",
+  "//": "The Scope string form (plan §13.3), shared by scope/scope_test.go (Go: scope.Scope.String, scope.Parse) and studio/web/src/lib/scope.test.ts (web: serializeScope, parseScope). roundtrip: serialise scope to string, parse string back to scope. serialize: serialise only (the parse side drops what it wrote as unset). parse: parse only (the lenient reader). Keys are the web Scope's: publicId, session, flow, run, agent, tags (U22: run metadata pairs, written tag.<k>=<v> in key order; a scope without a public id starts with ';', and a first segment that is a known key=value is read as one).",
   "roundtrip": [
     { "scope": { "publicId": "pub_1" }, "string": "pub_1" },
     { "scope": { "publicId": "pub_1", "session": "s_2" }, "string": "pub_1;session=s_2" },
@@ -17,11 +17,19 @@
     { "scope": { "publicId": "a!b*c'(d)" }, "string": "a!b*c'(d)" },
     { "scope": { "publicId": "pub é", "session": "s ✓", "flow": "f+1/2" }, "string": "pub%20%C3%A9;session=s%20%E2%9C%93;flow=f%2B1%2F2" },
     { "scope": { "publicId": "pub_1", "run": "r 😀&?#" }, "string": "pub_1;run=r%20%F0%9F%98%80%26%3F%23" },
-    { "scope": { "publicId": "pub\r\nX: y", "session": "\u0000\t\u007f" }, "string": "pub%0D%0AX%3A%20y;session=%00%09%7F" }
+    { "scope": { "publicId": "pub\r\nX: y", "session": "\u0000\t\u007f" }, "string": "pub%0D%0AX%3A%20y;session=%00%09%7F" },
+    { "scope": { "publicId": "", "tags": { "arena.batch": "cli-20261012-115753" } }, "string": ";tag.arena.batch=cli-20261012-115753" },
+    { "scope": { "publicId": "", "agent": "director" }, "string": ";agent=director" },
+    { "scope": { "publicId": "", "flow": "f_checkout" }, "string": ";flow=f_checkout" },
+    { "scope": { "publicId": "pub_1", "flow": "f_checkout", "agent": "a b", "tags": { "z": "1", "a.b": "x;y" } }, "string": "pub_1;flow=f_checkout;agent=a%20b;tag.a.b=x%3By;tag.z=1" },
+    { "scope": { "publicId": "", "agent": "director", "tags": { "ci.job": "1234", "eval.suite": "refunds" } }, "string": ";agent=director;tag.ci.job=1234;tag.eval.suite=refunds" },
+    { "scope": { "publicId": "", "tags": { "k=;": "v é" } }, "string": ";tag.k%3D%3B=v%20%C3%A9" }
   ],
   "serialize": [
     { "scope": { "publicId": "pub_1", "session": "" }, "string": "pub_1" },
-    { "scope": { "publicId": "pub_1", "session": "", "flow": "", "run": "r_9" }, "string": "pub_1;run=r_9" }
+    { "scope": { "publicId": "pub_1", "session": "", "flow": "", "run": "r_9" }, "string": "pub_1;run=r_9" },
+    { "scope": { "publicId": "", "tags": { "": "x", "k": "" } }, "string": "" },
+    { "scope": { "publicId": "pub_1", "agent": "", "tags": {} }, "string": "pub_1" }
   ],
   "parse": [
     { "string": "pub_1;tenant=acme;session=s_2;session=s_3;junk;run=", "scope": { "publicId": "pub_1", "session": "s_2" } },
@@ -38,6 +46,12 @@
     { "string": "%E0%A4%A", "scope": { "publicId": "%E0%A4%A" } },
     { "string": "", "scope": { "publicId": "" } },
     { "string": ";;;", "scope": { "publicId": "" } },
-    { "string": "junk", "scope": { "publicId": "junk" } }
+    { "string": "junk", "scope": { "publicId": "junk" } },
+    { "string": "tag.arena.batch=cli-20261012-115753", "scope": { "publicId": "", "tags": { "arena.batch": "cli-20261012-115753" } } },
+    { "string": " agent = director ;tag.a=1;tag.a=2;tag.=x;tag.b=;Tag.c=3", "scope": { "publicId": "", "agent": "director", "tags": { "a": "1" } } },
+    { "string": "flow=f_checkout", "scope": { "publicId": "", "flow": "f_checkout" } },
+    { "string": "a=b;run=r_1", "scope": { "publicId": "a=b", "run": "r_1" } },
+    { "string": "tag.=x", "scope": { "publicId": "tag.=x" } },
+    { "string": "pub_1;tag.k%2Ex=v;agent=x;agent=y", "scope": { "publicId": "pub_1", "agent": "x", "tags": { "k.x": "v" } } }
   ]
 }

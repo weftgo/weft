@@ -317,6 +317,13 @@ One script tag puts the run loop in the corner of your own page —
 
     <script type="module" src="/studio/panel.js" data-weft data-scope="pub_…"></script>
 
+Against a Studio that wants a token — setup B, `weft studio`, which
+prints its dev token — the tag carries it (on a page you ship, a panel
+token your backend mints instead):
+
+    <script type="module" src="http://127.0.0.1:7341/panel.js" data-weft
+      data-endpoint="http://127.0.0.1:7341/" data-token="<dev token>" data-scope="pub_…"></script>
+
 Rung 1 is a viewer scoped to that conversation: the turns (parked
 shown), the step story with tool calls, usage splits, each step's
 attempts and timing ("attempt 4 of 4 · fallback to glm-b", "1.2 s ·
@@ -721,15 +728,42 @@ that switches conversations sets `window.__WEFT__ = { scope }` (or
 knob, so keep `data-weft` on it — it is how the panel finds its own tag
 (and with it the endpoint) whatever the file is called.
 
-The panel follows a scope, `pub_…;session=s_…;flow=f_…;run=r_…`
-(`src/lib/scope.ts`; only the public id is required). The public id
-selects the conversation; `run` pins the selected turn, and its live
-tail, to that run once (your clicks own the selection afterwards), or
-says `run r_… not in this conversation` when it is not among the
-conversation's runs; `session` narrows the turn list to that session's
-runs (a run without a session id is not judged, and a list whose runs
-carry none says it is not narrowed); `flow` shows as a chip in the
-header and filters nothing yet (it waits for `weft/flow`).
+The panel follows a scope,
+`pub_…;session=s_…;flow=f_…;run=r_…;agent=…;tag.<k>=<v>`
+(`src/lib/scope.ts`, `weft/scope`'s `Scope`; one golden pins both).
+The public id selects the conversation; `run` pins the selected turn,
+and its live tail, to that run once (your clicks own the selection
+afterwards), or says `run r_… not in this conversation` when it is not
+among the conversation's runs; `session` narrows the turn list to that
+session's runs (a run without a session id is not judged, and a list
+whose runs carry none says it is not narrowed); `flow` narrows every
+read to the runs stamped `weft.flow` with it (run metadata: `scope.Header`
+stamps a scope's flow on the runs its handler starts, `scope.WithFlow`
+any context's) and shows as a chip.
+
+A page of unrelated runs — a test harness, a CI or eval batch — has no
+conversation: name it by its run metadata instead,
+`data-scope="tag.arena.batch=cli-20261012-115753"` (repeatable
+`tag.<k>=<v>` segments, ANDed; `agent=` the same way; the tags are
+what the app stamped with `core.WithMetadata` or `core.Metadata`). A
+tag, agent or flow scope stands without a public id (its string form
+then starts with `;`, and a first segment that is one of these keys is
+read as one). The panel then lists that page's runs —
+`/api/runs?tag.<k>=<v>` (and `agent=`, `flow=`) with the live lane on
+`/api/live?tag.<k>=<v>` — and the header reads `batch
+cli-20261012-115753 · 196 runs`: the first tag's key by its last dotted
+segment, the match's whole count; the rows say "run" and name their
+agent. Under a panel token a tag scope reads what the token already
+allows (its public id's runs); a tag scope is only as tight as the
+app's own tagging.
+
+| Scope | Write it as | Lists |
+|---|---|---|
+| one conversation | `data-scope="pub_…"` (or `?weft_scope=pub_…` on the page's URL, no code) | its turns |
+| one session of it | `pub_…;session=s_…` | that session's turns |
+| one flow | `;flow=f_checkout` (or `pub_…;flow=…`) | the runs stamped `weft.flow=f_checkout` |
+| a batch of runs | `data-scope="tag.arena.batch=…"` (`core.WithMetadata`) | the runs whose metadata carries every pair |
+| one agent's runs | `;agent=director` (with tags: that agent's runs of the batch) | those runs |
 `data-public-id="pub_…"` is still read, as the scope `pub_…`, but it
 is deprecated: `data-scope` is the form.
 
@@ -754,8 +788,9 @@ off by default here).
 | 1 | explicit: `data-scope` (element, `weft:scope` meta, script tag), `window.__WEFT__ = { scope }` or `{ publicId }`, `scope()` / `mount({scope})` from `@weftgo/devtools`, the deprecated `data-public-id` | always; it wins over every detected scope | — |
 | 2 | response headers: the `Weft-Scope` header of the page's own same-origin `fetch` responses (the scope header below) | by default only with the page and the endpoint on loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) and no token or a dev/server token, and only once Studio has answered; anywhere with `data-detect="headers"` (or `mount({detect: "headers"})`); never under a panel token (`weft_pt.`) unless asked | `data-scope` |
 | 3 | the DOM marker: `data-weft-scope="pub_…;session=…;flow=…;run=…"` on any element of the page — the framework helpers (`useWeftDevtools` for React and Vue, the Svelte `weftDevtools` action) set it on the element they are given | by default everywhere except a page off loopback under a read-scoped panel token (a playground-scoped panel token, the dev token, no token, or any token on loopback keep it on); anywhere with `data-detect="markers"` (or `"headers,markers"`, `mount({detect: "markers"})`) | `data-scope` |
-| 4 | the page URL: `?weft_scope=…` (read first), else `#weft_scope=…` — the same string form, URL-decoded (`#weft_scope=pub_x%3Bflow%3Df_1`); a value without a public id is ignored | always, every setup and token, `data-detect="off"` included; below rung 1, above rungs 2 and 3; re-read on `hashchange` and `popstate` | `data-scope` |
-| 5 | the fallback: no rung names a scope — the header reads "no conversation detected on this page · how to scope" and lists the newest runs | when 1–4 name nothing | any line under "how to scope": `data-scope="pub_…" on the panel's <script> tag (or <weft-devtools>)`, `scope("pub_…") from @weftgo/devtools`, `data-weft-scope="pub_…" on the chat's element`, `scope.Header(h, …) on the app's handler (Go, package weft/scope)` |
+| 4 | the page URL — the zero-code rung: `?weft_scope=…` (read first), else `#weft_scope=…` — the same string form, URL-decoded (`#weft_scope=pub_x%3Bflow%3Df_1`, `?weft_scope=tag.arena.batch%3Db1`); a value naming neither a public id nor a tag, agent or flow is ignored | always, every setup and token, `data-detect="off"` included; below rung 1, above rungs 2 and 3; re-read on `hashchange` and `popstate` | `data-scope` |
+| 4b | a panel token's public id (UX-D-09): a `weft_pt.` token's `public_id` claim, read as a hint (Studio still enforces the token) — the one conversation it can read anyway | when 1–4 name nothing and the token is a panel token | `data-scope` |
+| 5 | the fallback: no rung names a scope — the header reads "no conversation detected on this page · how to scope" and lists the newest runs, each with its agent, none selected and no summed cost | when 1–4 name nothing | any line under "how to scope": `add ?weft_scope=pub_… to this page's URL (no code)`, `data-scope="pub_…" on the panel's <script> tag (or <weft-devtools>)`, `scope("pub_…") from @weftgo/devtools`, `data-weft-scope="pub_…" on the chat's element`, `scope.Header(h, …) on the app's handler (Go, package weft/scope)` — and an "all rungs ⤢" link to this table; a batch of runs is named by its tags (above) |
 
 Rung 3 trusts the page's DOM: a `data-weft-scope` attribute anywhere
 in it names a conversation, and an HTML sanitizer (DOMPurify among
@@ -890,7 +925,9 @@ no run listed yet (no agent to name), the stream gone (it is reopened
 on the bounded backoff — 5 s, doubling, capped at a minute, five times at most; the poll does
 not reopen it in between), or a grant refused (`streaming needs the
 server token · polling`; a panel token is never granted an agent's
-stream, so under one the panel never asks and says the same). In the
+stream, so under one the panel never asks and says `live updates every
+10 s (panel tokens poll)` — but a panel token naming a public id scopes
+the panel to it first, rung 4b, so its page has no fallback). In the
 fallback only the streamed agent's runs light the pill below.
 
 The collapsed pill is an activity signal: while the stream the panel
@@ -1087,16 +1124,23 @@ source: in HTML you ship, use a per-page panel token your backend
 mints (`POST /api/panel-tokens`), never a dev or server token.
 
 No Studio answering: the dock the script mounted by itself removes
-itself silently — no console, at most two requests (`panel-config.json`,
-then meta; `panel-config.json` gives up after 3 s). A mount you made (a
+itself silently unless the endpoint is one you named on loopback (production safety)
+— no console, at most two requests (`panel-config.json`, then meta;
+`panel-config.json` gives up after 3 s). On a loopback endpoint you
+named (your own Studio, not started yet), and on a mount you made (a
 `<weft-devtools>` element in your markup, `mount(opts)`, or
-`data-auto="false"`) shows one quiet line instead, `Studio not
+`data-auto="false"`), it shows one quiet line instead, `Studio not
 reachable at <endpoint> · retry`, where `retry` asks again (the line
-reads `checking…` while it does). The
+reads `checking…` while it does). A Studio that answers 401 or 403 is
+there and wants a token (UX-S5a-03): never removed, whatever the
+install path, the line reads `Studio needs a token at <endpoint> — add
+data-token (the dev token) or a panel token (POST /api/panel-tokens)
+· retry` (`weft open --with-token` opens Studio
+itself signed in). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 285,221 B raw / 96,090 B gzip
-(93.8 KiB, the bundle of the ledger's row "U21.1"; 10,406 B — 10.2 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 286,714 B raw / 96,768 B gzip
+(94.5 KiB, the bundle of the ledger's row "U22 scope tags and flow"; 9,728 B — 9.5 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

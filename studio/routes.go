@@ -241,6 +241,13 @@ func (s *Server) registerGroups() {
 			mux.HandleFunc("POST /api/live-grant", s.serveLiveGrant)
 		},
 	})
+	// The tag scope (U22, UX-E-27, A5): tag.<k>=<v> and flow= (run
+	// metadata weft.flow) on /api/runs, /api/sessions, /api/search,
+	// /api/traces and /api/live (a selector over run frames, alone or
+	// narrowing another) — what the devtools panel's batch scope reads.
+	// The routes are the read API's and the live group's; the
+	// capability says the parameters are served. Always present.
+	s.addGroup(routeGroup{name: "scope_tags", capability: "scope_tags"})
 	// OTLP ingest (S4.4), unless NoIngest turned the receiver off.
 	if !s.noIngest {
 		s.addGroup(routeGroup{

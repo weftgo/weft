@@ -252,6 +252,7 @@ import {
 import {
   discoverEndpoint,
   headerRungOn,
+  isLoopback,
   markerRungOn,
   readConfig,
   setViaPackage,
@@ -303,6 +304,7 @@ import {
 import { nextTheme, resolveTheme, themeSetting, ThemeWatch } from "./theme"
 import {
   DEV_DISCOVERY_MS,
+  DEV_POLL_MS,
   emptyPanelState,
   listKey,
   MAX_EVENT_PAGES,
@@ -507,6 +509,7 @@ export type ScopeSource = "explicit" | "url" | "marker" | "header"
  * scope, one line each, from the README's ladder — shown under "how to
  * scope" when no rung names one. */
 export const HOW_TO_SCOPE: readonly string[] = [
+  "add ?weft_scope=pub_… to this page's URL (no code)",
   'data-scope="pub_…" on the panel\'s <script> tag (or <weft-devtools>)',
   'scope("pub_…") from @weftgo/devtools',
   'data-weft-scope="pub_…" on the chat\'s element',
@@ -831,6 +834,8 @@ export class WeftDevtools extends HTMLElement {
   /** The endpoint that did not answer, for the not-reachable line of
    * a mount the host made (null: no line). */
   private unreachable: string | null = null
+  /** The not-reachable line is a 401/403's: Studio wants a token. */
+  private walled = false
   /** A retry from the not-reachable line is in flight: the line stays
    * (saying "checking…") until the probe resolves. */
   private checking = false
@@ -1904,8 +1909,11 @@ export class WeftDevtools extends HTMLElement {
    * the plain link (never the minted one) is on the note line past 1 s
    * and, whatever the answer, once it came. */
   private handoff(url: string): boolean {
+    // A playground panel token mints a read token; the dev token (setup
+    // B, UX-D-18) rides the fragment as weft open's does. Not a read token.
     if (
-      tokenScope(this.cfg.token) !== "playground" ||
+      !this.cfg.token ||
+      tokenScope(this.cfg.token) == "read" ||
       !hasCapability(this.last, "handoff")
     )
       return false
@@ -2300,13 +2308,22 @@ export class WeftDevtools extends HTMLElement {
       return
     }
     // No Studio answered: the page's fetch is not the panel's to touch.
+    // A 401/403 is a Studio that wants a token (UX-S5a-03): said, never
+    // removed — as a loopback Studio the host named is (one not
+    // running yet); an endpoint guessed from the page stays silent.
+    this.walled = !!this.model?.state.walled
     this.dropRung()
     this.dropMarkers()
     this.model?.dispose()
     this.model = null
     this.conn = null
     // The panel's own dock: this page does not want a panel (V4).
-    if (this.autoMounted) this.remove()
+    if (
+      this.autoMounted &&
+      !this.walled &&
+      !(cfg.endpointExplicit && isLoopback(endpoint))
+    )
+      this.remove()
     else {
       // The host wrote the mount: it wants to see why nothing is there.
       this.dormant = true
@@ -2568,13 +2585,17 @@ export class WeftDevtools extends HTMLElement {
           role: "status",
         })
         line.append(
-          this.unreachable
-            ? "Studio not reachable at "
-            : "Studio not reachable: no http(s) endpoint",
+          this.walled
+            ? "Studio needs a token at "
+            : this.unreachable
+              ? "Studio not reachable at "
+              : "Studio not reachable: no http(s) endpoint",
           ...(this.unreachable
             ? [el("span", "weft-unreachable-at", this.unreachable)]
             : []),
-          " · "
+          this.walled
+            ? " — add data-token (the dev token) or a panel token (POST /api/panel-tokens) · "
+            : " · "
         )
         if (this.checking) line.append(el("span", "weft-checking", "checking…"))
         else {
@@ -2905,6 +2926,12 @@ export class WeftDevtools extends HTMLElement {
   private howToBox(): HTMLElement {
     const box = el("div", "weft-howto")
     for (const line of HOW_TO_SCOPE) box.append(el("code", "", line))
+    box.append(
+      el("a", "", "all rungs ⤢", {
+        href: "https://github.com/weftgo/weft/tree/main/studio#the-devtools-panel-weft-devtoolsmd",
+        ...NEW_TAB,
+      })
+    )
     return box
   }
 
@@ -2967,15 +2994,24 @@ export class WeftDevtools extends HTMLElement {
     )
     const agent = s.session?.agent ?? s.turns.at(0)?.agent ?? ""
     const scope = this.model?.publicId || s.session?.public_id || ""
+    // A page of runs (U22): its first tag by the key's last segment
+    // ("batch cli-…"), else its agent, else its flow.
+    const narrowing = this.model?.narrowing ?? {}
+    const [tk, tv] = Object.entries(narrowing.tags ?? {})[0] ?? []
+    const q = tk
+      ? `${tk.split(".").pop()} ${tv}`
+      : narrowing.agent
+        ? `agent ${narrowing.agent}`
+        : narrowing.flow && `flow ${narrowing.flow}`
     const title = scope
       ? `${agent ? agent + " · " : ""}${scope}`
-      : NO_SCOPE_LABEL
+      : q || NO_SCOPE_LABEL
     h.append(
       el("span", "weft-title", title, {
-        title: scope ? title : `${title}: the newest runs are shown`,
+        title: scope || q ? title : `${title}: the newest runs are shown`,
       })
     )
-    if (!scope) {
+    if (!scope && !q) {
       // The fallback (C3.4): never an unexplained list — the fixes are
       // one click away.
       const how = el(
@@ -2996,9 +3032,8 @@ export class WeftDevtools extends HTMLElement {
     }
     const sw = this.switcher(s)
     if (sw) h.append(sw)
-    // The scope's narrowing, as chips: the session filters the list,
-    // the flow is carried and filters nothing yet (C3.2).
-    const narrowing = this.model?.narrowing ?? {}
+    // The scope's narrowing, as chips: the session and the flow
+    // (weft.flow, U22) filter the list.
     if (narrowing.session)
       h.append(
         el(
@@ -3008,10 +3043,10 @@ export class WeftDevtools extends HTMLElement {
           { title: "the turn list is narrowed to this session" }
         )
       )
-    if (narrowing.flow)
+    if (narrowing.flow && title != `flow ${narrowing.flow}`)
       h.append(
         el("span", "weft-chip weft-scope-chip", `flow ${narrowing.flow}`, {
-          title: "the scope's flow — carried, filters nothing yet",
+          title: "the list is narrowed to this flow (weft.flow)",
         })
       )
     h.append(el("span", "weft-grow"))
@@ -3027,9 +3062,12 @@ export class WeftDevtools extends HTMLElement {
       ? "—"
       : `${unknown ? "≥" : ""}${tokenPair(inTok, outTok)}`
     // "turn" is a session's word (UX-F-13): a list no session scopes
-    // counts runs; "1 turn" singular.
-    const count = s.turns.length
-    const stats = `${count}${s.turnsCapped ? "+" : ""} ${s.session ? "turn" : "run"}${count - 1 || s.turnsCapped ? "s" : ""} · ${tok}`
+    // counts runs; "1 turn" singular. A page of runs (U22) counts its
+    // whole match (the runs page's total), "batch b · 196 runs".
+    const all = !scope && q ? s.total : undefined
+    const count = all ?? s.turns.length
+    const more = all == null && s.turnsCapped
+    const stats = `${count}${more ? "+" : ""} ${s.session && !q ? "turn" : "run"}${count - 1 || more ? "s" : ""} · ${tok}`
     h.append(
       el("span", "", stats, {
         title: unknown ? `${stats} — ${unknown.cost_reason ?? ""}` : stats,
@@ -3041,7 +3079,7 @@ export class WeftDevtools extends HTMLElement {
     // the reasons its title. Older turns not loaded yet: the sum is the
     // loaded turns' only, "≥". Then what is unpriced, once (U7: lib/
     // cost.ts's unpricedLine), a link to Studio's pricing table.
-    if (s.turns.length && hasCapability(s, "pricing")) {
+    if (s.turns.length && hasCapability(s, "pricing") && (scope || q)) {
       h.append(
         el(
           "span",
@@ -3313,15 +3351,19 @@ export class WeftDevtools extends HTMLElement {
       )
     // The fallback's stream, said: refused (it polls), or one agent of
     // several followed live.
-    if (!this.model?.publicId && s.devRefused)
+    // Only the fallback refuses a stream: a panel token is never
+    // granted an agent's (UX-D-09: never advise the server token).
+    if (s.devRefused)
       list.append(
         el(
           "div",
           "weft-note weft-dev-poll",
-          "streaming needs the server token · polling"
+          tokenScope(this.cfg.token)
+            ? `live updates every ${DEV_POLL_MS / 1000} s (panel tokens poll)`
+            : "streaming needs the server token · polling"
         )
       )
-    else if (!this.model?.publicId && s.devAgent)
+    else if (s.devAgent)
       list.append(
         el(
           "div",
@@ -3329,11 +3371,14 @@ export class WeftDevtools extends HTMLElement {
           `live: agent ${s.devAgent} · the other agents' runs every ${DEV_DISCOVERY_MS / 1000} s`
         )
       )
+    // A page of runs (U22) and the fallback say "run"; a conversation
+    // "turn".
+    const noun = this.model?.publicId ? "turn" : "run"
     if (!s.turns.length && !s.experiments.size) {
       const empty = session
         ? `no turns of session ${session} yet`
-        : this.model?.publicId
-          ? "no turns yet — run your app"
+        : this.model?.scoped
+          ? `no ${noun}s yet — run your app`
           : "no runs yet — connect your app (otel.Install)"
       list.append(el("div", "weft-splash", empty))
       return list
@@ -3364,7 +3409,7 @@ export class WeftDevtools extends HTMLElement {
         : ids[0]
     const items = el("div", "weft-rows", "", {
       role: "list",
-      "aria-label": "turns, newest first",
+      "aria-label": `${noun}s, newest first`,
     })
     const row = (r: RunRow) => this.turnRow(r, s.selected, tab, s.turns)
     const shown = new Set<string>(s.turns.map((r) => r.id))
@@ -3392,14 +3437,14 @@ export class WeftDevtools extends HTMLElement {
     list.append(items, s.marksCapped ? holeLine(s.marksCapped) : "")
     // Paging (D4): the sentinel loads the next older page when the list
     // scrolls to it (watchOlder), or on a click; no cap.
-    if (s.turnsCapped && this.model?.publicId) {
+    if (s.turnsCapped && this.model?.scoped) {
       const more = el(
         "button",
         "weft-btn weft-older",
-        s.loadingOlder ? "loading older turns…" : "older turns ↓",
+        s.loadingOlder ? `loading older ${noun}s…` : `older ${noun}s ↓`,
         {
           type: "button",
-          title: "load the next older page of turns",
+          title: `load the next older page of ${noun}s`,
           // Keyed by the cursor: each page read (even one that added no
           // row) is a new sentinel, so the observer is armed again.
           "data-key": `older:${s.olderAt}`,
@@ -5145,10 +5190,17 @@ export class WeftDevtools extends HTMLElement {
     const when = relativeTime(r.last_seen || r.started)
     const row1 = el("div", "weft-row1", [
       this.resumeChip(chip),
-      el("span", "weft-ttl", `${turnLabel(r)} ${clipTitle(t.text)}`.trim(), {
-        title: `${r.id}\n${t.full}`,
-        "data-weft-title": t.kind,
-      }),
+      // A page of runs (U22) and the fallback name each row's agent
+      // (UX-D-06), not a turn of a conversation.
+      el(
+        "span",
+        "weft-ttl",
+        `${this.model?.publicId ? turnLabel(r) : r.agent} ${clipTitle(t.text)}`.trim(),
+        {
+          title: `${r.id}\n${t.full}`,
+          "data-weft-title": t.kind,
+        }
+      ),
       // What the record says this turn is (D5): scripted, a fork, an
       // experiment of a turn the list names.
       ...turnChips(r, turns, chip.key),
@@ -5186,7 +5238,7 @@ export class WeftDevtools extends HTMLElement {
     // together: "turn 3, parked, <title>, 2 steps, 60 in 30 out, 3h ago".
     row.setAttribute(
       "aria-label",
-      `${r.turn ? `turn ${r.turn}` : "run"}, ${chip.word}, ${clipTitle(t.text)}, ${stepCount(r.steps)}${derivedUsageUnknown(r) ? "" : `, ${tokenPair(usage.input_tokens, usage.output_tokens)}`}, ${when}`
+      `${r.turn && this.model?.publicId ? `turn ${r.turn}` : "run"}, ${chip.word}, ${clipTitle(t.text)}, ${stepCount(r.steps)}${derivedUsageUnknown(r) ? "" : `, ${tokenPair(usage.input_tokens, usage.output_tokens)}`}, ${when}`
     )
     if (r.err) row.append(el("div", "weft-reason", r.err))
     on(row, "click", () => this.go(this.model?.select(r.id, true)))

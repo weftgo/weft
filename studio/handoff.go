@@ -21,8 +21,13 @@ import (
 // a hand-off mints, and a read token mints nothing (a scope never
 // widens, and a fresh read token would only renew its holder's
 // expiry); its page is already a read view of its conversation, so
-// the UI links to Studio directly instead. The server token needs no
-// token in the page: its answer is the same 303 with no fragment.
+// the UI links to Studio directly instead. The server token (setup B's
+// dev token, which the panel holds as data-token) hands off too (U22,
+// UX-D-18): its answer carries that same token in the fragment — what
+// `weft studio` and `weft open --with-token` already open the browser
+// with — so a tab in a browser that never stored it lands signed in,
+// as setup C's does. No read token is minted for it: a read token is
+// one public id's, and the dev token's page may be a batch of many.
 //
 // to is a path under Studio's base and nothing else — an open redirect
 // is the failure this guards against: it must start with "/" (not
@@ -89,6 +94,11 @@ func (s *Server) servePanelHandoff(w http.ResponseWriter, r *http.Request) {
 		}
 		location += "#token=" + tok
 		slog.Info("studio: panel hand-off", "public_id", claims.PublicID, "to", to, "exp", exp)
+	} else if id.server {
+		// The fragment never reaches a server; the answer is no-store
+		// and no-referrer (above). The UI reads #token= as it reads
+		// weft open's (url.QueryEscape: the CLI's runLink encoding).
+		location += "#token=" + url.QueryEscape(s.token)
 	}
 	if strings.Contains(r.Header.Get("Accept"), "application/json") {
 		var expOut *time.Time

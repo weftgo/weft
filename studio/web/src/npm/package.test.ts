@@ -294,8 +294,11 @@ describe("scope", () => {
     expect(node.getAttribute("data-weft-scope")).toBe("pub_orders;flow=f_1")
   })
 
-  it("passes the full scope through (C3.2): session narrows, run pins, flow is a chip; a mount after it starts there", async () => {
+  it("passes the full scope through (C3.2): session narrows, run pins, flow filters (U22) and is a chip; a mount after it starts there", async () => {
     const routes = baseRoutes()
+    const t1 = (routes["runs?public_id=pub_orders&limit=50"] as { runs: object[] }).runs[0]
+    // The flow is run metadata: every read asks flow= (studio filters on weft.flow).
+    routes["runs?session=s_01&flow=f_1&limit=50"] = { total: 1, runs: [t1], next_before: null }
     const t2 = { ...(routes["runs?public_id=pub_orders&limit=50"] as { runs: object[] }).runs[0], id: "s_01-t2", session_id: "s_02" }
     routes["runs?public_id=pub_orders&limit=50"] = {
       total: 2,

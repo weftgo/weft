@@ -30,6 +30,7 @@
     "delete",
     "proposals",
     "live",
+    "scope_tags",
     "ingest",
     "panel-config"
   ],

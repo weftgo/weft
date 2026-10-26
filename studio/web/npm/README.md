@@ -38,7 +38,26 @@ from the same ladder as the script tag, minus the tag itself:
 `mount(opts)`, the element's `data-*` attributes, then
 `<meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto">`. With
 none of these set, the endpoint is the page's own directory. If Studio
-does not answer, the dock removes itself silently.
+does not answer, the dock removes itself silently (unless you named a
+loopback endpoint; and when Studio answers 401/403 — "needs a token" — it says
+so in one line with a retry).
+
+Where the scope comes from — the ladder, highest first (the full table
+and every rule: `studio/README.md`, "The devtools panel"):
+
+| Rung | Name the scope with | Notes |
+|---|---|---|
+| 1 explicit | `mount({scope})`, `scope("pub_…")`, `data-scope`, `<meta name="weft:scope">`, `window.__WEFT__ = { scope }` | wins over every detected scope |
+| 4 the page URL | `?weft_scope=pub_…` (or `#weft_scope=`) on the page's URL | no code: the zero-touch rung; Studio's dev links write it |
+| 3 a DOM marker | `data-weft-scope="pub_…"` on the chat's element (`useWeftDevtools`, `weftDevtools`) | the production rung |
+| 2 a response header | `Weft-Scope` on the page's own `fetch` responses (Go: `scope.Header`) | loopback dev by default |
+| 4b a panel token | the `public_id` claim of a `weft_pt.` token | when nothing above names one |
+| 5 the fallback | none: the newest runs, each with its agent, and "how to scope" | — |
+
+A page of unrelated runs (a test batch) names its run metadata
+instead of a conversation: `data-scope="tag.arena.batch=…"` (repeatable
+`tag.<k>=<v>`, ANDed; `agent=` and `;flow=f_…` the same way) — the
+header reads "batch … · N runs".
 
 Server-rendered frameworks: the root entry is import-safe on a server
 (Node, a worker, an edge runtime). Nothing is registered there, and

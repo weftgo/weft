@@ -318,6 +318,12 @@ export interface PanelState {
   tooNew: boolean
   /** GET /api/meta failed: the panel removes itself silently (§5.3). */
   gone: boolean
+  /** That failure was a 401/403 (UX-S5a-03): Studio is there and wants
+   * a token — said, never removed. */
+  walled?: boolean
+  /** A query scope's (tag, agent, flow: U22) run count, the list's
+   * total. */
+  total?: number
   /** The header's session row (sessions?public_id=). */
   session: SessionRow | null
   /** The conversation's top-level turns, newest first. */
@@ -694,8 +700,27 @@ export class PanelModel {
   publicId: string
   /** What narrows it (C3.2): session filters the turn list (on runs
    * that carry weft.session.id), run pins the selected turn once per
-   * scope, flow is carried (the header's chip) and filters nothing. */
+   * scope; flow, agent and tags (U22) filter every read (q) and may
+   * stand without a public id — a page of runs. */
   narrowing: Omit<Scope, "publicId"> = {}
+
+  /** q is the scope's query filters as the read API takes them:
+   * agent, flow (weft.flow) and tag.<k>=<v>. */
+  get q(): Record<string, string> {
+    const { agent, flow, tags } = this.narrowing
+    const out: Record<string, string> = {
+      ...(agent && { agent }),
+      ...(flow && { flow }),
+    }
+    for (const k in tags) out[`tag.${k}`] = tags[k]
+    return out
+  }
+
+  /** scoped: a public id or a query scope names the list; otherwise
+   * the dev list. */
+  get scoped(): boolean {
+    return !!this.publicId || Object.keys(this.q).length > 0
+  }
   /** The run the pin was last applied for: a pin selects its run once,
    * the user's clicks own the selection afterwards. */
   private pinApplied = ""
@@ -731,7 +756,7 @@ export class PanelModel {
       serializeScope({ publicId: "", ...narrowing }) ===
       serializeScope({ publicId: "", ...this.narrowing })
     if (s.publicId === this.publicId && sameNarrowing) return
-    const samePublic = s.publicId === this.publicId
+    const q = JSON.stringify(this.q)
     const sameSession = narrowing.session === this.narrowing.session
     if (narrowing.run !== this.narrowing.run) {
       this.pinApplied = ""
@@ -740,10 +765,11 @@ export class PanelModel {
       this.pinTimer = null
     }
     if (opts.force) this.userSelected = false
+    const samePublic = s.publicId === this.publicId
     this.publicId = s.publicId
     this.narrowing = narrowing
     if (!this.state.meta || this.state.tooNew) return
-    if (!samePublic) {
+    if (!samePublic || q !== JSON.stringify(this.q)) {
       await this.scope()
       return
     }
@@ -900,7 +926,7 @@ export class PanelModel {
     this.scopeSub?.close()
     this.sessSub?.close()
     this.scopeSub = this.sessSub = undefined
-    if (!this.publicId) return
+    if (!this.scoped) return
     // The scope's session's lane beside it, quietly: its turns heard
     // even without the public id (a delegated session's, U16-fix).
     const sid = this.narrowing.session
@@ -916,7 +942,10 @@ export class PanelModel {
       await this.refresh()
     }
     this.scopeSub = openPanelLive(this.ep, {
-      selector: { public_id: this.publicId },
+      selector: {
+        ...(this.publicId && { public_id: this.publicId }),
+        ...this.q,
+      },
       kinds: ["run"],
       onOpen: (reopened) => {
         this.retries.scope = 0
@@ -1012,7 +1041,7 @@ export class PanelModel {
     this.devTimer = null
     if (
       !this.watching ||
-      this.publicId ||
+      this.scoped ||
       this.disposed ||
       !this.state.meta ||
       this.state.tooNew
@@ -1050,7 +1079,7 @@ export class PanelModel {
   private subscribeDev(seq: number) {
     const s = this.state
     if (
-      this.publicId ||
+      this.scoped ||
       this.devSub ||
       s.devRefused ||
       this.devBackoff ||
@@ -1428,7 +1457,7 @@ export class PanelModel {
     if (!this.inSession(run)) return
     for (const c of this.collectors) c.push(run)
     this.upsertRun(run)
-    if (!this.publicId) this.capDev()
+    if (!this.scoped) this.capDev()
     this.armStale()
     // The scope's run, heard as it starts: the pin takes it.
     const pin = this.takePin()
@@ -1614,11 +1643,12 @@ export class PanelModel {
         bySession = false
         page = await fetchRuns(
           this.ep,
-          this.publicId ? this.listParams() : { limit: String(DEV_LIMIT) }
+          this.scoped ? this.listParams(false) : { limit: String(DEV_LIMIT) }
         )
       }
       if (seq !== this.loadSeq || this.disposed) return
       this.bySession = bySession
+      this.state.total = page.total
       const listed: (RunRow | null)[] = [
         ...(Array.isArray(page.runs) ? page.runs : []),
         ...((xs && xs.runs) || []),
@@ -1666,7 +1696,7 @@ export class PanelModel {
     this.armStale()
     // The fallback's stream: opened once the list names an agent; the
     // poll stops while it covers the list.
-    if (!this.publicId) {
+    if (!this.scoped) {
       this.subscribeDev(seq)
       this.armDev()
     }
@@ -1680,7 +1710,8 @@ export class PanelModel {
     const pin = this.takePin()
     if (pin) {
       await this.select(pin)
-    } else if (!this.state.selected) {
+    } else if (!this.state.selected && this.scoped) {
+      // The fallback selects nothing (UX-D-06): a list, not a story.
       const running = this.state.turns.find((r) => r.status === "running")
       // The turn remembered from the last visit (D1), when it is listed.
       const kept = this.state.turns.find((r) => r.id === this.prefer)
@@ -2000,7 +2031,7 @@ export class PanelModel {
   async loadOlder() {
     const s = this.state
     const c = this.cursor
-    if (!this.publicId || !c || s.loadingOlder) return
+    if (!this.scoped || !c || s.loadingOlder) return
     const seq = this.loadSeq
     s.loadingOlder = true
     this.emit()
@@ -2056,8 +2087,11 @@ export class PanelModel {
         ...(doc as Meta),
         capabilities: Array.isArray(doc.capabilities) ? doc.capabilities : [],
       }
-    } catch {
+    } catch (e) {
       this.state.gone = true
+      this.state.walled = [401, 403].includes(
+        (e as { status?: number }).status!
+      )
       return false
     }
     if (this.disposed) return false
@@ -3001,7 +3035,8 @@ export class PanelModel {
     return {
       ...(by
         ? { session: this.narrowing.session! }
-        : { public_id: this.publicId }),
+        : this.publicId && { public_id: this.publicId }),
+      ...this.q,
       limit: String(TURNS_LIMIT),
     }
   }
@@ -3101,5 +3136,7 @@ function narrowingOf(s: Scope): Omit<Scope, "publicId"> {
   if (s.session) out.session = s.session
   if (s.flow) out.flow = s.flow
   if (s.run) out.run = s.run
+  if (s.agent) out.agent = s.agent
+  if (s.tags && Object.keys(s.tags).length) out.tags = s.tags
   return out
 }

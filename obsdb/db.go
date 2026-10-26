@@ -275,9 +275,14 @@ type TraceQuery struct {
 	// its detail would refuse (a non-weft span or another public id's
 	// run in the trace excludes it).
 	PublicID string
-	Since    time.Time // Start at or after; zero = no bound
-	Until    time.Time // Start before; zero = no bound
-	Before   time.Time // cursor on Start; zero = newest
+	// Meta keeps the traces holding, for each pair, a span whose
+	// attributes carry it — run metadata rides every weft span verbatim
+	// (core.Metadata, core.WithMetadata: tag.<k>=<v> and flow= on
+	// /api/traces, U22). Empty: no filter.
+	Meta   map[string]string
+	Since  time.Time // Start at or after; zero = no bound
+	Until  time.Time // Start before; zero = no bound
+	Before time.Time // cursor on Start; zero = newest
 	// BeforeID, with Before, makes the cursor the pair (Start, TraceID),
 	// as RunQuery.BeforeID: pass TracePage.NextBeforeID. A late earlier
 	// span can re-list a trace on a later page (TracePage).

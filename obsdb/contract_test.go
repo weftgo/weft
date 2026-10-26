@@ -43,6 +43,7 @@ import (
 	"github.com/weftgo/weft/obsdb/obsdbtest"
 	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/otel"
+	"github.com/weftgo/weft/scope"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/pool"
 )
@@ -2209,7 +2210,20 @@ func genCases() []genCase {
 			},
 		},
 	}
-	return append(cases, threadGenCases()...)
+	// Last: the fixtures' clock is shared, so a case added before
+	// another shifts its times.
+	flowScope := genCase{
+		name: "flow_scope",
+		desc: "a run started under scope.WithFlow (what scope.Header does for a Weft-Scope with flow=, U22) with a batch tag through core.Metadata: weft.flow and arena.batch in meta — the pairs /api/runs?flow= and ?tag.arena.batch= filter on",
+		dest: content,
+		run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+			agt := pipelineAgent(p, "checkout", wefttest.Script(wefttest.Say("Your cart is ready.")),
+				core.Instructions("You run checkout."))
+			return []string{mustRun(t, scope.WithFlow(ctx, "f_checkout"), agt, core.Prompt("check out"),
+				core.Metadata(map[string]string{"arena.batch": "b_contract"})).ID}
+		},
+	}
+	return append(append(cases, threadGenCases()...), flowScope)
 }
 
 // redactCards is bridge_overrides' Redact: a bridged line's "4111…"

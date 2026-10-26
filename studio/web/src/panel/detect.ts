@@ -37,7 +37,7 @@
 // wrapper could see — an SSE chat app names its scope explicitly
 // (rung 1) or through the DOM marker (rung 3). WebSocket is never
 // wrapped either (§13.3).
-import { parseScope } from "../lib/scope"
+import { parseScope, serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 
 /** The key a panel's wrapper carries its own chained answer under. */
@@ -158,7 +158,7 @@ export function installHeaderRung(opts: HeaderRungOptions): HeaderRung | null {
     if (!readable(url.href, page)) return
     if (opts.ignore?.(url.href)) return
     const scope = parseScope(value)
-    if (!scope.publicId && !scope.session && !scope.flow && !scope.run) return
+    if (!serializeScope(scope)) return
     opts.onScope(scope, url.pathname)
   }
 

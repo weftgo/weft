@@ -80,7 +80,7 @@ func apiStatus(t *testing.T, ts *httptest.Server, path, tok string) int {
 // minted token read-scoped to the same public id for five minutes —
 // it reads that public id's runs and no other's, and cannot hand off
 // itself — and the hand-off is logged without the token; the server
-// token is redirected with no fragment; a read-scoped token is 403;
+// token is redirected with itself in the fragment (U22); a read-scoped token is 403;
 // anonymous is 401.
 func TestPanelHandoff(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
@@ -169,10 +169,21 @@ func TestPanelHandoff(t *testing.T) {
 		t.Errorf("JSON hand-off = %+v", doc)
 	}
 
-	// The server token needs no token in the page: 303, no fragment.
+	// The server token (setup B's dev token, U22 / UX-D-18): the same
+	// 303, the dev token in the fragment — as weft open --with-token —
+	// so the opened tab lands signed in; the JSON form says the same.
 	r = handoffGet(t, ts, "to=/runs/run_a", "srv-token", "")
-	if r.StatusCode != http.StatusSeeOther || r.Header.Get("Location") != "/studio/runs/run_a" {
-		t.Errorf("server token: %d %q, want 303 /studio/runs/run_a", r.StatusCode, r.Header.Get("Location"))
+	if r.StatusCode != http.StatusSeeOther || r.Header.Get("Location") != "/studio/runs/run_a#token=srv-token" ||
+		r.Header.Get("Cache-Control") != "no-store" || r.Header.Get("Referrer-Policy") != "no-referrer" {
+		t.Errorf("server token: %d %q, want 303 /studio/runs/run_a#token=srv-token, no-store, no-referrer", r.StatusCode, r.Header.Get("Location"))
+	}
+	r = handoffGet(t, ts, "to=/runs/run_a", "srv-token", "application/json")
+	var dev struct {
+		Location string     `json:"location"`
+		Exp      *time.Time `json:"exp"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&dev); err != nil || dev.Location != "/studio/runs/run_a#token=srv-token" || dev.Exp != nil {
+		t.Errorf("server token's JSON hand-off = %+v (%v)", dev, err)
 	}
 	// A read-scoped token cannot widen; anonymous is walled.
 	if r := handoffGet(t, ts, "to=/runs/run_a", read, ""); r.StatusCode != http.StatusForbidden {
@@ -214,8 +225,8 @@ func TestPanelHandoffOpenRedirect(t *testing.T) {
 	}
 	for _, to := range []string{"/", "/runs/run_a", "/runs/run_b/0/call_1", "/runs/r%2F1?step=2&x=..", "/sessions/s_1", "/runs/a..b"} {
 		r := handoffGet(t, ts, "to="+url.QueryEscape(to), "srv-token", "")
-		if r.StatusCode != http.StatusSeeOther || r.Header.Get("Location") != "/studio"+to {
-			t.Errorf("to=%q = %d %q, want 303 /studio%s", to, r.StatusCode, r.Header.Get("Location"), to)
+		if r.StatusCode != http.StatusSeeOther || r.Header.Get("Location") != "/studio"+to+"#token=srv-token" {
+			t.Errorf("to=%q = %d %q, want 303 /studio%s#token=srv-token", to, r.StatusCode, r.Header.Get("Location"), to)
 		}
 	}
 }

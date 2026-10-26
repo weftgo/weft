@@ -158,7 +158,7 @@ var rootMissing = badgeFields{
 
 func (s *Server) serveTraces(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	query := obsdb.TraceQuery{Service: q.Get("service"), PublicID: q.Get("public_id")}
+	query := obsdb.TraceQuery{Service: q.Get("service"), PublicID: q.Get("public_id"), Meta: tagParams(q)}
 	// The scope first: a foreign public id's 403 wins over any 400.
 	scope := obsdb.RunQuery{PublicID: query.PublicID}
 	if !scopeRunsQuery(w, r, &scope, q.Get("public_id")) {

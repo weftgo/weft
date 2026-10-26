@@ -974,9 +974,19 @@ func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage,
 func traceGroup(q obsdb.TraceQuery) (group, having string, args []any) {
 	group = `SELECT trace_id, MIN(start_ns), MAX(end_ns), COUNT(*), MAX(status_code = 2)
 		FROM spans `
+	var where []string
 	if !q.Since.IsZero() {
-		group += `WHERE trace_id IN (SELECT trace_id FROM spans WHERE start_ns >= ?) `
+		where = append(where, `trace_id IN (SELECT trace_id FROM spans WHERE start_ns >= ?)`)
 		args = append(args, q.Since.UnixNano())
+	}
+	for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
+		// A span carrying the pair: key and value bound (runsWhere's
+		// json_each rule — no key quoted into a JSON path).
+		where = append(where, `trace_id IN (SELECT s.trace_id FROM spans AS s, json_each(s.attrs) AS j WHERE j.key = ? AND j.value = ?)`)
+		args = append(args, k, q.Meta[k])
+	}
+	if len(where) > 0 {
+		group += `WHERE ` + strings.Join(where, " AND ") + ` `
 	}
 	group += `GROUP BY trace_id HAVING `
 	conds := []string{"1=1"}

@@ -169,8 +169,18 @@ describe("open in Studio under a playground panel token (setup C)", () => {
     expect(opened).toEqual([])
   })
 
+  it("the dev token (setup B, UX-D-18) hands off too: the answer's fragment carries it, as weft open's", async () => {
+    const studio = studioWith({
+      location: "/studio/runs/s_01-t1#token=dev-token",
+    })
+    const el = await mount({ ...ATTRS, "data-token": "dev-token" })
+    expect(await clickExpand(el)).toBe(true)
+    await settle()
+    expect(studio.gets("panel-handoff")).toHaveLength(1)
+    expect(opened).toEqual([`${PLAIN}#token=dev-token`])
+  })
+
   for (const [name, tok] of [
-    ["the dev token", "dev-token"],
     ["no token", ""],
     ["a read-scoped panel token (its page is already a read view)", READ],
   ] as const)

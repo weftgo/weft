@@ -488,6 +488,28 @@ func TestAuthMatrix(t *testing.T) {
 		}},
 		{name: "GET /api/runs", method: "GET", path: fixed("/api/runs"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/runs?all=1", method: "GET", path: fixed("/api/runs?all=1"), resources: one, want: anyValid(ok)}, // forced onto the token's public id (pinned below)
+		// The tag scope (U22): tag.<k>=<v> and flow= narrow the list —
+		// any identity may send them; a panel token's rows stay inside
+		// its public id, a foreign public_id beside them is still 403.
+		{name: "GET /api/runs?tag.<k>=<v>", method: "GET", path: fixed("/api/runs?tag.arena.batch=b1"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/runs?flow=", method: "GET", path: fixed("/api/runs?flow=f_checkout"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/runs?flow=&public_id=", method: "GET", path: func(res string) string { return "/api/runs?flow=f_checkout&public_id=" + public[res] },
+			resources: []string{"A", "B"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
+		{name: "GET /api/search?flow=&tag.<k>=<v>", method: "GET", path: fixed("/api/search?flow=f_checkout&tag.arena.batch=b1"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/sessions?flow=", method: "GET", path: fixed("/api/sessions?flow=f_checkout"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/traces?tag.<k>=<v>&flow=", method: "GET", path: fixed("/api/traces?tag.arena.batch=b1&flow=f_checkout"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/traces?flow=&public_id=", method: "GET", path: func(res string) string { return "/api/traces?flow=f_checkout&public_id=" + public[res] },
+			resources: []string{"A", "B"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
 		{name: "GET /api/runs?public_id=", method: "GET", path: func(res string) string { return "/api/runs?public_id=" + public[res] },
 			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
 				if kind == "server" || res == "A" {
@@ -781,6 +803,21 @@ func TestAuthMatrix(t *testing.T) {
 				return forbidden403
 			}},
 		{name: "GET /api/live?agent=", method: "GET", path: fixed("/api/live?agent=acme-support"), resources: one, want: serverOnly(ok)},
+		// The tag scope's selector (U22, A5): alone it is every run's
+		// frames, filtered, for the server token, and the panel token's
+		// own public id's (the filter reads what the token allows);
+		// beside another selector it narrows that selector's rule.
+		{name: "GET /api/live?tag.<k>=<v>", method: "GET", path: fixed("/api/live?tag.arena.batch=b1&kinds=run"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/live?flow=", method: "GET", path: fixed("/api/live?flow=f_checkout"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/live?public_id=&flow=", method: "GET", path: func(res string) string { return "/api/live?flow=f_checkout&public_id=" + public[res] },
+			resources: []string{"A", "B"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
+		{name: "GET /api/live?agent=&tag.<k>=<v>", method: "GET", path: fixed("/api/live?agent=acme-support&tag.arena.batch=b1"), resources: one, want: serverOnly(ok)},
+		{name: "GET /api/live?all=1&flow=", method: "GET", path: fixed("/api/live?all=1&flow=f_checkout"), resources: one, want: serverOnly(ok)},
 		// all (plan A7, the Live page): every run on one stream — the
 		// server token's alone here (setup A's loopback: TestLiveAll*);
 		// every panel token 403, whatever its scope.
@@ -854,6 +891,7 @@ func TestAuthMatrix(t *testing.T) {
 				return forbidden403
 			}},
 		{name: "GET /api/live?agent=&sig=", method: "GET", path: fixed("/api/live?agent=acme-support"), resources: one, grant: true, want: serverOnly(ok)},
+		{name: "GET /api/live?tag.<k>=<v>&flow=&sig=", method: "GET", path: fixed("/api/live?tag.arena.batch=b1&flow=f_checkout&kinds=run"), resources: one, grant: true, want: anyValid(ok)},
 		{name: "GET /api/live?all=1&kinds=&sig=", method: "GET", path: fixed("/api/live?all=1&kinds=event,run"), resources: one, grant: true, want: serverOnly(ok)},
 
 		// The token mint: the server token's (401 for a panel token, as
@@ -1110,7 +1148,7 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		sel, _ := liveSelector(map[string][]string{"run": {"run_a"}})
 		kinds, _ := liveKinds(map[string][]string{"kinds": {"event,run"}})
-		expired, err := signLiveGrant(srv.grantKey, claims, liveStream(sel, kinds))
+		expired, err := signLiveGrant(srv.grantKey, claims, liveStream(sel, kinds, nil))
 		if err != nil {
 			t.Fatal(err)
 		}

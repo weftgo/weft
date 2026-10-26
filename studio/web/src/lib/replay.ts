@@ -411,16 +411,22 @@ export function prefixLine(fromStep: number, compacted: boolean): string {
  * server token, none) is "". An unreadable panel token is the default
  * mint, read. */
 export function tokenScopeOf(token: string): "" | "read" | "playground" {
-  if (!token.startsWith("weft_pt.")) return ""
+  const c = tokenClaimsOf(token)
+  return !c ? "" : c.scope === "playground" ? "playground" : "read"
+}
+
+/** tokenClaimsOf reads a panel token's claims (scope, public_id) — a
+ * hint, never a check; null for any other bearer, {} for a panel token
+ * that does not parse. */
+export function tokenClaimsOf(
+  token: string
+): { scope?: unknown; public_id?: unknown } | null {
+  if (!token.startsWith("weft_pt.")) return null
   try {
-    const body = token.slice("weft_pt.".length).split(".")[0]
-    const b64 = body.replace(/-/g, "+").replace(/_/g, "/")
-    const claims = JSON.parse(
-      atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))
-    ) as { scope?: unknown }
-    return claims.scope === "playground" ? "playground" : "read"
+    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
+    return JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))) ?? {}
   } catch {
-    return "read"
+    return {}
   }
 }
 

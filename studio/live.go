@@ -203,7 +203,10 @@ type runFrameDTO struct {
 
 // liveSelector parses S4.5's selector: exactly one of run, session,
 // public_id, agent or all (plan A7: all=1, every run — the dev token's
-// and setup A's alone, scopeLive), or the request is a 400.
+// and setup A's alone, scopeLive), or none beside a run metadata
+// filter (liveMeta: tag.<k>=<v>, flow=; U22), else the request is a
+// 400. A selector the filter stands alone with is the zero Selector:
+// resolveLive names its base once the caller is known.
 func liveSelector(q map[string][]string) (obsdb.Selector, error) {
 	var sel obsdb.Selector
 	set := 0
@@ -228,11 +231,104 @@ func liveSelector(q map[string][]string) (obsdb.Selector, error) {
 		}
 		*f.dst, set = vs[0], set+1
 	}
+	if set == 0 && len(liveMeta(q)) > 0 {
+		return sel, nil
+	}
 	if set != 1 {
 		return sel, fmt.Errorf(
-			"exactly one of run, session, public_id, agent or all is required (%d given)", set)
+			"exactly one of run, session, public_id, agent or all is required, or a tag.<k>=<v> / flow= filter alone (%d given)", set)
 	}
 	return sel, nil
+}
+
+// liveMeta is a live stream's run metadata filter (U22, A5): the
+// tag.<k>=<v> pairs and flow= (weft.flow) the runs page reads
+// (tagParams). A run frame passes when its row's metadata carries
+// every pair; a record or attempt frame when its run was admitted, or
+// when its own attributes carry every pair (run metadata rides every
+// record and span verbatim). Empty: no filter.
+func liveMeta(q map[string][]string) map[string]string { return tagParams(q) }
+
+// resolveLive names the base of a stream a metadata filter stands
+// alone in: a panel token's public id (the filter then reads what the
+// token already allows), else every run (all — scopeLive's rule:
+// the server token, or setup A on loopback).
+func resolveLive(r *http.Request, sel obsdb.Selector) obsdb.Selector {
+	if sel != (obsdb.Selector{}) {
+		return sel
+	}
+	if p := idFrom(r).panel; p != nil {
+		return obsdb.Selector{PublicID: p.PublicID}
+	}
+	return obsdb.Selector{All: true}
+}
+
+// liveFilter is one connection's metadata filter and the runs it
+// admitted (bounded as the dedup set is: a run cleared out is admitted
+// again by its next frame's own attributes or row).
+type liveFilter struct {
+	meta     map[string]string
+	admitted map[string]bool
+}
+
+func newLiveFilter(meta map[string]string) *liveFilter {
+	if len(meta) == 0 {
+		return nil
+	}
+	return &liveFilter{meta: meta, admitted: map[string]bool{}}
+}
+
+// admit records a run as inside the filter.
+func (lf *liveFilter) admit(run string) {
+	if lf == nil || run == "" {
+		return
+	}
+	if len(lf.admitted) >= liveDedupSize {
+		clear(lf.admitted)
+	}
+	lf.admitted[run] = true
+}
+
+// pass reports whether f is inside the filter (a nil filter passes
+// everything), admitting its run when it is.
+func (lf *liveFilter) pass(f obsdb.Frame) bool {
+	if lf == nil {
+		return true
+	}
+	switch {
+	case f.Kind == obsdb.FrameRun && f.Run != nil:
+		if !metaHas(f.Run.Meta, lf.meta) {
+			return false
+		}
+		lf.admit(f.Run.ID)
+		return true
+	case lf.admitted[f.Weft.RunID]:
+		return true
+	}
+	var attrs map[string]any
+	switch {
+	case f.Kind == obsdb.FrameRecord && f.Record != nil:
+		attrs = f.Record.Attrs
+	case f.Kind == obsdb.FrameAttempt && f.Span != nil:
+		attrs = f.Span.Attrs
+	}
+	for k, v := range lf.meta {
+		if s, ok := attrs[k].(string); !ok || s != v {
+			return false
+		}
+	}
+	lf.admit(f.Weft.RunID)
+	return true
+}
+
+// metaHas reports whether meta carries every pair of want.
+func metaHas(meta, want map[string]string) bool {
+	for k, v := range want {
+		if got, ok := meta[k]; !ok || got != v {
+			return false
+		}
+	}
+	return true
 }
 
 // liveKinds parses the optional kinds parameter (S4.5): a
@@ -268,6 +364,8 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	filter := newLiveFilter(liveMeta(r.URL.Query()))
+	sel = resolveLive(r, sel)
 	kinds, err := liveKinds(map[string][]string(r.URL.Query()))
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "bad_request", err.Error())
@@ -359,7 +457,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		// Nothing is evicted while the backfill writes, nor until the
 		// live frames queued behind it have drained (the first ping).
 		sent.hold = true
-		s.backfill(ctx, sw, sel, scope, kinds, sent)
+		s.backfill(ctx, sw, sel, scope, kinds, sent, filter)
 	}
 
 	ticker := time.NewTicker(pingEvery)
@@ -390,7 +488,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
-			if !liveWanted(kinds, f) || !liveInScope(scope, f) {
+			if !liveInScope(scope, f) || !filter.pass(f) || !liveWanted(kinds, f) {
 				continue
 			}
 			if key, ok := liveDedupKey(f); ok && sent.seen(key) {
@@ -528,9 +626,24 @@ const (
 // at the first failed write: a client that left costs nothing more.
 func (s *Server) backfill(
 	ctx context.Context, sw *sseWriter,
-	sel obsdb.Selector, scope string, kinds map[string]bool, sent *liveDedup,
+	sel obsdb.Selector, scope string, kinds map[string]bool, sent *liveDedup, filter *liveFilter,
 ) {
 	query := obsdb.RunQuery{ParentRunID: "*", Limit: 500}
+	if filter != nil {
+		// The metadata filter narrows the runs replayed (the runs list's
+		// own tag.<k>= filter); each is admitted for the live frames
+		// queued behind the backfill.
+		query.Meta = filter.meta
+	}
+	backfillRun := func(rec obsdb.RunRow) {
+		if filter != nil {
+			if !metaHas(rec.Meta, filter.meta) {
+				return
+			}
+			filter.admit(rec.ID)
+		}
+		s.backfillRun(ctx, sw, rec, scope, kinds, sent)
+	}
 	switch {
 	case sel.RunID != "":
 		// One run: read it directly (its children are separate runs,
@@ -539,7 +652,7 @@ func (s *Server) backfill(
 		if err != nil {
 			return // nothing stored (yet): the live stream is the whole story
 		}
-		s.backfillRun(ctx, sw, det.RunRow, scope, kinds, sent)
+		backfillRun(det.RunRow)
 		return
 	case sel.SessionID != "":
 		query.SessionID = sel.SessionID
@@ -564,7 +677,7 @@ func (s *Server) backfill(
 			if ctx.Err() != nil || sw.err != nil {
 				return
 			}
-			s.backfillRun(ctx, sw, rec, scope, kinds, sent)
+			backfillRun(rec)
 		}
 		return
 	}
@@ -577,7 +690,7 @@ func (s *Server) backfill(
 			if ctx.Err() != nil || sw.err != nil {
 				return
 			}
-			s.backfillRun(ctx, sw, rec, scope, kinds, sent)
+			backfillRun(rec)
 		}
 		if page.NextBefore == nil || len(page.Runs) == 0 {
 			return

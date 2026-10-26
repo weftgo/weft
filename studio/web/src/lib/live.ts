@@ -15,17 +15,22 @@ import { apiBase, dropTabTokenIf, studioToken } from "./api"
 
 /** Exactly one of run, session, public_id or agent (S4.5), or every
  * run (plan A7: all=true, the dev token's and loopback's alone —
- * api/meta's live_all says whether this caller may). */
-export type LiveSelector =
+ * api/meta's live_all says whether this caller may); the run
+ * metadata filter beside it or alone (U22: tag.<k>, flow — alone, the
+ * server reads every run, or a panel token's public id). */
+export type LiveSelector = (
   | { run: string }
   | { session: string }
   | { public_id: string }
   | { agent: string }
   | { all: true }
+  | object
+) & { [k: `tag.${string}`]: string; flow?: string }
 
 export function selectorSearch(sel: LiveSelector): string {
-  const [[k, v]] = Object.entries(sel)
-  return `${encodeURIComponent(k)}=${encodeURIComponent(v)}`
+  return Object.entries(sel)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join("&")
 }
 
 // ── The live grant (plan C5) ───────────────────────────────────────

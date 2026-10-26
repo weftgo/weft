@@ -555,8 +555,12 @@ describe("the fallback: no conversation detected", () => {
         .slice(0, 2)
     ).toEqual(["r_new6", "r_new5"])
     expect($(el, ".weft-dot.weft-on")).toBeTruthy() // the live dot
+    // The live words sit behind "how to scope" (UX-D-06).
+    if ($(el, ".weft-howto-btn")!.getAttribute("aria-expanded") !== "true")
+      click($(el, ".weft-howto-btn"))
+    await settle()
     expect(text(el, ".weft-dev-poll")).toBe(
-      "live: agent acme-support · the other agents' runs every 30 s"
+      "live: newest agent only (acme-support) · the others every 30 s"
     )
   })
 
@@ -584,8 +588,12 @@ describe("the fallback: no conversation detected", () => {
     expect(
       all(el, ".weft-turn").map((n) => n.getAttribute("data-weft-run"))
     ).toContain("r_bill")
+    // The live words sit behind "how to scope" (UX-D-06).
+    if ($(el, ".weft-howto-btn")!.getAttribute("aria-expanded") !== "true")
+      click($(el, ".weft-howto-btn"))
+    await settle()
     expect(text(el, ".weft-dev-poll")).toBe(
-      "live: agent acme-support · the other agents' runs every 30 s"
+      "live: newest agent only (acme-support) · the others every 30 s"
     )
     expect(studio.posts("live-grant")).toHaveLength(1) // still the one stream
   })
@@ -710,8 +718,12 @@ describe("the fallback: no conversation detected", () => {
     }
     const studio = fakeStudio(routes)
     const el = await mountWith({ "data-endpoint": REMOTE, "data-open": "true" })
+    // The live words sit behind "how to scope" (UX-D-06).
+    if ($(el, ".weft-howto-btn")!.getAttribute("aria-expanded") !== "true")
+      click($(el, ".weft-howto-btn"))
+    await settle()
     expect(text(el, ".weft-dev-poll")).toBe(
-      "live: agent acme-support · the other agents' runs every 30 s"
+      "live: newest agent only (acme-support) · the others every 30 s"
     )
     await vi.advanceTimersByTimeAsync(11_000)
     await settle()

@@ -223,13 +223,17 @@ func liveSelector(q map[string][]string) (obsdb.Selector, error) {
 		{"run", &sel.RunID},
 		{"session", &sel.SessionID},
 		{"public_id", &sel.PublicID},
-		{"agent", &sel.Agent},
 	} {
 		vs, ok := q[f.name]
 		if !ok || len(vs) == 0 || vs[0] == "" {
 			continue
 		}
 		*f.dst, set = vs[0], set+1
+	}
+	// agent= is the selector alone; beside another it narrows it
+	// (liveAgent: a filter over run frames, U22-fix).
+	if a := first(q, "agent"); a != "" && set == 0 {
+		sel.Agent, set = a, 1
 	}
 	if set == 0 && len(liveMeta(q)) > 0 {
 		return sel, nil
@@ -249,10 +253,29 @@ func liveSelector(q map[string][]string) (obsdb.Selector, error) {
 // record and span verbatim). Empty: no filter.
 func liveMeta(q map[string][]string) map[string]string { return tagParams(q) }
 
+// liveAgent is agent= when it narrows another selector (run, session,
+// public_id, all, or a metadata filter's resolved base) rather than
+// being the selector itself: "" otherwise.
+func liveAgent(q map[string][]string, sel obsdb.Selector) string {
+	if sel.Agent != "" {
+		return ""
+	}
+	return first(q, "agent")
+}
+
+// first is q's first value of k, "" when none.
+func first(q map[string][]string, k string) string {
+	if vs := q[k]; len(vs) > 0 {
+		return vs[0]
+	}
+	return ""
+}
+
 // resolveLive names the base of a stream a metadata filter stands
 // alone in: a panel token's public id (the filter then reads what the
-// token already allows), else every run (all — scopeLive's rule:
-// the server token, or setup A on loopback).
+// token already allows), else every run, filtered — allowed wherever
+// agent= alone is (scopeLiveFiltered): a filter narrows as an agent
+// does, so setup A behind an allowed Host gets its lane too.
 func resolveLive(r *http.Request, sel obsdb.Selector) obsdb.Selector {
 	if sel != (obsdb.Selector{}) {
 		return sel
@@ -263,19 +286,26 @@ func resolveLive(r *http.Request, sel obsdb.Selector) obsdb.Selector {
 	return obsdb.Selector{All: true}
 }
 
-// liveFilter is one connection's metadata filter and the runs it
-// admitted (bounded as the dedup set is: a run cleared out is admitted
-// again by its next frame's own attributes or row).
+// liveFilter is one connection's run filter — the metadata pairs and
+// an agent= narrowing another selector — and the runs it admitted
+// (bounded as the dedup set is: a run cleared out is admitted again by
+// its next frame's own attributes or row).
 type liveFilter struct {
 	meta     map[string]string
+	agent    string
 	admitted map[string]bool
 }
 
-func newLiveFilter(meta map[string]string) *liveFilter {
-	if len(meta) == 0 {
+func newLiveFilter(meta map[string]string, agent string) *liveFilter {
+	if len(meta) == 0 && agent == "" {
 		return nil
 	}
-	return &liveFilter{meta: meta, admitted: map[string]bool{}}
+	return &liveFilter{meta: meta, agent: agent, admitted: map[string]bool{}}
+}
+
+// row reports whether a run row is inside the filter.
+func (lf *liveFilter) row(r obsdb.RunRow) bool {
+	return (lf.agent == "" || r.Agent == lf.agent) && metaHas(r.Meta, lf.meta)
 }
 
 // admit records a run as inside the filter.
@@ -297,13 +327,16 @@ func (lf *liveFilter) pass(f obsdb.Frame) bool {
 	}
 	switch {
 	case f.Kind == obsdb.FrameRun && f.Run != nil:
-		if !metaHas(f.Run.Meta, lf.meta) {
+		if !lf.row(*f.Run) {
 			return false
 		}
 		lf.admit(f.Run.ID)
 		return true
 	case lf.admitted[f.Weft.RunID]:
 		return true
+	}
+	if lf.agent != "" && f.Weft.Agent != lf.agent {
+		return false
 	}
 	var attrs map[string]any
 	switch {
@@ -357,6 +390,18 @@ func liveKinds(q map[string][]string) (map[string]bool, error) {
 	return kinds, nil
 }
 
+// scopeLiveFiltered is scopeLive, except that a stream a metadata
+// filter stands alone in (resolved to every run for any caller but a
+// panel token) passes where agent= alone would — every identity but a
+// panel token — rather than under the all selector's db.path rule
+// (U22-fix): the filter narrows the frames as an agent does.
+func (s *Server) scopeLiveFiltered(w http.ResponseWriter, r *http.Request, sel obsdb.Selector, filterOnly bool) bool {
+	if filterOnly && idFrom(r).panel == nil {
+		return true
+	}
+	return s.scopeLive(w, r, sel)
+}
+
 // serveLive streams the live lane over SSE (S4.5).
 func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	sel, err := liveSelector(map[string][]string(r.URL.Query()))
@@ -364,7 +409,8 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	filter := newLiveFilter(liveMeta(r.URL.Query()))
+	filter := newLiveFilter(liveMeta(r.URL.Query()), liveAgent(r.URL.Query(), sel))
+	filterOnly := sel == (obsdb.Selector{})
 	sel = resolveLive(r, sel)
 	kinds, err := liveKinds(map[string][]string(r.URL.Query()))
 	if err != nil {
@@ -385,7 +431,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		after = n
 	}
 
-	if !s.scopeLive(w, r, sel) {
+	if !s.scopeLiveFiltered(w, r, sel, filterOnly) {
 		return
 	}
 
@@ -633,11 +679,11 @@ func (s *Server) backfill(
 		// The metadata filter narrows the runs replayed (the runs list's
 		// own tag.<k>= filter); each is admitted for the live frames
 		// queued behind the backfill.
-		query.Meta = filter.meta
+		query.Meta, query.Agent = filter.meta, filter.agent
 	}
 	backfillRun := func(rec obsdb.RunRow) {
 		if filter != nil {
-			if !metaHas(rec.Meta, filter.meta) {
+			if !filter.row(rec) {
 				return
 			}
 			filter.admit(rec.ID)

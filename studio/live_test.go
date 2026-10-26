@@ -692,7 +692,14 @@ func TestLiveAllSetupA(t *testing.T) {
 		{"?all=1", "studio.example", http.StatusForbidden},
 		{"?all=0", "", http.StatusBadRequest},
 		{"?all=1&run=r_ok", "", http.StatusBadRequest},
-		{"?all=1&agent=orders", "", http.StatusBadRequest},
+		// agent= beside all narrows it (U22-fix): all's rule still holds.
+		{"?all=1&agent=orders", "", http.StatusOK},
+		{"?all=1&agent=orders", "studio.example", http.StatusForbidden},
+		// A metadata filter alone is allowed where agent= alone is
+		// (U22-fix): setup A behind an allowed Host gets its lane.
+		{"?tag.arena.batch=b1", "studio.example", http.StatusOK},
+		{"?flow=f_checkout", "studio.example", http.StatusOK},
+		{"?agent=orders", "studio.example", http.StatusOK},
 	} {
 		if got := open(c.query, c.host); got != c.want {
 			t.Errorf("GET /api/live%s (Host %q): %d, want %d", c.query, c.host, got, c.want)

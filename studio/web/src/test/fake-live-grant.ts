@@ -51,11 +51,21 @@ function streamOf(
 ): { stream: string; sel: string; value: string } | { error: string } {
   // The run metadata filter (U22: tag.<k>, flow — live.go's liveMeta):
   // part of the stream, and a selector of its own when alone.
+  // Each pair two elements, "tag."+key then value, in key order
+  // (U22-fix); an agent= beside another selector narrows it and closes
+  // the stream as "agent", value.
   const meta = [...q.entries()]
     .filter(([k, v]) => (k.startsWith("tag.") || k === "flow") && v)
-    .map(([k, v]) => `${k === "flow" ? "weft.flow" : k.slice(4)}=${v}`)
-    .sort()
-  const named = SELECTORS.filter((k) => q.has(k))
+    .map(([k, v]): [string, string] => [k === "flow" ? "tag.weft.flow" : k, v])
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .flat()
+  let named = SELECTORS.filter((k) => q.has(k))
+  const agent =
+    named.length > 1 && named.includes("agent") ? (q.get("agent") ?? "") : ""
+  if (agent) {
+    named = named.filter((k) => k !== "agent")
+    meta.push("agent", agent)
+  }
   if (named.length !== 1 && !(named.length === 0 && meta.length))
     return { error: "exactly one of run, session, public_id, agent or all" }
   // The filter alone is the zero selector (livegrant.go's liveStream

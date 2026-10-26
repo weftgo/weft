@@ -231,3 +231,136 @@ describe("a token-walled Studio says so (UX-S5a-03)", () => {
     expect(text(el, ".weft-unreachable")).toContain("Studio needs a token at")
   })
 })
+
+describe("U22-fix", () => {
+  it("pub_…;agent=… opens its live lane: public_id and agent, the agent narrowing (finding 1)", async () => {
+    const routes = baseRoutes()
+    routes["runs?public_id=pub_orders&agent=acme-support&limit=50"] =
+      routes["runs?public_id=pub_orders&limit=50"]
+    const studio = fakeStudio(routes)
+    await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "pub_orders;agent=acme-support",
+      "data-open": "true",
+    })
+    expect(studio.posts("live-grant").map((g) => g.body)).toContainEqual(
+      expect.objectContaining({
+        public_id: "pub_orders",
+        agent: "acme-support",
+      })
+    )
+    const lane = FakeEventSource.last("public_id=pub_orders&agent=acme-support")
+    expect(lane).toBeTruthy()
+    expect(lane!.readyState).not.toBe(2) // the grant opened it
+  })
+
+  it("the header's session read and the experiments read carry the scope's filters (finding 2)", async () => {
+    const routes = baseRoutes()
+    const t1 = runRow({})
+    routes["runs?session=s_01&flow=f_1&limit=50"] = {
+      total: 1,
+      runs: [t1],
+      next_before: null,
+    }
+    const studio = fakeStudio(routes)
+    await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "pub_orders;session=s_01;flow=f_1",
+      "data-open": "true",
+    })
+    expect(studio.gets("sessions?q=s_01&flow=f_1")).toHaveLength(1)
+    expect(
+      studio.gets("runs?public_id=pub_orders&playground=1&flow=f_1&limit=50")
+    ).toHaveLength(1)
+  })
+
+  it("a public id with a tag: one noun — the header, the list and the rows say run — and the tag is a chip (finding 3)", async () => {
+    const routes = baseRoutes()
+    routes["sessions?public_id=pub_orders&tag.arena.batch=b1"] =
+      routes["sessions?public_id=pub_orders"]
+    routes["runs?public_id=pub_orders&tag.arena.batch=b1&limit=50"] = {
+      total: 1,
+      runs: [runRow({ turn: 3 })],
+      next_before: null,
+    }
+    fakeStudio(routes)
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "pub_orders;tag.arena.batch=b1",
+      "data-open": "true",
+    })
+    expect(text(el, "[data-weft-stats]")).toMatch(/^1 run · /)
+    expect($(el, ".weft-rows")!.getAttribute("aria-label")).toBe(
+      "runs, newest first"
+    )
+    expect(
+      $(el, "[data-weft-run]")!.getAttribute("aria-label")!.split(",")[0]
+    ).toBe("run")
+    expect(all(el, ".weft-scope-chip").map((n) => n.textContent)).toEqual([
+      "tag arena.batch=b1",
+    ])
+  })
+
+  it("a second tag the title does not name is a chip too", async () => {
+    const routes = baseRoutes()
+    routes["runs?tag.arena.batch=b1&tag.ci.job=7&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
+    fakeStudio(routes)
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "tag.arena.batch=b1;tag.ci.job=7",
+      "data-open": "true",
+    })
+    expect(text(el, ".weft-title")).toBe("batch b1")
+    expect(all(el, ".weft-scope-chip").map((n) => n.textContent)).toEqual([
+      "tag ci.job=7",
+    ])
+  })
+
+  it("the fallback groups its rows by agent and keeps the live words behind 'how to scope' (UX-D-06)", async () => {
+    const routes = baseRoutes()
+    routes["runs?limit=10"] = {
+      total: 3,
+      runs: [
+        runRow({ id: "r_1", agent: "incident-analyst" }),
+        runRow({ id: "r_2", agent: "director" }),
+        runRow({ id: "r_3", agent: "incident-analyst" }),
+      ],
+      next_before: null,
+    }
+    fakeStudio(routes)
+    const el = await mountWith({ "data-endpoint": REMOTE, "data-open": "true" })
+    expect(
+      all(el, "[data-weft-run]").map((r) => r.getAttribute("data-weft-run"))
+    ).toEqual(["r_1", "r_3", "r_2"])
+    const lane = FakeEventSource.last("agent=incident-analyst")
+    lane?.opened()
+    await settle()
+    expect($(el, ".weft-dev-poll")).toBeNull()
+    ;($(el, ".weft-howto-btn") as HTMLElement).click()
+    await settle()
+    expect(text(el, ".weft-dev-poll")).toBe(
+      "live: newest agent only (incident-analyst) · the others every 30 s"
+    )
+  })
+
+  it("each 'how to scope' line has a copy button (UX-D-07)", async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } })
+    fakeStudio(baseRoutes())
+    const el = await mountWith({ "data-endpoint": REMOTE, "data-open": "true" })
+    ;($(el, ".weft-howto-btn") as HTMLElement).click()
+    await settle()
+    const buttons = all(el, ".weft-howto button")
+    expect(buttons).toHaveLength(all(el, ".weft-howto code").length)
+    ;(buttons[0] as HTMLElement).click()
+    await settle()
+    expect(writeText).toHaveBeenCalledWith(
+      "add ?weft_scope=pub_… to this page's URL (no code)"
+    )
+    expect(text(el, ".weft-api-note")).toBe("copied")
+  })
+})

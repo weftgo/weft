@@ -52,6 +52,7 @@
     { "string": "flow=f_checkout", "scope": { "publicId": "", "flow": "f_checkout" } },
     { "string": "a=b;run=r_1", "scope": { "publicId": "a=b", "run": "r_1" } },
     { "string": "tag.=x", "scope": { "publicId": "tag.=x" } },
-    { "string": "pub_1;tag.k%2Ex=v;agent=x;agent=y", "scope": { "publicId": "pub_1", "agent": "x", "tags": { "k.x": "v" } } }
+    { "string": "pub_1;tag.k%2Ex=v;agent=x;agent=y", "scope": { "publicId": "pub_1", "agent": "x", "tags": { "k.x": "v" } } },
+    { "string": "tag.constructor=c;tag.__proto__=p;tag.toString=t;tag.constructor=d", "scope": { "publicId": "", "tags": { "constructor": "c", "__proto__": "p", "toString": "t" } } }
   ]
 }

@@ -816,6 +816,13 @@ func TestAuthMatrix(t *testing.T) {
 				}
 				return forbidden403
 			}},
+		{name: "GET /api/live?public_id=&agent= (agent narrows)", method: "GET", path: func(res string) string { return "/api/live?agent=acme-support&public_id=" + public[res] },
+			resources: []string{"A", "B"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
 		{name: "GET /api/live?agent=&tag.<k>=<v>", method: "GET", path: fixed("/api/live?agent=acme-support&tag.arena.batch=b1"), resources: one, want: serverOnly(ok)},
 		{name: "GET /api/live?all=1&flow=", method: "GET", path: fixed("/api/live?all=1&flow=f_checkout"), resources: one, want: serverOnly(ok)},
 		// all (plan A7, the Live page): every run on one stream — the
@@ -1148,7 +1155,7 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		sel, _ := liveSelector(map[string][]string{"run": {"run_a"}})
 		kinds, _ := liveKinds(map[string][]string{"kinds": {"event,run"}})
-		expired, err := signLiveGrant(srv.grantKey, claims, liveStream(sel, kinds, nil))
+		expired, err := signLiveGrant(srv.grantKey, claims, liveStream(sel, kinds, nil, ""))
 		if err != nil {
 			t.Fatal(err)
 		}

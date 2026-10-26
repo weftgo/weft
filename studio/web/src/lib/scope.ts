@@ -93,8 +93,16 @@ export function parseScope(str: string): Scope {
     const v = dec(seg.slice(at + 1).trim())
     if (!v || !known(k)) continue
     if (k.startsWith("tag.")) {
+      // A null-prototype record: a tag named constructor or __proto__
+      // is a key like any other (U22-fix).
       const name = dec(k.slice(4))
-      if (name && out.tags?.[name] === undefined) (out.tags ??= {})[name] = v
+      if (name) {
+        const tags = (out.tags ??= Object.create(null) as Record<
+          string,
+          string
+        >)
+        if (!Object.hasOwn(tags, name)) tags[name] = v
+      }
     } else {
       const key = k as (typeof KEYS)[number]
       if (out[key] === undefined) out[key] = v

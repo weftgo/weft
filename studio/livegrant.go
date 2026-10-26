@@ -101,7 +101,7 @@ func liveGrantKey(token string) []byte {
 // selector's name and value, and the kinds set sorted and
 // comma-joined — so "run,event" and "event,run" (and the omitted
 // default) name the same stream, and anything else does not.
-func liveStream(sel obsdb.Selector, kinds map[string]bool, meta map[string]string) []byte {
+func liveStream(sel obsdb.Selector, kinds map[string]bool, meta map[string]string, agent string) []byte {
 	name, value := "agent", sel.Agent
 	switch {
 	case sel.RunID != "":
@@ -119,10 +119,16 @@ func liveStream(sel obsdb.Selector, kinds map[string]bool, meta map[string]strin
 	}
 	sort.Strings(ks)
 	stream := []string{name, value, strings.Join(ks, ",")}
-	// The metadata filter (U22) is part of the stream: key=value pairs
-	// in key order after the kinds; none, the stream as before.
+	// The run filter (U22) is part of the stream: after the kinds, each
+	// metadata pair in key order as two elements ("tag."+key, value —
+	// never joined, so no "=" in a key or value is ambiguous), then
+	// "agent" and an agent narrowing another selector; none, the
+	// stream as before.
 	for _, k := range slices.Sorted(maps.Keys(meta)) {
-		stream = append(stream, k+"="+meta[k])
+		stream = append(stream, "tag."+k, meta[k])
+	}
+	if agent != "" {
+		stream = append(stream, "agent", agent)
 	}
 	b, _ := json.Marshal(stream)
 	return b
@@ -234,7 +240,7 @@ func (s *Server) verifyLiveGrant(r *http.Request, sig string) (identity, error) 
 	if err != nil {
 		return identity{}, errBadGrant
 	}
-	claims, err := parseLiveGrant(s.grantKey, sig, liveStream(sel, kinds, liveMeta(q)), s.now())
+	claims, err := parseLiveGrant(s.grantKey, sig, liveStream(sel, kinds, liveMeta(q), liveAgent(q, sel)), s.now())
 	if err != nil {
 		return identity{}, err
 	}
@@ -330,7 +336,7 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, r, err.Error())
 		return
 	}
-	if !s.scopeLive(w, r, resolveLive(r, sel)) {
+	if !s.scopeLiveFiltered(w, r, resolveLive(r, sel), sel == (obsdb.Selector{})) {
 		return
 	}
 	id := idFrom(r)
@@ -346,7 +352,7 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	claims.Exp = exp
-	sig, err := signLiveGrant(s.grantKey, claims, liveStream(sel, kinds, liveMeta(q)))
+	sig, err := signLiveGrant(s.grantKey, claims, liveStream(sel, kinds, liveMeta(q), liveAgent(q, sel)))
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "internal", "sign the live grant")
 		return

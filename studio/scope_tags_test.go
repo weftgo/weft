@@ -362,3 +362,68 @@ func TestLiveTagGrantUnderAPanelToken(t *testing.T) {
 		t.Errorf("the server token's tag stream: %q, want r_other r_mine", got)
 	}
 }
+
+// U22-fix 1: agent= beside another selector narrows it — a panel
+// scoped pub_1;agent=director opens public_id + agent and gets only
+// that agent's runs of the conversation (record frames by their own
+// agent); the backfill and the grant (bound to it) alike.
+func TestLiveAgentNarrowsAnotherSelector(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	hub := obsdb.NewHub()
+	h := Handler(DB(db), Live(hub))
+	resp := subscribeLive(t, h, "?public_id=pub_1&agent=director&kinds=run,event", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("public_id + agent: %d, want 200", resp.StatusCode)
+	}
+	ctx := context.Background()
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_a", PublicID: "pub_1", Agent: "analyst"}))
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_d", PublicID: "pub_1", Agent: "director"}))
+	rec := pubRecord("r_d2", "pub_1", "", 0)
+	rec.Attrs["gen_ai.agent.name"] = "director"
+	hub.Publish(ctx, obsdb.RecordFrame(rec))
+	other := pubRecord("r_o", "pub_1", "", 0) // agent "orders"
+	hub.Publish(ctx, obsdb.RecordFrame(other))
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_x", PublicID: "pub_2", Agent: "director"}))
+	var got []string
+	for _, f := range readSSE(t, resp, 2, 5*time.Second) {
+		var d struct {
+			RunID string `json:"run_id"`
+			Run   struct {
+				ID string `json:"id"`
+			} `json:"run"`
+		}
+		_ = json.Unmarshal([]byte(f.data), &d)
+		got = append(got, f.event+":"+d.RunID+d.Run.ID)
+	}
+	if strings.Join(got, " ") != "run:r_d record:r_d2" {
+		t.Errorf("public_id=pub_1&agent=director saw %v, want run:r_d record:r_d2", got)
+	}
+}
+
+// U22-fix 6: the grant's stream names each filter pair as two
+// elements, so "a=b" → "c" and "a" → "b=c" are different streams, and
+// an agent filter differs from a tag named agent.
+func TestLiveStreamBindsTheFilterUnambiguously(t *testing.T) {
+	kinds := map[string]bool{"run": true}
+	sel := obsdb.Selector{PublicID: "pub_1"}
+	seen := map[string]string{}
+	for name, s := range map[string][]byte{
+		"a=b → c":       liveStream(sel, kinds, map[string]string{"a=b": "c"}, ""),
+		"a → b=c":       liveStream(sel, kinds, map[string]string{"a": "b=c"}, ""),
+		"tag agent → x": liveStream(sel, kinds, map[string]string{"agent": "x"}, ""),
+		"agent x":       liveStream(sel, kinds, nil, "x"),
+		"none":          liveStream(sel, kinds, nil, ""),
+	} {
+		if prev, dup := seen[string(s)]; dup {
+			t.Errorf("%s and %s bind the same stream %s", prev, name, s)
+		}
+		seen[string(s)] = name
+	}
+	if got := string(liveStream(sel, kinds, nil, "")); got != `["public_id","pub_1","run"]` {
+		t.Errorf("an unfiltered stream = %s, want the stream as before", got)
+	}
+}

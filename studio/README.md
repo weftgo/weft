@@ -156,7 +156,9 @@ The tab opens after the hand-off answers; a browser that blocks a popup
 after a slow answer leaves the plain link on the note line (put there
 once the answer takes over a second). Without the
 capability, under a read-scoped panel token (its Studio page is already a
-read view), the dev token or none, the plain link opens; a refusal opens
+read view) or no token, the plain link opens; under the dev token (setup
+B, UX-D-18) the hand-off answers with that same token in the fragment, as
+`weft open --with-token` opens it, so the tab lands signed in; a refusal opens
 the plain link too (a 403 or 404 silently, anything else with the note
 line). The host API's `studioLink()` stays the plain URL.
 
@@ -755,7 +757,16 @@ cli-20261012-115753 · 196 runs`: the first tag's key by its last dotted
 segment, the match's whole count; the rows say "run" and name their
 agent. Under a panel token a tag scope reads what the token already
 allows (its public id's runs); a tag scope is only as tight as the
-app's own tagging.
+app's own tagging. The flow is caller-written metadata the same way:
+`scope.Header` stamps `weft.flow` from the scope your handler returns,
+else from the request's own `Weft-Scope` header — which the client
+controls, as it controls any tag — so a flow narrows a view, never
+grants one. A tag, agent or flow scope with no public id opens its live
+lane wherever `agent=` alone would (the dev token, setup A on any
+allowed Host); `agent=` beside a public id, session or run narrows that
+lane to the agent's runs. Rows read "turn" only for a public id with no
+tag, agent or flow; otherwise every word is "run", and each tag the
+title does not name is a chip.
 
 | Scope | Write it as | Lists |
 |---|---|---|
@@ -917,8 +928,9 @@ follow `/api/live?agent=<agent of the newest listed run>` (run frames
 only, opened through a grant like every stream) instead of a poll: the
 live API has no selector for everything (exactly one of `run`,
 `session`, `public_id`, `agent`), and an app's dev page usually runs
-one agent. While that stream is up the list says `live: agent X · the
-other agents' runs every 30 s` and is still read every 30 s (dock open,
+one agent. While that stream is up the list — its rows grouped by agent, each
+group where its newest run is — says, with "how to scope" open, `live:
+newest agent only (X) · the others every 30 s` and is still read every 30 s (dock open,
 page visible), so another agent's runs that start later appear. The
 10 s poll (dock open, page visible) takes over while no stream is up —
 no run listed yet (no agent to name), the stream gone (it is reopened
@@ -1139,8 +1151,8 @@ data-token (the dev token) or a panel token (POST /api/panel-tokens)
 itself signed in). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 287,230 B raw / 96,975 B gzip
-(94.7 KiB, the bundle of the ledger's row "U21.2-fix"; 9,521 B — 9.3 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 287,837 B raw / 97,215 B gzip
+(94.9 KiB, the bundle of the ledger's row "U22-fix"; 9,281 B — 9.1 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -3260,7 +3272,11 @@ where `t` is a read-scoped panel token for the same public id, signed like
 `/api/panel-tokens`'s, expiring in 5 minutes or at the asking token's own
 expiry if sooner, logged as a hand-off without the token; `Accept:
 application/json` gets the same as `{"location","exp"}` for a fetch. The
-server token gets the 303 with no fragment. A read-scoped panel token is 403:
+server token (setup B's dev token) gets the 303 to `<base><to>#token=<the
+server token>` (no `exp`): the non-JSON answer carries the dev token in its
+`Location` header's fragment — never sent on by a browser, and the answer is
+`Cache-Control: no-store` and `Referrer-Policy: no-referrer` — as `weft open
+--with-token`'s link does. A read-scoped panel token is 403:
 it cannot widen, and its page links to Studio directly. `to` must be a path
 under the base — a single leading `/`, no scheme, host, fragment, backslash,
 white space or `.`/`..` segment (raw or `%2e`) — else 400: never an open

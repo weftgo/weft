@@ -266,6 +266,7 @@ import { installHeaderRung } from "./detect"
 import type { HeaderRung } from "./detect"
 import type { Marker, MarkerRung } from "./markers"
 import { parseScope, serializeScope } from "../lib/scope"
+import { copyText } from "../lib/json"
 import { clip as clipTitle, turnLabel, turnTitle } from "../lib/title"
 import { lineageOf } from "../lib/run-row"
 import { panelStudioVersion } from "./version"
@@ -2943,10 +2944,31 @@ export class WeftDevtools extends HTMLElement {
     return { base: this.base, token: this.cfg.token }
   }
 
+  /** turnish: the list is one conversation's turns — a public id and
+   * no tag, agent or flow filter; else it is a page of runs (U22), and
+   * the header, the list and every row say "run". */
+  private turnish(): boolean {
+    const m = this.model
+    return !!m?.publicId && !Object.keys(m.q).length
+  }
+
   /** howToBox is the fallback's expander: the one-line fixes. */
   private howToBox(): HTMLElement {
     const box = el("div", "weft-howto")
-    for (const line of HOW_TO_SCOPE) box.append(el("code", "", line))
+    // Each line copyable (UX-D-07): the tree's ⧉, the note line says
+    // whether the clipboard took it.
+    for (const line of HOW_TO_SCOPE) {
+      const c = el("button", "weft-tc", "⧉", {
+        type: "button",
+        "aria-label": `copy: ${line}`,
+      })
+      on(c, "click", () =>
+        copyText(line).then((ok) =>
+          this.say(ok ? "copied" : "the clipboard refused")
+        )
+      )
+      box.append(el("div", "", [el("code", "", line), c]))
+    }
     box.append(
       el("a", "", "all rungs ⤢", {
         href: "https://github.com/weftgo/weft/tree/main/studio#the-devtools-panel-weft-devtoolsmd",
@@ -3070,6 +3092,11 @@ export class WeftDevtools extends HTMLElement {
           title: "the list is narrowed to this flow (weft.flow)",
         })
       )
+    // Every tag the title does not name (U22-fix): a scope's tags
+    // narrow the list too.
+    for (const [k, v] of Object.entries(narrowing.tags ?? {}))
+      if (scope || k != tk)
+        h.append(el("span", "weft-chip weft-scope-chip", `tag ${k}=${v}`))
     h.append(el("span", "weft-grow"))
     // A derived turn whose spans reported no usage is left out of the
     // total (its zeros are "not reported"): the total then reads "≥",
@@ -3088,7 +3115,7 @@ export class WeftDevtools extends HTMLElement {
     const all = !scope && q ? s.total : undefined
     const count = all ?? s.turns.length
     const more = all == null && s.turnsCapped
-    const stats = `${count}${more ? "+" : ""} ${s.session && !q ? "turn" : "run"}${count - 1 || more ? "s" : ""} · ${tok}`
+    const stats = `${count}${more ? "+" : ""} ${s.session && this.turnish() ? "turn" : "run"}${count - 1 || more ? "s" : ""} · ${tok}`
     h.append(
       el("span", "", stats, {
         title: unknown ? `${stats} — ${unknown.cost_reason ?? ""}` : stats,
@@ -3384,17 +3411,19 @@ export class WeftDevtools extends HTMLElement {
             : "streaming needs the server token · polling"
         )
       )
-    else if (s.devAgent)
+    // The fallback's live words only with "how to scope" open
+    // (UX-D-06): the card stays short.
+    else if (s.devAgent && this.howTo)
       list.append(
         el(
           "div",
           "weft-note weft-dev-poll",
-          `live: agent ${s.devAgent} · the other agents' runs every ${DEV_DISCOVERY_MS / 1000} s`
+          `live: newest agent only (${s.devAgent}) · the others every ${DEV_DISCOVERY_MS / 1000} s`
         )
       )
     // A page of runs (U22) and the fallback say "run"; a conversation
     // "turn".
-    const noun = this.model?.publicId ? "turn" : "run"
+    const noun = this.turnish() ? "turn" : "run"
     if (!s.turns.length && !s.experiments.size) {
       const empty = session
         ? `no turns of session ${session} yet`
@@ -3408,6 +3437,13 @@ export class WeftDevtools extends HTMLElement {
     // prompt_preview; a status; has error. Applied to the loaded rows.
     list.append(this.turnFilter())
     const turns = s.turns.filter((r) => this.match(r))
+    // The fallback groups its rows by agent (UX-D-06), each group where
+    // its newest run is, newest first inside.
+    if (!this.model?.scoped) {
+      const at = new Map<string, number>()
+      turns.forEach((r, i) => at.has(r.agent) || at.set(r.agent, i))
+      turns.sort((a, b) => at.get(a.agent)! - at.get(b.agent)!)
+    }
     const filtered = this.filtering()
     if (filtered)
       list.append(
@@ -5216,7 +5252,7 @@ export class WeftDevtools extends HTMLElement {
       el(
         "span",
         "weft-ttl",
-        `${this.model?.publicId ? turnLabel(r) : r.agent} ${clipTitle(t.text)}`.trim(),
+        `${this.turnish() ? turnLabel(r) : r.agent} ${clipTitle(t.text)}`.trim(),
         {
           title: `${r.id}\n${t.full}`,
           "data-weft-title": t.kind,
@@ -5259,7 +5295,7 @@ export class WeftDevtools extends HTMLElement {
     // together: "turn 3, parked, <title>, 2 steps, 60 in 30 out, 3h ago".
     row.setAttribute(
       "aria-label",
-      `${r.turn && this.model?.publicId ? `turn ${r.turn}` : "run"}, ${chip.word}, ${clipTitle(t.text)}, ${stepCount(r.steps)}${derivedUsageUnknown(r) ? "" : `, ${tokenPair(usage.input_tokens, usage.output_tokens)}`}, ${when}`
+      `${r.turn && this.turnish() ? `turn ${r.turn}` : "run"}, ${chip.word}, ${clipTitle(t.text)}, ${stepCount(r.steps)}${derivedUsageUnknown(r) ? "" : `, ${tokenPair(usage.input_tokens, usage.output_tokens)}`}, ${when}`
     )
     if (r.err) row.append(el("div", "weft-reason", r.err))
     on(row, "click", () => this.go(this.model?.select(r.id, true)))

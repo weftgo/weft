@@ -1609,10 +1609,11 @@ export class PanelModel {
         // session is read by its id (U16-fix: a delegated session's
         // turns may carry no public id), else the public id's newest.
         const want = this.narrowing.session
-        const sessions = await fetchSessions(
-          this.ep,
-          want ? { q: want } : { public_id: this.publicId }
-        ).catch(() => null)
+        // The scope's filters narrow the header's read as the list's.
+        const sessions = await fetchSessions(this.ep, {
+          ...(want ? { q: want } : { public_id: this.publicId }),
+          ...this.q,
+        }).catch(() => null)
         if (seq !== this.loadSeq || this.disposed) return
         if (sessions && Array.isArray(sessions.sessions)) {
           this.state.session =
@@ -1637,6 +1638,7 @@ export class PanelModel {
         (await fetchRuns(this.ep, {
           public_id: this.publicId,
           playground: "1",
+          ...this.q,
           limit: String(TURNS_LIMIT),
         }).catch(() => null))
       if (!page?.runs.length) {

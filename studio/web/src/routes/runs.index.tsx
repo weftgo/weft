@@ -72,6 +72,7 @@ import { runLink } from "@/lib/links"
 import type { RunsSearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { ANY_STATUS, statusPick } from "@/lib/status"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 export { filtersFromSearch }
 
@@ -696,7 +697,10 @@ function RunsPage() {
         </div>
       ) : null}
       {badWhen.length > 0 ? (
-        <p className="font-mono text-[11px] text-status-bad" data-when-notes>
+        <p
+          className={`font-mono text-[11px] ${STATUS_TEXT.bad}`}
+          data-when-notes
+        >
           {badWhen.join(" · ")}{" "}
           <button
             type="button"
@@ -744,7 +748,7 @@ function RunsPage() {
         </div>
       ) : page.isError ? (
         <div className="mx-auto max-w-md space-y-2 py-24 text-center">
-          <p className="text-sm text-status-bad">{page.error.message}</p>
+          <p className={`text-sm ${STATUS_TEXT.bad}`}>{page.error.message}</p>
           <Button
             variant="outline"
             size="sm"

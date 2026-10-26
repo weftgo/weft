@@ -58,6 +58,7 @@ import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
 import { SelectField } from "@/components/ui/select-field"
 import { Term } from "@/components/studio/term"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 type FormProps = {
   variant: VariantFields
@@ -257,7 +258,11 @@ export function ModeFields({
           source turn and an input. */}
       <div className="block min-w-0 flex-1 space-y-1">
         <SelectField
-          caption={<Term name="fork">Write to</Term>}
+          caption={
+            <Term name="fork" portal>
+              Write to
+            </Term>
+          }
           label="Write to"
           className="w-full"
           value={variant.thread}
@@ -572,7 +577,7 @@ function Problems({ list }: { list: LabProblem[] }) {
       {list.map((p, i) => (
         <p
           key={`${i}:${p.message}`}
-          className="text-[11px] text-status-bad"
+          className={`text-[11px] ${STATUS_TEXT.bad}`}
           role="alert"
           data-lab-problem={p.field}
         >
@@ -662,7 +667,7 @@ export function TranscriptEdits({
         >
           <Badge
             variant="outline"
-            className="border-ev-error/40 font-mono text-[10px] font-normal text-ev-error"
+            className={`border-ev-error/40 font-mono text-[10px] font-normal ${STATUS_TEXT.error}`}
           >
             {source.fields === null
               ? "unchecked edit"
@@ -834,7 +839,7 @@ export function EngineRadios({
       {refused ? (
         <p
           id={refusedID}
-          className="text-xs text-status-bad"
+          className={`text-xs ${STATUS_TEXT.bad}`}
           role="alert"
           data-engine-refused
         >

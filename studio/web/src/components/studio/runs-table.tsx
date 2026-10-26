@@ -59,7 +59,7 @@ import { CacheHint, CostText } from "@/components/studio/cost"
 import { DerivedChip } from "@/components/studio/hole-badge"
 import { derivedUsageUnknown } from "@/lib/honesty"
 import { runLink, runsLink, sessionLink } from "@/lib/links"
-import { statusClass } from "@/lib/status-class"
+import { statusClass, STATUS_TEXT } from "@/lib/status-class"
 import {
   STATUS,
   statusOf,
@@ -797,7 +797,7 @@ function RunTableRow({
         </TableCell>
         <TableCell className="text-right font-mono whitespace-nowrap tabular-nums">
           {run.status === "running" ? (
-            <span className="text-status-run-ink" title="elapsed so far">
+            <span className={`${STATUS_TEXT.running}`} title="elapsed so far">
               {elapsed(run.started, clock)}…
             </span>
           ) : (

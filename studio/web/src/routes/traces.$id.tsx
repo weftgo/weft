@@ -41,6 +41,7 @@ import { SPLITS } from "@/lib/pane-sizes"
 import { runLink, traceSelectionLink, tracesLink } from "@/lib/links"
 import type { TraceSearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 const searchText = (v: unknown): string | undefined =>
   typeof v === "string" && v ? v : typeof v === "number" ? String(v) : undefined
@@ -212,7 +213,7 @@ function TracePage() {
           </span>
         ) : null}
         {facts.error ? (
-          <span className="text-status-bad" data-trace-error>
+          <span className={`${STATUS_TEXT.bad}`} data-trace-error>
             error
           </span>
         ) : null}
@@ -394,7 +395,7 @@ function SelectedSpan({
     <div className="grid min-w-0 gap-3">
       {at && onReplay ? (
         <div className="flex flex-wrap items-center gap-2" data-span-retry>
-          <span className="font-mono text-[11px] text-status-bad">
+          <span className={`font-mono text-[11px] ${STATUS_TEXT.bad}`}>
             {span.status_message || "the model call failed"}
           </span>
           <ReplayFromHere run={at.run} step={at.step} onReplay={onReplay} />
@@ -478,7 +479,7 @@ function PartView({ part }: { part: ChatPart }) {
           data-chat-tool-call={part.name}
         >
           <summary className="cursor-pointer">
-            <span className="text-ev-tool">
+            <span className={`${STATUS_TEXT.tool}`}>
               ⚙ {part.name || "(unnamed tool)"}
             </span>
             {part.id ? <span className="text-faint"> · {part.id}</span> : null}
@@ -574,7 +575,7 @@ function ChatMessages({
         ))}
       </ol>
       {problems.map((p) => (
-        <p key={p} className="font-mono text-[11px] text-status-bad">
+        <p key={p} className={`font-mono text-[11px] ${STATUS_TEXT.bad}`}>
           {p} — the raw value is in the attributes
         </p>
       ))}

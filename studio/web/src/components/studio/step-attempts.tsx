@@ -32,6 +32,7 @@ import { attemptError } from "@/lib/error-kind"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import type { RunRequests } from "@/components/studio/step-request"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /**
  * StepHeadline is the step header's attempt and timing words: the step
@@ -120,13 +121,14 @@ export function stepAttemptsHole(
 }
 
 function outcomeOf(a: StepAttempt) {
-  if (a.outcome === "ok") return <span className="text-ev-result">ok</span>
+  if (a.outcome === "ok")
+    return <span className={`${STATUS_TEXT.result}`}>ok</span>
   if (a.outcome === "error") {
     // The phrase, the raw error.type in the hover (UX-S2-15).
     const e = attemptError(a.error_type)
     return (
       <span
-        className="text-ev-error"
+        className={`${STATUS_TEXT.error}`}
         title={e.title}
         data-attempt-error={a.error_type}
       >
@@ -262,7 +264,7 @@ export function AttemptsSection({
     body = q.data ? (
       <AttemptsPane doc={q.data} running={running} />
     ) : q.isError ? (
-      <p className="pt-2 font-mono text-[11px] text-status-bad">
+      <p className={`pt-2 font-mono text-[11px] ${STATUS_TEXT.bad}`}>
         the attempts could not be read: {q.error.message}
       </p>
     ) : (

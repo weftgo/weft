@@ -1139,8 +1139,8 @@ data-token (the dev token) or a panel token (POST /api/panel-tokens)
 itself signed in). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 287,055 B raw / 96,883 B gzip
-(94.6 KiB, the bundle of the ledger's row "U21.2"; 9,613 B — 9.4 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 287,230 B raw / 96,975 B gzip
+(94.7 KiB, the bundle of the ledger's row "U21.2-fix"; 9,521 B — 9.3 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1449,10 +1449,12 @@ so `Generate` and thread's `Send` under `r.Context()` carry it with no option
 passed (a run's own `weft.Metadata` wins). `scope.PageURLFromContext(ctx)`
 reads it in the handler; `scope.PageURL(r)` applies the rule to any request.
 Studio's run row serves it in `meta`; the run page's "open in app" (plan
-G3) returns to that page with `#weft_scope=`, and `&weft_step=<n>[.<tab>]`
-beside it — the step and view the run page was on (U21.2) — so the panel
-there opens that run at that step, on that tab (story, request, waterfall
-or raw).
+G3) returns to that page with `#weft_scope=`, and `&weft_step=<n>.<tab>`
+beside it — the step and view the run page was on (U21.2; `.<tab>` alone
+when no step is selected) — so the panel there opens that run at that
+step, on that tab (story, request, waterfall or raw). The linked tab is
+that visit's: the panel's stored tab is unchanged, and an explicit scope
+on the page (data-scope, mount's scope) wins over the link.
 
 ## The playground (WEFT-PLAYGROUND.md)
 

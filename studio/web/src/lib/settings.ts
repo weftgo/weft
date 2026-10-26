@@ -475,6 +475,7 @@ export const INGEST_WORDS = {
  * index and the sections themselves read their titles here. The anchor
  * of each is #settings-<id>. */
 export const SETTINGS_SECTIONS = [
+  { id: "connect", title: "Connect an app" },
   { id: "studio", title: "Studio" },
   { id: "token", title: "Token" },
   { id: "database", title: "Database" },

@@ -19,6 +19,7 @@ import {
 import { TOKEN_WALL } from "@/lib/settings"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** True when err is the wall's refusal. */
 export function isUnauthorized(err: unknown): boolean {
@@ -88,7 +89,7 @@ export function TokenWall({ children }: { children: React.ReactNode }) {
           unlock
         </Button>
       </div>
-      <p className="font-mono text-[11px] text-status-bad">
+      <p className={`font-mono text-[11px] ${STATUS_TEXT.bad}`}>
         {meta.isFetching ? "checking…" : meta.error?.message}
       </p>
     </form>

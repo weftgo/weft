@@ -85,7 +85,7 @@ export function editable(target: ReplayEdit, max: number | null): boolean {
 
 /** The line that holds Run while a fork carries edits (both surfaces). */
 export const FORK_EDITS =
-  "transcript edits belong to an ephemeral replay; a fork starts at step 0 — switch thread to ephemeral or drop the edits"
+  "transcript edits belong to an ephemeral replay; a fork starts at step 0 — set Write to: nowhere (ephemeral) or drop the edits"
 
 /** editsProblem holds Run while a draft's edits cannot travel: they go
  * only with from_step > 0, so a draft at step 0 is refused, never sent

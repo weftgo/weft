@@ -28,6 +28,7 @@ import { BarList, Sparkline } from "@/components/studio/spark"
 import type { Bar } from "@/components/studio/spark"
 import { CostText } from "@/components/studio/cost"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** useStats reads GET /api/stats for one by over a window (the app's
  * own runs: the server's playground=false), gated on capability
@@ -172,7 +173,7 @@ export function AgentStatsStrip({
           <span className="text-faint">{m.label}</span>
           <RunsOf
             group={group}
-            className={m.bad ? "text-status-bad" : "text-foreground"}
+            className={m.bad ? `${STATUS_TEXT.bad}` : "text-foreground"}
           >
             {m.cost ? <CostText v={m.cost} /> : m.value}
           </RunsOf>
@@ -341,7 +342,7 @@ export function ToolStatsLine({
     >
       <span>{group.calls.toLocaleString()} calls</span>
       <span
-        className={group.failed_calls ? "text-status-bad" : ""}
+        className={group.failed_calls ? `${STATUS_TEXT.bad}` : ""}
         title={`${group.failed_calls} of ${group.calls} failed`}
       >
         failed {pct(group.failure_rate)}
@@ -352,7 +353,7 @@ export function ToolStatsLine({
           : "—"}
       </span>
       {group.denials ? (
-        <span className="text-status-bad">{group.denials} denied</span>
+        <span className={`${STATUS_TEXT.bad}`}>{group.denials} denied</span>
       ) : null}
     </p>
   )
@@ -390,7 +391,7 @@ export function VsTypical({ doc }: { doc: RunDoc }) {
       {chips.map((c) => (
         <RunsOf key={c.key} group={g!}>
           <span
-            className={`rounded-sm border px-1.5 py-px ${c.high ? "border-status-int/50 text-status-int" : ""}`}
+            className={`rounded-sm border px-1.5 py-px ${c.high ? `border-status-int/50 ${STATUS_TEXT.int}` : ""}`}
             title={c.title}
             data-typical={c.key}
           >

@@ -33,6 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** ExportVerbs: "export json · jsonl · otlp" — each a download of the
  * run in that format (wefttest is save as test, beside it). Absent
@@ -225,7 +226,11 @@ export function DeleteRun({
               {w.derived}
             </p>
             {refused ? (
-              <p className="text-status-bad" role="alert" data-delete-refused>
+              <p
+                className={`${STATUS_TEXT.bad}`}
+                role="alert"
+                data-delete-refused
+              >
                 {refused}
               </p>
             ) : null}

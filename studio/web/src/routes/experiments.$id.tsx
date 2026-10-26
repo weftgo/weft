@@ -79,7 +79,7 @@ import { isUnknownCommand, settled } from "@/hooks/use-command-tracking"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { statusOf } from "@/lib/status"
-import { statusClass } from "@/lib/status-class"
+import { statusClass, STATUS_TEXT } from "@/lib/status-class"
 import { useRuntimesNeeded } from "@/hooks/use-notices"
 import {
   CostText,
@@ -512,7 +512,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
   if (q.isError)
     return (
       <div className="space-y-2 p-6 text-xs">
-        <p className="text-status-bad" role="alert">
+        <p className={`${STATUS_TEXT.bad}`} role="alert">
           experiment {id} could not be read: {q.error.message}
         </p>
         <Link {...experimentsLink()} className="hover:underline">
@@ -643,7 +643,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
         </p>
       ) : null}
       {error ? (
-        <p className="text-xs text-status-bad" role="alert">
+        <p className={`text-xs ${STATUS_TEXT.bad}`} role="alert">
           {error}
         </p>
       ) : null}
@@ -820,7 +820,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                               mine.state === "rejected" ||
                               mine.state === "lost" ||
                               mine.status === "failed"
-                                ? "text-status-bad"
+                                ? `${STATUS_TEXT.bad}`
                                 : "text-muted-foreground"
                             }
                             data-cell-rerun
@@ -983,7 +983,7 @@ function VsSource({ run, read }: { run: RunRow; read: boolean }) {
         [run.id],
         d.data?.summary.first_changed ?? (src.fromStep || undefined)
       )}
-      className={`hover:underline ${words && d.data?.summary.first_changed != null ? "text-status-bad" : "text-muted-foreground"}`}
+      className={`hover:underline ${words && d.data?.summary.first_changed != null ? `${STATUS_TEXT.bad}` : "text-muted-foreground"}`}
       title={
         !read
           ? REPLAY_WORDS.vsNotRead(VS_CHIP_CELLS)

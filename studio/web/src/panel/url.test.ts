@@ -141,6 +141,13 @@ describe("open in app's step (U21.2, UX-F-28): weft_step= beside the scope", () 
       tab: "",
     })
     expect(urlStep("http://localhost/#weft_scope=pub_x")).toBeNull()
+    // The tab alone: Studio knew no step.
+    expect(urlStep("http://localhost/#weft_step=.raw")).toEqual({
+      step: undefined,
+      tab: "raw",
+    })
+    expect(urlStep("http://localhost/#weft_step=")).toBeNull()
+    expect(urlStep("http://localhost/#weft_step=.")).toBeNull()
     expect(urlStep("http://localhost/#weft_step=-1")).toBeNull()
     expect(urlStep("http://localhost/#weft_step=x")).toBeNull()
     // The scope still ends at the &: the step never leaks into it.
@@ -157,6 +164,24 @@ describe("open in app's step (U21.2, UX-F-28): weft_step= beside the scope", () 
     await vi.waitFor(() => expect(m.state.selected).toBe("r_pub_x"))
     expect(m.state.selectedStep).toBe(0)
     expect((el as unknown as { lay: { tab: string } }).lay.tab).toBe("raw")
+    // The linked tab is this visit's: the stored layout is untouched.
+    expect(localStorage.getItem("weft.devtools") ?? "").not.toContain(
+      '"tab":"raw"'
+    )
+  })
+
+  it("an explicit scope wins: the URL's run and step are not selected", async () => {
+    fakeStudio(routesFor("pub_x", "pub_y"))
+    setURL("#weft_scope=pub_x%3Brun%3Dr_pub_x&weft_step=0.raw")
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-open": "true",
+      "data-scope": "pub_y",
+    })
+    const m = (el as unknown as { model: PanelModel }).model
+    await settle()
+    expect(m.state.selected).not.toBe("r_pub_x")
+    expect((el as unknown as { lay: { tab: string } }).lay.tab).not.toBe("raw")
   })
 })
 

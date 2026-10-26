@@ -15,6 +15,7 @@ import { WeftMark } from "@/components/studio/weft-mark"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
 import { FORBIDDEN_NOTE, isForbidden, notFoundBack } from "@/lib/not-found"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /**
  * LoadFailed is a detail page's read that failed with anything but a
@@ -42,7 +43,7 @@ export function LoadFailed({
       data-load-failed={forbidden ? "forbidden" : ""}
     >
       <p className="font-mono text-xs text-faint">{id}</p>
-      <p className="text-sm text-status-bad">{error.message}</p>
+      <p className={`text-sm ${STATUS_TEXT.bad}`}>{error.message}</p>
       {forbidden ? (
         <p className="text-xs text-muted-foreground" data-no-retry>
           {FORBIDDEN_NOTE}

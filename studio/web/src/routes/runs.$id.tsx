@@ -195,6 +195,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { storyRunID, useRunEvents } from "@/hooks/use-run-events"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 type View = "waterfall" | "story" | "raw" | "logs"
 
@@ -1770,7 +1771,9 @@ function RunPage() {
           {/* While running: positions may still be in flight. Once over,
           the header's gap badge (the run's holes) says it. */}
           {runStatus === "running" && stream.gaps.length > 0 && (
-            <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
+            <div
+              className={`rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs ${STATUS_TEXT.bad}`}
+            >
               {stream.gaps.length >= 1000 ? "1,000+" : stream.gaps.length}{" "}
               recorded {stream.gaps.length === 1 ? "event is" : "events are"}{" "}
               missing from the database (position
@@ -1781,7 +1784,9 @@ function RunPage() {
             </div>
           )}
           {stream.error && (
-            <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
+            <div
+              className={`rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs ${STATUS_TEXT.bad}`}
+            >
               event stream: {stream.error}
             </div>
           )}
@@ -1875,7 +1880,7 @@ function RunPage() {
                     </span>
                   ) : levelError ? (
                     <span
-                      className="text-status-bad"
+                      className={`${STATUS_TEXT.bad}`}
                       data-level-hole
                       data-read-failed
                     >

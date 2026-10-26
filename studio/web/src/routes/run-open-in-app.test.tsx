@@ -139,6 +139,14 @@ describe("appLink", () => {
     )
     expect(urlScope(href)).toEqual(scope)
     expect(urlStep(href)).toEqual({ step: 2, tab: "story" })
+    // No step known: the tab alone.
+    expect(appLink(PAGE, scope, { tab: "raw" })).toBe(
+      `${PAGE}#weft_scope=pub_1%3Bsession%3Ds_2%3Brun%3Dr_9&weft_step=.raw`
+    )
+    expect(urlStep(appLink(PAGE, scope, { tab: "raw" })!)).toEqual({
+      step: undefined,
+      tab: "raw",
+    })
     // No run, no step: the panel's step needs the run it is of.
     expect(appLink(PAGE, { publicId: "pub_1" }, { step: 2 })).toBe(
       `${PAGE}#weft_scope=pub_1`
@@ -197,8 +205,9 @@ describe("the run page header", () => {
     serve(runDoc())
     renderApp("/runs/r_9")
     await waitFor(() => expect(verb()).toBeTruthy())
+    // No step: the page's view, the waterfall, alone (U21.2-fix).
     expect(verb()!.getAttribute("href")).toBe(
-      `${PAGE}#weft_scope=pub_1%3Bsession%3Ds_2%3Brun%3Dr_9`
+      `${PAGE}#weft_scope=pub_1%3Bsession%3Ds_2%3Brun%3Dr_9&weft_step=.waterfall`
     )
   })
 

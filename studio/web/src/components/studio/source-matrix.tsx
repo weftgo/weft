@@ -44,7 +44,7 @@ import type { MatrixColumn } from "@/lib/matrix"
 import { DEFAULT_PREDICATE, parsePredicate } from "@/lib/predicate"
 import { canReplay } from "@/lib/replay"
 import { statusOf } from "@/lib/status"
-import { statusClass } from "@/lib/status-class"
+import { statusClass, STATUS_TEXT } from "@/lib/status-class"
 import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select-field"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -403,7 +403,11 @@ export function SourceMatrix({
           onChange={(e) => setPredicate(e.target.value)}
         />
         {parsed.ok ? null : (
-          <span className="text-status-bad" role="alert" data-predicate-error>
+          <span
+            className={`${STATUS_TEXT.bad}`}
+            role="alert"
+            data-predicate-error
+          >
             {parsed.error}
           </span>
         )}
@@ -454,7 +458,7 @@ export function SourceMatrix({
         ) : null}
       </div>
       {error ? (
-        <p className="text-status-bad" role="alert">
+        <p className={`${STATUS_TEXT.bad}`} role="alert">
           {error}
         </p>
       ) : null}

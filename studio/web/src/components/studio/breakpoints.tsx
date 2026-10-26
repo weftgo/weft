@@ -12,6 +12,7 @@ import { BREAKPOINTS_MOVED } from "@/lib/drawer-spec"
 import { plural } from "@/lib/format"
 import { runtimesLink } from "@/lib/links"
 import { BREAKPOINT_WORDS } from "@/lib/settings"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** BreakpointsPointer is the link to the runtime's breakpoints, with
  * how many tools break on every run now. */
@@ -108,7 +109,7 @@ export function Breakpoints({
         ) : null}
       </div>
       {all ? (
-        <p className="text-xs text-status-int" data-breakpoints-all>
+        <p className={`text-xs ${STATUS_TEXT.int}`} data-breakpoints-all>
           {BREAKPOINT_WORDS.all}
         </p>
       ) : null}

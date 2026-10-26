@@ -35,7 +35,7 @@ import {
   VERB_TITLE,
 } from "@/lib/decisions"
 import { HoleBadge } from "@/components/studio/hole-badge"
-import { THREAD_LINK, TONE_TEXT } from "@/lib/status-class"
+import { THREAD_LINK, TONE_TEXT, STATUS_TEXT } from "@/lib/status-class"
 import { useEffect, useId, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -222,7 +222,7 @@ function VerbLine({
   const w = appVerbWords(v, runID, verb)
   return (
     <div
-      className={w.bad ? "text-ev-error" : "text-faint"}
+      className={w.bad ? `${STATUS_TEXT.error}` : "text-faint"}
       data-app-verb={v.state}
     >
       {w.text}
@@ -351,7 +351,7 @@ export function DecisionsNote({
 }) {
   const note = decisionsNote(d, resume)
   return note || d.hole ? (
-    <p className="mt-1 text-status-int" data-decisions-note="">
+    <p className={`mt-1 ${STATUS_TEXT.int}`} data-decisions-note="">
       {d.hole ? <HoleBadge hole={d.hole} {...CALLS_HOLE} /> : null}
       {d.hole && note ? " " : null}
       {note}
@@ -669,7 +669,7 @@ export function ParkedCalls({
             !(verbs[p.id] as Verb | undefined) &&
             shown !== "resumed" ? (
               <p
-                className="font-sans text-status-int"
+                className={`font-sans ${STATUS_TEXT.int}`}
                 data-command-lost={lost.get(p.id)!.command_id}
                 data-app-verb="lost"
               >
@@ -694,7 +694,11 @@ export function ParkedCalls({
         </p>
       ) : shown === "child" && doc.parent_run_id ? (
         // lib/honesty.ts's words, the parent id a link to its turn.
-        <p id={lineID} className="mt-1 text-status-int" data-app-owned="child">
+        <p
+          id={lineID}
+          className={`mt-1 ${STATUS_TEXT.int}`}
+          data-app-owned="child"
+        >
           {`${SUBAGENT_CALL} `}
           <Link
             {...runLink(doc.parent_run_id)}
@@ -709,7 +713,7 @@ export function ParkedCalls({
         // (weft.session.parent); the delegating turn too when known.
         <p
           id={lineID}
-          className="mt-1 text-status-int"
+          className={`mt-1 ${STATUS_TEXT.int}`}
           data-app-owned="pool-child"
         >
           {`${POOL_CHILD} `}
@@ -736,7 +740,7 @@ export function ParkedCalls({
       ) : shown === "experiment" || deciding ? null : (
         <p
           id={lineID}
-          className="mt-1 text-status-int"
+          className={`mt-1 ${STATUS_TEXT.int}`}
           data-app-owned={
             shown === "unread"
               ? "unread"
@@ -814,7 +818,7 @@ function RequestExpiry({ at, now }: { at: string; now: number }) {
   const w = expiryWords(at, now)
   return (
     <span
-      className={w.lapsed ? "text-status-int" : "text-faint"}
+      className={w.lapsed ? `${STATUS_TEXT.int}` : "text-faint"}
       title={w.title}
       data-request-expiry={w.lapsed ? "lapsed" : "open"}
     >

@@ -14,8 +14,6 @@ import {
   sessionViewLink,
 } from "./links"
 import { connectLines, studioURL } from "./connect"
-import { matchesFilter } from "./live-rows"
-import type { RunRow } from "./api"
 
 describe("linkable states (U21.2)", () => {
   it("a session's turn: the table view, the turn; ?turn= alone opens the table", () => {
@@ -49,16 +47,6 @@ describe("linkable states (U21.2)", () => {
     expect(path(conceptLink("session"))).toBe("settings#concept-session")
     expect(path(conceptLink())).toBe("settings#concepts")
   })
-
-  it("agent:<name> in the live filter is one agent exactly", () => {
-    const row = { id: "r", agent: "orders", status: "running" } as RunRow
-    expect(matchesFilter(row, "agent:orders")).toBe(true)
-    expect(matchesFilter(row, "agent:order")).toBe(false)
-    expect(matchesFilter({ ...row, agent: "orders-x" }, "agent:orders")).toBe(
-      false
-    )
-    expect(matchesFilter(row, "running agent:orders")).toBe(true)
-  })
 })
 
 describe("connect an app to this Studio (U21.2)", () => {
@@ -82,5 +70,11 @@ describe("connect an app to this Studio (U21.2)", () => {
     expect(walled[1].code).toContain('data-token="<token>"')
     expect(walled[1].note).toContain("<db>.token")
     expect(walled[2].code).toContain("WEFT_STUDIO_TOKEN=<token>")
+    // WEFT_STUDIO_URL turns discovery off: the token goes beside it.
+    expect(walled[0].code).toContain("export WEFT_STUDIO_TOKEN=<token>")
+    expect(open[0].code).not.toContain("WEFT_STUDIO_TOKEN")
+    expect(open[0].note).toContain("WEFT_STUDIO_TOKEN")
+    // The form of weft open that works today names a run.
+    expect(walled[1].note).toContain("weft open <run id> --with-token")
   })
 })

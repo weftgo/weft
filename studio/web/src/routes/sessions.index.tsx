@@ -52,7 +52,7 @@ import {
   SESSION_STATUSES,
   sinceOf,
 } from "@/lib/session-states"
-import { statusClass } from "@/lib/status-class"
+import { statusClass, STATUS_TEXT } from "@/lib/status-class"
 import { forkOf } from "@/lib/timeline"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { Term } from "@/components/studio/term"
@@ -312,7 +312,7 @@ function SessionsPage() {
         </p>
       ) : q.isError ? (
         <div className="mx-auto max-w-md space-y-2 py-24 text-center">
-          <p className="text-sm text-status-bad">{q.error.message}</p>
+          <p className={`text-sm ${STATUS_TEXT.bad}`}>{q.error.message}</p>
           <Button variant="outline" size="sm" onClick={() => void q.refetch()}>
             retry
           </Button>

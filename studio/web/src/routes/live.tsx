@@ -55,7 +55,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
-import { statusClass } from "@/lib/status-class"
+import { statusClass, STATUS_TEXT } from "@/lib/status-class"
 import { EmptyState } from "@/components/studio/empty-state"
 import { TERMS } from "@/lib/glossary"
 
@@ -130,16 +130,29 @@ function LiveBody() {
   const setPeekRef = useRef(setPeek)
   setPeekRef.current = setPeek
   // The filter is the URL's (?q=, ?agent=): a shared link opens on it.
-  // The box keeps its own text while typing; the URL follows it.
+  // The box keeps its own text while typing; the URL follows it, and a
+  // ?q= the box did not write (a link followed on this page, back) is
+  // taken into the box.
   const [box, setBox] = useState(q ?? "")
+  const written = useRef<string[]>([])
+  useEffect(() => {
+    const v = q ?? ""
+    const at = written.current.indexOf(v)
+    if (at >= 0) written.current = written.current.slice(at + 1)
+    else {
+      written.current = []
+      setBox(v)
+    }
+  }, [q])
   const setFilter = (v: string) => {
     setBox(v)
+    written.current.push(v)
     void navigate({
       search: (prev) => ({ ...prev, q: v || undefined }),
       replace: true,
     })
   }
-  const filter = [box, agent ? `agent:${agent}` : ""].join(" ").trim()
+  const filter = box
   // The grant refused the all stream although meta offered it (a token
   // changed under the page): the poll, said the same way.
   const [refused, setRefused] = useState(false)
@@ -165,6 +178,7 @@ function LiveBody() {
   const streamed = meta.data?.live_all === true && !refused
   const common = {
     filter,
+    agent,
     peek,
     onPeek: setPeek,
     now,
@@ -257,6 +271,8 @@ function LiveBody() {
 
 interface ListProps {
   filter: string
+  /** ?agent=: one agent, exactly as named. */
+  agent?: string
   peek?: string
   onPeek: (id: string | undefined) => void
   now: number
@@ -282,18 +298,18 @@ const CONN_WORDS: Record<Conn, { text: string; title: string; tone: string }> =
       text: "reconnecting…",
       title:
         "the stream dropped: the browser resumes it (Last-Event-ID) and the running list is read again",
-      tone: "text-status-int",
+      tone: `${STATUS_TEXT.int}`,
     },
     overflow: {
       text: "overflow — catching up",
       title:
         "Studio dropped this page's subscription (its queue overflowed): a fresh stream, then the running list again",
-      tone: "text-status-int",
+      tone: `${STATUS_TEXT.int}`,
     },
     "gave-up": {
       text: "stopped",
       title: "the stream gave up reconnecting: the rows are as last seen",
-      tone: "text-status-bad",
+      tone: `${STATUS_TEXT.bad}`,
     },
   }
 
@@ -303,6 +319,7 @@ const FLUSH_MS = 150
 
 function StreamedRuns({
   filter,
+  agent,
   peek,
   onPeek,
   now,
@@ -439,7 +456,10 @@ function StreamedRuns({
 
   const all = useMemo(() => rowsOf(state), [state])
   const held = all.map((v) => v.run)
-  const rows = all.filter((v) => matchesFilter(v.run, filter, held))
+  const rows = all.filter(
+    (v) =>
+      (!agent || v.run.agent === agent) && matchesFilter(v.run, filter, held)
+  )
   const running = all.filter((v) => !ended(v.run)).length
   const c = CONN_WORDS[conn]
 
@@ -496,14 +516,21 @@ function StreamedRuns({
   )
 }
 
-function PolledRuns({ filter, peek, onPeek, now, canCancel }: ListProps) {
+function PolledRuns({
+  filter,
+  agent,
+  peek,
+  onPeek,
+  now,
+  canCancel,
+}: ListProps) {
   const queryClient = useQueryClient()
   const q = useQuery({
     queryKey: ["runs", "live-page"],
     queryFn: () => fetchRuns({ status: "running", parent: "*", limit: 200 }),
     refetchInterval: LIVE_POLL_MS,
   })
-  const runs = q.data?.runs ?? []
+  const runs = (q.data?.runs ?? []).filter((r) => !agent || r.agent === agent)
   const total = q.data?.total ?? runs.length
 
   return (
@@ -525,7 +552,7 @@ function PolledRuns({ filter, peek, onPeek, now, canCancel }: ListProps) {
         </p>
       ) : q.isError && runs.length === 0 ? (
         <div className="mx-auto max-w-md space-y-2 py-16 text-center">
-          <p className="text-sm text-status-bad">{q.error.message}</p>
+          <p className={`text-sm ${STATUS_TEXT.bad}`}>{q.error.message}</p>
           <Button variant="outline" size="sm" onClick={() => void q.refetch()}>
             retry
           </Button>

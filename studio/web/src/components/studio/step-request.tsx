@@ -20,6 +20,7 @@
 // record, a content-off destination, a token that may not read
 // prompts — never an empty section. The provider wire pair (plan A6)
 // is the pane's second tab, Wire (step-wire.tsx): the same rows' raw.
+import { STATUS_TEXT } from "@/lib/status-class"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
@@ -442,7 +443,7 @@ function ToolRow({ t }: { t: ToolEntry }) {
     <li className="space-y-1">
       <button
         type="button"
-        className="flex min-h-6 items-center gap-1 font-mono text-[12px] text-ev-tool hover:underline"
+        className={`flex min-h-6 items-center gap-1 font-mono text-[12px] ${STATUS_TEXT.tool} hover:underline`}
         aria-expanded={open}
         onClick={() => setOpen((x) => !x)}
       >
@@ -474,7 +475,7 @@ function CatalogView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
     return (
       <div className="min-w-0 flex-1 space-y-1">
         {names.length ? (
-          <span className="font-mono text-[12px] text-ev-tool">
+          <span className={`font-mono text-[12px] ${STATUS_TEXT.tool}`}>
             {names.join(", ")}
           </span>
         ) : null}
@@ -1082,7 +1083,7 @@ export function RequestSection({
     )
   } else if (req.error) {
     head = (
-      <span className="font-mono text-[11px] text-status-bad">
+      <span className={`font-mono text-[11px] ${STATUS_TEXT.bad}`}>
         the request could not be read: {req.error}
       </span>
     )

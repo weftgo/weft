@@ -500,6 +500,32 @@ export const RAW: Term = {
   group: "machinery",
 }
 
+export const EVENT: Term = {
+  term: "event",
+  short:
+    "event — one record of what the run did, in order: a step, a tool call, a result",
+  long: [
+    "Every run records its loop as events (step started, tool call, result, step finished),",
+    "each with its position. Raw lists them; the playback plays them back in order.",
+  ].join("\n"),
+  docs: `${RC}#event-and-delta`,
+  aliases: [],
+  group: "machinery",
+}
+
+export const MANIFEST: Term = {
+  term: "manifest",
+  short:
+    "manifest — the agent as it was built: model, instructions, tools; its hash names it",
+  long: [
+    "An agent's manifest is its definition as data (weft.json, or what a runtime registers):",
+    "model, instructions, tools and policy. A run records its hash, so a change shows.",
+  ].join("\n"),
+  docs: `${LOOP}#the-manifest-the-agent-as-a-diffable-artifact`,
+  aliases: [],
+  group: "machinery",
+}
+
 export const TRACE: Term = {
   term: "trace",
   short: "trace — OpenTelemetry's spans of one request, across services",
@@ -586,6 +612,8 @@ export const TERMS = {
   story: STORY,
   request: REQUEST,
   raw: RAW,
+  event: EVENT,
+  manifest: MANIFEST,
   trace: TRACE,
   span: SPAN,
   tokens: TOKENS,

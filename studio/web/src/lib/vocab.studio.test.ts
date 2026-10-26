@@ -87,6 +87,11 @@ describe("retired words (U21.2)", () => {
       'const f = { thread: "/api/threads/x" }',
       "const g = <p>kept by weft/thread, read as thread.PublicID</p>",
       "const h = <p>one thread.</p>",
+      "const i = <p>threads:</p>",
+      "const j = <p>",
+      "  a delegated",
+      "  session of the pool",
+      "</p>",
     ].join("\n")
     const hits = scanVocab("x.tsx", code, ALIASES)
     expect(hits.map((h) => [h.line, h.alias])).toEqual([
@@ -95,6 +100,8 @@ describe("retired words (U21.2)", () => {
       [4, "continue"],
       [7, "holes"],
       [10, "thread"],
+      [11, "threads"],
+      [13, "delegated session"],
     ])
   })
 })

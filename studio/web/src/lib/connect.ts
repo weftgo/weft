@@ -22,7 +22,7 @@ export interface ConnectLine {
 
 /** Where a token-walled Studio's token is (B7 owns the wall itself). */
 export const TOKEN_PLACE =
-  "the token: <db>.token beside the database, or `weft open --with-token`"
+  "the token: <db>.token beside the database, or `weft open <run id> --with-token`"
 
 /** connectLines are the three ways an app, a page and a coding agent
  * reach the Studio at url. */
@@ -38,8 +38,8 @@ export function connectLines(
     {
       key: "app",
       label: "Go app",
-      code: `export WEFT_STUDIO_URL=${url}\ngo run .   # an app that calls otel.Install()`,
-      note: "otel.Install() records runs here; without WEFT_STUDIO_URL it finds the Studio a running `weft studio` names in its discovery file (studio.json). runtime.Install(...) lets Studio replay them.",
+      code: `export WEFT_STUDIO_URL=${url}\n${authRequired ? "export WEFT_STUDIO_TOKEN=<token>\n" : ""}go run .   # an app that calls otel.Install()`,
+      note: `otel.Install() records runs here; without WEFT_STUDIO_URL it finds the Studio a running \`weft studio\` names in its discovery file (studio.json). WEFT_STUDIO_URL turns discovery off: a Studio with an ingest token needs WEFT_STUDIO_TOKEN too${authRequired ? ` (${TOKEN_PLACE})` : ""}. runtime.Install(...) lets Studio replay them.`,
     },
     {
       key: "panel",

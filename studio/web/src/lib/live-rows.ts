@@ -434,11 +434,6 @@ export function matchesFilter(
   const st = statusOf(run, runs)
   const hay = `${run.agent} ${st.word}`.toLowerCase()
   return words.every((w) =>
-    // agent:<name> is one agent exactly (the live page's ?agent=, U21.2).
-    w.startsWith("agent:")
-      ? run.agent.toLowerCase() === w.slice(6)
-      : Object.hasOwn(STATUS, w)
-        ? st.key === w
-        : hay.includes(w)
+    Object.hasOwn(STATUS, w) ? st.key === w : hay.includes(w)
   )
 }

@@ -29,7 +29,7 @@ import {
 } from "@/lib/api"
 import type { RunRow } from "@/lib/api"
 import { absoluteTime, relativeTime } from "@/lib/format"
-import { statusClass } from "@/lib/status-class"
+import { statusClass, STATUS_TEXT } from "@/lib/status-class"
 import { costView, sumCost } from "@/lib/cost"
 import {
   EXPERIMENT_CELLS,
@@ -163,7 +163,7 @@ function ReplayList() {
       {q.isPending ? (
         <p className="text-xs text-muted-foreground">loading…</p>
       ) : q.isError ? (
-        <p className="text-xs text-status-bad" role="alert">
+        <p className={`text-xs ${STATUS_TEXT.bad}`} role="alert">
           the replays could not be read: {q.error.message}
         </p>
       ) : groups.length === 0 ? (
@@ -400,7 +400,7 @@ function ExperimentList() {
       {list.isPending ? (
         <p className="text-xs text-muted-foreground">loading…</p>
       ) : list.isError ? (
-        <p className="text-xs text-status-bad" role="alert">
+        <p className={`text-xs ${STATUS_TEXT.bad}`} role="alert">
           the experiments could not be read: {list.error.message}
         </p>
       ) : loaded.length === 0 ? (

@@ -56,6 +56,8 @@ describe("the glossary's TERMS (U21.1)", () => {
         "story",
         "request",
         "raw",
+        "event",
+        "manifest",
         "trace",
         "span",
       ])

@@ -41,6 +41,7 @@ import {
 import { Term } from "@/components/studio/term"
 import { EmptyState } from "@/components/studio/empty-state"
 import { TERMS } from "@/lib/glossary"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 export const Route = createFileRoute("/traces/")({
   validateSearch: (search: Record<string, unknown>): TracesSearch => ({
@@ -202,7 +203,10 @@ function TracesPage() {
       </div>
 
       {badWhen.length > 0 ? (
-        <p className="font-mono text-[11px] text-status-bad" data-when-notes>
+        <p
+          className={`font-mono text-[11px] ${STATUS_TEXT.bad}`}
+          data-when-notes
+        >
           {badWhen.join(" · ")}{" "}
           <button
             type="button"
@@ -251,7 +255,7 @@ function TracesPage() {
         </div>
       ) : q.isError ? (
         <div className="mx-auto max-w-md space-y-2 py-24 text-center">
-          <p className="text-sm text-status-bad">{q.error.message}</p>
+          <p className={`text-sm ${STATUS_TEXT.bad}`}>{q.error.message}</p>
           <Button variant="outline" size="sm" onClick={() => void q.refetch()}>
             retry
           </Button>
@@ -315,7 +319,7 @@ function TracesPage() {
                         </span>
                         {t.error ? (
                           <span
-                            className="font-mono text-[10px] text-status-bad"
+                            className={`font-mono text-[10px] ${STATUS_TEXT.bad}`}
                             data-trace-error
                           >
                             error
@@ -344,7 +348,7 @@ function TracesPage() {
                       ) : (
                         <Link
                           {...runLink(t.root_run?.id ?? t.run_ids[0])}
-                          className={`hover:text-thread-ink hover:underline ${t.failed_runs ? "text-status-bad" : "text-muted-foreground"}`}
+                          className={`hover:text-thread-ink hover:underline ${t.failed_runs ? `${STATUS_TEXT.bad}` : "text-muted-foreground"}`}
                           title={t.run_ids.join("\n")}
                           data-trace-run-count
                         >

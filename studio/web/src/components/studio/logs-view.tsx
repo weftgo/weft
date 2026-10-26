@@ -15,6 +15,7 @@ import type { AllLogs, LogLevel } from "@/lib/logs"
 import { DRAWER } from "@/lib/run-tree"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** A line's attributes as one short string: k=v, space-separated. */
 function attrsLine(a: Record<string, unknown>): string {
@@ -177,7 +178,9 @@ export function LogsView({
       {q.isPending ? (
         <p className="font-mono text-xs text-faint">{DRAWER.loading}</p>
       ) : q.isError ? (
-        <p className="font-mono text-xs text-status-bad">{q.error.message}</p>
+        <p className={`font-mono text-xs ${STATUS_TEXT.bad}`}>
+          {q.error.message}
+        </p>
       ) : (
         <>
           <LogsHoles page={q.data} />

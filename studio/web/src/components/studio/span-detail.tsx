@@ -76,6 +76,7 @@ import {
 import type { ChildRow } from "@/components/studio/subagent-block"
 import { Button } from "@/components/ui/button"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 function Facts({ rows }: { rows: [string, React.ReactNode][] }) {
   return (
@@ -292,7 +293,7 @@ function Answer({
     <div key={k} className="contents">
       <dt className="text-muted-foreground">{ANSWER_LABELS[k]}</dt>
       <dd
-        className={`min-w-0 break-words ${bad ? "text-status-bad" : ""}`}
+        className={`min-w-0 break-words ${bad ? `${STATUS_TEXT.bad}` : ""}`}
         data-answer-line={k}
       >
         {text}
@@ -316,7 +317,7 @@ function Answer({
       <div className="contents">
         <dt className="text-muted-foreground">{ANSWER_LABELS.verdict}</dt>
         <dd
-          className={`min-w-0 break-words ${verdict.bad ? "text-status-bad" : "text-foreground"}`}
+          className={`min-w-0 break-words ${verdict.bad ? `${STATUS_TEXT.bad}` : "text-foreground"}`}
           data-verdict
           data-bad={verdict.bad || undefined}
         >
@@ -590,7 +591,9 @@ function LogsTab({
     )
   if (q.isError)
     return (
-      <p className="font-mono text-xs text-status-bad">{q.error.message}</p>
+      <p className={`font-mono text-xs ${STATUS_TEXT.bad}`}>
+        {q.error.message}
+      </p>
     )
   const page = q.data
   const lines = page.logs.filter(

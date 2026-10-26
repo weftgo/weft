@@ -15,6 +15,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** A JSON-Schema tree: type, required fields, nested properties. */
 export function SchemaTree({
@@ -93,7 +94,9 @@ function ToolCard({ tool, extra }: { tool: ManifestTool; extra?: ReactNode }) {
   return (
     <div className="rounded-lg border bg-background px-3 py-2">
       <div className="flex flex-wrap items-baseline gap-2">
-        <span className="font-mono text-[13px] text-ev-tool">{tool.name}</span>
+        <span className={`font-mono text-[13px] ${STATUS_TEXT.tool}`}>
+          {tool.name}
+        </span>
         {tool.source ? (
           <span className="font-mono text-[10px] text-faint">
             {tool.source}

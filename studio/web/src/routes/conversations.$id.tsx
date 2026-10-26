@@ -24,7 +24,7 @@ import {
 } from "@/lib/conversation"
 import { runLink, runsLink, sessionLink } from "@/lib/links"
 import { LIVE_WORDS, pageOrder } from "@/lib/timeline"
-import { THREAD_LINK } from "@/lib/status-class"
+import { THREAD_LINK, STATUS_TEXT } from "@/lib/status-class"
 import { CostText, useCostCapable } from "@/components/studio/cost"
 import { OrderSwitch, SessionTurns } from "@/components/studio/session-turns"
 import { SessionState } from "@/components/studio/session-state"
@@ -137,7 +137,7 @@ function ConversationPage() {
     return (
       <div className="mx-auto max-w-md space-y-3 py-24 text-center">
         <p className="font-mono text-xs text-faint">{id}</p>
-        <p className="text-sm text-status-bad">{runs.error.message}</p>
+        <p className={`text-sm ${STATUS_TEXT.bad}`}>{runs.error.message}</p>
         {isForbidden(runs.error) ? (
           // A 403 answers the same next time: no retry.
           <p className="text-xs text-muted-foreground" data-no-retry>
@@ -190,7 +190,7 @@ function ConversationPage() {
         ) : null}
         {live !== "off" ? (
           <span
-            className={`font-mono text-[11px] ${running ? "text-status-run-ink" : "text-faint"}`}
+            className={`font-mono text-[11px] ${running ? `${STATUS_TEXT.running}` : "text-faint"}`}
             title={LIVE_WORDS.title}
             data-conversation-live={live}
           >

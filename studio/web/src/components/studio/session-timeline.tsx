@@ -30,7 +30,12 @@ import {
 } from "@/lib/format"
 import { runLink, sessionLink } from "@/lib/links"
 import { statusOf, turnTag } from "@/lib/status"
-import { statusClass, THREAD_LINK, TONE_TEXT } from "@/lib/status-class"
+import {
+  statusClass,
+  THREAD_LINK,
+  TONE_TEXT,
+  STATUS_TEXT,
+} from "@/lib/status-class"
 import { turnLabel, turnTitle } from "@/lib/title"
 import {
   ALL_LANES,
@@ -661,7 +666,7 @@ function TurnRow({
         </details>
       ) : row?.err ? (
         <div
-          className="col-start-2 truncate font-mono text-[11px] text-status-bad"
+          className={`col-start-2 truncate font-mono text-[11px] ${STATUS_TEXT.bad}`}
           title={row.err}
           data-turn-err="failed"
         >

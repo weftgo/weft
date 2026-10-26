@@ -112,6 +112,7 @@ import { ForkOfLine } from "@/components/studio/fork-of"
 import { isPlainShortcut } from "@/lib/keys"
 import type { ToolFactsMap } from "@/lib/error-kind"
 import { Term, TermWrap } from "@/components/studio/term"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** TurnStepper walks a session turn by turn (UX-B-21): "‹ t3 · turn 4
  * of 5 · t5 ›", { and } its keys (the run page's [ ] walk steps). Its
@@ -728,7 +729,7 @@ export function RunHeader({
         {/* A derived run has no events to count: its derived badge
             (below) says so — "0 events" would read as lost. */}
         {isDerived(doc) ? null : (
-          <span>{eventCount.toLocaleString()} events</span>
+          <Term name="event">{eventCount.toLocaleString()} events</Term>
         )}
         {/* A derived run whose stock spans reported no usage reads "—"
             in the API's reason, never "0 in / 0 out" as a known figure. */}
@@ -774,7 +775,7 @@ export function RunHeader({
           started {relativeTime(doc.started, now)} · {absoluteTime(doc.started)}
         </span>
         <span
-          className={doc.status === "running" ? "text-status-run-ink" : ""}
+          className={doc.status === "running" ? `${STATUS_TEXT.running}` : ""}
           title={
             doc.finished
               ? `finished ${absoluteTime(doc.finished)}`
@@ -832,10 +833,14 @@ export function RunHeader({
         </div>
       ) : doc.err ? (
         <div className="flex gap-3 rounded-md border border-status-bad/40 bg-status-bad/5 px-3 py-2">
-          <span className="eyebrow mt-0.5 w-[6ch] shrink-0 text-status-bad">
+          <span
+            className={`eyebrow mt-0.5 w-[6ch] shrink-0 ${STATUS_TEXT.bad}`}
+          >
             error
           </span>
-          <div className="min-w-0 flex-1 font-mono text-xs leading-relaxed whitespace-pre-wrap text-status-bad">
+          <div
+            className={`min-w-0 flex-1 font-mono text-xs leading-relaxed whitespace-pre-wrap ${STATUS_TEXT.bad}`}
+          >
             {doc.err}
           </div>
           <CopyButton
@@ -861,7 +866,7 @@ export function RunHeader({
             </span>
             {output.repairs ? (
               <span
-                className="text-status-int"
+                className={`${STATUS_TEXT.int}`}
                 title="submit_output calls the schema refused (INVALID_INPUT) before the valid one"
                 data-output-repairs={output.repairs}
               >
@@ -881,7 +886,7 @@ export function RunHeader({
           <HoleBadge hole="stripped" />
           {output.repairs ? (
             <span
-              className="text-status-int"
+              className={`${STATUS_TEXT.int}`}
               data-output-repairs={output.repairs}
             >
               {repairedWords(output.repairs)}
@@ -890,7 +895,7 @@ export function RunHeader({
         </div>
       ) : output?.none ? (
         <div
-          className="font-mono text-xs text-status-int"
+          className={`font-mono text-xs ${STATUS_TEXT.int}`}
           title="an Output agent's run that ended without a valid submit_output call: GenerateAs returns ErrNoOutput (weft.output.submitted false)"
           data-output-none
         >
@@ -911,8 +916,13 @@ export function RunHeader({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-faint">
-        <span className="font-mono" title={doc.manifest_hash || undefined}>
-          manifest {shortHash(doc.manifest_hash)}
+        <span className="font-mono">
+          <Term
+            name="manifest"
+            extra={doc.manifest_hash ? `hash ${doc.manifest_hash}` : undefined}
+          >
+            manifest {shortHash(doc.manifest_hash)}
+          </Term>
           <RunManifestMark agent={doc.agent} hash={doc.manifest_hash} />
         </span>
         {doc.weft_version ? (

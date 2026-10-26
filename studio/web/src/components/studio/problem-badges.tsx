@@ -4,13 +4,14 @@
 // run draws nothing.
 import { kindChip, problemBadges, toolErrorKinds } from "@/lib/error-kind"
 import type { ProblemRow, ToolFactsMap } from "@/lib/error-kind"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** The kind chip's class per tone: the cancelled tone is its own (the
  * run's context ended), a plain class until U1's status vocabulary. */
 export function kindToneClass(tone: "bad" | "cancelled"): string {
   return tone === "cancelled"
-    ? "border-status-int/40 text-status-int"
-    : "border-status-bad/40 text-status-bad"
+    ? `border-status-int/40 ${STATUS_TEXT.int}`
+    : `border-status-bad/40 ${STATUS_TEXT.bad}`
 }
 
 /** KindChip is the failed run's kind, "[max_steps]"; nothing without

@@ -116,6 +116,7 @@ import {
 } from "@/components/studio/transcript-editor"
 import { Button } from "@/components/ui/button"
 import { Term } from "@/components/studio/term"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** One "replay from here": the run to take the turn from (a child
  * row's verb names the child — A10: the child replays as its own
@@ -241,9 +242,9 @@ export function ReplayDrawer({
 
 /** The verdicts' tone. */
 const TONE: Record<ToolVerdict["verdict"], string> = {
-  runs: "text-status-ok",
+  runs: `${STATUS_TEXT.ok}`,
   substituted: "text-thread-ink",
-  parked: "text-ev-error",
+  parked: `${STATUS_TEXT.error}`,
   off: "text-faint",
 }
 
@@ -860,7 +861,7 @@ function ReplayForm({
         {blocked ? (
           <p
             id={blockedID}
-            className="text-xs text-status-bad"
+            className={`text-xs ${STATUS_TEXT.bad}`}
             role="alert"
             data-replay-blocked
           >
@@ -976,7 +977,7 @@ function ReplayForm({
         </section>
         {forkEdits ? (
           <p
-            className="text-xs text-status-bad"
+            className={`text-xs ${STATUS_TEXT.bad}`}
             role="alert"
             data-replay-fork-edits
           >
@@ -986,7 +987,7 @@ function ReplayForm({
         {compactedEdit ? (
           <p
             id={compactedID}
-            className="text-xs text-status-bad"
+            className={`text-xs ${STATUS_TEXT.bad}`}
             role="alert"
             data-replay-view-edit
           >
@@ -995,7 +996,7 @@ function ReplayForm({
         ) : null}
         {invalid.length ? (
           <p
-            className="text-xs text-status-bad"
+            className={`text-xs ${STATUS_TEXT.bad}`}
             role="alert"
             data-replay-invalid
           >
@@ -1003,7 +1004,7 @@ function ReplayForm({
           </p>
         ) : null}
         {refused.length ? (
-          <p className="text-xs text-status-bad" role="alert">
+          <p className={`text-xs ${STATUS_TEXT.bad}`} role="alert">
             side effects allow is refused while {refused.join(", ")}{" "}
             {refused.length === 1 ? "is" : "are"} on: turn{" "}
             {refused.length === 1 ? "it" : "them"} off, or pick substitute or
@@ -1013,7 +1014,7 @@ function ReplayForm({
         {pastEnd ? (
           <p
             id={pastEndID}
-            className="text-xs text-status-bad"
+            className={`text-xs ${STATUS_TEXT.bad}`}
             role="alert"
             data-replay-past-end
           >
@@ -1030,7 +1031,7 @@ function ReplayForm({
         ) : null}
         {orphans.length && !editsLoading ? (
           <p
-            className="text-xs text-status-bad"
+            className={`text-xs ${STATUS_TEXT.bad}`}
             role="alert"
             data-replay-orphans
           >
@@ -1069,7 +1070,11 @@ function ReplayForm({
           </div>
         </details>
         {error ? (
-          <p className="text-xs text-status-bad" role="alert" data-replay-error>
+          <p
+            className={`text-xs ${STATUS_TEXT.bad}`}
+            role="alert"
+            data-replay-error
+          >
             {error}
           </p>
         ) : null}
@@ -1257,7 +1262,7 @@ function ReplayOutcome({
         ) : null}
       </div>
       {e.state === "rejected" || e.state === "lost" ? (
-        <p className="text-status-bad" role="alert">
+        <p className={`${STATUS_TEXT.bad}`} role="alert">
           {e.state === "rejected" ? "the runtime refused it" : "lost"}
           {e.error ? `: ${e.error}` : ""}{" "}
           <button
@@ -1285,7 +1290,7 @@ function ReplayOutcome({
           onSave={onSave}
         />
       ) : e.error ? (
-        <p className="text-status-bad">{e.error}</p>
+        <p className={`${STATUS_TEXT.bad}`}>{e.error}</p>
       ) : null}
       {e.runID && (e.state === "finished" || e.state === "accepted") ? (
         <div className="flex flex-wrap gap-3">

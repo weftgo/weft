@@ -15,6 +15,7 @@ import {
   runsInLine,
 } from "@/lib/runs-in"
 import { SelectField } from "@/components/ui/select-field"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** thisStudio is the Studio this page asked: its base URL. */
 export const thisStudio = (): string =>
@@ -61,7 +62,7 @@ export function RunsIn({
         data-runs-in="none"
         role="status"
       >
-        <p className="text-status-bad">
+        <p className={`${STATUS_TEXT.bad}`}>
           {RUNS_IN.head}: {RUNS_IN.none(agent)} · {manage}
         </p>
         <p className="text-muted-foreground">{RUNS_IN.connected(connected)}</p>

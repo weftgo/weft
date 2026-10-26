@@ -26,7 +26,7 @@ import {
   summarize,
 } from "@/lib/predicate"
 import type { ColumnTally, Judged, Predicate } from "@/lib/predicate"
-import { VERDICT_TEXT } from "@/lib/status-class"
+import { VERDICT_TEXT, STATUS_TEXT } from "@/lib/status-class"
 import { testRegex } from "@/lib/regex-run"
 
 /** The summary's words. */
@@ -261,12 +261,12 @@ export function PredicateField({
         ) : null}
       </label>
       {parsed.ok ? null : (
-        <p className="text-status-bad" role="alert" data-predicate-error>
+        <p className={`${STATUS_TEXT.bad}`} role="alert" data-predicate-error>
           {parsed.error}
         </p>
       )}
       {error ? (
-        <p className="text-status-bad" role="alert">
+        <p className={`${STATUS_TEXT.bad}`} role="alert">
           {error}
         </p>
       ) : null}

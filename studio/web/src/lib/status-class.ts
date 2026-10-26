@@ -74,3 +74,18 @@ export const VERDICT_TEXT = {
   fail: "text-status-bad",
   unknown: "text-faint",
 } as const
+
+/** The solid text of each status role and tone (U21.2-fix): what a
+ * renderer writes instead of a text-status-* / text-ev-* literal —
+ * palette.test.ts allows no solid literal in components/ or routes/
+ * beyond its reasoned list; washes (an /alpha) are a counted ratchet. */
+export const STATUS_TEXT = {
+  bad: statusClass("failed").text,
+  ok: statusClass("succeeded").text,
+  int: statusClass("interrupted").text,
+  parked: statusClass("parked").text,
+  running: statusClass("running").text,
+  error: TONE_TEXT.error,
+  tool: TONE_TEXT.tool,
+  result: TONE_TEXT.result,
+} as const

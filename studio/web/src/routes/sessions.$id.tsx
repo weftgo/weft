@@ -91,7 +91,7 @@ import { ForkOfLine } from "@/components/studio/fork-of"
 import { LineageLine } from "@/components/studio/lineage"
 import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
 import { HoleBadge } from "@/components/studio/hole-badge"
-import { THREAD_LINK } from "@/lib/status-class"
+import { THREAD_LINK, STATUS_TEXT } from "@/lib/status-class"
 import { AWAITING_TITLE, DECIDE } from "@/lib/session-states"
 import { SessionCounts } from "@/components/studio/session-state"
 import { SessionActions } from "@/components/studio/session-actions"
@@ -340,7 +340,7 @@ function SessionPage() {
         ) : null}
         {liveState !== "off" ? (
           <span
-            className={`font-mono text-[11px] ${running ? "text-status-run-ink" : "text-faint"}`}
+            className={`font-mono text-[11px] ${running ? `${STATUS_TEXT.running}` : "text-faint"}`}
             title={LIVE_WORDS.title}
             data-session-live={liveState}
           >

@@ -20,6 +20,7 @@ import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import { UnknownTokens } from "@/components/studio/runs-table"
 import { Usage } from "@/components/studio/step-list"
 import { Button } from "@/components/ui/button"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** DerivedNote is the banner a pane draws in place of what a derived
  * run cannot have: the badge, its reason and its fix, in full. */
@@ -139,7 +140,7 @@ function DerivedStepCard({
             {costCapable ? <Cost fields={st} label="cost" /> : null}
           </>
         ) : q.isError ? (
-          <span className="text-status-bad">
+          <span className={`${STATUS_TEXT.bad}`}>
             the step could not be read: {q.error.message}
           </span>
         ) : enabled ? (

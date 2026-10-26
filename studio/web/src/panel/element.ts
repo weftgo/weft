@@ -1123,11 +1123,12 @@ export class WeftDevtools extends HTMLElement {
     this.syncGlobal()
     this.schedule()
     // Studio's "open in app" (U21.2): the URL rung's run at its step
-    // and tab (weft_step=), once.
+    // and tab (weft_step=), once, below an explicit scope; the tab is
+    // this visit's, never stored.
     const at = first && urlStep()
     const run = this.cfg.urlScope?.run
-    if (at && run) {
-      this.setTab(at.tab)
+    if (at && run && !this.cfg.scopeExplicit) {
+      this.setTab(at.tab, true)
       this.select(run, at.step)
     }
   }
@@ -2170,7 +2171,12 @@ export class WeftDevtools extends HTMLElement {
    * marks a user's placement (a toggle, a move, a resize, a re-dock). */
   private save(place = false) {
     this.placed ||= place
-    writeStore(this.lay, this.placed)
+    // A linked tab (open in app) is this visit's: the stored one stays.
+    const k = this.keptTab
+    writeStore(
+      k ? { ...this.lay, tab: k[0], raw: k[1] } : this.lay,
+      this.placed
+    )
   }
 
   /** quiet reports that the model has no draw scheduled (a draw held
@@ -2207,12 +2213,15 @@ export class WeftDevtools extends HTMLElement {
 
   /** setTab opens one of the turn view's tabs (D4), remembered as the
    * stored layout's tab (raw mirrors it). */
-  private setTab(id: string) {
+  private setTab(id: string, linked?: boolean) {
     if (!TABS.includes(id)) return
+    this.keptTab = linked
+      ? (this.keptTab ?? [this.lay.tab, this.lay.raw])
+      : undefined
     if (this.lay.tab !== "raw") this.prevTab = this.lay.tab
     this.lay.tab = id
     this.lay.raw = id === "raw"
-    this.save()
+    if (!linked) this.save()
     this.render(this.last)
   }
 
@@ -2469,6 +2478,8 @@ export class WeftDevtools extends HTMLElement {
 
   /** The tab r goes back to from Raw. */
   private prevTab = "story"
+  /** The stored tab (and raw) while a linked tab shows (U21.2-fix). */
+  private keptTab?: [string, boolean]
 
   disconnectedCallback() {
     LIVE.delete(this)

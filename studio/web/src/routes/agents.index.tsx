@@ -34,6 +34,7 @@ import { HoleBadge } from "@/components/studio/hole-badge"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { ConnectApp } from "@/components/studio/empty-state"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 export const Route = createFileRoute("/agents/")({
   // The stats window rides the URL (?window=24h|7d, UX-A-14).
@@ -112,7 +113,7 @@ function AgentsPage() {
         </div>
       )
     return (
-      <p className="py-24 text-center text-sm text-status-bad">
+      <p className={`py-24 text-center text-sm ${STATUS_TEXT.bad}`}>
         {manifest.error.message}
       </p>
     )
@@ -152,7 +153,7 @@ function AgentsPage() {
         >
           <AgentSources agent={a} sources={sources} />
           {manifest.data.agents.filter((b) => b.name === a.name).length > 1 && (
-            <p className="text-[11px] text-status-int">
+            <p className={`text-[11px] ${STATUS_TEXT.int}`}>
               {a.name} differs between services: one card per version
             </p>
           )}
@@ -242,7 +243,7 @@ function AgentsStats({
         <span className="text-[11px] text-faint">{STATS_WORDS.appRuns}</span>
       </div>
       {error ? (
-        <p className="text-xs text-status-bad" role="alert">
+        <p className={`text-xs ${STATUS_TEXT.bad}`} role="alert">
           the numbers could not be read: {error}
         </p>
       ) : null}
@@ -341,7 +342,7 @@ function StateLabel({ source }: { source: ManifestSource }) {
     source.source === "file"
       ? "text-muted-foreground"
       : source.live
-        ? "text-status-ok"
+        ? `${STATUS_TEXT.ok}`
         : "text-faint"
   return <span className={tone}>{sourceState(source)}</span>
 }

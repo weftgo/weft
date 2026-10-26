@@ -192,6 +192,7 @@ import { SourceMatrix } from "@/components/studio/source-matrix"
 import { sourcesOf } from "@/lib/matrix"
 import { ConnectApp, EmptyState } from "@/components/studio/empty-state"
 import { TERMS } from "@/lib/glossary"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 // The command's pure halves and the form's controls live in shared
 // modules (plan F1: the run page's replay drawer renders the same
@@ -1474,7 +1475,7 @@ function Playground({ caps }: { caps: string[] }) {
                 {/* Where the form came from (plan F5): a share link, a draft. */}
                 {restored ? (
                   <p
-                    className={`text-xs ${restored.tone === "bad" ? "text-status-bad" : "text-muted-foreground"}`}
+                    className={`text-xs ${restored.tone === "bad" ? `${STATUS_TEXT.bad}` : "text-muted-foreground"}`}
                     role="status"
                     data-form-restored
                   >
@@ -1486,7 +1487,7 @@ function Playground({ caps }: { caps: string[] }) {
                   // included (U18.2-fix2).
                   <p
                     id={check.held ? undefined : heldID}
-                    className={`text-xs ${!sourceHold && preview.pending ? "text-faint" : "text-status-bad"}`}
+                    className={`text-xs ${!sourceHold && preview.pending ? "text-faint" : `${STATUS_TEXT.bad}`}`}
                     role={!sourceHold && preview.pending ? "status" : "alert"}
                     data-run-held
                   >
@@ -1611,7 +1612,7 @@ function Playground({ caps }: { caps: string[] }) {
                   </button>
                 </div>
                 {renameProblem ? (
-                  <p className="text-xs text-status-bad" role="alert">
+                  <p className={`text-xs ${STATUS_TEXT.bad}`} role="alert">
                     {renameProblem}
                   </p>
                 ) : null}
@@ -1664,7 +1665,7 @@ function Playground({ caps }: { caps: string[] }) {
                 {heldEdits ? (
                   <>
                     <p
-                      className="text-xs text-status-bad"
+                      className={`text-xs ${STATUS_TEXT.bad}`}
                       role="alert"
                       data-edits-held
                     >
@@ -1986,7 +1987,7 @@ function PendingCall({
     <div className="flex flex-wrap items-center gap-2">
       <span className="font-mono">{call.name}</span>
       {decided && (
-        <span className="text-status-ok">{DONE[decided] ?? decided}</span>
+        <span className={`${STATUS_TEXT.ok}`}>{DONE[decided] ?? decided}</span>
       )}
       <button
         className="text-faint hover:underline"
@@ -2260,7 +2261,7 @@ function ResultCard({
               {mayRun ? AWAITING : `${AWAITING} (read-only)`}
             </div>
             {folded.pending.length > 1 && (
-              <div className="text-status-int">
+              <div className={`${STATUS_TEXT.int}`}>
                 the run resumes once every parked call has a decision
                 {decidedHere > 0
                   ? ` · ${decidedHere} of ${folded.pending.length} decided`
@@ -2370,8 +2371,8 @@ function DiffRows({ rows }: { rows: DiffRow[] }) {
             key={i}
             className={
               r.kind === "add"
-                ? "whitespace-pre-wrap text-status-ok"
-                : "whitespace-pre-wrap text-status-int line-through"
+                ? `whitespace-pre-wrap ${STATUS_TEXT.ok}`
+                : `whitespace-pre-wrap ${STATUS_TEXT.int} line-through`
             }
           >
             {r.kind === "add" ? "+ " : "− "}
@@ -2896,7 +2897,7 @@ function Matrix({
                               className={
                                 cell.state === "finished" &&
                                 cell.status !== "failed"
-                                  ? "text-status-ok"
+                                  ? `${STATUS_TEXT.ok}`
                                   : cell.state === "rejected" ||
                                       cell.state === "lost" ||
                                       cell.status === "failed"
@@ -2992,7 +2993,7 @@ function FormVerbs({
       </Button>
       {share ? (
         <p
-          className={share.url ? "text-muted-foreground" : "text-status-bad"}
+          className={share.url ? "text-muted-foreground" : `${STATUS_TEXT.bad}`}
           role="status"
           data-share-note
         >

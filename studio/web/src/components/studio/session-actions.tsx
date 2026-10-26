@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dialog"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { OpenInApp } from "@/components/studio/run-header"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 export function SessionActions({
   doc,
@@ -202,7 +203,7 @@ function DeleteSession({ doc }: { doc: SessionDoc }) {
           </DialogHeader>
           {refused ? (
             <p
-              className="text-xs text-status-bad"
+              className={`text-xs ${STATUS_TEXT.bad}`}
               role="alert"
               data-delete-refused
             >

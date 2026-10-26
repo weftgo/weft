@@ -37,7 +37,7 @@ import {
   runtimeState,
   shortManifest,
 } from "@/lib/runtimes"
-import { statusClass } from "@/lib/status-class"
+import { statusClass, STATUS_TEXT } from "@/lib/status-class"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { useRuntimesNeeded } from "@/hooks/use-notices"
@@ -45,6 +45,7 @@ import { Breakpoints } from "@/components/studio/breakpoints"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { ConnectApp } from "@/components/studio/empty-state"
 
 interface RuntimesSearch {
   runtime?: string
@@ -108,7 +109,7 @@ export function RuntimesView({
           reason={`your token's access does not reach the runtimes: ${runtimes.error.message}`}
         />
       ) : (
-        <p className="text-xs text-status-bad" role="alert">
+        <p className={`text-xs ${STATUS_TEXT.bad}`} role="alert">
           the runtimes did not load: {runtimes.error.message}
         </p>
       )
@@ -134,7 +135,11 @@ export function RuntimesView({
           </div>
         ) : null}
         {list.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{NO_RUNTIMES}</p>
+          <div className="space-y-3" data-no-runtimes>
+            <p className="text-xs text-muted-foreground">{NO_RUNTIMES}</p>
+            {/* How to link an app to THIS Studio (U21.2-fix, UX-F-11). */}
+            <ConnectApp only={["app"]} />
+          </div>
         ) : (
           STATE_ORDER.map((state) => {
             const these = list.filter((r) => runtimeState(r) === state)
@@ -159,7 +164,7 @@ export function RuntimesView({
                         {processHead(g)}
                       </p>
                       {overlapping(g).length ? (
-                        <p className="text-[11px] text-status-int">
+                        <p className={`text-[11px] ${STATUS_TEXT.int}`}>
                           {overlapWords(overlapping(g))}
                         </p>
                       ) : null}
@@ -448,7 +453,7 @@ function ForgetButton({ id }: { id: string }) {
   return (
     <span className="flex items-center gap-2">
       {err ? (
-        <span className="text-[11px] text-status-bad" role="alert">
+        <span className={`text-[11px] ${STATUS_TEXT.bad}`} role="alert">
           {err}
         </span>
       ) : null}

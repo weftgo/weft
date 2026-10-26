@@ -73,21 +73,28 @@ describe("every setup opens its streams with a grant", () => {
     it(name, async () => {
       const studio = fakeStudio(liveRoutes())
       const el = await mount(token ? { ...ATTRS, "data-token": token } : ATTRS)
-      const grants = studio.posts("live-grant")
-      expect(grants.map((g) => g.body)).toEqual(
-        expect.arrayContaining([
-          { public_id: "pub_orders", kinds: "run" },
-          { run: "s_01-t1", kinds: "event,delta,run" },
-        ])
-      )
+      // Under a loaded suite the second stream's grant can trail the
+      // mount's settle: wait for both, never for a time (U21.2-fix).
+      const grants = await vi.waitFor(() => {
+        const g = studio.posts("live-grant")
+        expect(g.map((x) => x.body)).toEqual(
+          expect.arrayContaining([
+            { public_id: "pub_orders", kinds: "run" },
+            { run: "s_01-t1", kinds: "event,delta,run" },
+          ])
+        )
+        return g
+      })
       for (const g of grants) {
         expect(g.path).toBe("live-grant") // the stream named in the body, not the query
         expect(g.headers.Authorization).toBe(
           token ? `Bearer ${token}` : undefined
         )
       }
-      const streams = FakeEventSource.instances
-      expect(streams.length).toBe(2)
+      const streams = await vi.waitFor(() => {
+        expect(FakeEventSource.instances.length).toBe(2)
+        return FakeEventSource.instances
+      })
       for (const es of streams) {
         expect(es.refused).toBeNull()
         expect(es.url).not.toContain("token=")

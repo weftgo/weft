@@ -944,7 +944,8 @@ export function saveTestLink(id: string): RunLink {
  * a scope without one carries no fragment: the page opens as it is.
  * null for a page that is not an http(s) URL. Never a token. */
 /** The panel's step parameter beside #weft_scope= (U21.2, UX-F-28):
- * the step ordinal, then the tab — "3", "3.story". The panel's URL rung
+ * the step ordinal, then the tab — "3", "3.story", ".raw" (no step
+ * known). The panel's URL rung
  * reads it (panel/config.ts urlStep) and opens that step on that tab. */
 export const URL_STEP_PARAM = "weft_step"
 
@@ -966,10 +967,12 @@ export function appLink(
   u.hash = ""
   const base = u.toString()
   if (!scope.publicId) return base
+  // The step, the tab, or both ("3.story", "3", ".raw"): only beside
+  // the run they are of.
   const step = ordinal(at.step)
   const where =
-    step !== undefined && scope.run
-      ? `&${URL_STEP_PARAM}=${step}${at.tab ? `.${at.tab}` : ""}`
+    scope.run && (step !== undefined || at.tab)
+      ? `&${URL_STEP_PARAM}=${step ?? ""}${at.tab ? `.${at.tab}` : ""}`
       : ""
   return `${base}#weft_scope=${encodeURIComponent(serializeScope(scope))}${where}`
 }

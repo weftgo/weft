@@ -23,7 +23,7 @@ import { WHO_HOLE } from "@/lib/decisions"
 import { absoluteTime } from "@/lib/format"
 import { runLink, sessionViewLink } from "@/lib/links"
 import { turnTag } from "@/lib/status"
-import { THREAD_LINK, TONE_TEXT } from "@/lib/status-class"
+import { THREAD_LINK, TONE_TEXT, STATUS_TEXT } from "@/lib/status-class"
 import { clockTime, floorOf, parkedCallLink } from "@/lib/timeline"
 import { HoleBadge } from "@/components/studio/hole-badge"
 
@@ -147,7 +147,7 @@ function DecisionTr({
           {r.call}
         </Link>
       </td>
-      <td className="px-2 py-1 text-ev-tool">{r.tool || "—"}</td>
+      <td className={`px-2 py-1 ${STATUS_TEXT.tool}`}>{r.tool || "—"}</td>
       <td className="px-2 py-1">
         <span className={TONE_TEXT[o.tone]}>
           <span aria-hidden>{o.icon} </span>
@@ -242,7 +242,7 @@ function GrantTr({
           <div className="text-muted-foreground">‘{g.reason}’</div>
         ) : null}
       </td>
-      <td className="px-2 py-1 text-ev-tool">{g.tool || "—"}</td>
+      <td className={`px-2 py-1 ${STATUS_TEXT.tool}`}>{g.tool || "—"}</td>
       <td className="px-2 py-1">
         {[g.rule, grantScope(g)].filter(Boolean).join(" · ") || "—"}
       </td>

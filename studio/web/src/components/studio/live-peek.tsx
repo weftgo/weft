@@ -18,6 +18,7 @@ import { DerivedStory } from "@/components/studio/derived-story"
 import { isDerived } from "@/lib/honesty"
 import { StatusChip } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 export function LivePeek({ id, onClose }: { id: string; onClose: () => void }) {
   const { has, loading } = useCapabilities()
@@ -73,7 +74,9 @@ export function LivePeek({ id, onClose }: { id: string; onClose: () => void }) {
         </Button>
       </div>
       {run.isError ? (
-        <p className="font-mono text-xs text-status-bad">{run.error.message}</p>
+        <p className={`font-mono text-xs ${STATUS_TEXT.bad}`}>
+          {run.error.message}
+        </p>
       ) : !run.data || (stream.loading && stream.events.length === 0) ? (
         <p className="py-8 text-center font-mono text-xs text-faint">
           loading…
@@ -81,7 +84,9 @@ export function LivePeek({ id, onClose }: { id: string; onClose: () => void }) {
       ) : (
         <div className="min-w-0" data-peek-story>
           {stream.error ? (
-            <p className="font-mono text-xs text-status-bad">{stream.error}</p>
+            <p className={`font-mono text-xs ${STATUS_TEXT.bad}`}>
+              {stream.error}
+            </p>
           ) : null}
           {/* A derived run (plan I1.3): no events to fold — its story
               is the steps route's, under the derived badge. */}

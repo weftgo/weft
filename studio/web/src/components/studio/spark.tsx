@@ -11,11 +11,12 @@
 import type { ReactNode } from "react"
 
 import { barScale } from "@/lib/stats"
+import { ROLE_SVG, statusClass, studioVar } from "@/lib/status-class"
 
 /** The tones a mark is drawn in: the palette's chart and status tokens. */
 const TONE = {
   series: "stroke-chart-1 fill-chart-1",
-  bad: "stroke-status-bad fill-status-bad",
+  bad: `${ROLE_SVG[studioVar("failed")].stroke} ${ROLE_SVG[studioVar("failed")].fill}`,
 } as const
 
 /** Sparkline is a series as a 2px line over a faint area, oldest left;
@@ -121,7 +122,7 @@ export function BarList({ bars, label }: { bars: Bar[]; label: string }) {
           <span className="h-2 rounded-sm bg-secondary" aria-hidden>
             {b.unknown ? null : (
               <span
-                className={`block h-2 rounded-sm ${b.bad ? "bg-status-bad" : "bg-chart-1"}`}
+                className={`block h-2 rounded-sm ${b.bad ? statusClass("failed").dot : "bg-chart-1"}`}
                 style={{
                   width: `${Math.max(scale[i] * 100, b.value > 0 ? 2 : 0)}%`,
                 }}

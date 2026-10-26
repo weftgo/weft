@@ -312,7 +312,7 @@ describe("the drawer's order and target (lib/drawer-spec.ts)", () => {
       "1 what changes",
       "2 will be sent",
       "3 tools during the replay",
-      "advanced: side effects · thread · options",
+      "advanced: side effects · where it writes · options",
       "",
     ])
   })

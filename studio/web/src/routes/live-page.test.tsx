@@ -379,6 +379,17 @@ describe("the all stream", () => {
         q: "running",
       })
     )
+    // A ?q= followed on the page (not typed) is taken into the box.
+    await act(() =>
+      router.navigate({ to: "/live", search: { agent: "orders", q: "orders" } })
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText<HTMLInputElement>(
+          "filter the runs by agent or status"
+        ).value
+      ).toBe("orders")
+    )
     cleanup()
     const again = await openPage("/live?q=research")
     act(() => {
@@ -392,6 +403,20 @@ describe("the all stream", () => {
         "filter the runs by agent or status"
       ).value
     ).toBe("research")
+  })
+
+  it("?agent= is the name exactly: one with a space, case kept", async () => {
+    const { es } = await openPage(
+      `/live?agent=${encodeURIComponent("Order Desk")}`
+    )
+    act(() => {
+      es.emit("run", { run: running("r_a", { agent: "Order Desk" }) }, "1")
+      es.emit("run", { run: running("r_b", { agent: "order desk" }) }, "2")
+      es.emit("run", { run: running("r_c", { agent: "Order" }) }, "3")
+    })
+    await waitFor(() => expect(rowOf("r_a")).toBeTruthy())
+    expect(rowOf("r_b")).toBeNull()
+    expect(rowOf("r_c")).toBeNull()
   })
 })
 

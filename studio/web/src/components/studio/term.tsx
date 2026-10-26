@@ -33,6 +33,8 @@ export interface TermHandle {
   }
   tip: ReactNode
   open: boolean
+  /** Opens the tooltip (a tap on the word). */
+  show: () => void
 }
 
 const WIDTH = 288
@@ -75,14 +77,27 @@ export function useTerm(
     hide.current = window.setTimeout(() => setOpen(false), 120)
   }, [])
   useEffect(() => () => window.clearTimeout(hide.current), [])
-  // Escape hides a tooltip the pointer opened, wherever focus is.
+  // Escape hides a tooltip the pointer opened, wherever focus is; a
+  // scroll anywhere (capture: a table's own scroll box too) or a resize
+  // hides it — it is drawn fixed and would stay behind its word.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false)
     }
+    const close = (e: Event) => {
+      // A scroll inside the tooltip itself is no move of its word.
+      if (e.target instanceof Node && tip.current?.contains(e.target)) return
+      setOpen(false)
+    }
     document.addEventListener("keydown", onKey)
-    return () => document.removeEventListener("keydown", onKey)
+    document.addEventListener("scroll", close, true)
+    window.addEventListener("resize", close)
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.removeEventListener("scroll", close, true)
+      window.removeEventListener("resize", close)
+    }
   }, [open])
 
   const inside = (n: EventTarget | null) =>
@@ -101,6 +116,7 @@ export function useTerm(
 
   return {
     open,
+    show,
     props: {
       "aria-describedby": open ? id : undefined,
       onFocus: show,
@@ -173,25 +189,37 @@ export function TermWrap({
 }
 
 /** Term draws children (default: the term's word) as a focusable word
- * with a dotted underline and TERMS[name]'s tooltip. */
+ * with a dotted underline and TERMS[name]'s tooltip. A click or tap on
+ * the word opens the tooltip and goes no further — inside a caption
+ * that focuses its control, a row that opens a run, it stays a word to
+ * read (touch has no hover). portal draws the tooltip in <body>: inside
+ * an element that names a control (aria-labelledby), the open tooltip
+ * never joins the name. */
 export function Term({
   name,
   children,
   extra,
   className,
+  portal,
 }: {
   name: TermName
   children?: ReactNode
   extra?: string
   className?: string
+  portal?: boolean
 }) {
-  const h = useTerm(name, extra)
+  const h = useTerm(name, extra, portal)
   return (
     <>
       <span
         {...h.props}
         tabIndex={0}
         data-term={name}
+        onClick={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          h.show()
+        }}
         className={`cursor-help underline decoration-current/40 decoration-dotted underline-offset-4 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring ${className ?? ""}`}
       >
         {children ?? TERMS[name].term}

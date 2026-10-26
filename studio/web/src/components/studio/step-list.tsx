@@ -127,6 +127,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** isAtEnd: the scroller shows its last 48 px. */
 function isAtEnd(el: HTMLElement): boolean {
@@ -313,7 +314,7 @@ function CallPill({
     return (
       <span className="flex items-center gap-1.5">
         <span
-          className="rounded-sm border border-status-parked/50 px-1.5 py-px font-mono text-[10px] tracking-wide text-status-parked"
+          className={`rounded-sm border border-status-parked/50 px-1.5 py-px font-mono text-[10px] tracking-wide ${STATUS_TEXT.parked}`}
           title={parked.hint}
           data-parked-call={cf?.park ?? ""}
         >
@@ -324,7 +325,7 @@ function CallPill({
     )
   if (state === "running")
     return (
-      <span className="font-mono text-[11px] text-status-run-ink">
+      <span className={`font-mono text-[11px] ${STATUS_TEXT.running}`}>
         running…
       </span>
     )
@@ -342,7 +343,7 @@ function CallPill({
   if (state === "never")
     return (
       <span
-        className="rounded-sm border border-ev-error/40 px-1.5 py-px font-mono text-[10px] tracking-wide text-ev-error uppercase"
+        className={`rounded-sm border border-ev-error/40 px-1.5 py-px font-mono text-[10px] tracking-wide ${STATUS_TEXT.error} uppercase`}
         title="tool_start was recorded but no tool_finish — the run ended first"
       >
         never completed
@@ -365,7 +366,7 @@ function CallPill({
     <span className="flex items-center gap-1.5">
       {r.isError ? (
         <span
-          className="rounded-sm border border-ev-error/40 px-1.5 py-px font-mono text-[10px] tracking-wide text-ev-error uppercase"
+          className={`rounded-sm border border-ev-error/40 px-1.5 py-px font-mono text-[10px] tracking-wide ${STATUS_TEXT.error} uppercase`}
           title={
             f?.hint ??
             "error as data: the model saw this result and could recover"
@@ -375,7 +376,9 @@ function CallPill({
           {f?.word ?? (coded ? coded[1] : "tool error")}
         </span>
       ) : (
-        <span className="font-mono text-[11px] text-ev-result">ok</span>
+        <span className={`font-mono text-[11px] ${STATUS_TEXT.result}`}>
+          ok
+        </span>
       )}
       {approval ? (
         <span
@@ -466,7 +469,7 @@ export function ToolCallRow({
             className={`size-3 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
             data-slot="icon"
           />
-          <span className="font-mono text-[13px] text-ev-tool">
+          <span className={`font-mono text-[13px] ${STATUS_TEXT.tool}`}>
             {call.name}
           </span>
           {summary ? (
@@ -774,11 +777,13 @@ function StepOutcome({
   }
   if (runStatus === "running")
     return (
-      <span className="font-mono text-xs text-status-run-ink">in flight…</span>
+      <span className={`font-mono text-xs ${STATUS_TEXT.running}`}>
+        in flight…
+      </span>
     )
   return (
     <span
-      className={`font-mono text-xs ${runStatus === "failed" ? "text-status-bad" : "text-ev-error"}`}
+      className={`font-mono text-xs ${runStatus === "failed" ? `${STATUS_TEXT.bad}` : `${STATUS_TEXT.error}`}`}
       title="no step_finish was recorded: the run ended during this step"
     >
       {runStatus === "failed"
@@ -975,7 +980,7 @@ function StepCard({
         {loop && loop.first < step.index && loop.steps.includes(step.index) ? (
           <Link
             {...runLink(runId, { step: loop.first, view: "story" })}
-            className="rounded-sm border border-status-bad/40 px-1.5 py-px font-mono text-[10px] text-status-bad hover:underline"
+            className={`rounded-sm border border-status-bad/40 px-1.5 py-px font-mono text-[10px] ${STATUS_TEXT.bad} hover:underline`}
             title={repeatWords(loop).title}
             data-loop-repeat={loop.first}
           >

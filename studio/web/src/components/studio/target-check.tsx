@@ -12,6 +12,7 @@ import {
   TARGET_WORDS,
 } from "@/lib/target"
 import type { AgentOption, TargetCheck } from "@/lib/target"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /**
  * TargetCheckBlock is the build line, why Run is held, the agent picker
@@ -58,7 +59,7 @@ export function TargetCheckBlock({
       {check.build ? (
         <p
           id={isBuild && check.held ? heldID : undefined}
-          className={`text-[11px] [overflow-wrap:anywhere] ${check.held ? "text-status-bad" : "text-faint"}`}
+          className={`text-[11px] [overflow-wrap:anywhere] ${check.held ? `${STATUS_TEXT.bad}` : "text-faint"}`}
           role={check.held ? "alert" : undefined}
           data-target-build
         >
@@ -68,7 +69,7 @@ export function TargetCheckBlock({
       {check.held && !isBuild ? (
         <p
           id={heldID}
-          className="text-xs text-status-bad"
+          className={`text-xs ${STATUS_TEXT.bad}`}
           role="alert"
           data-target-held={check.kind}
         >
@@ -139,7 +140,7 @@ export function MissLine({
   onSave?: () => void
 }) {
   return (
-    <p className="text-status-bad" data-replay-miss>
+    <p className={`${STATUS_TEXT.bad}`} data-replay-miss>
       {text}
       {again
         ? (

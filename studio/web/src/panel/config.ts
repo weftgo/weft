@@ -594,19 +594,21 @@ export function debugForced(): boolean {
   return false
 }
 
-/** urlStep is "open in app"'s step (U21.2, UX-F-28): weft_step=<n>
- * or <n>.<tab> beside the URL rung's scope (lib/links.ts appLink) —
- * the panel opens that step of the scope's run, on that tab. null when
- * the page's URL names none. */
+/** urlStep is "open in app"'s step (U21.2, UX-F-28): weft_step=<n>,
+ * <n>.<tab> or .<tab> beside the URL rung's scope (lib/links.ts
+ * appLink) — the panel opens the scope's run at that step (when named),
+ * on that tab. null when the page's URL names none. */
 export function urlStep(
   page: string = pageURL.href()
-): { step: number; tab: string } | null {
+): { step?: number; tab: string } | null {
   try {
     const u = new URL(page)
-    const m = /^(\d+)(?:\.(\w+))?$/.exec(
+    const m = /^(\d*)(?:\.(\w+))?$/.exec(
       urlParam(u.search, "weft_step") ?? urlParam(u.hash, "weft_step") ?? ""
     )
-    return m ? { step: +m[1], tab: m.at(2) ?? "" } : null
+    return m && (m[1] || m.at(2))
+      ? { step: m[1] ? +m[1] : undefined, tab: m.at(2) ?? "" }
+      : null
   } catch {
     return null
   }

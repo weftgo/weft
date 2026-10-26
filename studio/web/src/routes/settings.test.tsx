@@ -108,6 +108,7 @@ const fact = (id: string, k: string) =>
   section(id).querySelector<HTMLElement>(`[data-fact="${k}"] dd`)!
 
 const SECTIONS = [
+  ["connect", "Connect an app"],
   ["studio", "Studio"],
   ["token", "Token"],
   ["database", "Database"],

@@ -132,8 +132,13 @@ export function scanVocab(
     re: new RegExp(`(?<![\\w/.-])${esc(a.alias)}(?![\\w/-]|\\.\\w)`, "i"),
   }))
   const hits: VocabHit[] = []
-  const check = (node: ts.Node, s: string) => {
-    if (!s.trim() || looksLikeCode(s)) return
+  const check = (node: ts.Node, raw: string) => {
+    // One space for every run of white space: a phrase JSX wraps over
+    // two lines is one phrase on screen.
+    const s = raw.replace(/\s+/g, " ")
+    // A sentence's last word keeps its colon or full stop: "threads:"
+    // is a word, not code.
+    if (!s.trim() || looksLikeCode(s.trim().replace(/[:.]+$/, ""))) return
     const label = s
       .trim()
       .replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "")

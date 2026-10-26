@@ -14,7 +14,6 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import { studioURL } from "@/lib/connect"
 import { GROUPS, TERMS } from "@/lib/glossary"
 import { FIRST_RUN_KEY } from "@/components/studio/empty-state"
 import { renderApp, stubBrowser } from "@/test/app"
@@ -81,16 +80,24 @@ const PAGES: [string, Record<string, unknown>, RegExp][] = [
     { capabilities: [...caps, "playground"] },
     /No runtime connected/,
   ],
+  [
+    "/runtimes",
+    { capabilities: [...caps, "playground", "runtimes"] },
+    /No runtime has registered/,
+  ],
 ]
+
+/** The URL this page was served at, at the root: the document's own
+ * origin — never studioURL() itself. */
+const servedAt = () => window.location.origin
 
 describe("every page's empty state names this Studio's URL (U21.2)", () => {
   it.each(PAGES)("%s", async (path, over, title) => {
     studio.on("GET meta", meta(over))
     renderApp(path)
     await screen.findByText(title)
-    const url = studioURL()
     // The page's own origin (jsdom's), not a fixed port.
-    expect(url).toBe(window.location.origin)
+    const url = window.location.origin
     const box = await waitFor(() => {
       const b = document.querySelector<HTMLElement>(`[data-connect="${url}"]`)
       expect(b).not.toBeNull()
@@ -100,6 +107,27 @@ describe("every page's empty state names this Studio's URL (U21.2)", () => {
     expect(document.body.textContent).not.toContain(
       "This command starts Studio"
     )
+  })
+
+  it("under a mount (/studio/), the lines carry the mount", async () => {
+    // Studio served under /studio/: the document's own URL there.
+    const was = window.location.pathname
+    history.replaceState(null, "", "/studio/runs")
+    try {
+      renderApp("/runs")
+      await screen.findByText(/No runs yet/)
+      const url = `${window.location.origin}/studio`
+      const box = await waitFor(() => {
+        const b = document.querySelector<HTMLElement>(`[data-connect="${url}"]`)
+        expect(b).not.toBeNull()
+        return b!
+      })
+      expect(box.textContent).toContain(`WEFT_STUDIO_URL=${url}\n`)
+      expect(box.textContent).toContain(`src="${url}/panel.js"`)
+    } finally {
+      cleanup()
+      history.replaceState(null, "", was)
+    }
   })
 
   it("the panel line names the token's place, never a token, on a walled Studio", async () => {
@@ -121,11 +149,34 @@ describe("every page's empty state names this Studio's URL (U21.2)", () => {
   })
 })
 
+describe("/settings' Connect an app (U21.2-fix, UX-S5a-10)", () => {
+  it("leads the page with the three lines and this Studio's URL", async () => {
+    studio.on("GET settings/pricing", golden<object>("settings-pricing"))
+    renderApp("/settings")
+    const h = await screen.findByRole("heading", {
+      level: 2,
+      name: "Connect an app",
+    })
+    const section = h.closest("section")!
+    expect(
+      document.querySelector("[data-section]")?.getAttribute("data-section")
+    ).toBe("connect")
+    const url = servedAt()
+    expect(
+      [...section.querySelectorAll("[data-connect-line]")].map((l) =>
+        l.getAttribute("data-connect-line")
+      )
+    ).toEqual(["app", "panel", "mcp"])
+    expect(section.textContent).toContain(`WEFT_STUDIO_URL=${url}`)
+    expect(section.textContent).toContain(`weft mcp --url ${url}`)
+  })
+})
+
 describe("the /runs first-run card (U21.2)", () => {
   it("shows until dismissed, and stays dismissed in this browser", async () => {
     renderApp("/runs")
     const card = await screen.findByRole("region", { name: "first run" })
-    expect(card.textContent).toContain(`WEFT_STUDIO_URL=${studioURL()}`)
+    expect(card.textContent).toContain(`WEFT_STUDIO_URL=${servedAt()}`)
     expect(card.textContent).toContain("press ?")
     fireEvent.click(within(card).getByRole("button", { name: "dismiss" }))
     await waitFor(() =>

@@ -37,7 +37,7 @@ export const DRAWER_TITLES: Record<DrawerSection, string> = {
   changes: "1 what changes",
   send: "2 will be sent",
   tools: "3 tools during the replay",
-  advanced: "advanced: side effects · thread · options",
+  advanced: "advanced: side effects · where it writes · options",
   run: "",
 }
 

@@ -38,6 +38,7 @@ import {
 import type { PreviewDoc, PreviewRow } from "@/lib/preview"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Button } from "@/components/ui/button"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 /** The editor as the run page provides it: the edits so far, the
  * fields whose text is refused (by key), put (null: revert), the
@@ -182,7 +183,7 @@ export function Editable({
         </span>
         {cur ? (
           <span
-            className="rounded-sm border border-ev-error/50 px-1.5 py-px font-mono text-[10px] text-ev-error uppercase"
+            className={`rounded-sm border border-ev-error/50 px-1.5 py-px font-mono text-[10px] ${STATUS_TEXT.error} uppercase`}
             data-edited
           >
             {k === "insert" ? "inserted" : "edited"}
@@ -226,7 +227,11 @@ export function Editable({
         </p>
       ) : null}
       {err ? (
-        <p className="text-xs text-status-bad" role="alert" data-edit-error>
+        <p
+          className={`text-xs ${STATUS_TEXT.bad}`}
+          role="alert"
+          data-edit-error
+        >
           {err}
         </p>
       ) : null}
@@ -327,8 +332,8 @@ export function EditList({
 const OP_TONE: Record<string, string> = {
   same: "text-faint",
   changed: "text-thread-ink",
-  added: "text-status-ok",
-  removed: "text-ev-error",
+  added: `${STATUS_TEXT.ok}`,
+  removed: `${STATUS_TEXT.error}`,
 }
 
 /** The preview's state in the drawer: the answer, or the refusal
@@ -415,7 +420,11 @@ export function PreviewPane({
         </p>
       ) : null}
       {state.error ? (
-        <p className="text-xs text-status-bad" role="alert" data-preview-error>
+        <p
+          className={`text-xs ${STATUS_TEXT.bad}`}
+          role="alert"
+          data-preview-error
+        >
           {state.error}
         </p>
       ) : null}
@@ -558,7 +567,9 @@ export function EditsMark({
             className="flex flex-wrap items-baseline gap-2"
             data-edit-mark={m.what}
           >
-            <span className="rounded-sm border border-ev-error/50 px-1.5 py-px font-mono text-[10px] text-ev-error uppercase">
+            <span
+              className={`rounded-sm border border-ev-error/50 px-1.5 py-px font-mono text-[10px] ${STATUS_TEXT.error} uppercase`}
+            >
               {MARK_CHIPS[m.what]}
             </span>
             <span className="font-mono">{markLine(m)}</span>

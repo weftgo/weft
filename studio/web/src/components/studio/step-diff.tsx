@@ -41,6 +41,7 @@ import { useCapabilities } from "@/hooks/use-capabilities"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 const STATE_TONE: Record<CellState, string> = {
   same: "text-faint",
@@ -55,7 +56,7 @@ const ROW_TONE: Record<RowState, string> = {
   kept: "text-faint",
   missing: "text-muted-foreground",
   same: "text-faint",
-  changed: "text-status-bad",
+  changed: `${STATUS_TEXT.bad}`,
 }
 
 /** RowWord is a compared run's row in one word — kept (not re-run) ·
@@ -318,7 +319,11 @@ export function StepDiffTable({
   }, [focus])
   if (view.error)
     return (
-      <p className="text-xs text-status-bad" role="alert" data-step-diff-error>
+      <p
+        className={`text-xs ${STATUS_TEXT.bad}`}
+        role="alert"
+        data-step-diff-error
+      >
         {view.error}
       </p>
     )
@@ -652,7 +657,7 @@ export function StepCompare({
         >
           <Badge
             variant="outline"
-            className="border-status-bad/40 font-mono text-[10px] font-normal text-status-bad"
+            className={`border-status-bad/40 font-mono text-[10px] font-normal ${STATUS_TEXT.bad}`}
           >
             not compared
           </Badge>
@@ -671,7 +676,7 @@ export function StepCompare({
               </button>
             </>
           ) : (
-            <span className="text-status-bad">
+            <span className={`${STATUS_TEXT.bad}`}>
               the step compare could not be read: {q.error?.message}
             </span>
           )}

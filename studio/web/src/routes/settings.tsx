@@ -63,6 +63,7 @@ import { useDocumentTitle } from "@/hooks/use-document-title"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { KbdHelpBody } from "@/components/studio/kbd-help"
 import { ConceptsBody } from "@/components/studio/concepts"
+import { ConnectApp } from "@/components/studio/empty-state"
 import { setThemeChoice, useThemeChoice } from "@/components/studio/theme"
 import type { ThemeChoice } from "@/components/studio/theme"
 import { useDensity } from "@/components/studio/density-toggle"
@@ -77,6 +78,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { STATUS_TEXT } from "@/lib/status-class"
 
 export const Route = createFileRoute("/settings")({
   // ?price=<provider/model>: the pricing table opens with a row for it
@@ -109,7 +111,7 @@ function SettingsPage() {
     return (
       <div className="mx-auto max-w-3xl space-y-4">
         <h1 className="text-lg font-medium">Settings</h1>
-        <p className="text-sm text-status-bad" role="alert">
+        <p className={`text-sm ${STATUS_TEXT.bad}`} role="alert">
           /api/meta did not answer: {meta.error.message}
         </p>
         <Section id="appearance">
@@ -129,6 +131,11 @@ function SettingsPage() {
       <SectionIndex />
       <div className="min-w-0 space-y-4">
         <h1 className="text-lg font-medium">Settings</h1>
+        {/* How an app, a page and a coding agent reach THIS Studio
+            (U21.2-fix, UX-S5a-10): the empty states' lines. */}
+        <Section id="connect">
+          <ConnectApp />
+        </Section>
         <Section id="studio">
           <StudioFacts meta={m} />
         </Section>
@@ -636,7 +643,7 @@ function Refused({ err, what }: { err: Error; what: string }) {
       />
     )
   return (
-    <p className="text-xs text-status-bad" role="alert">
+    <p className={`text-xs ${STATUS_TEXT.bad}`} role="alert">
       {what} did not load: {err.message}
     </p>
   )
@@ -797,7 +804,7 @@ function PricingTable({ settings }: { settings: PricingSettings }) {
       </div>
       {bad.length > 0 && (
         <ul
-          className="space-y-0.5 text-xs text-status-bad"
+          className={`space-y-0.5 text-xs ${STATUS_TEXT.bad}`}
           role="alert"
           data-pricing-problems
         >
@@ -973,7 +980,7 @@ function ContentFacts({ meta }: { meta: Meta }) {
           : `Studio's ingest policy: ${c.ingest}`}
       </p>
       {c.error ? (
-        <p className="text-status-bad" role="alert">
+        <p className={`${STATUS_TEXT.bad}`} role="alert">
           the latest run could not be read: {c.error}
         </p>
       ) : l === null ? (

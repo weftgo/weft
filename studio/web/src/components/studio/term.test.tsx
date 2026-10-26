@@ -7,6 +7,7 @@ import axe from "axe-core"
 import { describe, expect, it } from "vitest"
 
 import { Term, TermWrap } from "@/components/studio/term"
+import { SelectField } from "@/components/ui/select-field"
 import { TERMS } from "@/lib/glossary"
 import { renderWithRouter } from "@/test/render"
 
@@ -112,5 +113,57 @@ describe("<Term> (U21.2)", () => {
     expect(tip.textContent).toContain("sorts by tokens")
     fireEvent.keyDown(b, { key: "Escape" })
     await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull())
+  })
+
+  it("a scroll (any box, capture) or a resize hides it: it is drawn fixed", async () => {
+    await renderWithRouter(
+      <div data-box style={{ overflow: "auto" }}>
+        <Term name="step" />
+      </div>
+    )
+    const word = await screen.findByText("step")
+    act(() => word.focus())
+    await screen.findByRole("tooltip")
+    fireEvent.scroll(document.querySelector("[data-box]")!)
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull())
+    fireEvent.mouseEnter(word)
+    await screen.findByRole("tooltip")
+    fireEvent(window, new Event("resize"))
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull())
+  })
+
+  it("in a select's caption: a tap reads the word, never focuses the select, and the open tip stays out of its name", async () => {
+    await renderWithRouter(
+      <SelectField
+        caption={
+          <Term name="fork" portal>
+            Write to
+          </Term>
+        }
+        label="Write to"
+        value="ephemeral"
+        onValueChange={() => {}}
+        options={[
+          { value: "ephemeral", label: "nowhere (ephemeral)" },
+          { value: "fork", label: "a new session (fork)" },
+        ]}
+      />
+    )
+    const word = await screen.findByText("Write to", {
+      selector: "[data-term]",
+    })
+    const caption = word.closest<HTMLElement>('[id$="-caption"]')!
+    const trigger = document.querySelector<HTMLElement>(
+      `[aria-labelledby="${caption.id}"]`
+    )!
+    fireEvent.click(word)
+    const tip = await screen.findByRole("tooltip")
+    expect(document.activeElement).not.toBe(trigger)
+    // The name the trigger reads stays the caption's words alone.
+    expect(caption.contains(tip)).toBe(false)
+    expect(caption.textContent).toBe("Write to")
+    // The caption itself still focuses its control.
+    fireEvent.click(caption)
+    expect(document.activeElement).toBe(trigger)
   })
 })

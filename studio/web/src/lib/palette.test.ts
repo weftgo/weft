@@ -467,84 +467,139 @@ describe("every role, one hex on both renderers (U21.1, UX-F-01, UX-F-07)", () =
 
 describe("no status or kind colour literal outside the palette (U21.1-fix, UX-F-01)", () => {
   // A renderer draws a status, a kind or a gap through lib/palette.ts's
-  // roles (lib/status-class.ts's classes, TONE_TEXT, TONE_SVG; the
-  // panel's ROLE / TONE tokens), never a literal of its own — the rule
-  // lib/links.ts's one-scheme lint holds for links. The files below
-  // still hold literals (washes, borders at an alpha, banners and
-  // callouts whose colour is not a status's): each count is a ratchet
-  // — a new literal fails here, and a file that drops one lowers its
+  // roles (lib/status-class.ts's classes, STATUS_TEXT, TONE_TEXT,
+  // ROLE_SVG, TONE_SVG; the panel's ROLE / TONE tokens), never a literal
+  // of its own — the rule lib/links.ts's one-scheme lint holds for
+  // links. Two kinds are told apart (U21.2-fix): a solid literal (no
+  // /alpha) is allowed only where SOLID names it with its reason; a wash
+  // (an /alpha tint: a banner, a border at an alpha) is a counted
+  // ratchet — a new one fails here, and a file that drops one lowers its
   // count. The loop graph and the step strip's words are role-only.
-  const LITERAL =
-    /\b(?:text|bg|border|fill|stroke)-(?:status-[a-z-]+|ev-error|ev-tool)/g
-  const ALLOW: Record<string, number> = {
-    "components/studio/agent-cards.tsx": 1,
-    "components/studio/agent-stats.tsx": 5,
-    "components/studio/breakpoints.tsx": 1,
-    "components/studio/call-graph.tsx": 3,
-    "components/studio/caps-unread.tsx": 1,
-    "components/studio/derived-story.tsx": 1,
-    "components/studio/empty-state.tsx": 1,
-    "components/studio/experiment-form.tsx": 4,
-    "components/studio/hole-badge.tsx": 2,
-    "components/studio/live-peek.tsx": 2,
-    "components/studio/logs-view.tsx": 1,
-    "components/studio/parked-calls.tsx": 8,
-    "components/studio/pass-predicate.tsx": 3,
-    "components/studio/problem-badges.tsx": 4,
-    "components/studio/replay-drawer.tsx": 12,
+  const PREFIX = "(?:text|bg|border|fill|stroke|ring|outline|decoration|divide)"
+  const TARGET = "(?:status-[a-z-]+|ev-(?:error|tool|result))"
+  const LITERAL = new RegExp(
+    `(?<![\\w-])((?:[\\w-]+:)*)${PREFIX}-${TARGET}(\\/(?:\\d+|\\[[^\\]]*\\]))?(?![\\w-])|var\\(--status-`,
+    "g"
+  )
+  const WF =
+    "the waterfall's kind and tone tables: TONE_STUDIO's variables, pinned above"
+  /** The solid literals left, each with its reason: file → [literal, why]. */
+  const SOLID: Record<string, [string, string][]> = {
+    "components/studio/waterfall.tsx": [
+      ["bg-ev-tool", WF],
+      ["bg-ev-result", WF],
+      ["bg-ev-error", WF],
+      ["bg-status-bad", WF],
+      ["bg-status-run", WF],
+      ["text-ev-tool", WF],
+      ["text-ev-result", WF],
+      ["text-ev-error", WF],
+      ["text-status-bad", WF],
+      ["text-status-run-ink", WF],
+      ["text-ev-error", WF],
+      ["text-ev-result", WF],
+      ["text-ev-result", WF],
+      ["text-ev-error", WF],
+      ["text-status-bad", WF],
+      ["text-status-run-ink", WF],
+      ["text-ev-error", WF],
+    ],
+    "components/studio/step-request.tsx": [
+      ["text-status-ok", "DiffBlock's added row: DIFF_STUDIO, pinned above"],
+      ["text-status-bad", "DiffBlock's removed row: DIFF_STUDIO, pinned above"],
+    ],
+    "components/studio/hole-badge.tsx": [
+      ["text-ev-error", "the loss badge: HOLE_STUDIO.loss, pinned below"],
+    ],
+    "components/studio/run-header.tsx": [
+      ["hover:text-status-bad", "a variant: Tailwind needs the literal class"],
+    ],
+    "components/studio/source-matrix.tsx": [
+      ["border-status-bad", "an invalid field's border (no border helper)"],
+    ],
+    "components/studio/pass-predicate.tsx": [
+      ["border-status-bad", "an invalid field's border (no border helper)"],
+    ],
+    "components/studio/transcript-editor.tsx": [
+      ["border-ev-error", "an invalid field's border (no border helper)"],
+    ],
+  }
+  const WASH: Record<string, number> = {
+    "components/studio/agent-stats.tsx": 1,
+    "components/studio/experiment-form.tsx": 1,
+    "components/studio/hole-badge.tsx": 1,
+    "components/studio/parked-calls.tsx": 1,
+    "components/studio/problem-badges.tsx": 2,
     "components/studio/resumed-card.tsx": 1,
-    "components/studio/run-actions.tsx": 1,
-    "components/studio/run-header.tsx": 10,
-    "components/studio/runs-in.tsx": 1,
-    "components/studio/runs-table.tsx": 2,
-    "components/studio/session-actions.tsx": 1,
-    "components/studio/session-approvals.tsx": 2,
-    "components/studio/session-timeline.tsx": 2,
+    "components/studio/run-header.tsx": 3,
+    "components/studio/runs-table.tsx": 1,
+    "components/studio/session-timeline.tsx": 1,
     "components/studio/session-turns.tsx": 1,
-    "components/studio/source-matrix.tsx": 3,
-    "components/studio/span-detail.tsx": 4,
-    "components/studio/spark.tsx": 3,
-    "components/studio/step-attempts.tsx": 2,
-    "components/studio/step-diff.tsx": 6,
-    "components/studio/step-list.tsx": 17,
-    "components/studio/step-request.tsx": 7,
+    "components/studio/span-detail.tsx": 1,
+    "components/studio/step-diff.tsx": 2,
+    "components/studio/step-list.tsx": 8,
+    "components/studio/step-request.tsx": 2,
     "components/studio/step-strip.tsx": 2,
     "components/studio/subagent-block.tsx": 2,
-    "components/studio/target-check.tsx": 3,
-    "components/studio/token-wall.tsx": 1,
-    "components/studio/transcript-editor.tsx": 11,
-    "components/studio/waterfall.tsx": 19,
-    "routes/agents.index.tsx": 4,
-    "routes/conversations.$id.tsx": 2,
-    "routes/experiments.$id.tsx": 4,
-    "routes/experiments.index.tsx": 2,
-    "routes/live.tsx": 4,
-    "routes/playground.tsx": 10,
-    "routes/runs.$id.tsx": 5,
-    "routes/runs.index.tsx": 2,
-    "routes/runtimes.tsx": 4,
-    "routes/sessions.$id.tsx": 1,
-    "routes/sessions.index.tsx": 1,
-    "routes/settings.tsx": 4,
-    "routes/traces.$id.tsx": 4,
-    "routes/traces.index.tsx": 4,
+    "components/studio/transcript-editor.tsx": 4,
+    "components/studio/waterfall.tsx": 8,
+    "routes/runs.$id.tsx": 2,
+    "routes/runtimes.tsx": 1,
   }
   const walk = (d: string): string[] =>
     readdirSync(d).flatMap((f) => {
       const p = resolve(d, f)
       return statSync(p).isDirectory() ? walk(p) : [p]
     })
-  it("components/ and routes/ hold no literal beyond the allowlist", () => {
-    const seen: Record<string, number> = {}
+  const scan = () => {
+    const solid: Record<string, string[]> = {}
+    const wash: Record<string, number> = {}
     for (const dir of ["components", "routes"])
       for (const f of walk(resolve(process.cwd(), "src", dir)).filter(
         (p) => /\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p)
       )) {
-        const n = (readFileSync(f, "utf8").match(LITERAL) ?? []).length
-        if (n) seen[f.slice(resolve(process.cwd(), "src").length + 1)] = n
+        const rel = f.slice(resolve(process.cwd(), "src").length + 1)
+        for (const m of readFileSync(f, "utf8").matchAll(LITERAL)) {
+          if (m[2] || m[0].startsWith("var(")) wash[rel] = (wash[rel] ?? 0) + 1
+          else (solid[rel] ??= []).push(m[0])
+        }
       }
-    expect(seen).toEqual(ALLOW)
-    expect(seen["components/studio/loop-graph.tsx"]).toBeUndefined()
+    return { solid, wash }
+  }
+  it("components/ and routes/ hold no solid literal beyond the reasoned list", () => {
+    const { solid } = scan()
+    const allowed = Object.fromEntries(
+      Object.entries(SOLID).map(([f, l]) => [f, l.map(([lit]) => lit)])
+    )
+    expect(solid).toEqual(allowed)
+    for (const l of Object.values(SOLID))
+      for (const [lit, why] of l) expect(why, lit).not.toBe("")
+  })
+  it("washes are a ratchet: no new one, a dropped one lowers its count", () => {
+    expect(scan().wash).toEqual(WASH)
+    expect(scan().wash["components/studio/loop-graph.tsx"]).toBeUndefined()
+  })
+  it("the pattern catches every prefix, a variant, a wash and a style var", () => {
+    const hits = (s: string) =>
+      [...s.matchAll(LITERAL)].map((m) => [
+        m[0],
+        !!m[2] || m[0].startsWith("var("),
+      ])
+    expect(
+      hits(
+        'ring-status-bad outline-ev-tool decoration-ev-result divide-status-ok hover:text-status-bad bg-status-bad/10 border-ev-error/[0.3] style={{ color: "var(--status-bad)" }} text-foreground bg-status-badge-x'
+      )
+    ).toEqual([
+      ["ring-status-bad", false],
+      ["outline-ev-tool", false],
+      ["decoration-ev-result", false],
+      ["divide-status-ok", false],
+      ["hover:text-status-bad", false],
+      ["bg-status-bad/10", true],
+      ["border-ev-error/[0.3]", true],
+      ["var(--status-", true],
+      ["bg-status-badge-x", false],
+    ])
   })
   it("the panel's styles draw a status or tone through ROLE / TONE", () => {
     const src = readFileSync(

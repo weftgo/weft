@@ -29,7 +29,7 @@ import {
   nodeStatus,
   nodeStatusLine,
 } from "@/lib/graph"
-import { ROLE_SVG, studioVar } from "@/lib/status-class"
+import { ROLE_SVG, TONE_SVG, studioVar } from "@/lib/status-class"
 import { GraphHint, GraphTip } from "@/components/studio/graph-tip"
 import type { StatusKey } from "@/lib/status"
 
@@ -88,7 +88,8 @@ export function CallGraphView({
   }
   const width = PAD * 2 + ncols * W + (ncols - 1) * GX
   const height = top + PAD + rows * H + (rows - 1) * GY
-  const tone = (fails: number) => (fails ? "stroke-ev-error" : "stroke-border")
+  const tone = (fails: number) =>
+    fails ? TONE_SVG.error.stroke : "stroke-border"
   // ── One roving tab stop: column by column, top to bottom ──
   const order = [...cols.entries()]
     .sort(([a], [b]) => a - b)
@@ -287,7 +288,7 @@ export function CallGraphView({
                         : loud
                           ? paint.stroke
                           : n.fails
-                            ? "stroke-ev-error"
+                            ? TONE_SVG.error.stroke
                             : "stroke-border"
                     }`}
                     strokeWidth={on || loud ? 2 : 1}
@@ -313,7 +314,7 @@ export function CallGraphView({
                       loud
                         ? paint.fill
                         : n.fails
-                          ? "fill-ev-error"
+                          ? TONE_SVG.error.fill
                           : "fill-foreground"
                     }`}
                   >

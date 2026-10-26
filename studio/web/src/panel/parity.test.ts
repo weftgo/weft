@@ -5338,10 +5338,11 @@ describe("the shared libs on both surfaces (U21.1)", () => {
       expect(PANEL_CSS).toContain(
         `.weft-chip.weft-${s.key} { color: var(--weft-${INK[ROLE[s.role]] ?? ROLE[s.role]});`
       )
-    // The hints alike where neither reads the whole session (an open
-    // park: the panel, session-scoped, may say "awaiting", U1-fix).
+    // The hints alike, except an open park (the panel, session-scoped,
+    // may say "awaiting", U1-fix); a decided park ("parked → tN") is
+    // held like every other row (U21.2-fix).
     for (const [i, s] of want.entries())
-      if (s.key !== "parked") {
+      if (s.key !== "parked" || s.resumedBy) {
         expect(panelSeen[i][1], s.word).toBe(s.hint)
         expect(studio[i].getAttribute("title"), s.word).toBe(s.hint)
       }

@@ -52,6 +52,22 @@ describe("the manifest marks (U20.1)", () => {
     expect(mark()).toBe("")
   })
 
+  it("the Agents card on a weft.json Studio: a file agent carries no hash, the check's stale list decides (U20.1-fix)", () => {
+    const file = { ...CHECK, source: "file" as const }
+    const mark = () =>
+      document
+        .querySelector("[data-manifest-mark]")
+        ?.getAttribute("data-manifest-mark")
+    withMeta(<ManifestCheckBadge agent="writer" />, file)
+    expect(mark()).toBe("current")
+    cleanup()
+    withMeta(<ManifestCheckBadge agent="director" />, file)
+    expect(mark()).toBe("stale")
+    cleanup()
+    withMeta(<ManifestCheckBadge agent="analyst" />, file)
+    expect(mark()).toBe("unchecked")
+  })
+
   it("the Agents card: nothing without a check", () => {
     withMeta(<ManifestCheckBadge agent="writer" hash="w1" />, null)
     expect(document.querySelector("[data-manifest-mark]")).toBeNull()

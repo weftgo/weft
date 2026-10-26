@@ -29,6 +29,8 @@ import { pickTarget } from "@/lib/experiment-body"
 import { mintExperimentID, idTail } from "@/lib/experiments"
 import { cellBody, formFromExperiment } from "@/lib/form-state"
 import { experimentLink, runLink } from "@/lib/links"
+import { RUNS_IN, runtimeRefusal } from "@/lib/runs-in"
+import { RuntimesLinkFor } from "@/components/studio/runs-in"
 import {
   MATRIX_WORDS,
   columnKey,
@@ -161,9 +163,9 @@ export function SourceMatrix({
     : runtimes.isPending
       ? "reading the connected runtimes…"
       : !target.runtime || !target.agent
-        ? "no runtime connected — runtime.Install(...) in your app opens the link"
+        ? runtimeRefusal(agent)
         : target.mismatch
-          ? `no connected runtime registers agent ${target.mismatch}`
+          ? runtimeRefusal(target.mismatch)
           : !mine.length
             ? MATRIX_WORDS.noRows
             : rows.some((q) => q.isPending)
@@ -420,6 +422,9 @@ export function SourceMatrix({
         {held ? (
           <span id="matrix-held" className="text-faint" data-matrix-held>
             {held}
+            {held.startsWith(RUNS_IN.none("")) ? (
+              <RuntimesLinkFor agent={target.mismatch || agent} />
+            ) : null}
           </span>
         ) : null}
       </div>

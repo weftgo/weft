@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest"
 
 import type { Meta, RuntimeView } from "./api"
-import { APP_CANCEL, OWN_RUNTIME } from "./honesty"
+import { APP_CANCEL, OWN_RUNTIME, READ_TOKEN } from "./honesty"
 import { RUNS_IN, registering, runsInLine, runtimeLabel } from "./runs-in"
 import {
   breakpointsBy,
@@ -20,6 +20,8 @@ import {
   runManifestMark,
   runtimeState,
   STATE_WORDS,
+  steerOffLine,
+  steerWhyNot,
 } from "./runtimes"
 import { BREAKPOINT_WORDS } from "./settings"
 
@@ -105,6 +107,17 @@ describe("the runtimes page's reading (U20.1)", () => {
       "one process · box · pid 7 · 2 runtime links"
     )
     expect(overlapping(groups[0])).toEqual(["director"])
+    // Only connected links group, and only within one cwd (U20.1-fix):
+    // two stale links that share a host and a (reused) pid are two
+    // runtimes; so are two connected ones in different directories.
+    const s1 = rt({ id: "rt_s1", pid: 7, connected: false })
+    const s2 = rt({ id: "rt_s2", pid: 7, connected: false })
+    expect(processGroups([s1, s2]).map((g) => g.runtimes.length)).toEqual([
+      1, 1,
+    ])
+    const d1 = rt({ id: "rt_d1", pid: 9, cwd: "/a" })
+    const d2 = rt({ id: "rt_d2", pid: 9, cwd: "/b" })
+    expect(processGroups([d1, d2])).toHaveLength(2)
   })
 
   it("a command goes to the connected registration, then the newest seen — never the first listed", () => {
@@ -127,7 +140,7 @@ describe("the runtimes page's reading (U20.1)", () => {
 
   it("the refusal says what is connected, the fix and the Studio asked", () => {
     expect(RUNS_IN.none("studio-local")).toBe(
-      '✗ no connected runtime registers studio-local'
+      "✗ no connected runtime registers studio-local"
     )
     expect(RUNS_IN.connected([lab])).toBe(
       "connected: weft-arena-dev (trip-planner)"
@@ -173,6 +186,10 @@ describe("the runtimes page's reading (U20.1)", () => {
     })
     expect(manifestMark("writer", "w1", check).mark).toBe("current")
     expect(manifestMark("analyst", "a1", check).mark).toBe("unchecked")
+    // A weft.json agent has no hash of its own (U20.1-fix): the stale
+    // list decides, never "other".
+    expect(manifestMark("writer", undefined, check).mark).toBe("current")
+    expect(manifestMark("director", undefined, check).mark).toBe("stale")
     // Another registered version of a name that is not stale.
     expect(manifestMark("writer", "w0", check).mark).toBe("other")
     // An older Studio: stale names but no latest.
@@ -214,5 +231,24 @@ describe("the runtimes page's reading (U20.1)", () => {
       "1 runtime that is not connected registers it: rt_gone."
     )
     expect(missingWords("orders", [batch])).toHaveLength(1)
+  })
+
+  it("why a running app turn offers no steer (UX-S4-10, U20.1-fix)", () => {
+    const f = {
+      kind: "read-only" as const,
+      steer: true,
+      mayAct: true,
+      service: "app",
+    }
+    expect(steerWhyNot(f)).toBe(
+      "no connected runtime of service app registered runtime.Sessions"
+    )
+    expect(steerWhyNot({ ...f, kind: "decide" })).toBe("")
+    expect(steerWhyNot({ ...f, kind: "decide", steer: false })).toBe(
+      "capability steer is off"
+    )
+    expect(steerWhyNot({ ...f, mayAct: false })).toBe(READ_TOKEN)
+    expect(steerWhyNot({ ...f, kind: "experiment" })).toBe("")
+    expect(steerOffLine("x", "runtime-started runs")).toContain(APP_CANCEL)
   })
 })

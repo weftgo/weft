@@ -4885,7 +4885,21 @@ describe("the engine per command on both drawers (U17)", () => {
 
   /** U18.2's fixture: the source row's fields, the registered agent,
    * and whether the reader takes the target check's escape. */
-  type Fx = { row?: Partial<RunRow>; agent?: AgentView; escape?: boolean }
+  type Fx = {
+    row?: Partial<RunRow>
+    agent?: AgentView
+    escape?: boolean
+    /** The one registration is disconnected (U20.1-fix). */
+    gone?: boolean
+  }
+  const runtimesOf = (fx: Fx) => ({
+    runtimes: [
+      {
+        ...RK.runtimeOf([fx.agent ?? agent]),
+        ...(fx.gone ? { connected: false } : {}),
+      },
+    ],
+  })
 
   async function studioSide(
     draft: ReplayDraft,
@@ -4912,7 +4926,7 @@ describe("the engine per command on both drawers (U17)", () => {
       .on(`GET runs/${RK.RUN}/steps/1`, cost(1))
       .on(`GET runs/${RK.RUN}/steps/2`, cost(2))
       .on(`GET runs/${RK.RUN}/steps/3`, cost(3))
-      .on("GET runtimes", { runtimes: [RK.runtimeOf([fx.agent ?? agent])] })
+      .on("GET runtimes", runtimesOf(fx))
       .install()
     const { container } = await renderWithRouter(
       createElement(ReplayDrawer, {
@@ -4971,7 +4985,7 @@ describe("the engine per command on both drawers (U17)", () => {
     }
     if (pv) routes["POST playground/preview"] = pv
     for (const n of [0, 1, 2, 3]) routes[`runs/${RK.RUN}/steps/${n}`] = cost(n)
-    routes.runtimes = { runtimes: [RK.runtimeOf([fx.agent ?? agent])] }
+    routes.runtimes = runtimesOf(fx)
     panelStudio(routes, {
       ...RK.REPLAY_META,
       capabilities: [
@@ -5022,6 +5036,19 @@ describe("the engine per command on both drawers (U17)", () => {
     return studio
   }
   const T = ": the recording answered the original"
+
+  it("Runs in on a disconnected registration: the refusal on both drawers, never its id (U20.1-fix)", async () => {
+    const fx: Fx = { gone: true }
+    const head = `target${RUNS_IN.head}: ${RUNS_IN.none("acme-support")} · ${RUNS_IN.manage}`
+    for (const r of [
+      await studioSide(replayFromStep(2), undefined, undefined, fx),
+      await panelSide(replayFromStep(2), undefined, undefined, fx),
+    ]) {
+      expect(r.target.startsWith(head)).toBe(true)
+      expect(r.target).toContain(RUNS_IN.connected([]))
+      expect(r.target).toContain(RUNS_IN.fix("acme-support"))
+    }
+  })
 
   it("a plain replay: scripted on both, the same lines and target, every later step priced, Run 'Run on scripted · 0 tokens'", async () => {
     const r = await bothDrawers(() => replayFromStep(2))

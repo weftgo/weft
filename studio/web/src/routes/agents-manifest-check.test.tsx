@@ -1,7 +1,7 @@
 // /agents badges manifest_check (U20.1, UX-S4-01): the audit's seeded
 // arena — 13 registered agents, 9 whose latest run ran another manifest
 // — reads 9 "stale" badges, each naming the hash the latest run ran,
-// and the 4 others "current" (or "no run yet"). The badge is its own
+// and the 4 others "current" (or "unchecked"). The badge is its own
 // component (components/studio/manifest-badge.tsx) on the Agents card.
 import { cleanup, configure, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -100,5 +100,45 @@ describe("the Agents card's manifest_check badge (U20.1)", () => {
     expect(director.title).toBe(
       "the latest run ran d2151022, not this manifest: the app runs another build than the one registered here"
     )
+  })
+
+  it("a weft.json Studio: file agents carry no hash — 9 stale, 3 current, never 'other' (U20.1-fix)", async () => {
+    const latest: Record<string, string> = {}
+    for (const n of NAMES) latest[n] = `run${n.length}`
+    delete latest["trip-planner"]
+    const manifest: Manifest = {
+      weft: 1,
+      agents: NAMES.map((n) => {
+        const { manifest_hash: _drop, ...a } = agent(n)
+        return a
+      }),
+    }
+    new FakeStudio()
+      .on("GET meta", {
+        ...golden<Record<string, unknown>>("meta"),
+        has_manifest: true,
+        capabilities: ["live"],
+        capabilities_off: undefined,
+        manifest_check: {
+          source: "file",
+          agents: 13,
+          checked: 12,
+          stale: STALE,
+          latest,
+        },
+      })
+      .on("GET manifest", manifest)
+      .install()
+    renderApp("/agents")
+    await screen.findByText("director")
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-manifest-mark]")).toHaveLength(13)
+    )
+    const count = (m: string) =>
+      document.querySelectorAll(`[data-manifest-mark="${m}"]`).length
+    expect(count("stale")).toBe(9)
+    expect(count("current")).toBe(3)
+    expect(count("unchecked")).toBe(1)
+    expect(count("other")).toBe(0)
   })
 })

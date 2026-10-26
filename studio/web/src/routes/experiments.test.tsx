@@ -16,6 +16,7 @@ import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { TARGET_WORDS } from "@/lib/target"
+import { runtimeRefusal } from "@/lib/runs-in"
 import { setStudioToken } from "@/lib/api"
 import type {
   ExperimentRow,
@@ -601,6 +602,27 @@ describe("/experiments/{id}", () => {
       agent: "orders",
       cross_agent: true,
     })
+  })
+
+  // U20.1-fix (UX-C-14): no connected runtime registering the agent is
+  // the drawers' sentence — the refusal, the fix — and a link to
+  // /runtimes explaining it.
+  it("no runtime registers the matrix's agent: the Runs in refusal and the fix, linked to /runtimes", async () => {
+    studio.on("GET runtimes", {
+      runtimes: runtimes.runtimes.map((r) => ({
+        ...r,
+        agents: r.agents.map((a) => ({ ...a, name: "billing" })),
+      })),
+    })
+    renderApp("/experiments/exp_tone")
+    const held = await waitFor(() => {
+      const el = document.querySelector("[data-rerun-blocked]")
+      expect(el?.textContent).toContain(runtimeRefusal("orders"))
+      return el!
+    })
+    expect(
+      held.querySelector("[data-runtime-refusal]")!.getAttribute("href")
+    ).toBe("/runtimes?agent=orders")
   })
 
   // The palette moves /experiments/A → /experiments/B: B is a fresh

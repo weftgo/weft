@@ -243,6 +243,30 @@ describe("the runtimes page (U20.1)", () => {
     )
   })
 
+  it("two stale links sharing a host and pid are two stale runtimes, never one process (U20.1-fix)", async () => {
+    const s1 = rt({
+      id: "rt_s1",
+      pid: 77,
+      connected: false,
+      last_seen: at(4000),
+    })
+    const s2 = rt({
+      id: "rt_s2",
+      pid: 77,
+      connected: false,
+      last_seen: at(4000),
+    })
+    studio.on("GET runtimes", { runtimes: [batch, s1, s2, stale] })
+    await open()
+    expect(document.querySelector("[data-process]")).toBeNull()
+    expect(
+      card("rt_s1")!
+        .closest("[data-runtime-section]")!
+        .getAttribute("data-runtime-section")
+    ).toBe("stale")
+    expect(card("rt_s2")).toBeTruthy()
+  })
+
   it("explains an agent no connected runtime registers (?agent=)", async () => {
     await open("/runtimes?agent=orders")
     const box = document.querySelector<HTMLElement>(

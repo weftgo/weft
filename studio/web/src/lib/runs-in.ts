@@ -35,12 +35,20 @@ export const RUNS_IN = {
   manage: "runtimes ⤢",
 } as const
 
+/** runtimeRefusal is a held Run's sentence when no connected runtime
+ * registers the agent (UX-C-14): the refusal and the fix, as the
+ * drawers say them (Studio's experiment page and source matrix). */
+export const runtimeRefusal = (agent: string) =>
+  `${RUNS_IN.none(agent)} · ${RUNS_IN.fix(agent)}`
+
 /** Studio's words beside the line (the panel draws neither): why this
- * runtime of several, and the Studio a connected runtime's link
- * dialled (studio_url, which a panel token never reads). */
+ * runtime of several, and the Studio each connected runtime's link
+ * dialled, named by the runtime (studio_url, which a panel token never
+ * reads). */
 export const runsInWhy = (n: number, agent: string) =>
   `the newest connected of ${n} registering ${agent}`
-export const runsInDialled = (url: string) => `the runtime chose ${url}`
+export const runsInDialled = (rt: RunsInRuntime) =>
+  `${shortRuntime(rt.id)} ${rt.service || "(unnamed)"} chose ${rt.studio_url}`
 
 /** shortRuntime elides a runtime id to its head: "rt_0396…". */
 export const shortRuntime = (id: string): string =>

@@ -75,7 +75,9 @@ import {
   SUBAGENT_CALL,
 } from "@/lib/honesty"
 import type { AppGateFacts } from "@/lib/honesty"
-import { runLink, sessionLink } from "@/lib/links"
+import { runLink, runtimesLink, sessionLink } from "@/lib/links"
+import { RUNS_IN } from "@/lib/runs-in"
+import { steerOffLine, steerWhyNot } from "@/lib/runtimes"
 import { heldError } from "@/lib/query"
 import { canReplay, tokenScopeOf } from "@/lib/replay"
 import { AWAITING, turnTag } from "@/lib/status"
@@ -719,6 +721,21 @@ export function AppSteer({ doc }: { doc: RunDoc }) {
   const { kind, mayAct, steer, checking, unread } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
   const [text, setText] = useState("")
+  const meta = useQuery(metaQuery())
+  // No steer on a running app turn: why, in /runtimes' words (UX-S4-10).
+  const why =
+    doc.status === "running" && !checking && !unread
+      ? steerWhyNot({ kind, steer, mayAct, service: doc.service })
+      : ""
+  if (why)
+    return (
+      <p className="text-xs text-muted-foreground" data-app-steer-off={kind}>
+        {steerOffLine(why, meta.data?.debug_scope)}{" "}
+        <Link {...runtimesLink()} className="text-thread-ink hover:underline">
+          {RUNS_IN.manage}
+        </Link>
+      </p>
+    )
   if (
     kind !== "decide" ||
     checking ||

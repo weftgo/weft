@@ -15,6 +15,8 @@
 // (formFromExperiment).
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { RuntimesLinkFor } from "@/components/studio/runs-in"
+import { RUNS_IN, runtimeRefusal } from "@/lib/runs-in"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
@@ -233,9 +235,9 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
       : "unnamed" in target && target.unnamed
         ? "the experiment names no agent: open it in the playground and pick one"
         : !target.runtime || !target.agent
-          ? "no runtime connected — runtime.Install(...) in your app opens the link"
+          ? runtimeRefusal(exp?.agent ?? "?")
           : target.mismatch
-            ? `no connected runtime registers agent ${target.mismatch}`
+            ? runtimeRefusal(target.mismatch)
             : srcRun && !srcRow.data
               ? sourceUnread(srcRow.isError ? srcRow.error.message : undefined)
               : (check?.held ?? "")
@@ -563,6 +565,9 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
       ) : runBlocked ? (
         <p className="text-xs text-muted-foreground" data-rerun-blocked>
           re-run: {runBlocked}
+          {runBlocked.startsWith(RUNS_IN.none("")) ? (
+            <RuntimesLinkFor agent={target.mismatch || exp.agent || ""} />
+          ) : null}
         </p>
       ) : null}
       {error ? (

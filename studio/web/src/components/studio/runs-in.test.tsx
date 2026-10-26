@@ -85,7 +85,11 @@ describe("RunsIn (U20.1)", () => {
     expect(box.textContent).toContain(RUNS_IN.connected([other]))
     expect(box.textContent).toContain(RUNS_IN.fix("studio-local"))
     expect(box.querySelector("[data-runs-in-asked]")!.textContent).toContain(
-      runsInDialled("http://127.0.0.1:7341")
+      runsInDialled(other)
+    )
+    // The Studio a runtime chose is named by that runtime (U20.1-fix).
+    expect(box.querySelector("[data-runs-in-asked]")!.textContent).toContain(
+      "rt_0396… weft-arena-dev chose http://127.0.0.1:7341"
     )
     expect(
       box.querySelector("[data-runs-in-manage]")!.getAttribute("href")

@@ -176,6 +176,7 @@ describe("a source that names no agent asks for one (UX-C-02)", () => {
     const s = await studio(replayFromStep(2), fx)
     const held = await s.q('[data-target-held="unnamed"]')
     expect(held.textContent).toBe(RECORDED_UNNAMED)
+    expect(s.container.querySelector("[data-runs-in]")).toBeNull()
     expect(s.run().disabled).toBe(true)
     const opts = [
       ...s.container.querySelectorAll<HTMLElement>("[data-target-option]"),
@@ -203,6 +204,9 @@ describe("a source that names no agent asks for one (UX-C-02)", () => {
   it("panel: the drawer asks too — the same words, Run held, posts only after a pick", async () => {
     const p = await panel(replayFromStep(2), fx)
     expect(text(p.el, '[data-target-held="unnamed"]')).toBe(RECORDED_UNNAMED)
+    // No agent yet: the picker asks — no Runs in refusal naming "" (as
+    // Studio's RunsIn, U20.1-fix).
+    expect($(p.el, "[data-runs-in]")).toBeNull()
     expect(p.run().hasAttribute("disabled")).toBe(true)
     const opts = all(p.el, "[data-target-option]")
     expect(opts.map((o) => o.getAttribute("data-target-option"))).toEqual([

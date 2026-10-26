@@ -50,7 +50,7 @@ export function RunsIn({
   if (!agent) return null
   if (!here) {
     const connected = runtimes.filter((r) => r.connected !== false)
-    const service = connected.find((r) => r.studio_url)
+    const dialled = connected.filter((r) => r.studio_url).map(runsInDialled)
     return (
       <div
         className="space-y-0.5 font-mono text-xs [overflow-wrap:anywhere]"
@@ -64,7 +64,7 @@ export function RunsIn({
         <p className="text-muted-foreground">{RUNS_IN.fix(agent)}</p>
         <p className="text-faint" data-runs-in-asked>
           {RUNS_IN.asked(thisStudio())}
-          {service?.studio_url ? ` · ${runsInDialled(service.studio_url)}` : ""}
+          {dialled.map((d) => ` · ${d}`).join("")}
         </p>
       </div>
     )
@@ -99,5 +99,22 @@ export function RunsIn({
         </>
       ) : null}
     </div>
+  )
+}
+
+/** RuntimesLinkFor is the "runtimes ⤢" link a held Run's refusal
+ * carries (UX-C-14): /runtimes explaining the agent. */
+export function RuntimesLinkFor({ agent }: { agent: string }) {
+  return (
+    <>
+      {" · "}
+      <Link
+        {...runtimesLink({ agent })}
+        className="text-thread-ink hover:underline"
+        data-runtime-refusal={agent}
+      >
+        {RUNS_IN.manage}
+      </Link>
+    </>
   )
 }

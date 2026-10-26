@@ -7,7 +7,8 @@
 // runtime's runs and on the app's own turns, with why not. Studio only:
 // the panel's "Runs in" line is lib/runs-in.ts.
 import type { Meta, RuntimeView } from "./api"
-import { APP_CANCEL, OWN_RUNTIME } from "./honesty"
+import { APP_CANCEL, OWN_RUNTIME, READ_TOKEN } from "./honesty"
+import type { ParkedKind } from "./honesty"
 import { plural, relativeTime } from "./format"
 import { BREAKPOINT_WORDS } from "./settings"
 import type { Role } from "./palette"
@@ -56,13 +57,18 @@ export interface ProcessGroup {
   runtimes: RuntimeView[]
 }
 
-/** processGroups groups runtimes by process, in their first order. A
- * runtime with no pid is its own group. */
+/** processGroups groups connected runtimes by process (host, pid and
+ * cwd), in their first order. A runtime that is not connected, or has
+ * no pid, is its own group: a pid reused after a restart is not the
+ * same process. */
 export function processGroups(runtimes: RuntimeView[]): ProcessGroup[] {
   const out: ProcessGroup[] = []
   const at = new Map<string, ProcessGroup>()
   for (const rt of runtimes) {
-    const key = rt.pid ? `${rt.host}\u0000${rt.pid}` : `id\u0000${rt.id}`
+    const key =
+      rt.pid && rt.connected !== false
+        ? `${rt.host}\u0000${rt.pid}\u0000${rt.cwd ?? ""}`
+        : `id\u0000${rt.id}`
     let g = at.get(key)
     if (!g) {
       g = { key, host: rt.host, pid: rt.pid, runtimes: [] }
@@ -179,8 +185,12 @@ export function manifestMark(
     return check?.stale.includes(name)
       ? { mark: "stale" }
       : { mark: "unchecked" }
-  if (hash && latest === hash) return { mark: "current", latest }
-  if (check.stale.includes(name)) return { mark: "stale", latest }
+  const stale = check.stale.includes(name)
+  // A weft.json agent carries no hash of its own (only registered ones
+  // do): the check's stale list is the verdict.
+  if (!hash) return { mark: stale ? "stale" : "current", latest }
+  if (latest === hash) return { mark: "current", latest }
+  if (stale) return { mark: "stale", latest }
   return { mark: "other", latest }
 }
 
@@ -209,7 +219,7 @@ export const MANIFEST_WORDS: Record<
       `the latest run ran ${shortManifest(latest)}: another registered version of this agent`,
   },
   unchecked: {
-    word: "no run yet",
+    word: "unchecked",
     role: "resumed",
     title: () => "no stored run of this agent carries a manifest hash",
   },
@@ -296,3 +306,34 @@ export const RESOLVER_TITLE =
 /** The empty page. */
 export const NO_RUNTIMES =
   "No runtime has registered: an app links with runtime.Install(…) under WEFT_ENV=dev (or runtime.Enabled(true))."
+
+/** Why the run page offers no steer on a running app turn (UX-S4-10),
+ * in /runtimes' words: the token, the capability, or the runtime state
+ * of the run's service ("" when steer is offered, or the turn is not
+ * the app's to steer at all). Cancel is never offered on an app turn
+ * (APP_CANCEL). */
+export function steerWhyNot(f: {
+  kind: ParkedKind
+  steer: boolean
+  mayAct: boolean
+  service?: string
+}): string {
+  if (
+    f.kind !== "decide" &&
+    f.kind !== "read-only" &&
+    f.kind !== "no-public-id"
+  )
+    return ""
+  if (!f.mayAct) return READ_TOKEN
+  if (!f.steer) return "capability steer is off"
+  if (f.kind === "no-public-id")
+    return "the session has no public id: runtime.Sessions resolves a session by it"
+  if (f.kind === "read-only")
+    return `no connected runtime of service ${f.service || "(unnamed)"} registered runtime.Sessions`
+  return ""
+}
+
+/** The run page's line for it: the reason, debug_scope explained, and
+ * cancel's own word. */
+export const steerOffLine = (why: string, scope: string | undefined) =>
+  `steer and cancel are unavailable on this turn: ${why}; ${APP_CANCEL}. ${debugScopeWords(scope)}`

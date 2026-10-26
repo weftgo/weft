@@ -21,6 +21,7 @@ import {
   APP_OWNED,
   APP_RUN,
   APP_RUN_FIX,
+  APP_CANCEL,
   CAPS_UNREAD,
   PLAYGROUND_OFF,
   POOL_CHILD,
@@ -390,6 +391,30 @@ describe("the run page when a read fails", () => {
     }
     expect(seen.filter((k) => k !== "-")).toEqual(["unread"])
     expect(line("unread")).toBe(`${CAPS_UNREAD}: meta store unavailable`)
+  })
+})
+
+describe("a running app turn the runtime cannot steer (U20.1-fix, UX-S4-10)", () => {
+  it("says why, in /runtimes' words: the runtime state, cancel's word and debug_scope", async () => {
+    serveAppTurn(new FakeStudio(), {
+      studioMeta: true,
+      running: true,
+      runtimes: [runtimeRow({ sessions: false, breakpoints_own: false })],
+    }).install()
+    renderApp(`/runs/${encodeURIComponent(PARKED)}?view=story`)
+    const off = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-app-steer-off]")
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(off.getAttribute("data-app-steer-off")).toBe("read-only")
+    expect(off.textContent).toContain(
+      "no connected runtime of service app registered runtime.Sessions"
+    )
+    expect(off.textContent).toContain(APP_CANCEL)
+    expect(off.textContent).toContain("view-only")
+    expect(off.querySelector("a")!.getAttribute("href")).toBe("/runtimes")
+    expect(document.querySelector("[data-app-steer]")).toBeNull()
   })
 })
 

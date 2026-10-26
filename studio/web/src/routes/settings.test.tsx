@@ -118,6 +118,7 @@ const SECTIONS = [
   ["content", "Content policy"],
   ["appearance", "Appearance"],
   ["keyboard", "Keyboard"],
+  ["concepts", "Concepts"],
 ]
 
 async function openSettings(): Promise<void> {

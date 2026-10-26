@@ -462,6 +462,44 @@ export const WATERFALL: Term = {
   group: "machinery",
 }
 
+export const STORY: Term = {
+  term: "story",
+  short:
+    "story — the run as a conversation: each step's messages, tool calls and results",
+  long: [
+    "The run's transcript, step by step: what the model was sent, what it answered,",
+    "the tools it called and what they returned. Both surfaces call it the story.",
+  ].join("\n"),
+  docs: `${RC}#messages--the-transcript-and-the-compaction-view`,
+  aliases: [],
+  group: "machinery",
+}
+
+export const REQUEST: Term = {
+  term: "request",
+  short:
+    "request — what one model call was given: its messages, prompt and tools",
+  long: [
+    "A step's request is exactly what the model was sent: the messages after compaction,",
+    "the system prompt and the tool catalog. Studio shows it as a step's pane.",
+  ].join("\n"),
+  docs: `${RC}#request-prompt-tools--what-each-model-call-was-given`,
+  aliases: [],
+  group: "machinery",
+}
+
+export const RAW: Term = {
+  term: "raw",
+  short: "raw — the run's recorded events and its JSON document, as stored",
+  long: [
+    "The events the run recorded, in order, and the run's JSON as the API serves it:",
+    "what every other view is drawn from. The playback bar plays these events.",
+  ].join("\n"),
+  docs: `${RC}#event-and-delta`,
+  aliases: [],
+  group: "machinery",
+}
+
 export const TRACE: Term = {
   term: "trace",
   short: "trace — OpenTelemetry's spans of one request, across services",
@@ -545,6 +583,9 @@ export const TERMS = {
   runtime: RUNTIME,
   appOwned: APP_OWNED,
   waterfall: WATERFALL,
+  story: STORY,
+  request: REQUEST,
+  raw: RAW,
   trace: TRACE,
   span: SPAN,
   tokens: TOKENS,

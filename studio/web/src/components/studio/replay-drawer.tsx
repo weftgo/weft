@@ -115,6 +115,7 @@ import {
   usePreview,
 } from "@/components/studio/transcript-editor"
 import { Button } from "@/components/ui/button"
+import { Term } from "@/components/studio/term"
 
 /** One "replay from here": the run to take the turn from (a child
  * row's verb names the child — A10: the child replays as its own
@@ -848,6 +849,12 @@ function ReplayForm({
         >
           {VERB_TITLES[draft.verb]}
         </h2>
+        {/* The drawer's words (U21.2, UX-C-22): replay re-runs the
+            agent, an experiment keeps replays, a fork is a session. */}
+        <p className="text-xs text-muted-foreground" data-drawer-terms>
+          <Term name="replay" /> · <Term name="experiment" /> ·{" "}
+          <Term name="scripted" /> · <Term name="live" /> · <Term name="fork" />
+        </p>
       </div>
       <div ref={formBody} className="space-y-3 px-6 pb-6">
         {blocked ? (

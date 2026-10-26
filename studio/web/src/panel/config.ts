@@ -515,10 +515,10 @@ export const URL_SCOPE_PARAM = "weft_scope"
  * at the next ?), URL-decoded once — "+" stays "+" (the scope's own
  * form percent-encodes it), a malformed escape is kept as written;
  * null when the string carries none. */
-function urlParam(part: string): string | null {
+function urlParam(part: string, name = URL_SCOPE_PARAM): string | null {
   for (const pair of part.replace(/^[?#]/, "").split(/[?&]/)) {
     const at = pair.indexOf("=")
-    if ((at < 0 ? pair : pair.slice(0, at)) !== URL_SCOPE_PARAM) continue
+    if ((at < 0 ? pair : pair.slice(0, at)) !== name) continue
     const v = at < 0 ? "" : pair.slice(at + 1)
     try {
       return decodeURIComponent(v)
@@ -592,6 +592,24 @@ export function debugForced(): boolean {
     // about:blank and friends: not forced
   }
   return false
+}
+
+/** urlStep is "open in app"'s step (U21.2, UX-F-28): weft_step=<n>
+ * or <n>.<tab> beside the URL rung's scope (lib/links.ts appLink) —
+ * the panel opens that step of the scope's run, on that tab. null when
+ * the page's URL names none. */
+export function urlStep(
+  page: string = pageURL.href()
+): { step: number; tab: string } | null {
+  try {
+    const u = new URL(page)
+    const m = /^(\d+)(?:\.(\w+))?$/.exec(
+      urlParam(u.search, "weft_step") ?? urlParam(u.hash, "weft_step") ?? ""
+    )
+    return m ? { step: +m[1], tab: m.at(2) ?? "" } : null
+  } catch {
+    return null
+  }
 }
 
 /** urlScope is detection rung 4 (plan C3.4): the host page's

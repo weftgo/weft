@@ -96,6 +96,7 @@ import { AWAITING_TITLE, DECIDE } from "@/lib/session-states"
 import { SessionCounts } from "@/components/studio/session-state"
 import { SessionActions } from "@/components/studio/session-actions"
 import type { TurnOrder } from "@/lib/session-states"
+import { isPlainShortcut } from "@/lib/keys"
 
 type LiveState = "off" | "on" | "down"
 
@@ -194,6 +195,34 @@ function SessionPage() {
         agent: q.data?.agent ?? "",
       }),
   })
+  // ?turn= (U21.2, UX-F-28): the table's selected turn; j / k move it
+  // through the rows as drawn (newest first unless oldest).
+  const turnNos = (q.data?.runs ?? []).map((r) => r.turn)
+  const turnKey = turnNos.join(",")
+  useEffect(() => {
+    if (view !== "table") return
+    const onKey = (e: KeyboardEvent) => {
+      if (!isPlainShortcut(e) || (e.key !== "j" && e.key !== "k")) return
+      const nos = turnKey ? turnKey.split(",").map(Number) : []
+      const shown = order === "newest" ? [...nos].reverse() : nos
+      if (!shown.length) return
+      e.preventDefault()
+      const down = e.key === "j"
+      // From the URL as it is now: two quick presses both move.
+      void navigate({
+        search: (prev) => {
+          const at = prev.turn === undefined ? -1 : shown.indexOf(prev.turn)
+          const next = down
+            ? Math.min(at + 1, shown.length - 1)
+            : Math.max(at - 1, 0)
+          return { ...prev, turn: shown[next] }
+        },
+        replace: true,
+      })
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [view, order, turnKey, navigate])
   if (q.isPending) {
     return (
       <div className="flex justify-center py-24">
@@ -469,6 +498,7 @@ function SessionPage() {
               experiments={experiments}
               agent={s.agent}
               order={order}
+              selected={search.turn}
             />
           </div>
         </>

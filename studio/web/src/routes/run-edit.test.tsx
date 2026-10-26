@@ -705,7 +705,7 @@ describe("a fork carries no edits (review 4)", () => {
     await story()
     await edit("the result of search_kb (c2)", "x")
     await waitFor(() => expect(kinds()).toEqual(["tool_result"]))
-    await choose(within(drawer()!).getByLabelText("Thread"), "fork")
+    await choose(within(drawer()!).getByLabelText("Write to"), "fork")
     fireEvent.change(within(drawer()!).getByLabelText("input"), {
       target: { value: "next" },
     })

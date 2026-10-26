@@ -143,7 +143,7 @@ describe("the readout's end word", () => {
     await renderWithRouter(bar(null, false))
     const r = document.querySelector("[data-replay-readout]")!
     expect(r.textContent).toBe(
-      "end · all 6 events · press space or click the bar to replay"
+      "end · all 6 events · press space or click the bar to play it back"
     )
     expect(
       document.querySelector("[data-replay]")!.getAttribute("data-replay")

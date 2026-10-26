@@ -57,6 +57,7 @@ import { BreakpointsPointer } from "@/components/studio/breakpoints"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
 import { SelectField } from "@/components/ui/select-field"
+import { Term } from "@/components/studio/term"
 
 type FormProps = {
   variant: VariantFields
@@ -256,14 +257,14 @@ export function ModeFields({
           source turn and an input. */}
       <div className="block min-w-0 flex-1 space-y-1">
         <SelectField
-          caption="Thread"
-          label="Thread"
+          caption={<Term name="fork">Write to</Term>}
+          label="Write to"
           className="w-full"
           value={variant.thread}
           onValueChange={(v) => patch({ thread: v as VariantFields["thread"] })}
           options={[
-            { value: "ephemeral", label: "ephemeral" },
-            { value: "fork", label: "fork (new session)" },
+            { value: "ephemeral", label: "nowhere (ephemeral)" },
+            { value: "fork", label: "a new session (fork)" },
           ]}
         />
       </div>

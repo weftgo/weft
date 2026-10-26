@@ -81,6 +81,7 @@ import { editKey, impliedFromStep, putEdit, schemaOf } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 import { replayBounds } from "@/lib/experiment-body"
 import type {
+  AppTab,
   ReplayLinkState,
   RunScale,
   RunSearch,
@@ -158,7 +159,8 @@ import {
 } from "@/lib/loopgraph"
 import type { GraphLevel } from "@/lib/loopgraph"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
-import { FlowStrip } from "@/components/studio/flow-strip"
+import { StepStrip } from "@/components/studio/step-strip"
+import { TermWrap } from "@/components/studio/term"
 import { RunHeader, runPlace } from "@/components/studio/run-header"
 import { saveTest } from "@/components/studio/saves"
 import { notifySave } from "@/lib/notify"
@@ -248,6 +250,21 @@ function scaleOf(v: unknown): RunScale | undefined {
     : v === "events"
       ? "order"
       : undefined
+}
+
+/** appAt is where "open in app" lands the panel (U21.2, UX-F-28): the
+ * page's step and its view as the panel's tab — a step's Request pane
+ * is the panel's request tab; logs, which the panel has not, none. */
+function appAt(search: RunSearch): { step?: number; tab?: AppTab } {
+  const tab: AppTab | undefined =
+    search.pane === "request" || search.pane === "wire"
+      ? "request"
+      : search.view === "story" || search.view === "raw"
+        ? search.view
+        : search.view === undefined
+          ? "waterfall"
+          : undefined
+  return { step: search.step, tab }
 }
 
 export const Route = createFileRoute("/runs/$id")({
@@ -1716,6 +1733,7 @@ function RunPage() {
         <div className="space-y-4">
           <RunHeader
             doc={doc}
+            openAt={appAt(search)}
             folded={atPlayhead}
             eventCount={Math.max(doc.event_count, stream.total)}
             transcript={transcript.data}
@@ -1737,7 +1755,7 @@ function RunPage() {
               {stream.base.toLocaleString()} before them are on the API
               (api/runs/{doc.id}
               /events?after=) — the story and the waterfall hold the whole run,
-              replay needs the whole stream
+              playback needs the whole stream
             </p>
           ) : scale === "order" && !derived ? (
             <ReplayBar
@@ -1786,9 +1804,17 @@ function RunPage() {
             <div className="flex flex-wrap items-center gap-3">
               <TabsList>
                 {/* The views' labels (lib/links.ts's VIEWS): the panel's tabs say the same. */}
-                <TabsTrigger value="waterfall">{VIEWS.waterfall}</TabsTrigger>
-                <TabsTrigger value="story">{VIEWS.story}</TabsTrigger>
-                <TabsTrigger value="raw">{VIEWS.raw}</TabsTrigger>
+                {/* Each a glossary word (U21.2): its tooltip on focus,
+                    drawn in <body> — a tablist holds tabs only. */}
+                {(["waterfall", "story", "raw"] as const).map((v) => (
+                  <TermWrap key={v} name={v} portal>
+                    {(t) => (
+                      <TabsTrigger value={v} {...t}>
+                        {VIEWS[v]}
+                      </TabsTrigger>
+                    )}
+                  </TermWrap>
+                ))}
                 <TabsTrigger value="logs" data-logs-tab>
                   {LOGS.view}
                 </TabsTrigger>
@@ -1930,7 +1956,7 @@ function RunPage() {
                 ) : null}
                 {derived ? null : (
                   <>
-                    <Kbd>space</Kbd> replay ·{" "}
+                    <Kbd>space</Kbd> play ·{" "}
                   </>
                 )}
                 <Kbd>[</Kbd>
@@ -1957,7 +1983,7 @@ function RunPage() {
                 <>
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
-                      <FlowStrip
+                      <StepStrip
                         pills={flow}
                         runStatus={viewStatus}
                         errorType={replaying ? undefined : run.data.error_type}

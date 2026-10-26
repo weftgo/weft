@@ -258,6 +258,7 @@ import {
   setViaPackage,
   tokenScope,
   urlScope,
+  urlStep,
   viaPackage,
 } from "./config"
 import type { MountOptions, PanelConfig } from "./config"
@@ -1088,7 +1089,8 @@ export class WeftDevtools extends HTMLElement {
     // constructor: re-read before connecting, and adopt data-open
     // once (the user's toggles own it afterwards).
     this.cfg = readConfig(this)
-    if (!this.opened) {
+    const first = !this.opened
+    if (first) {
       // data-position / data-open / data-mode are the initial values;
       // what this origin stored last (D1) wins over them.
       this.opened = true
@@ -1120,6 +1122,14 @@ export class WeftDevtools extends HTMLElement {
     this.syncTheme()
     this.syncGlobal()
     this.schedule()
+    // Studio's "open in app" (U21.2): the URL rung's run at its step
+    // and tab (weft_step=), once.
+    const at = first && urlStep()
+    const run = this.cfg.urlScope?.run
+    if (at && run) {
+      this.setTab(at.tab)
+      this.select(run, at.step)
+    }
   }
 
   // ── The host API (plan C4) ──────────────────────────────────────

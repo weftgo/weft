@@ -56,17 +56,27 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { statusClass } from "@/lib/status-class"
+import { EmptyState } from "@/components/studio/empty-state"
+import { TERMS } from "@/lib/glossary"
 
 interface LiveSearch {
   /** The run whose story the side pane shows. */
   peek?: string
+  /** The filter box's words (U21.2, UX-F-28: a linkable filter). */
+  q?: string
+  /** One agent exactly. */
+  agent?: string
 }
+
+const str = (v: unknown) => (typeof v === "string" && v ? v : undefined)
 
 export const Route = createFileRoute("/live")({
   // An invalid ?peek= reads as none (an explicit undefined: the
   // router keeps a raw key the validator leaves out).
   validateSearch: (search: Record<string, unknown>): LiveSearch => ({
     peek: validPeek(search.peek),
+    q: str(search.q),
+    agent: str(search.agent),
   }),
   component: LivePage,
 })
@@ -113,13 +123,23 @@ function useNow(ms = 1000): number {
 function LiveBody() {
   const meta = useQuery(metaQuery())
   const { has } = useCapabilities()
-  const { peek } = Route.useSearch()
+  const { peek, q, agent } = Route.useSearch()
   const navigate = useNavigate({ from: "/live" })
   const setPeek = (id: string | undefined) =>
     void navigate({ search: (prev) => ({ ...prev, peek: id }) })
   const setPeekRef = useRef(setPeek)
   setPeekRef.current = setPeek
-  const [filter, setFilter] = useState("")
+  // The filter is the URL's (?q=, ?agent=): a shared link opens on it.
+  // The box keeps its own text while typing; the URL follows it.
+  const [box, setBox] = useState(q ?? "")
+  const setFilter = (v: string) => {
+    setBox(v)
+    void navigate({
+      search: (prev) => ({ ...prev, q: v || undefined }),
+      replace: true,
+    })
+  }
+  const filter = [box, agent ? `agent:${agent}` : ""].join(" ").trim()
   // The grant refused the all stream although meta offered it (a token
   // changed under the page): the poll, said the same way.
   const [refused, setRefused] = useState(false)
@@ -173,12 +193,27 @@ function LiveBody() {
         ) : null}
         <Input
           type="search"
-          value={filter}
+          value={box}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="filter agent or status"
           aria-label="filter the runs by agent or status"
           className="ml-auto h-7 w-52 font-mono text-xs"
         />
+        {agent ? (
+          <button
+            type="button"
+            className="rounded-sm border px-1.5 font-mono text-[11px] text-muted-foreground hover:text-foreground"
+            title="show every agent's runs"
+            data-live-agent={agent}
+            onClick={() =>
+              void navigate({
+                search: (prev) => ({ ...prev, agent: undefined }),
+              })
+            }
+          >
+            agent {agent} ×
+          </button>
+        ) : null}
       </div>
       {!streamed && meta.data ? (
         <p
@@ -439,10 +474,11 @@ function StreamedRuns({
           loading…
         </p>
       ) : all.length === 0 ? (
-        <p className="py-16 text-center font-mono text-xs text-faint">
-          nothing is streaming right now — run something and it lands here the
-          moment its first run row is written
-        </p>
+        <EmptyState
+          title="Nothing is running right now"
+          what={TERMS.running.short}
+          next="Run your app and each run lands here the moment its first run row is written."
+        />
       ) : (
         <LiveTable
           rows={rows}
@@ -495,10 +531,11 @@ function PolledRuns({ filter, peek, onPeek, now, canCancel }: ListProps) {
           </Button>
         </div>
       ) : runs.length === 0 ? (
-        <p className="py-16 text-center font-mono text-xs text-faint">
-          nothing is streaming right now — run something and it lands here the
-          moment its run_start arrives
-        </p>
+        <EmptyState
+          title="Nothing is running right now"
+          what={TERMS.running.short}
+          next="Run your app and each run lands here the moment its run_start arrives."
+        />
       ) : (
         <LiveRuns
           runs={runs}

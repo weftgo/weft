@@ -48,6 +48,32 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe("?agent= (U21.2, UX-F-28)", () => {
+  it("marks that agent's card, scrolls to it and opens its instructions", async () => {
+    new FakeStudio()
+      .on("GET meta", meta({ has_manifest: true, capabilities: ["live"] }))
+      .on("GET manifest", {
+        weft: 1,
+        agents: [
+          agent("support", "Help the user."),
+          agent("billing", "Bills."),
+        ],
+      })
+      .install()
+    renderApp("/agents?agent=billing")
+    const card = await waitFor(() => {
+      const c = document.querySelector<HTMLElement>("[data-agent-selected]")
+      expect(c).not.toBeNull()
+      return c!
+    })
+    expect(card.getAttribute("data-agent-card")).toBe("billing")
+    expect(within(card).getByText("Bills.")).toBeTruthy()
+    // The other card stays folded.
+    expect(screen.queryByText("Help the user.")).toBeNull()
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+  })
+})
+
 describe("the Agents page from registrations (B4)", () => {
   it("draws the registered agents and labels each hash live or remembered", async () => {
     const manifest: Manifest = {
@@ -240,7 +266,7 @@ describe("why off (B4)", () => {
     })
     expect(page.querySelector('[data-hole="hidden"]')).toBeTruthy()
     expect(page.textContent).toContain(
-      "your token's scope may not read the agents: a panel token may not read the manifest"
+      "your token's access does not reach the agents: a panel token may not read the manifest"
     )
     const reads = studio.calls("GET manifest").length
     await new Promise((r) => setTimeout(r, 5_500))

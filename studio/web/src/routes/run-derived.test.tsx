@@ -278,7 +278,7 @@ describe("a derived run's page (the Done line)", () => {
     expect(tree.textContent).not.toContain("execute_tool lookup_order")
     expect(document.body.textContent).not.toContain("past the playhead")
     expect(document.body.textContent).not.toContain(
-      "press space or click the bar to replay"
+      "press space or click the bar to play it back"
     )
     // A span is selected, and its detail offers no playhead jump: there
     // are no events to replay (nor a "space replay" key hint).

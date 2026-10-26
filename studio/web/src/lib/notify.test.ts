@@ -38,7 +38,7 @@ describe("noticeText: the words", () => {
         runID: "pg_1",
         status: "succeeded",
       },
-      "experiment pg_1 finished · succeeded",
+      "replay run pg_1 finished · succeeded",
       "success",
     ],
     [
@@ -48,7 +48,7 @@ describe("noticeText: the words", () => {
         runID: "pg_1",
         status: "failed",
       },
-      "experiment pg_1 finished · failed",
+      "replay run pg_1 finished · failed",
       "error",
     ],
     [
@@ -58,7 +58,7 @@ describe("noticeText: the words", () => {
         runID: "",
         status: "succeeded",
       },
-      "experiment cmd_1 finished · succeeded",
+      "replay run cmd_1 finished · succeeded",
       "success",
     ],
     [
@@ -259,7 +259,7 @@ describe("notify", () => {
     expect(notify({ ...n, commandID: "cmd_2" })).toBe(true)
     expect(toast.success).toHaveBeenCalledTimes(2)
     expect(toast.success.mock.calls[0][0]).toBe(
-      "experiment pg_1 finished · succeeded"
+      "replay run pg_1 finished · succeeded"
     )
     expect(toast.success.mock.calls[0][1]).toMatchObject({
       id: "experiment:cmd_1",

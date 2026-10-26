@@ -69,6 +69,10 @@ import {
 import type { Status, StatusRow } from "@/lib/status"
 import { runTitle, shortId } from "@/lib/title"
 import type { Title } from "@/lib/title"
+import { Term, TermWrap } from "@/components/studio/term"
+import type { TermHandle } from "@/components/studio/term"
+import { TERMS } from "@/lib/glossary"
+import type { TermName } from "@/lib/glossary"
 
 const roleClass = (s: Status) => statusClass(s.role)
 
@@ -111,15 +115,21 @@ export function StatusChip({
   complete,
   dotOnly,
   detail,
+  term,
 }: {
   row: StatusRow
   runs?: readonly StatusRow[] | null
   complete?: boolean
   dotOnly?: boolean
   detail?: boolean
+  /** The word is a focusable glossary term (U21.2): the run header's
+   * chip; a list row's keeps its title (one tab stop per row is the
+   * row's link). */
+  term?: boolean
 }) {
   if (dotOnly) return <StatusDot row={row} runs={runs} complete={complete} />
   const s = statusOf(row, runs, complete)
+  const named = term && s.key in TERMS ? (s.key as TermName) : undefined
   const word = s.resumedBy ? (
     <Link
       {...runLink(s.resumedBy)}
@@ -128,13 +138,15 @@ export function StatusChip({
     >
       {s.word}
     </Link>
+  ) : named ? (
+    <Term name={named}>{s.word}</Term>
   ) : (
     s.word
   )
   return (
     <span
       className={`inline-flex items-center gap-1.5 font-mono text-xs ${roleClass(s).text}`}
-      title={s.hint}
+      title={named ? undefined : s.hint}
       data-status={s.key}
     >
       <StatusDot row={row} runs={runs} complete={complete} decorative />
@@ -394,16 +406,26 @@ function SortHead({
   sort,
   label,
   title,
+  term,
   className = "text-right",
 }: {
   sortKey: RunSortKey
   sort?: RunsSort
   label: string
   title?: string
+  /** The glossary word its tooltip explains (U21.2): title becomes
+   * the tooltip's second line. */
+  term?: TermName
   className?: string
 }) {
   if (!sort)
-    return (
+    return term ? (
+      <TableHead className={className}>
+        <Term name={term} extra={title}>
+          {label}
+        </Term>
+      </TableHead>
+    ) : (
       <TableHead className={className} title={title}>
         {label}
       </TableHead>
@@ -416,29 +438,38 @@ function SortHead({
         : COST_SORT_LOCAL
       : SORT_WORDS[sortKey][sort.server ? "server" : "local"]
   const toggle = sortKey === "started" || !active ? sortKey : "started"
+  const order =
+    active && sortKey !== "started" ? `${why} — click for newest first` : why
+  const button = (props?: TermHandle["props"]) => (
+    <button
+      type="button"
+      {...props}
+      className={`font-medium hover:text-foreground ${active ? "text-foreground" : ""} ${props ? "underline decoration-current/40 decoration-dotted underline-offset-4" : ""}`}
+      title={props ? undefined : order}
+      data-term={props ? term : undefined}
+      onClick={() => sort.onSort(toggle)}
+      data-sort={sortKey}
+      data-cost-sort={
+        sortKey === "cost" ? (sort.server ? "server" : "page") : undefined
+      }
+      aria-pressed={active}
+    >
+      {label}
+      {active ? " ↓" : ""}
+      {active && sortKey !== "started" && !sort.server ? (
+        <span className="text-faint"> (page)</span>
+      ) : null}
+    </button>
+  )
   return (
     <TableHead className={className} aria-sort={active ? "descending" : "none"}>
-      <button
-        type="button"
-        className={`font-medium hover:text-foreground ${active ? "text-foreground" : ""}`}
-        title={
-          active && sortKey !== "started"
-            ? `${why} — click for newest first`
-            : why
-        }
-        onClick={() => sort.onSort(toggle)}
-        data-sort={sortKey}
-        data-cost-sort={
-          sortKey === "cost" ? (sort.server ? "server" : "page") : undefined
-        }
-        aria-pressed={active}
-      >
-        {label}
-        {active ? " ↓" : ""}
-        {active && sortKey !== "started" && !sort.server ? (
-          <span className="text-faint"> (page)</span>
-        ) : null}
-      </button>
+      {term ? (
+        <TermWrap name={term} extra={order}>
+          {button}
+        </TermWrap>
+      ) : (
+        button()
+      )}
     </TableHead>
   )
 }
@@ -526,21 +557,22 @@ export function RunsTable({
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead className="w-24 sm:w-28">status</TableHead>
-          <TableHead>run</TableHead>
+          <TableHead>
+            <Term name="run" />
+          </TableHead>
           <TableHead className={COL.agent}>agent</TableHead>
-          <TableHead
-            className={COL.session}
-            title="the thread this run is a turn of"
-          >
-            session
+          <TableHead className={COL.session}>
+            <Term name="session" extra="the session this run is a turn of" />
           </TableHead>
           <TableHead className={COL.model}>model</TableHead>
-          <TableHead className={`text-right ${COL.steps}`}>steps</TableHead>
+          <TableHead className={`text-right ${COL.steps}`}>
+            <Term name="step">steps</Term>
+          </TableHead>
           <SortHead
             sortKey="tokens"
             sort={sort}
             label="tokens in / out"
-            title="input / output tokens"
+            term="tokens"
             className={`text-right ${COL.tokens}`}
           />
           {showCost ? (
@@ -548,7 +580,8 @@ export function RunsTable({
               sortKey="cost"
               sort={sort}
               label="cost"
-              title="the run's own cost, priced at read time; delegated (its child runs') apart"
+              title="priced at read time"
+              term="own"
               className={`text-right ${COL.cost}`}
             />
           ) : null}

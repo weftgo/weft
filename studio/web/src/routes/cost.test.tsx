@@ -5,6 +5,7 @@
 // the playground matrix's per-variant total, the sessions list — and
 // none of it without capability "pricing".
 import {
+  act,
   cleanup,
   configure,
   fireEvent,
@@ -260,7 +261,18 @@ describe("the runs table's Cost column", () => {
     await screen.findByText("r_cheap")
     const head = document.querySelector<HTMLElement>("[data-cost-sort]")!
     expect(head.getAttribute("data-cost-sort")).toBe("page")
-    expect(head.getAttribute("title")).toContain("sorts the loaded rows only")
+    // The order rides the column's glossary tooltip (U21.2): the
+    // button's description while it shows.
+    act(() => head.focus())
+    const tip = await waitFor(() => {
+      const t = document.getElementById(
+        head.getAttribute("aria-describedby") ?? ""
+      )
+      expect(t).not.toBeNull()
+      return t!
+    })
+    expect(tip.textContent).toContain("sorts the loaded rows only")
+    act(() => head.blur())
     fireEvent.click(head)
     await waitFor(() =>
       expect(listed()).toEqual(["r_dear", "r_cheap", "r_stale"])

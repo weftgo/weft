@@ -69,6 +69,8 @@ import {
   mayReadExperiments,
   NoExperiments,
 } from "@/components/studio/no-experiments"
+import { EmptyState } from "@/components/studio/empty-state"
+import { TERMS } from "@/lib/glossary"
 
 export const Route = createFileRoute("/experiments/")({
   component: ExperimentsPage,
@@ -165,9 +167,12 @@ function ReplayList() {
           the replays could not be read: {q.error.message}
         </p>
       ) : groups.length === 0 ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">
-          {REPLAY_WORDS.noReplays}
-        </p>
+        <EmptyState
+          title="No replays yet"
+          what={TERMS.replay.short}
+          next={REPLAY_WORDS.noReplays}
+          only={["app"]}
+        />
       ) : (
         groups.map((g) => <ReplayGroupBlock key={g.source} group={g} />)
       )}
@@ -399,9 +404,12 @@ function ExperimentList() {
           the experiments could not be read: {list.error.message}
         </p>
       ) : loaded.length === 0 ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">
-          No experiments yet: a matrix run from the playground is saved here.
-        </p>
+        <EmptyState
+          title="No saved matrices yet"
+          what={TERMS.experiment.short}
+          next="A matrix run from the playground is saved here; a single replay is listed under replays."
+          only={["app"]}
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border" data-scroll-box="">
           <Table>

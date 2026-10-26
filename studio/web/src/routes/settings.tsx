@@ -62,6 +62,7 @@ import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { KbdHelpBody } from "@/components/studio/kbd-help"
+import { ConceptsBody } from "@/components/studio/concepts"
 import { setThemeChoice, useThemeChoice } from "@/components/studio/theme"
 import type { ThemeChoice } from "@/components/studio/theme"
 import { useDensity } from "@/components/studio/density-toggle"
@@ -90,6 +91,14 @@ export const Route = createFileRoute("/settings")({
 function SettingsPage() {
   useDocumentTitle({ page: "settings" })
   const meta = useQuery(metaQuery())
+  // #concepts / #concept-<term> (a <Term>'s "more ›", U21.2) and
+  // #settings-<section>: scrolled to once the page has drawn it.
+  const drawn = !meta.isPending
+  useEffect(() => {
+    if (!drawn) return
+    const id = decodeURIComponent(window.location.hash.slice(1))
+    if (id) document.getElementById(id)?.scrollIntoView({ block: "start" })
+  }, [drawn])
   if (meta.isPending)
     return (
       <div className="flex justify-center py-24">
@@ -108,6 +117,9 @@ function SettingsPage() {
         </Section>
         <Section id="keyboard">
           <KbdHelpBody />
+        </Section>
+        <Section id="concepts">
+          <Concepts />
         </Section>
       </div>
     )
@@ -146,6 +158,9 @@ function SettingsPage() {
         </Section>
         <Section id="keyboard">
           <KbdHelpBody />
+        </Section>
+        <Section id="concepts">
+          <Concepts />
         </Section>
       </div>
     </div>
@@ -207,6 +222,20 @@ function Section({
       </h2>
       {children}
     </section>
+  )
+}
+
+/** The Concepts section (U21.2): the glossary, each term anchored
+ * concept-<key>, the ? dialog's Concepts tab's list. */
+function Concepts() {
+  return (
+    <div id="concepts" className="scroll-mt-4">
+      <p className="mb-3 text-xs text-muted-foreground">
+        The words Studio and the devtools panel use, one meaning each. Every
+        dotted word in Studio opens its line here.
+      </p>
+      <ConceptsBody />
+    </div>
   )
 }
 
@@ -603,7 +632,7 @@ function Refused({ err, what }: { err: Error; what: string }) {
       <HoleBadge
         hole="hidden"
         detail
-        reason={`your token's scope may not read ${what}: ${err.message}`}
+        reason={`your token's access does not reach ${what}: ${err.message}`}
       />
     )
   return (

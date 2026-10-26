@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { pageURL, readConfig, urlScope } from "./config"
+import { pageURL, readConfig, urlScope, urlStep } from "./config"
 import { SCOPE_HEADER } from "./detect"
 import { HOW_TO_SCOPE, NO_SCOPE_LABEL, WeftDevtools } from "./element"
 import { DEV_LIMIT, LIVE_RETRIES } from "./state"
@@ -127,6 +127,38 @@ afterEach(() => {
 })
 
 // ── Rung 4: the URL ───────────────────────────────────────────────
+
+describe("open in app's step (U21.2, UX-F-28): weft_step= beside the scope", () => {
+  it("urlStep reads <n> or <n>.<tab> from the fragment or the query; anything else is none", () => {
+    expect(
+      urlStep("http://localhost/#weft_scope=pub_x&weft_step=3.story")
+    ).toEqual({
+      step: 3,
+      tab: "story",
+    })
+    expect(urlStep("http://localhost/?weft_step=0")).toEqual({
+      step: 0,
+      tab: "",
+    })
+    expect(urlStep("http://localhost/#weft_scope=pub_x")).toBeNull()
+    expect(urlStep("http://localhost/#weft_step=-1")).toBeNull()
+    expect(urlStep("http://localhost/#weft_step=x")).toBeNull()
+    // The scope still ends at the &: the step never leaks into it.
+    expect(
+      urlScope("http://localhost/#weft_scope=pub_x%3Brun%3Dr_1&weft_step=2")
+    ).toEqual({ publicId: "pub_x", run: "r_1" })
+  })
+
+  it("the panel opens the scope's run at that step, on that tab", async () => {
+    fakeStudio(routesFor("pub_x"))
+    setURL("#weft_scope=pub_x%3Brun%3Dr_pub_x&weft_step=0.raw")
+    const el = await mountWith({ "data-endpoint": REMOTE, "data-open": "true" })
+    const m = (el as unknown as { model: PanelModel }).model
+    await vi.waitFor(() => expect(m.state.selected).toBe("r_pub_x"))
+    expect(m.state.selectedStep).toBe(0)
+    expect((el as unknown as { lay: { tab: string } }).lay.tab).toBe("raw")
+  })
+})
 
 describe("C3's Done line, the URL leg of the flow round-trip", () => {
   it("#weft_scope=pub_x%3Bflow%3Df_1 scopes the panel: its followed scope carries flow f_1 and the header chip shows it", async () => {

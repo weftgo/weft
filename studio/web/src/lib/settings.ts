@@ -485,6 +485,7 @@ export const SETTINGS_SECTIONS = [
   { id: "content", title: "Content policy" },
   { id: "appearance", title: "Appearance" },
   { id: "keyboard", title: "Keyboard" },
+  { id: "concepts", title: "Concepts" },
 ] as const
 
 export type SettingsSectionID = (typeof SETTINGS_SECTIONS)[number]["id"]

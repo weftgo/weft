@@ -55,6 +55,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Term } from "@/components/studio/term"
 
 /** The disabled cancel's words on an app-owned run (plan F4.3: the runtime refuses it). */
 export const APP_RUN_CANCEL = `the app's own run: ${APP_CANCEL}`
@@ -244,38 +245,41 @@ export function LiveTable({
     <Table aria-label="runs streaming now">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead>run</TableHead>
+          <TableHead>
+            <Term name="run" />
+          </TableHead>
           <TableHead>agent</TableHead>
           <TableHead className="w-28">status</TableHead>
-          <TableHead
-            className="text-right"
-            title="the current step (and the total once the run ended)"
-          >
-            step
+          <TableHead className="text-right">
+            <Term
+              name="step"
+              extra="the current step (and the total once the run ended)"
+            />
           </TableHead>
-          <TableHead
-            className="text-right"
-            title="input + output tokens so far"
-          >
-            tokens
+          <TableHead className="text-right">
+            <Term name="tokens" extra="input + output tokens so far" />
           </TableHead>
           {priced ? (
-            <TableHead
-              className="text-right"
-              title="the run's own cost: unknown while running (usage arrives at run end)"
-            >
-              cost
+            <TableHead className="text-right">
+              <Term
+                name="own"
+                extra="the run's own cost: unknown while running (usage arrives at run end)"
+              >
+                cost
+              </Term>
             </TableHead>
           ) : null}
-          <TableHead
-            className="text-right"
-            title="time to first token (TTFT) of the last finished step"
-          >
-            {FIRST_TOKEN}
+          <TableHead className="text-right">
+            <Term name="firstToken" extra="of the last finished step">
+              {FIRST_TOKEN}
+            </Term>
           </TableHead>
           <TableHead>started</TableHead>
-          <TableHead title="the conversation this run is a turn of (its public id under it)">
-            session
+          <TableHead>
+            <Term
+              name="session"
+              extra="the session this run is a turn of (its public id under it)"
+            />
           </TableHead>
           <TableHead>
             <span className="sr-only">actions</span>
@@ -392,7 +396,7 @@ export function LiveTable({
                 title={
                   ttft !== null
                     ? "the last finished step's time to first token"
-                    : "no step_finish with a TTFT seen yet"
+                    : "no finished step with a first token seen yet"
                 }
               >
                 {ttft !== null ? `${ttft.toLocaleString()} ms` : "—"}

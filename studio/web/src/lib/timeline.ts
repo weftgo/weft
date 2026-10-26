@@ -847,9 +847,9 @@ export function marksByTurn(doc: Pick<TimelineDoc, "marks" | "turns">): {
 /** The session page's footer: the experiments forked from its turns —
  * a link to the table, where they nest under their source turn. */
 export const forksWords = (n: number) =>
-  `${n} ${n === 1 ? "experiment" : "experiments"} forked from these turns`
+  `${n} ${n === 1 ? "experiment" : "experiments"} started from these turns`
 export const FORKS_TITLE =
-  "the table view lists each experiment under the turn it forked"
+  "the table view lists each experiment under the turn it started from"
 
 // ── U15.2: lanes, ends, ids, forks, the context lane ────────────────
 

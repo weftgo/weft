@@ -169,13 +169,13 @@ describe("the playground's notices", () => {
       .on("GET runs/pg_1/events", eventsOf("pg_1"))
       .on("GET runs/pg_1/transcript", { batches: [] })
     const router = await runA()
-    const t = await toastFor(/^experiment pg_1 finished · succeeded$/)
+    const t = await toastFor(/^replay run pg_1 finished · succeeded$/)
     const open = within(t).getByRole("link", { name: "open" })
     expect(open.getAttribute("href")).toMatch(/\/runs\/pg_1$/)
     // Re-renders and refetches never repeat it.
     await settle()
     expect(
-      toastTitles().filter((s) => s.startsWith("experiment"))
+      toastTitles().filter((s) => s.startsWith("replay run"))
     ).toHaveLength(1)
     fireEvent.click(open)
     await waitFor(() =>
@@ -321,7 +321,7 @@ describe("the playground's notices", () => {
     fireEvent.click(
       await within(card).findByRole("button", { name: "approve" })
     )
-    await toastFor(/^experiment pg_2 finished · succeeded$/)
+    await toastFor(/^replay run pg_2 finished · succeeded$/)
     await waitFor(() =>
       expect(toastTitles()).not.toContain("run pg_1 parked at refund")
     )

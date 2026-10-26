@@ -380,6 +380,26 @@ describe("/experiments", () => {
   })
 })
 
+describe("/experiments/{id}?pick= (U21.2, UX-F-28)", () => {
+  it("opens with the linked cells picked; a pick writes the URL", async () => {
+    const { router } = renderApp("/experiments/exp_tone?pick=A%C3%971,B%C3%972")
+    await waitFor(() => expect(cell("B×2").textContent).toContain("failed"))
+    const box = (k: string) =>
+      within(cell(k)).getByRole<HTMLInputElement>("checkbox", {
+        name: `pick cell ${k} to compare`,
+      })
+    expect(box("A×1").checked).toBe(true)
+    expect(box("B×2").checked).toBe(true)
+    expect(document.querySelector("[data-compare-picked]")).not.toBeNull()
+    fireEvent.click(box("A×1"))
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ pick: "B×2" })
+    )
+    expect(box("A×1").checked).toBe(false)
+    expect(document.querySelector("[data-compare-picked]")).toBeNull()
+  })
+})
+
 describe("/experiments/{id}", () => {
   it("draws the variants × inputs grid: each cell its run, status, cost and link; totals per variant", async () => {
     renderApp("/experiments/exp_tone")
@@ -1060,7 +1080,9 @@ describe("/experiments/{id}'s grid cell", () => {
     )
     const c = cell("A×1")
     expect(c.querySelector("[data-run-status]")?.textContent).toBeTruthy()
-    expect(c.querySelector("[data-cell-tokens]")?.textContent).toMatch(/ tokens$/)
+    expect(c.querySelector("[data-cell-tokens]")?.textContent).toMatch(
+      / tokens$/
+    )
     expect(c.querySelector("[data-cell-cost]")?.textContent).toContain("$0.01")
     expect(c.querySelector("[data-cell-engine]")?.textContent).toContain(
       "live · "

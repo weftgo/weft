@@ -84,6 +84,7 @@ import { steerOffLine, steerWhyNot } from "@/lib/runtimes"
 import { heldError } from "@/lib/query"
 import { canReplay, tokenScopeOf } from "@/lib/replay"
 import { AWAITING, turnTag } from "@/lib/status"
+import { Term } from "@/components/studio/term"
 
 interface Call {
   id: string
@@ -585,13 +586,14 @@ export function ParkedCalls({
       className="rounded-lg border border-ev-error/30 px-4 py-2 text-xs"
       data-parked={shown}
     >
-      <span className="eyebrow">
+      {/* The decision's words (U21.2): approve · deny · resolve…. */}
+      <Term name="approve" className="eyebrow">
         {shown === "resumed"
           ? "decided"
           : pending.every((p) => words?.get(p.id)?.word === BREAKPOINT)
             ? BREAKPOINT
             : AWAITING}
-      </span>
+      </Term>
       {expiry.capped && shown !== "resumed" ? (
         <HoleBadge hole="truncated" cause="response_cap" {...RUN_MARKS_HOLE} />
       ) : null}

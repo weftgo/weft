@@ -108,7 +108,7 @@ export function noticeText(n: Notice): { title: string; tone: Tone } {
   switch (n.kind) {
     case "experiment":
       return {
-        title: `experiment ${n.runID || n.commandID} finished · ${n.status}`,
+        title: `replay run ${n.runID || n.commandID} finished · ${n.status}`,
         tone: n.status === "failed" ? "error" : "success",
       }
     case "matrix": {

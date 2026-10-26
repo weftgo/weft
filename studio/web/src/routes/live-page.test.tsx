@@ -353,6 +353,46 @@ describe("the all stream", () => {
     await waitFor(() => expect(rowOf("r_r")).toBeNull())
     expect(rowOf("r_o")).toBeTruthy()
   })
+
+  // UX-F-28 (U21.2): the filter is the URL's, so a link opens on it.
+  it("?agent= and ?q= filter on arrival; typing writes q", async () => {
+    const { es, router } = await openPage("/live?agent=orders")
+    act(() => {
+      es.emit("run", { run: running("r_o", { agent: "orders" }) }, "1")
+      es.emit("run", { run: running("r_r", { agent: "research" }) }, "2")
+      es.emit("run", { run: running("r_x", { agent: "orders-x" }) }, "3")
+    })
+    await waitFor(() => expect(rowOf("r_o")).toBeTruthy())
+    // One agent exactly: orders-x is another agent.
+    expect(rowOf("r_r")).toBeNull()
+    expect(rowOf("r_x")).toBeNull()
+    expect(document.querySelector("[data-live-agent]")?.textContent).toBe(
+      "agent orders ×"
+    )
+    fireEvent.change(
+      screen.getByLabelText("filter the runs by agent or status"),
+      { target: { value: "running" } }
+    )
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({
+        agent: "orders",
+        q: "running",
+      })
+    )
+    cleanup()
+    const again = await openPage("/live?q=research")
+    act(() => {
+      again.es.emit("run", { run: running("r_o", { agent: "orders" }) }, "1")
+      again.es.emit("run", { run: running("r_r", { agent: "research" }) }, "2")
+    })
+    await waitFor(() => expect(rowOf("r_r")).toBeTruthy())
+    expect(rowOf("r_o")).toBeNull()
+    expect(
+      screen.getByLabelText<HTMLInputElement>(
+        "filter the runs by agent or status"
+      ).value
+    ).toBe("research")
+  })
 })
 
 describe("the stream's life", () => {

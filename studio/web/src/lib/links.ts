@@ -230,6 +230,9 @@ export interface SessionSearch {
    * separated in lib/timeline.ts's LANES order — the others' marks are
    * dimmed, never hidden. Absent: every lane. */
   lanes?: string
+  /** The turn selected in the table view (U21.2, UX-F-28): its turn
+   * number — scrolled to and highlighted; j / k move it. */
+  turn?: number
 }
 
 export interface SessionLink {
@@ -424,6 +427,9 @@ export interface TracesLink {
 export interface SettingsLink {
   to: "/settings"
   search: { price?: string }
+  /** concepts, or concept-<term> (U21.2): the Concepts section, or one
+   * term's entry in it. */
+  hash?: string
 }
 
 /** The runtimes page (U20.1): one runtime scrolled to, or the
@@ -446,6 +452,8 @@ export type StudioLink =
   | SettingsLink
   | ExperimentLink
   | ExperimentsLink
+  | LiveLink
+  | AgentsLink
 
 /** A whole, non-negative number, or undefined. */
 function ordinal(n: number | undefined): number | undefined {
@@ -559,12 +567,18 @@ export function sessionLink(id: string): SessionLink {
  * panel, which links the page alone, carries none of it. */
 export function sessionViewLink(
   id: string,
-  opts: { view?: SessionView; mark?: string; lanes?: string }
+  opts: { view?: SessionView; mark?: string; lanes?: string; turn?: number }
 ): SessionLink {
   const search: SessionSearch = {}
   if (opts.view && opts.view !== "timeline") search.view = opts.view
   if (opts.mark) search.mark = opts.mark
   if (opts.lanes) search.lanes = opts.lanes
+  const turn = ordinal(opts.turn)
+  if (turn !== undefined) {
+    // A turn is a row of the table view.
+    search.view = "table"
+    search.turn = turn
+  }
   return { to: "/sessions/$id", params: { id }, search }
 }
 
@@ -583,6 +597,16 @@ export function sessionSearch(search: Record<string, unknown>): SessionSearch {
   if (typeof m === "string" && m) out.mark = m
   else if (typeof m === "number") out.mark = String(m)
   if (typeof search.lanes === "string" && search.lanes) out.lanes = search.lanes
+  const turn = ordinal(
+    typeof search.turn === "string"
+      ? Number(search.turn)
+      : (search.turn as number)
+  )
+  if (turn !== undefined) {
+    out.turn = turn
+    // A turn is a row of the table: ?turn= alone opens that view.
+    out.view ??= "table"
+  }
   return out
 }
 
@@ -640,6 +664,17 @@ export function tracesLink(search: TracesSearch = {}): TracesLink {
  * model…"). */
 export function settingsLink(price?: string): SettingsLink {
   return { to: "/settings", search: price ? { price } : {} }
+}
+
+/** conceptLink is the Settings page's Concepts section (U21.2): with a
+ * glossary key (lib/glossary.ts TERMS), that term's entry — where a
+ * <Term> tooltip's "more ›" goes. */
+export function conceptLink(term?: string): SettingsLink {
+  return {
+    to: "/settings",
+    search: {},
+    hash: term ? `concept-${term}` : "concepts",
+  }
 }
 
 /** runtimesLink is the runtimes page (U20.1): every "Runs in" line
@@ -719,18 +754,59 @@ export interface ExperimentLink {
   params: { id: string }
   /** issued: the cells a matrix just issued (U24.2-fix 4) — the grid
    * polls until that many runs joined, its empty cells "issued, not
-   * started" meanwhile. */
-  search: { issued?: number }
+   * started" meanwhile. pick: the cells picked to compare (U21.2,
+   * UX-F-28), "<variant>×<input>" comma separated. */
+  search: { issued?: number; pick?: string }
+}
+
+/** The live page (U21.2, UX-F-28): its filter words and one agent. */
+export interface LiveLink {
+  to: "/live"
+  search: { q?: string; agent?: string }
+}
+
+/** The agents page (U21.2, UX-F-28): one agent's card, scrolled to. */
+export interface AgentsLink {
+  to: "/agents"
+  search: { agent?: string }
 }
 
 /** experimentLink is a saved experiment's page (plan F5: its grid,
  * re-run, clone and compare); issued, the cells a matrix just sent. */
-export function experimentLink(id: string, issued?: number): ExperimentLink {
-  return {
-    to: "/experiments/$id",
-    params: { id },
-    search: issued ? { issued } : {},
-  }
+export function experimentLink(
+  id: string,
+  issued?: number,
+  pick?: readonly string[]
+): ExperimentLink {
+  const search: ExperimentLink["search"] = {}
+  if (issued) search.issued = issued
+  if (pick?.length) search.pick = pick.join(",")
+  return { to: "/experiments/$id", params: { id }, search }
+}
+
+/** pickOf reads ?pick= back: the "<variant>×<input>" cells, in order,
+ * at most two (the compare's pair). */
+export function pickOf(v: unknown): string[] {
+  if (typeof v !== "string") return []
+  return v
+    .split(",")
+    .filter((k) => /^[^,×]+×[^,×]+$/.test(k))
+    .slice(-2)
+}
+
+/** liveLink is the live page filtered (?q=) and narrowed to one agent. */
+export function liveLink(
+  search: { q?: string; agent?: string } = {}
+): LiveLink {
+  const out: LiveLink["search"] = {}
+  if (search.q) out.q = search.q
+  if (search.agent) out.agent = search.agent
+  return { to: "/live", search: out }
+}
+
+/** agentsLink is the agents page with one agent's card opened. */
+export function agentsLink(agent?: string): AgentsLink {
+  return { to: "/agents", search: agent ? { agent } : {} }
 }
 
 /** experimentsLink is the saved experiments' list. */
@@ -867,7 +943,19 @@ export function saveTestLink(id: string): RunLink {
  * The panel's rung accepts a scope only when it names a public id, so
  * a scope without one carries no fragment: the page opens as it is.
  * null for a page that is not an http(s) URL. Never a token. */
-export function appLink(page: string, scope: Scope): string | null {
+/** The panel's step parameter beside #weft_scope= (U21.2, UX-F-28):
+ * the step ordinal, then the tab — "3", "3.story". The panel's URL rung
+ * reads it (panel/config.ts urlStep) and opens that step on that tab. */
+export const URL_STEP_PARAM = "weft_step"
+
+/** The panel tab a Studio view lands on (the panel has no logs tab). */
+export type AppTab = "story" | "request" | "waterfall" | "raw"
+
+export function appLink(
+  page: string,
+  scope: Scope,
+  at: { step?: number; tab?: AppTab } = {}
+): string | null {
   let u: URL
   try {
     u = new URL(page)
@@ -877,7 +965,11 @@ export function appLink(page: string, scope: Scope): string | null {
   if (u.protocol !== "http:" && u.protocol !== "https:") return null
   u.hash = ""
   const base = u.toString()
-  return scope.publicId
-    ? `${base}#weft_scope=${encodeURIComponent(serializeScope(scope))}`
-    : base
+  if (!scope.publicId) return base
+  const step = ordinal(at.step)
+  const where =
+    step !== undefined && scope.run
+      ? `&${URL_STEP_PARAM}=${step}${at.tab ? `.${at.tab}` : ""}`
+      : ""
+  return `${base}#weft_scope=${encodeURIComponent(serializeScope(scope))}${where}`
 }

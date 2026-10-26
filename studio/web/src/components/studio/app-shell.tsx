@@ -47,6 +47,8 @@ import { useCopyLink } from "@/hooks/use-copy-link"
 import { useLiveGaveUpNotices, useRuntimeNotices } from "@/hooks/use-notices"
 import { Toaster } from "@/components/ui/sonner"
 import { KbdHelpBody } from "@/components/studio/kbd-help"
+import { ConceptsBody } from "@/components/studio/concepts"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TokenWall, isUnauthorized } from "@/components/studio/token-wall"
 import { PALETTE_EVENT } from "@/lib/not-found"
 import { SKIP_TO_CONTENT, TOKEN_WALL } from "@/lib/settings"
@@ -476,12 +478,29 @@ export function AppShell() {
       </SidebarInset>
 
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Keyboard</DialogTitle>
-            <DialogDescription>Studio is keyboard-first.</DialogDescription>
+            <DialogTitle>Help</DialogTitle>
+            <DialogDescription>
+              Studio is keyboard-first; the words it uses are under concepts.
+            </DialogDescription>
           </DialogHeader>
-          <KbdHelpBody />
+          {/* Keys and Concepts (U21.2, UX-A-20): the glossary beside
+              the bindings — also /settings#concepts. */}
+          <Tabs defaultValue="keys" data-help-tabs>
+            <TabsList>
+              <TabsTrigger value="keys">keys</TabsTrigger>
+              <TabsTrigger value="concepts" data-help-tab="concepts">
+                concepts
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="keys">
+              <KbdHelpBody />
+            </TabsContent>
+            <TabsContent value="concepts">
+              <ConceptsBody anchors={false} />
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
 

@@ -6,7 +6,7 @@
 // never a remembered one shown as live.
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import type { ManifestAgent, ManifestSource, StatsPage } from "@/lib/api"
 import { ApiError, deleteProposal, manifestQuery, studioToken } from "@/lib/api"
@@ -33,13 +33,21 @@ import { useCapabilities } from "@/hooks/use-capabilities"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { ConnectApp } from "@/components/studio/empty-state"
 
 export const Route = createFileRoute("/agents/")({
   // The stats window rides the URL (?window=24h|7d, UX-A-14).
   validateSearch: (
     search: Record<string, unknown>
-  ): { window?: StatsWindow } =>
-    search.window === undefined ? {} : { window: statsWindowOf(search.window) },
+  ): { window?: StatsWindow; agent?: string } => ({
+    ...(search.window === undefined
+      ? {}
+      : { window: statsWindowOf(search.window) }),
+    // One agent's card, scrolled to and opened (U21.2, UX-F-28).
+    ...(typeof search.agent === "string" && search.agent
+      ? { agent: search.agent }
+      : {}),
+  }),
   component: AgentsPage,
 })
 
@@ -61,7 +69,16 @@ function AgentsPage() {
     refetchInterval: (q) => (refused(q.state.error) ? false : REFRESH_MS),
   })
   const caps = useCapabilities()
-  const window = statsWindowOf(Route.useSearch().window)
+  const search = Route.useSearch()
+  const window = statsWindowOf(search.window)
+  const named = search.agent
+  const loaded = !!manifest.data
+  useEffect(() => {
+    if (!named || !loaded) return
+    document
+      .querySelector(`[data-agent-card="${CSS.escape(named)}"]`)
+      ?.scrollIntoView({ block: "start" })
+  }, [named, loaded])
   const stats = useStats("agent", window)
   // Registered agents always get their numbers: a group the page's cap
   // cut is read on its own (useRegisteredNumbers).
@@ -90,7 +107,7 @@ function AgentsPage() {
           <HoleBadge
             hole="hidden"
             detail
-            reason={`your token's scope may not read the agents: ${manifest.error.message}`}
+            reason={`your token's access does not reach the agents: ${manifest.error.message}`}
           />
         </div>
       )
@@ -127,7 +144,12 @@ function AgentsPage() {
         />
       ) : null}
       {manifest.data.agents.map((a) => (
-        <div key={`${a.name}:${a.manifest_hash ?? ""}`} className="space-y-1">
+        <div
+          key={`${a.name}:${a.manifest_hash ?? ""}`}
+          className={`scroll-mt-4 space-y-1 ${a.name === named ? "rounded-lg ring-2 ring-thread/60" : ""}`}
+          data-agent-card={a.name}
+          data-agent-selected={a.name === named ? "" : undefined}
+        >
           <AgentSources agent={a} sources={sources} />
           {manifest.data.agents.filter((b) => b.name === a.name).length > 1 && (
             <p className="text-[11px] text-status-int">
@@ -144,9 +166,9 @@ function AgentsPage() {
             />
           ) : null}
           {caps.has("stats") ? (
-            <AgentToolsCard agent={a} window={window} />
+            <AgentToolsCard agent={a} window={window} open={a.name === named} />
           ) : (
-            <AgentCard agent={a} />
+            <AgentCard agent={a} open={a.name === named} />
           )}
         </div>
       ))}
@@ -159,14 +181,17 @@ function AgentsPage() {
 function AgentToolsCard({
   agent,
   window,
+  open,
 }: {
   agent: ManifestAgent
   window: StatsWindow
+  open?: boolean
 }) {
   const tools = useStats("tool", window, agent.name)
   return (
     <AgentCard
       agent={agent}
+      open={open}
       toolExtra={(name) =>
         tools.data ? (
           <ToolStatsLine
@@ -265,6 +290,7 @@ function NoAgents({ reason }: { reason: string }) {
         app&apos;s <span className="font-mono">runtime.Install(...)</span>{" "}
         registration.
       </p>
+      <ConnectApp only={["app"]} />
     </div>
   )
 }

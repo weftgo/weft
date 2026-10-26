@@ -120,10 +120,13 @@ function ToolCard({ tool, extra }: { tool: ManifestTool; extra?: ReactNode }) {
 export function AgentCard({
   agent,
   toolExtra,
+  open,
 }: {
   agent: ManifestAgent
   /** A tool's numbers under its card (agent-stats.tsx's tool rows). */
   toolExtra?: (tool: string) => ReactNode
+  /** The card a link named (?agent=, U21.2): its instructions open. */
+  open?: boolean
 }) {
   return (
     <div className="space-y-2 rounded-lg border bg-background px-4 py-3">
@@ -136,7 +139,7 @@ export function AgentCard({
       </div>
       <Chips chips={agentPolicyChips(agent.policy)} />
       {agent.instructions ? (
-        <Collapsible defaultOpen={false}>
+        <Collapsible defaultOpen={!!open}>
           <CollapsibleTrigger className="group/instr flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
             <ChevronRight
               className="size-3 transition-transform group-aria-expanded/instr:rotate-90 group-data-[panel-open]/instr:rotate-90"

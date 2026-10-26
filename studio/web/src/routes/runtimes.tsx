@@ -105,7 +105,7 @@ export function RuntimesView({
         <HoleBadge
           hole="hidden"
           detail
-          reason={`your token's scope may not read the runtimes: ${runtimes.error.message}`}
+          reason={`your token's access does not reach the runtimes: ${runtimes.error.message}`}
         />
       ) : (
         <p className="text-xs text-status-bad" role="alert">

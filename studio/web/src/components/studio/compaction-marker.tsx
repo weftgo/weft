@@ -45,6 +45,7 @@ import type { CompactionStart, ContextMark } from "@/lib/timeline"
 import { runLink } from "@/lib/links"
 import { THREAD_LINK } from "@/lib/status-class"
 import { HoleBadge } from "@/components/studio/hole-badge"
+import { Term } from "@/components/studio/term"
 
 export function CompactionMarker({
   c,
@@ -70,9 +71,9 @@ export function CompactionMarker({
       data-compaction={session ? "session" : String(c.step ?? "")}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="eyebrow text-thread-ink">
+        <Term name="compacted" className="eyebrow text-thread-ink">
           {session ? SESSION_AFTER : "compaction"}
-        </span>
+        </Term>
         <span data-compaction-line className="font-mono">
           {compactionLine(c)}
         </span>
@@ -88,7 +89,7 @@ export function CompactionMarker({
         {session && c.reason ? (
           <span
             className="font-mono text-[10px] text-faint"
-            title="thread's compaction reason"
+            title="the session's compaction reason"
           >
             {c.reason}
           </span>

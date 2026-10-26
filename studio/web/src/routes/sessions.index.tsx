@@ -22,6 +22,7 @@ import { fetchSessions, nextCursor } from "@/lib/api"
 import type { PageCursor } from "@/lib/api"
 import { absoluteTime, relativeTime, tokens } from "@/lib/format"
 import { EmptyState } from "@/components/studio/empty-state"
+import { TERMS } from "@/lib/glossary"
 import {
   CacheHint,
   Cost,
@@ -54,6 +55,7 @@ import {
 import { statusClass } from "@/lib/status-class"
 import { forkOf } from "@/lib/timeline"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { Term } from "@/components/studio/term"
 
 interface SessionsSearch {
   agent?: string
@@ -216,7 +218,7 @@ function SessionsPage() {
             ? "…"
             : q.isError
               ? ""
-              : `${total.toLocaleString()} ${total === 1 ? "thread" : "threads"}`}
+              : `${total.toLocaleString()} ${total === 1 ? "session" : "sessions"}`}
         </span>
         <FilterBox
           value={search.agent ?? ""}
@@ -340,7 +342,12 @@ function SessionsPage() {
             </Button>
           </div>
         ) : (
-          <EmptyState command="go run ./examples/studio-local" />
+          <EmptyState
+            title="No sessions yet"
+            what={TERMS.session.short}
+            next="A session appears once your app keeps a conversation with weft/thread while it records to this Studio."
+            only={["app", "panel"]}
+          />
         )
       ) : (
         <>
@@ -354,21 +361,24 @@ function SessionsPage() {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="w-40">status</TableHead>
-                  <TableHead>session</TableHead>
+                  <TableHead>
+                    <Term name="session" />
+                  </TableHead>
                   <TableHead>agent</TableHead>
-                  <TableHead className="text-right">turns</TableHead>
-                  <TableHead
-                    className="text-right"
-                    title="input / output tokens"
-                  >
-                    tokens in / out
+                  <TableHead className="text-right">
+                    <Term name="turn">turns</Term>
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <Term name="tokens">tokens in / out</Term>
                   </TableHead>
                   {costCapable ? (
-                    <TableHead
-                      className="text-right"
-                      title="the session's turns, own + delegated, priced at read time"
-                    >
-                      cost
+                    <TableHead className="text-right">
+                      <Term
+                        name="own"
+                        extra="the session's turns, own + delegated, priced at read time"
+                      >
+                        cost
+                      </Term>
                     </TableHead>
                   ) : null}
                   <TableHead className="text-right">last seen</TableHead>

@@ -302,8 +302,41 @@ describe("a session page (S4.7)", () => {
       turn.id
     )
     expect(
-      screen.getByText(/1 experiment forked from these turns/)
+      screen.getByText(/1 experiment started from these turns/)
     ).toBeTruthy()
+  })
+
+  // UX-F-28 (U21.2): ?turn= selects a turn of the table; j / k move it.
+  it("?turn= highlights that turn and j / k move it through the rows", async () => {
+    const session = golden<SessionDoc>("session-orders")
+    studio.on(`GET sessions/${session.id}`, session).on("GET runs", page([]))
+    const { router } = renderApp(`/sessions/${session.id}?turn=2`)
+    // A turn is a row of the table: the link's view.
+    const sel = await waitFor(() => {
+      const r = document.querySelector<HTMLElement>(
+        "[data-turn][data-selected]"
+      )
+      expect(r).not.toBeNull()
+      return r!
+    })
+    const byTurn = new Map(session.runs.map((r) => [r.turn, r.id]))
+    expect(sel.getAttribute("data-turn")).toBe(byTurn.get(2))
+    expect(sel.getAttribute("aria-current")).toBe("true")
+    // Newest first: j goes down to turn 1, k back up past 2 to 3.
+    fireEvent.keyDown(window, { key: "j" })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ turn: 1 })
+    )
+    fireEvent.keyDown(window, { key: "k" })
+    fireEvent.keyDown(window, { key: "k" })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ turn: 3 })
+    )
+    expect(
+      document
+        .querySelector("[data-turn][data-selected]")
+        ?.getAttribute("data-turn")
+    ).toBe(byTurn.get(3))
   })
 })
 

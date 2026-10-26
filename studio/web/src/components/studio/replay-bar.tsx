@@ -221,7 +221,7 @@ export function ReplayBar({
         <div
           className="flex items-center gap-0.5"
           role="group"
-          aria-label="replay speed"
+          aria-label="playback speed"
         >
           {([1, 4] as const).map((s) => (
             <Button
@@ -253,7 +253,7 @@ export function ReplayBar({
             else if (e.key === "End") onSeek(null)
           }}
           role="slider"
-          aria-label="replay position"
+          aria-label="playback position"
           aria-valuemin={0}
           aria-valuemax={total}
           aria-valuenow={at}
@@ -263,7 +263,7 @@ export function ReplayBar({
               : `0 of ${total}`
           }
           tabIndex={0}
-          title="click to seek — replay moves by position, not time"
+          title="click to seek — playback moves by position, not time"
         >
           {cells.map((c, i) => (
             <span

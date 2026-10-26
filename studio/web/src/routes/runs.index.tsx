@@ -50,7 +50,8 @@ import {
   withTags,
 } from "@/lib/run-filters"
 import { useCapabilities } from "@/hooks/use-capabilities"
-import { EmptyState } from "@/components/studio/empty-state"
+import { EmptyState, FirstRunCard } from "@/components/studio/empty-state"
+import { TERMS } from "@/lib/glossary"
 import { RunsTable } from "@/components/studio/runs-table"
 import { UnpricedNote } from "@/components/studio/cost"
 import { costSortNote } from "@/lib/cost"
@@ -735,6 +736,8 @@ function RunsPage() {
       {search.error_class && caps.stats && caps.search ? (
         <ExperimentOnThese runs={loaded} total={total} />
       ) : null}
+      {/* The first-run card (U21.2): until this browser dismisses it. */}
+      <FirstRunCard />
       {page.isPending ? (
         <div className="flex justify-center py-24">
           <Spinner />
@@ -763,8 +766,11 @@ function RunsPage() {
             </Button>
           </div>
         ) : (
-          // B1.2: becomes "weft dev"
-          <EmptyState command="weft studio" />
+          <EmptyState
+            title="No runs yet"
+            what={TERMS.run.short}
+            next="Runs appear here once your app records one: point it at this Studio."
+          />
         )
       ) : (
         <>

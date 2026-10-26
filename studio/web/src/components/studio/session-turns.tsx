@@ -12,7 +12,7 @@
 // the session's agent and a chip marks a turn that ran another
 // (UX-B-20); each turn link named "turn 3: … (succeeded)" (UX-B-40).
 // Words are lib/session-states.ts's.
-import { Fragment } from "react"
+import { Fragment, useEffect, useRef } from "react"
 import { Link } from "@tanstack/react-router"
 import { FlaskConical } from "lucide-react"
 
@@ -58,6 +58,7 @@ export function SessionTurns({
   now,
   agent,
   order = "newest",
+  selected,
 }: {
   /** The session's turns in the order they ran (oldest first). */
   turns: RunRow[]
@@ -67,8 +68,15 @@ export function SessionTurns({
   /** The session's agent: a turn that ran another carries a chip. */
   agent?: string
   order?: TurnOrder
+  /** The turn number a link selected (?turn=, U21.2): highlighted and
+   * scrolled to. */
+  selected?: number
 }) {
   const clock = now ?? Date.now()
+  const selectedRow = useRef<HTMLTableRowElement>(null)
+  useEffect(() => {
+    selectedRow.current?.scrollIntoView({ block: "nearest" })
+  }, [selected])
   const costCapable = useCostCapable()
   const sessionAgent = agent ?? (turns.length ? turns[0].agent : "")
   // Titles and gaps read the turn before in run order — of the same
@@ -118,7 +126,23 @@ export function SessionTurns({
           const other = !!r.agent && !!sessionAgent && r.agent !== sessionAgent
           return (
             <Fragment key={r.id}>
-              <TableRow className="h-9" data-turn={r.id}>
+              <TableRow
+                className={`h-9 ${selected !== undefined && r.turn === selected ? "bg-secondary" : ""}`}
+                data-turn={r.id}
+                data-selected={
+                  selected !== undefined && r.turn === selected ? "" : undefined
+                }
+                aria-current={
+                  selected !== undefined && r.turn === selected
+                    ? "true"
+                    : undefined
+                }
+                ref={
+                  selected !== undefined && r.turn === selected
+                    ? selectedRow
+                    : undefined
+                }
+              >
                 <TableCell>
                   <StatusChip row={r} runs={turns} complete />
                 </TableCell>
@@ -211,7 +235,7 @@ export function SessionTurns({
                         <Link
                           {...runLink(x.id)}
                           className="flex min-w-0 text-[12px] hover:text-thread-ink"
-                          title={`an experiment forked from this turn (${x.forked_from})`}
+                          title={`an experiment started from this turn (${x.forked_from})`}
                         >
                           <TitleText t={runTitle(x)} />
                         </Link>
@@ -220,7 +244,7 @@ export function SessionTurns({
                             ? `from step ${src.fromStep}`
                             : "whole turn"}
                           {x.experiment_id ? ` · ${x.experiment_id}` : ""}
-                          {x.session_id ? " · fork" : ""}
+                          {x.session_id ? " · into a new session" : ""}
                           {x.model.name ? ` · ${x.model.name}` : ""}
                         </span>
                       </span>

@@ -38,6 +38,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Term } from "@/components/studio/term"
+import { EmptyState } from "@/components/studio/empty-state"
+import { TERMS } from "@/lib/glossary"
 
 export const Route = createFileRoute("/traces/")({
   validateSearch: (search: Record<string, unknown>): TracesSearch => ({
@@ -254,21 +257,34 @@ function TracesPage() {
           </Button>
         </div>
       ) : traces.length === 0 ? (
-        <p className="py-20 text-center text-sm">
-          {chips.length > 0
-            ? "No traces match these filters."
-            : "No traces recorded yet."}
-        </p>
+        chips.length > 0 ? (
+          <p className="py-20 text-center text-sm">
+            No traces match these filters.
+          </p>
+        ) : (
+          <EmptyState
+            title="No traces yet"
+            what={TERMS.trace.short}
+            next="Traces arrive with your app's runs, or from any service that sends OTLP spans to this Studio."
+            only={["app"]}
+          />
+        )
       ) : (
         <>
           <div className="overflow-x-auto rounded-lg border bg-background">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>trace</TableHead>
+                  <TableHead>
+                    <Term name="trace" />
+                  </TableHead>
                   <TableHead>service</TableHead>
-                  <TableHead>runs</TableHead>
-                  <TableHead className="text-right">spans</TableHead>
+                  <TableHead>
+                    <Term name="run">runs</Term>
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <Term name="span">spans</Term>
+                  </TableHead>
                   <TableHead className="text-right">started</TableHead>
                   <TableHead className="text-right">duration</TableHead>
                 </TableRow>

@@ -190,6 +190,8 @@ import {
 } from "@/lib/honesty"
 import { SourceMatrix } from "@/components/studio/source-matrix"
 import { sourcesOf } from "@/lib/matrix"
+import { ConnectApp, EmptyState } from "@/components/studio/empty-state"
+import { TERMS } from "@/lib/glossary"
 
 // The command's pure halves and the form's controls live in shared
 // modules (plan F1: the run page's replay drawer renders the same
@@ -440,6 +442,7 @@ function NoPlayground({ why }: { why?: string }) {
         <span className="font-mono">runtime.Install(...)</span> in your app
         (WEFT-PLAYGROUND §6 rule 1).
       </p>
+      <ConnectApp only={["app"]} />
     </div>
   )
 }
@@ -1458,6 +1461,16 @@ function Playground({ caps }: { caps: string[] }) {
                 data-column="config"
                 className="h-full space-y-3 overflow-y-auto p-4 in-data-stacked:h-auto in-data-stacked:overflow-visible in-data-stacked:border-b"
               >
+                {/* No runtime (U21.2, UX-F-11): how to open the link
+                    to THIS Studio, above a form nothing can run yet. */}
+                {runtimes.isSuccess && all.length === 0 ? (
+                  <EmptyState
+                    title="No runtime connected"
+                    what={TERMS.runtime.short}
+                    next="runtime.Install(...) in your app opens the link; its agents then appear here to replay."
+                    only={["app"]}
+                  />
+                ) : null}
                 {/* Where the form came from (plan F5): a share link, a draft. */}
                 {restored ? (
                   <p

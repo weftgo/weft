@@ -14,7 +14,7 @@ import type { RunDoc, RunsPage } from "@/lib/api"
 import { appLink } from "@/lib/links"
 import { serializeScope } from "@/lib/scope"
 import type { Scope } from "@/lib/scope"
-import { urlScope } from "@/panel/config"
+import { urlScope, urlStep } from "@/panel/config"
 import { NO_PAGE_URL, OpenInApp } from "@/components/studio/run-header"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
@@ -131,6 +131,20 @@ describe("appLink", () => {
     expect(appLink(PAGE, { publicId: "", run: "r_9" })).toBe(PAGE)
   })
 
+  it("carries the step and tab beside the scope, which the panel's rungs read (U21.2)", () => {
+    const scope = { publicId: "pub_1", session: "s_2", run: "r_9" }
+    const href = appLink(PAGE, scope, { step: 2, tab: "story" })!
+    expect(href).toBe(
+      `${PAGE}#weft_scope=pub_1%3Bsession%3Ds_2%3Brun%3Dr_9&weft_step=2.story`
+    )
+    expect(urlScope(href)).toEqual(scope)
+    expect(urlStep(href)).toEqual({ step: 2, tab: "story" })
+    // No run, no step: the panel's step needs the run it is of.
+    expect(appLink(PAGE, { publicId: "pub_1" }, { step: 2 })).toBe(
+      `${PAGE}#weft_scope=pub_1`
+    )
+  })
+
   it("refuses a page that is not http(s)", () => {
     expect(appLink("javascript:alert(1)", { publicId: "pub_1" })).toBeNull()
     expect(appLink("not a url", { publicId: "pub_1" })).toBeNull()
@@ -185,6 +199,15 @@ describe("the run page header", () => {
     await waitFor(() => expect(verb()).toBeTruthy())
     expect(verb()!.getAttribute("href")).toBe(
       `${PAGE}#weft_scope=pub_1%3Bsession%3Ds_2%3Brun%3Dr_9`
+    )
+  })
+
+  it("carries the page's step and view (U21.2, UX-F-28)", async () => {
+    serve(runDoc())
+    renderApp("/runs/r_9?step=0&view=raw")
+    await waitFor(() => expect(verb()?.tagName).toBe("A"))
+    expect(verb()!.getAttribute("href")).toBe(
+      `${PAGE}#weft_scope=pub_1%3Bsession%3Ds_2%3Brun%3Dr_9&weft_step=0.raw`
     )
   })
 

@@ -27,6 +27,7 @@ import {
   repairedWords,
   tokenSplit,
 } from "@/lib/cards"
+import type { AppTab } from "@/lib/links"
 import type { RunDoc, Span, Transcript } from "@/lib/api"
 import { summarizerView } from "@/lib/cost"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
@@ -77,7 +78,7 @@ import {
   experimentLink,
   runLink,
   runsLink,
-  sessionLink,
+  sessionViewLink,
   traceLink,
 } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -110,6 +111,7 @@ import { REPLAY_WORDS } from "@/lib/replay"
 import { ForkOfLine } from "@/components/studio/fork-of"
 import { isPlainShortcut } from "@/lib/keys"
 import type { ToolFactsMap } from "@/lib/error-kind"
+import { Term, TermWrap } from "@/components/studio/term"
 
 /** TurnStepper walks a session turn by turn (UX-B-21): "‹ t3 · turn 4
  * of 5 · t5 ›", { and } its keys (the run page's [ ] walk steps). Its
@@ -285,13 +287,17 @@ export const NO_PAGE_URL =
  */
 export function OpenInApp({
   doc,
+  at,
 }: {
   doc: Pick<RunDoc, "id" | "meta" | "public_id" | "session_id">
+  /** The step and tab the page is on (U21.2, UX-F-28): the panel opens
+   * there. */
+  at?: { step?: number; tab?: AppTab }
 }) {
   const page = doc.meta["weft.page_url"]
   const publicId = doc.public_id || doc.meta["weft.public_id"] || ""
   const href = page
-    ? appLink(page, { publicId, session: doc.session_id, run: doc.id })
+    ? appLink(page, { publicId, session: doc.session_id, run: doc.id }, at)
     : null
   if (!href) {
     // aria-disabled, not disabled (UX-A-28): the button stays focusable
@@ -505,8 +511,11 @@ export function RunHeader({
   overrideRead,
   toolFacts,
   spans,
+  openAt,
 }: {
   doc: RunDoc
+  /** The step and tab the page is on: "open in app" carries them. */
+  openAt?: { step?: number; tab?: AppTab }
   folded: FoldedRun
   eventCount: number
   /** The event positions the walk found missing (the last page's
@@ -666,6 +675,7 @@ export function RunHeader({
           runs={sess.data?.runs}
           complete={!!sess.data}
           detail
+          term
         />
         {/* Settling: the status word stays (it is the root's), the note
             says the story may stop short while its records trail. */}
@@ -694,7 +704,7 @@ export function RunHeader({
         <ReplayOf doc={doc} />
         <CompareWith doc={doc} />
         <span className="ml-auto flex flex-wrap items-center gap-2">
-          <OpenInApp doc={doc} />
+          <OpenInApp doc={doc} at={openAt} />
           <SaveAsTest runID={doc.id} derived={isDerived(doc)} />
           {/* The run's other downloads and its delete (U26). */}
           <ExportVerbs runID={doc.id} subagents={doc.children.length} />
@@ -704,7 +714,7 @@ export function RunHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground tabular-nums">
-        <span>{stepCount(doc.steps)}</span>
+        <Term name="step">{stepCount(doc.steps)}</Term>
         <ProblemStrip
           row={doc}
           status={statusOf(doc, sess.data?.runs, !!sess.data).key}
@@ -727,11 +737,10 @@ export function RunHeader({
             <UnknownTokens reason={doc.cost_reason} />
           </span>
         ) : (
-          <span
-            title="input / output tokens, subagents included"
-            data-header-usage=""
-          >
-            {usageSummary(doc.usage)}
+          <span data-header-usage="">
+            <Term name="tokens" extra="subagents included">
+              {usageSummary(doc.usage)}
+            </Term>
           </span>
         )}
         {split ? (
@@ -746,6 +755,7 @@ export function RunHeader({
         ) : null}
         {costCapable ? (
           <RunCost
+            term
             run={doc}
             hasChildren={
               doc.children.length > 0 ||
@@ -909,14 +919,20 @@ export function RunHeader({
           <span className="font-mono">weft {doc.weft_version}</span>
         ) : null}
         {doc.session_id ? (
-          <Link
-            {...sessionLink(doc.session_id)}
-            className="font-mono hover:text-foreground hover:underline"
-            title="the thread this run belongs to (a turn of it)"
-          >
-            session {doc.session_id}
-            {doc.turn ? ` · turn ${doc.turn}` : ""}
-          </Link>
+          <TermWrap name="session" extra="this run is a turn of it">
+            {(t) => (
+              <Link
+                {...sessionViewLink(doc.session_id, {
+                  turn: doc.turn || undefined,
+                })}
+                {...t}
+                className="font-mono hover:text-foreground hover:underline"
+              >
+                session {doc.session_id}
+                {doc.turn ? ` · turn ${doc.turn}` : ""}
+              </Link>
+            )}
+          </TermWrap>
         ) : null}
         {/* A delegated session's turn (U14, UX-B-05): its lineage as
             links, never as raw weft.session.parent chips; a run a tool
@@ -939,14 +955,18 @@ export function RunHeader({
         {/* The public id and the metadata pairs filter the runs list
             on click (UX-S4-14): the list's own URL chips. */}
         {doc.public_id ? (
-          <Link
-            {...runsLink({ public_id: doc.public_id })}
-            className="font-mono [overflow-wrap:anywhere] hover:text-foreground hover:underline"
-            title="the public id (the browser-safe handle) — list its runs"
-            data-meta-chip="public_id"
-          >
-            {doc.public_id}
-          </Link>
+          <TermWrap name="publicId" extra="click to list its runs">
+            {(t) => (
+              <Link
+                {...runsLink({ public_id: doc.public_id })}
+                {...t}
+                className="font-mono [overflow-wrap:anywhere] hover:text-foreground hover:underline"
+                data-meta-chip="public_id"
+              >
+                {doc.public_id}
+              </Link>
+            )}
+          </TermWrap>
         ) : null}
         {Object.entries(doc.meta)
           .filter(([k]) => !lineage || !LINEAGE_KEYS.includes(k))

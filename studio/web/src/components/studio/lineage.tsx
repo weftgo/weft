@@ -21,6 +21,7 @@ import type { ChildKind, Lineage } from "@/lib/delegation"
 import { UNNAMED_AGENT } from "@/lib/format"
 import { runLink, sessionLink } from "@/lib/links"
 import { StatusChip } from "@/components/studio/runs-table"
+import { Term } from "@/components/studio/term"
 
 const linkClass =
   "inline-flex min-h-6 items-center font-mono hover:text-foreground hover:underline"
@@ -132,9 +133,15 @@ export function ChildChips({
       className="flex flex-wrap items-center gap-2 text-xs"
       data-child-kind={kind}
     >
-      <span className="eyebrow" title={CHILD_TITLES[kind]}>
-        {rows.length === 1 ? words.one : words.many}
-      </span>
+      {kind === "subagent" ? (
+        <Term name="childRun" extra={CHILD_TITLES[kind]} className="eyebrow">
+          {rows.length === 1 ? words.one : words.many}
+        </Term>
+      ) : (
+        <span className="eyebrow" title={CHILD_TITLES[kind]}>
+          {rows.length === 1 ? words.one : words.many}
+        </span>
+      )}
       {rows.map((c) =>
         kind === "delegated" && c.session_id ? (
           <span key={c.id} className="flex min-w-0 items-center gap-1">

@@ -53,6 +53,9 @@ describe("the glossary's TERMS (U21.1)", () => {
         "runtime",
         "appOwned",
         "waterfall",
+        "story",
+        "request",
+        "raw",
         "trace",
         "span",
       ])

@@ -65,7 +65,7 @@ export function stepHasProblem(step: FoldedStep, runStatus: string): boolean {
   return step.toolCalls.some((c) => c.result?.isError || (!c.result && over))
 }
 
-/** The replay bar's words with nothing hidden (UX-A-24): "live" only
+/** The playback bar's words with nothing hidden (UX-A-24): "live" only
  * while the run runs; a finished run's stream is at its end. `back` is
  * the verb that returns there from a scrubbed position. */
 export function replayEnd(
@@ -75,12 +75,12 @@ export function replayEnd(
   return running
     ? {
         readout:
-          "live · every event shown · press space or click the bar to replay",
+          "live · every event shown · press space or click the bar to play it back",
         back: "back to live",
         key: "live",
       }
     : {
-        readout: `end · all ${total.toLocaleString()} ${total === 1 ? "event" : "events"} · press space or click the bar to replay`,
+        readout: `end · all ${total.toLocaleString()} ${total === 1 ? "event" : "events"} · press space or click the bar to play it back`,
         back: "back to the end",
         key: "end",
       }

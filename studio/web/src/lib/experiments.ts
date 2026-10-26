@@ -245,7 +245,7 @@ export const REPLAY_WORDS = {
   replaysHint:
     "every playground run, grouped by the run it replays (weft.forked_from)",
   noReplays:
-    "No replays yet: a replay from the drawer (replay from here) is listed here under its source run.",
+    "A replay from the drawer (replay from here) is listed here under its source run.",
   noSource: "no source run (typed inputs)",
   fromStep: (n: number) => `from step ${n}`,
   compare: "compare",

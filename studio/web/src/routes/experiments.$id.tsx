@@ -66,7 +66,9 @@ import {
 } from "@/lib/drafts"
 import {
   compareLink,
+  experimentLink,
   experimentsLink,
+  pickOf,
   playgroundDraftLink,
   runLink,
   runsLink,
@@ -115,12 +117,21 @@ export const Route = createFileRoute("/experiments/$id")({
   // carried onto B.
   remountDeps: ({ params }) => params.id,
   // The cells a matrix just issued (lib/links.ts's experimentLink).
-  validateSearch: (search: Record<string, unknown>): { issued?: number } =>
-    typeof search.issued === "number" &&
-    Number.isInteger(search.issued) &&
-    search.issued > 0
-      ? { issued: search.issued }
-      : {},
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { issued?: number; pick?: string } => {
+    const out: { issued?: number; pick?: string } = {}
+    if (
+      typeof search.issued === "number" &&
+      Number.isInteger(search.issued) &&
+      search.issued > 0
+    )
+      out.issued = search.issued
+    // The picked cells (U21.2, UX-F-28): a shared link opens on them.
+    const pick = pickOf(search.pick)
+    if (pick.length) out.pick = pick.join(",")
+    return out
+  },
   component: ExperimentPage,
 })
 
@@ -464,14 +475,22 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
     }
   }
 
-  // Compare: any two cells' latest runs (plan E3's page).
-  const [picked, setPicked] = useState<string[]>([])
-  const togglePick = (runID: string) =>
-    setPicked((cur) =>
-      cur.includes(runID)
-        ? cur.filter((x) => x !== runID)
-        : [...cur, runID].slice(-2)
-    )
+  // Compare: any two cells' latest runs (plan E3's page). The picked
+  // cells are the URL's ?pick= (U21.2, UX-F-28).
+  const pickedCells = pickOf(Route.useSearch().pick)
+  const navPick = Route.useNavigate()
+  const togglePick = (cell: string) =>
+    void navPick({
+      // From the URL as it is now: two quick picks both land.
+      search: (prev) => {
+        const cur = pickOf(prev.pick)
+        const next = cur.includes(cell)
+          ? cur.filter((x) => x !== cell)
+          : [...cur, cell].slice(-2)
+        return experimentLink(id, prev.issued, next).search
+      },
+      replace: true,
+    })
 
   // The pass predicate (UX-C-38): the definition's, or one the reader
   // is trying (null: the saved one); every cell judged under it.
@@ -504,6 +523,11 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
   if (!exp || !form || !placed) return null
 
   const latest = latestOf
+  const picked = pickedCells.flatMap((c) => {
+    const [v, i] = c.split("×")
+    const r = latestOf(v, i)
+    return r ? [r.id] : []
+  })
   const columnName = (key: string) => {
     const o = exp.variants.find((v) => v.key === key)?.overrides
     const m = o && typeof o === "object" && "model" in o ? String(o.model) : ""
@@ -722,8 +746,10 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                             <input
                               type="checkbox"
                               aria-label={`pick cell ${v.key}×${i.key} to compare`}
-                              checked={picked.includes(run.id)}
-                              onChange={() => togglePick(run.id)}
+                              checked={pickedCells.includes(
+                                `${v.key}×${i.key}`
+                              )}
+                              onChange={() => togglePick(`${v.key}×${i.key}`)}
                             />
                             <RunStatus run={run} />
                             <VerdictChip

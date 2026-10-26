@@ -17,6 +17,7 @@ import {
 import { settingsLink } from "@/lib/links"
 import type { CostView } from "@/lib/cost"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { Term } from "@/components/studio/term"
 
 /** ScriptedChip is a scripted run's chip (UX-C-42): lib/cost.ts's
  * scriptedChip words, the panel's turn chip — "scripted · 0 tokens" on
@@ -174,16 +175,19 @@ export function CacheHint({
 export function RunCost({
   run,
   hasChildren,
+  term,
 }: {
   run: CostFields & DelegatedCostFields
   /** Whether the run has subagent children (the delegated part shows). */
   hasChildren: boolean
+  /** own and delegated are glossary words with tooltips (U21.2). */
+  term?: boolean
 }) {
   const own = costView(run)
   if (!hasChildren)
     return (
       <span className="inline-flex items-center gap-1.5" data-run-cost>
-        <span>cost</span>
+        <span>{term ? <Term name="own">cost</Term> : "cost"}</span>
         <span data-cost-part="own">
           <CostText v={own} />
         </span>
@@ -195,12 +199,20 @@ export function RunCost({
       <span data-cost-part="own">
         <CostText v={own} />
       </span>
-      <span>{COST_PARTS.own}</span>
+      <span>
+        {term ? <Term name="own">{COST_PARTS.own}</Term> : COST_PARTS.own}
+      </span>
       <span className="text-faint">{COST_PARTS.sep.trim()}</span>
       <span data-cost-part="delegated">
         <CostText v={delegatedView(run)} />
       </span>
-      <span>{COST_PARTS.delegated}</span>
+      <span>
+        {term ? (
+          <Term name="delegated">{COST_PARTS.delegated}</Term>
+        ) : (
+          COST_PARTS.delegated
+        )}
+      </span>
       <CacheHint fields={run} />
     </span>
   )

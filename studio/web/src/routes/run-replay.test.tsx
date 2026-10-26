@@ -556,7 +556,7 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
     )
     const d = await waitFor(() => within(drawer()!))
     const input = d.getByLabelText("input")
-    expect(valueOf(d.getByLabelText("Thread"))).toBe("fork")
+    expect(valueOf(d.getByLabelText("Write to"))).toBe("fork")
     fireEvent.change(input, { target: { value: "and the other order?" } })
     await waitFor(() =>
       expect(
@@ -988,7 +988,7 @@ describe("continue here and fork (reviews 5, 6)", () => {
         d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
       ).toBe(false)
     )
-    await choose(d.getByLabelText("Thread"), "fork")
+    await choose(d.getByLabelText("Write to"), "fork")
     expect(d.queryByLabelText("continue from step")).toBeNull()
     expect(
       d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN }).disabled
@@ -1865,13 +1865,17 @@ describe("the option lab (plan F3, Studio's drawer)", () => {
     const d = await openLab()
     for (const [caption, label] of [
       ["Side effects", "Side effects"],
-      ["Thread", "Thread"],
+      ["Write to", "Write to"],
       ["Model", "model"],
       ["Thinking", "thinking"],
       ["Continue from step", "continue from step"],
     ]) {
       const trigger = d.getByLabelText(label)
-      const text = d.getByText(caption, { selector: "span" })
+      // The caption may hold a glossary word (U21.2): the caption is
+      // the span the trigger is labelled by.
+      const text = d
+        .getByText(caption, { selector: "span" })
+        .closest<HTMLElement>('[id$="-caption"]')!
       expect(trigger.getAttribute("aria-labelledby")).toBe(text.id)
       fireEvent.click(text)
       expect(document.activeElement, caption).toBe(trigger)

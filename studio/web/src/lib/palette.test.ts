@@ -473,7 +473,7 @@ describe("no status or kind colour literal outside the palette (U21.1-fix, UX-F-
   // still hold literals (washes, borders at an alpha, banners and
   // callouts whose colour is not a status's): each count is a ratchet
   // — a new literal fails here, and a file that drops one lowers its
-  // count. The loop graph and the flow strip's words are role-only.
+  // count. The loop graph and the step strip's words are role-only.
   const LITERAL =
     /\b(?:text|bg|border|fill|stroke)-(?:status-[a-z-]+|ev-error|ev-tool)/g
   const ALLOW: Record<string, number> = {
@@ -485,7 +485,6 @@ describe("no status or kind colour literal outside the palette (U21.1-fix, UX-F-
     "components/studio/derived-story.tsx": 1,
     "components/studio/empty-state.tsx": 1,
     "components/studio/experiment-form.tsx": 4,
-    "components/studio/flow-strip.tsx": 2,
     "components/studio/hole-badge.tsx": 2,
     "components/studio/live-peek.tsx": 2,
     "components/studio/logs-view.tsx": 1,
@@ -509,6 +508,7 @@ describe("no status or kind colour literal outside the palette (U21.1-fix, UX-F-
     "components/studio/step-diff.tsx": 6,
     "components/studio/step-list.tsx": 17,
     "components/studio/step-request.tsx": 7,
+    "components/studio/step-strip.tsx": 2,
     "components/studio/subagent-block.tsx": 2,
     "components/studio/target-check.tsx": 3,
     "components/studio/token-wall.tsx": 1,

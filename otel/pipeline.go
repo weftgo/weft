@@ -246,7 +246,10 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	if !dev {
 		for i := range dests {
 			if dests[i].blocking {
-				dests[i].blocking, blockingRefused = false, true
+				// Local has no queue and ignores Blocking: nothing to
+				// refuse, so nothing to warn about.
+				dests[i].blocking = false
+				blockingRefused = blockingRefused || dests[i].kind != destLocal
 			}
 		}
 	}
@@ -933,10 +936,11 @@ func devGate(cfg config) (open, byDevMode bool, r gateRefusal) {
 	}
 }
 
-// hasBlocking reports whether any destination kept Blocking.
+// hasBlocking reports whether any queued destination kept Blocking
+// (Local has no queue and ignores it).
 func hasBlocking(dests []dest) bool {
 	for _, d := range dests {
-		if d.blocking {
+		if d.blocking && d.kind != destLocal {
 			return true
 		}
 	}

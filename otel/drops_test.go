@@ -334,6 +334,59 @@ func TestBlockingDevGate(t *testing.T) {
 	}
 }
 
+// A Local destination has no queue and ignores Blocking: under DevMode
+// no "Blocking on" INFO claims a wait that never happens, and outside
+// the gate no WARN refuses what was never in force. RawBodies and
+// Blocking refused together by WEFT_ENV=prod against DevMode are one
+// WARN, not one per switch.
+func TestBlockingDevGateLocalAndBoth(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		env     map[string]string
+		noEnv   bool
+		devMode bool
+		queued  bool // add a queued destination with Blocking (else Local alone)
+		raw     bool
+		warns   int
+		warn    string
+	}{
+		{"Local, NoEnv with DevMode", nil, true, true, false, false, 0, ""},
+		{"Local, DevMode, WEFT_ENV unset", nil, false, true, false, false, 0, ""},
+		{"Local, WEFT_ENV unset", nil, false, false, false, false, 0, ""},
+		{"both, DevMode, WEFT_ENV=prod", map[string]string{"WEFT_ENV": "prod"}, false, true, true, true, 1, "otel: DevMode ignored: WEFT_ENV=prod"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			devEnv(t, c.env)
+			logBuf := captureSlogSafe(t)
+			opts := []Option{NoGlobal(), Heartbeat(0), Local(filepath.Join(t.TempDir(), "weft.db"), Blocking())}
+			if c.queued {
+				opts = append(opts, Exporters(nil, newMemExporter(), Blocking()))
+			}
+			if c.raw {
+				opts = append(opts, RawBodies(true))
+			}
+			if c.noEnv {
+				opts = append(opts, NoEnv())
+			}
+			if c.devMode {
+				opts = append(opts, DevMode())
+			}
+			p, err := Start(testCtx(t), opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = p.Shutdown(testCtx(t))
+			out := logBuf.String()
+			if strings.Contains(out, "Blocking on by otel.DevMode()") {
+				t.Errorf("a Local-only Blocking claimed a wait:\n%s", out)
+			}
+			if n := strings.Count(out, "level=WARN"); n != c.warns || (c.warn != "" && strings.Count(out, c.warn) != 1) {
+				t.Errorf("WARN lines = %d, want %d (%q):\n%s", n, c.warns, c.warn, out)
+			}
+		})
+	}
+}
+
 // TestBlockingIsDevOnly: Blocking outside WEFT_ENV=dev is refused with
 // one WARN and the destination refuses on a full queue as without it;
 // under dev it waits, and a storm through a queue of 16 with a slow

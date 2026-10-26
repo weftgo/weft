@@ -14,7 +14,7 @@ import type { ReactNode } from "react"
 import { fetchStats } from "@/lib/api"
 import type { RunDoc, StatsBy, StatsGroup, StatsPage } from "@/lib/api"
 import { costView, isScripted } from "@/lib/cost"
-import { spanMs, tokens } from "@/lib/format"
+import { FIRST_TOKEN, spanMs, tokens } from "@/lib/format"
 import { runsLink } from "@/lib/links"
 import {
   STATS_WORDS,
@@ -257,7 +257,7 @@ const CHARTS: {
   },
   {
     key: "ttft",
-    label: "TTFT p50",
+    label: `${FIRST_TOKEN} p50`,
     value: (g) => g.ttft_ms?.p50 ?? null,
     text: (g) => (g.ttft_ms ? spanMs(g.ttft_ms.p50) : "—"),
   },

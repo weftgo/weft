@@ -327,7 +327,7 @@ token your backend mints instead):
 Rung 1 is a viewer scoped to that conversation: the turns (parked
 shown), the step story with tool calls, usage splits, each step's
 attempts and timing ("attempt 4 of 4 · fallback to glm-b", "1.2 s ·
-ttft 180 ms"), approvals (read-only — or decided from the panel on
+first token 180 ms"), approvals (read-only — or decided from the panel on
 the app's own turns, below), truncation/gap/stripped honesty, the raw JSON, a live tail,
 ⤢ deep links into Studio, lazy subagents (inline at any depth, each
 read only once opened, with the child's request line and an "open in
@@ -383,7 +383,7 @@ ids repeat per step; `weft.parent.*` only when that span is absent) — a
 nested Generate's run, or a live delegation whose tool has not ended, is
 a child row too, and a running run's in-flight steps and calls are open
 rows on the time scale;
-`dimRows` dims (never hides) by errors, slow or tools. The Timeline
+`dimRows` dims (never hides) by errors, slow or tools. The waterfall tab
 draws those rows as Studio's run page does, one level deep (U8.3): the
 same keys, labels (with the gist as the label's title), kinds
 (`ROW_KIND`, glyphs `KIND_ICON`: ▣ run, ↻ step, ◆ model, ◇ attempt, ⚙
@@ -424,7 +424,7 @@ after 2 s or with the next action; where the clipboard is missing or
 refuses, the text is shown selected to copy by hand, and that box goes
 once you leave it (or on `Esc`). The Story tab's node is kept across a
 tab switch (hidden, not rebuilt), so what you opened in it stays open;
-the Timeline's axis is the waterfall's own window, and spans it cannot
+the waterfall tab's axis is the waterfall's own window, and spans it cannot
 place (unreadable times, an end before the start) are counted in a
 note. `download` saves the document
 as `<run id>.json` (a `/` in a child's id becomes `_`). The turn list
@@ -524,10 +524,10 @@ the API's `cost_reason` when the spans reported none; the panel
 header's token total leaves such a turn out, "≥" or "—"), its
 `execute_tool` calls badged `derived`, its request and messages blocks
 the badge (the panel's Story hands off: "2 steps · open in Studio ⤢",
-the run page's story at step 0); the raw view and the panel's Timeline
+the run page's story at step 0); the raw view and the panel's waterfall tab
 and Raw tabs the badge above what they hold, with no "no events yet"
 line and no "replay here" or space-replay hint; the Request tab `request: derived`; the waterfall
-and the Timeline the real spans on the time axis (no event playhead;
+and the waterfall tab the real spans on the time axis (no event playhead;
 until the spans are read, the derived note in the waterfall's place). A
 derived source has no transcript, so the replay verbs, the editor, the
 drawer and save as test are not offered: they are drawn disabled with
@@ -1074,7 +1074,7 @@ throttle stays.
 | expanders | `aria-expanded` on how to scope, a subagent's summary, and each raw tree node's `▸`/`▾`; Raw is a tab (`r` toggles it; the header's `raw` button is gone, U29.5) |
 | the turn view's tabs (D4) | `role="tablist"` (`aria-label="turn views"`) of `role="tab"` buttons with `aria-selected`, one `tabindex="0"`, `aria-controls` on the selected one; the drawn panel `role="tabpanel"`, `aria-labelledby` its tab |
 | the filters | `aria-label="filter turns"`, `aria-label="status"`, `aria-label="filter keys and values"`; `⧉` labelled `copy <key>` |
-| icon buttons | an `aria-label` on each: `⤢`, `⇆`, `◐`, `–`, `↺`, and the pill (its visible words, `weft devtools · 10→4`); from 480 px of dock width `⤢`, `⇆`, `◐` also show their word (`Studio`, `layout`, `theme` — a `data-w` attribute as `:before` content under a container query; each word inside its label) |
+| icon buttons | an `aria-label` on each: `⤢`, `⇆`, `◐`, `–`, `↺`, and the pill (its visible words, `weft devtools · 10 in · 4 out`); from 480 px of dock width `⤢`, `⇆`, `◐` also show their word (`Studio`, `layout`, `theme` — a `data-w` attribute as `:before` content under a container query; each word inside its label) |
 | the switcher, the turn dropdown | `aria-label="conversation"`, `aria-label="turn"` |
 | the experiment drawer | the system prompt, input and edit fields inside their `<label>`; the selects `aria-label`led `model`, `thinking`, `side effects`, `thread`; the engine radios inside their labels; the result pane's `compare with`; tool checkboxes inside their labels; `–` / `↺` labelled; the option lab's fields inside their `<label>`, its checkboxes `aria-label`led `only tools: <tool>` / `park on: <tool>` in a labelled group, each `↺` `reset <knob> to the agent's default` |
 
@@ -1082,7 +1082,7 @@ The accessibility budget. `src/panel/a11y.test.ts` runs axe-core (a
 devDependency only — a test asserts `panel.js` holds no `axe`) with its
 default rules over the panel's shadow root in each mode — float open,
 docked right, the bottom sheet at 400 px, the pill, the Raw tab with
-its tree open and filtered, the Timeline tab, the experiment drawer
+its tree open and filtered, the waterfall tab, the experiment drawer
 open (and its option lab with an override, a refusal and the named tool
 picker), and the Raw tree under the `?` shortcuts overlay — in both themes,
 and fails on any violation, listing them. jsdom has no layout, so the
@@ -1139,8 +1139,8 @@ data-token (the dev token) or a panel token (POST /api/panel-tokens)
 itself signed in). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 286,714 B raw / 96,768 B gzip
-(94.5 KiB, the bundle of the ledger's row "U22 scope tags and flow"; 9,728 B — 9.5 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 286,758 B raw / 96,779 B gzip
+(94.5 KiB, the bundle of the ledger's row "U21.1-fix"; 9,717 B — 9.5 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1885,7 +1885,7 @@ marked **spans not reported yet**; once the run ended it is badged
 `not_recorded` (dropped on the way or never exported — `truncated` when
 the tree's own cap cut it). A max_tokens step's call the loop never ran
 (rule 11) has no span by design: it reads **not executed**, no badge
-(P8-gate-fix; the panel's Timeline the same). The dim filters (`?dim=errors,slow,tools`,
+(P8-gate-fix; the panel's waterfall tab the same). The dim filters (`?dim=errors,slow,tools`,
 the **dim all but** chips) dim every row the active filters do not keep
 — never hide it; a kept row's ancestors stay lit. With the `spans_tree`
 capability the page reads `runs/{id}/spans?tree=1` and a delegation's

@@ -22,12 +22,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "../lib/api"
 import { queryClient } from "../lib/query"
-import { ROLE } from "../lib/palette"
+import { INK, ROLE } from "../lib/palette"
 import { BILL_TITLE, costLine } from "../lib/cost"
 import { TERMS } from "../lib/glossary"
 import { keyText, PANEL_KEYMAP, STUDIO_KEYMAP, VIEW_KEYS } from "../lib/keys"
 import { rowView } from "../lib/run-row"
-import { tokenPair } from "../lib/format"
+import { FIRST_TOKEN, tokenPair } from "../lib/format"
 import { timingLine } from "../lib/attempts"
 import { KbdHelpBody } from "../components/studio/kbd-help"
 import { RunCost } from "../components/studio/cost"
@@ -5288,40 +5288,63 @@ describe("the shared libs on both surfaces (U21.1)", () => {
   it("status words: STATUS's word, hint and role on the panel's turn chip and Studio's runs list", async () => {
     // The hints are the glossary's tooltips (lib/glossary.ts).
     expect(TERMS.running.short).toBe(`running — ${STATUS.running.hint}`)
+    // Newest first: t7 an open park, t5 a park t6 resumed ("parked → t6").
     const rows = [
+      turn(7, { pending: 2 }),
+      turn(6, {}),
+      turn(5, { pending: 1 }),
       turn(4, { status: "running", finished: null }),
-      turn(3, {}),
-      turn(2, { status: "failed", err: "boom" }),
-      turn(1, { status: "interrupted", finished: null }),
+      turn(3, { status: "failed", err: "boom" }),
+      turn(2, { status: "interrupted", finished: null }),
     ]
+    const want = rows.map((r) => statusOf(r, rows))
+    expect(want.map((s) => s.word)).toEqual([
+      "parked",
+      "succeeded",
+      "parked → t6",
+      "running",
+      "failed",
+      "interrupted",
+    ])
     const el = await panelOver(rows)
-    await vi.waitFor(() => expect(all(el, ".weft-turn")).toHaveLength(4), {
+    await vi.waitFor(() => expect(all(el, ".weft-turn")).toHaveLength(6), {
       timeout: 5_000,
     })
-    const panel = all(el, ".weft-turn").map((r) => {
-      const c = r.querySelector(".weft-row1 > .weft-chip")!
-      return [c.textContent, c.getAttribute("title")]
-    })
+    const panel = all(el, ".weft-turn").map((r) =>
+      r.querySelector(".weft-row1 > .weft-chip")!
+    )
+    const panelSeen = panel.map((c) => [c.textContent, c.getAttribute("title")])
+    const panelKeys = panel.map((c, i) =>
+      c.classList.contains(`weft-${want[i].key}`)
+    )
     await done(el)
     const { container } = await renderWithRouter(
       createElement(RunsTable, { runs: rows })
     )
-    const studio = [...container.querySelectorAll("[data-status]")].map((c) => [
-      c.textContent,
-      c.getAttribute("title"),
-    ])
-    const want = rows.map((r) => {
-      const s = statusOf(r, rows)
-      return [s.word, s.hint]
-    })
-    expect(panel).toEqual(want)
-    expect(studio).toEqual(want)
-    expect(want.map(([w]) => w)).toEqual([
-      "running",
-      "succeeded",
-      "failed",
-      "interrupted",
-    ])
+    const studio = [...container.querySelectorAll("[data-status]")]
+    expect(studio.map((c) => c.getAttribute("data-status"))).toEqual(
+      want.map((s) => s.key)
+    )
+    // The words on both; the role's class on both (Studio's statusClass,
+    // the panel's .weft-<key>, drawn in ROLE's token — UX-F-07).
+    expect(studio.map((c) => c.textContent)).toEqual(want.map((s) => s.word))
+    expect(panelSeen.map(([w]) => w)).toEqual(want.map((s) => s.word))
+    expect(panelKeys).toEqual(want.map(() => true))
+    for (const [i, c] of studio.entries())
+      expect(c.className, want[i].word).toContain(
+        statusClass(want[i].role).text
+      )
+    for (const s of want)
+      expect(PANEL_CSS).toContain(
+        `.weft-chip.weft-${s.key} { color: var(--weft-${INK[ROLE[s.role]] ?? ROLE[s.role]});`
+      )
+    // The hints alike where neither reads the whole session (an open
+    // park: the panel, session-scoped, may say "awaiting", U1-fix).
+    for (const [i, s] of want.entries())
+      if (s.key !== "parked") {
+        expect(panelSeen[i][1], s.word).toBe(s.hint)
+        expect(studio[i].getAttribute("title"), s.word).toBe(s.hint)
+      }
   })
 
   it("keys: one KEYMAP, both help overlays draw it, a key both bind means one thing", async () => {
@@ -5418,8 +5441,13 @@ describe("the shared libs on both surfaces (U21.1)", () => {
       finished: AT(60_811),
       last_seen: AT(60_811),
     })
+    // An experiment with no source run (weft.experiment.id alone): its
+    // chip on both too (U21.1-fix).
+    const t5 = turn(5, { experiment_id: "exp_2" })
     const view3 = rowView(t3, [t3, x1])
     const viewX = rowView(x1, [t3, x1])
+    const view5 = rowView(t5, [t5, t3, x1])
+    expect(view5.lineage.map((l) => l.text)).toEqual(["experiment"])
     expect(view3).toMatchObject({
       turn: "t3",
       steps: "1 step",
@@ -5430,7 +5458,7 @@ describe("the shared libs on both surfaces (U21.1)", () => {
     expect(viewX.lineage.map((l) => l.text)).toEqual([
       "↻ replay of t3 · step 1",
     ])
-    const el = await panelOver([x1, t3])
+    const el = await panelOver([x1, t5, t3])
     await vi.waitFor(
       () =>
         expect(
@@ -5455,9 +5483,22 @@ describe("the shared libs on both surfaces (U21.1)", () => {
         (o) => o.getAttribute("value") === "pg_x1"
       )?.textContent
     expect(chip).toContain(viewX.lineage[0].text)
+    await vi.waitFor(() =>
+      expect(
+        $(el, '[data-weft-run="s_01-t5"] [data-weft-chip="experiment"]')
+      ).toBeTruthy()
+    )
+    const exp5 = $(
+      el,
+      '[data-weft-run="s_01-t5"] [data-weft-chip="experiment"]'
+    )!
+    expect([exp5.textContent, exp5.getAttribute("title")]).toEqual([
+      view5.lineage[0].text,
+      view5.lineage[0].title,
+    ])
     await done(el)
     const { container } = await renderWithRouter(
-      createElement(RunsTable, { runs: [x1, t3] })
+      createElement(RunsTable, { runs: [x1, t5, t3] })
     )
     const tr = (id: string) =>
       [...container.querySelectorAll("tr")].find((r) =>
@@ -5467,6 +5508,11 @@ describe("the shared libs on both surfaces (U21.1)", () => {
       viewX.lineage[0].text
     )
     expect(tr("s_01-t3").textContent).toContain(view3.tokens)
+    const s5 = tr("s_01-t5").querySelector("[data-replay-chip] [data-lineage]")!
+    expect([s5.textContent, s5.getAttribute("title")]).toEqual([
+      view5.lineage[0].text,
+      view5.lineage[0].title,
+    ])
   })
 
   it("formats: tokens, first token and own · delegated alike on both surfaces", async () => {
@@ -5501,6 +5547,35 @@ describe("the shared libs on both surfaces (U21.1)", () => {
       .replace(/ · /g, "·")
       .replace(/·/g, " · ")
     expect(panel).toBe(costLine("$0.0012", "$0.0040"))
+    expect(studio).toBe(panel)
+  })
+
+  it("formats: a step's timing reads \"first token\" in both renderers' DOM", async () => {
+    const el = await panelOver([turn(1, { id: RUN })])
+    const panel = await vi.waitFor(
+      () => {
+        const n = $(el, "[data-weft-timing]")
+        expect(n).toBeTruthy()
+        return n!.textContent
+      },
+      { timeout: 5_000 }
+    )
+    await done(el)
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serve({ doc: {}, events: events() }, true)
+    renderApp(`/runs/${RUN}?view=story`)
+    const studio = await waitFor(() => {
+      const n = document.querySelector("[data-timing]")
+      expect(n).toBeTruthy()
+      return n!.textContent
+    })
+    expect(panel).toContain(`${FIRST_TOKEN} `)
+    expect(panel).not.toContain("ttft")
     expect(studio).toBe(panel)
   })
 })

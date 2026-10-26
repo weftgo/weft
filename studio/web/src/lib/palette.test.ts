@@ -21,7 +21,7 @@ import {
 import type { DIFF, Role } from "./palette"
 import { PANEL_CSS as PANEL_RULES } from "../panel/styles"
 import { STATUS } from "./status"
-import { ROLE_CLASS, ROLE_SVG, studioVar } from "./status-class"
+import { ROLE_CLASS, ROLE_SVG, studioVar, TONE_SVG } from "./status-class"
 
 function studioTokens(selector: string): Record<string, string> {
   const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8")
@@ -462,5 +462,117 @@ describe("every role, one hex on both renderers (U21.1, UX-F-01, UX-F-07)", () =
       "utf8"
     )
     expect(live).toContain('tone: statusClass("live").text,')
+  })
+})
+
+describe("no status or kind colour literal outside the palette (U21.1-fix, UX-F-01)", () => {
+  // A renderer draws a status, a kind or a gap through lib/palette.ts's
+  // roles (lib/status-class.ts's classes, TONE_TEXT, TONE_SVG; the
+  // panel's ROLE / TONE tokens), never a literal of its own — the rule
+  // lib/links.ts's one-scheme lint holds for links. The files below
+  // still hold literals (washes, borders at an alpha, banners and
+  // callouts whose colour is not a status's): each count is a ratchet
+  // — a new literal fails here, and a file that drops one lowers its
+  // count. The loop graph and the flow strip's words are role-only.
+  const LITERAL =
+    /\b(?:text|bg|border|fill|stroke)-(?:status-[a-z-]+|ev-error|ev-tool)/g
+  const ALLOW: Record<string, number> = {
+    "components/studio/agent-cards.tsx": 1,
+    "components/studio/agent-stats.tsx": 5,
+    "components/studio/breakpoints.tsx": 1,
+    "components/studio/call-graph.tsx": 3,
+    "components/studio/caps-unread.tsx": 1,
+    "components/studio/derived-story.tsx": 1,
+    "components/studio/empty-state.tsx": 1,
+    "components/studio/experiment-form.tsx": 4,
+    "components/studio/flow-strip.tsx": 2,
+    "components/studio/hole-badge.tsx": 2,
+    "components/studio/live-peek.tsx": 2,
+    "components/studio/logs-view.tsx": 1,
+    "components/studio/parked-calls.tsx": 8,
+    "components/studio/pass-predicate.tsx": 3,
+    "components/studio/problem-badges.tsx": 4,
+    "components/studio/replay-drawer.tsx": 12,
+    "components/studio/resumed-card.tsx": 1,
+    "components/studio/run-actions.tsx": 1,
+    "components/studio/run-header.tsx": 10,
+    "components/studio/runs-in.tsx": 1,
+    "components/studio/runs-table.tsx": 2,
+    "components/studio/session-actions.tsx": 1,
+    "components/studio/session-approvals.tsx": 2,
+    "components/studio/session-timeline.tsx": 2,
+    "components/studio/session-turns.tsx": 1,
+    "components/studio/source-matrix.tsx": 3,
+    "components/studio/span-detail.tsx": 4,
+    "components/studio/spark.tsx": 3,
+    "components/studio/step-attempts.tsx": 2,
+    "components/studio/step-diff.tsx": 6,
+    "components/studio/step-list.tsx": 17,
+    "components/studio/step-request.tsx": 7,
+    "components/studio/subagent-block.tsx": 2,
+    "components/studio/target-check.tsx": 3,
+    "components/studio/token-wall.tsx": 1,
+    "components/studio/transcript-editor.tsx": 11,
+    "components/studio/waterfall.tsx": 19,
+    "routes/agents.index.tsx": 4,
+    "routes/conversations.$id.tsx": 2,
+    "routes/experiments.$id.tsx": 4,
+    "routes/experiments.index.tsx": 2,
+    "routes/live.tsx": 4,
+    "routes/playground.tsx": 10,
+    "routes/runs.$id.tsx": 5,
+    "routes/runs.index.tsx": 2,
+    "routes/runtimes.tsx": 4,
+    "routes/sessions.$id.tsx": 1,
+    "routes/sessions.index.tsx": 1,
+    "routes/settings.tsx": 4,
+    "routes/traces.$id.tsx": 4,
+    "routes/traces.index.tsx": 4,
+  }
+  const walk = (d: string): string[] =>
+    readdirSync(d).flatMap((f) => {
+      const p = resolve(d, f)
+      return statSync(p).isDirectory() ? walk(p) : [p]
+    })
+  it("components/ and routes/ hold no literal beyond the allowlist", () => {
+    const seen: Record<string, number> = {}
+    for (const dir of ["components", "routes"])
+      for (const f of walk(resolve(process.cwd(), "src", dir)).filter(
+        (p) => /\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p)
+      )) {
+        const n = (readFileSync(f, "utf8").match(LITERAL) ?? []).length
+        if (n) seen[f.slice(resolve(process.cwd(), "src").length + 1)] = n
+      }
+    expect(seen).toEqual(ALLOW)
+    expect(seen["components/studio/loop-graph.tsx"]).toBeUndefined()
+  })
+  it("the panel's styles draw a status or tone through ROLE / TONE", () => {
+    const src = readFileSync(
+      resolve(process.cwd(), "src/panel/styles.ts"),
+      "utf8"
+    )
+    // The literal tokens left (badges, diff, the waterfall bar): a ratchet.
+    expect(
+      (
+        src.match(
+          /var\(--weft-(?:ok|err|warn|parked|status-run|status-run-ink|info|result)\)/g
+        ) ?? []
+      ).length
+    ).toBe(25)
+    for (const rule of [
+      ".weft-dot.weft-on { background: var(--weft-${ROLE.live}); }",
+      ".weft-dot.weft-run { background: var(--weft-${ROLE.running}); }",
+      ".weft-fab-running { border-color: var(--weft-${ROLE.running}); }",
+      ".weft-loop [data-tone=error] { color: var(--weft-${TONE.error}); }",
+      ".weft-loop [data-tone=parked] { color: var(--weft-${ROLE.parked}); }",
+      ".weft-loop [data-tone=bad] { color: var(--weft-${ROLE.failed}); }",
+    ])
+      expect(src).toContain(rule)
+  })
+  it("TONE_SVG paints the error tone's variable", () => {
+    expect(TONE_SVG.error).toEqual({
+      fill: `fill-${TONE_STUDIO.error}`,
+      stroke: `stroke-${TONE_STUDIO.error}`,
+    })
   })
 })

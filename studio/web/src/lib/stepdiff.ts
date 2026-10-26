@@ -31,6 +31,7 @@
 import type { Usage } from "./api"
 import { HOLES, isHole, mergeHoles } from "./honesty"
 import type { HoleMark } from "./honesty"
+import { tokenPair } from "./format"
 
 /** The compared columns, in the order every surface draws them. */
 export type DiffColumn =
@@ -398,7 +399,7 @@ export function cellText(side: DiffSide | null, col: DiffColumn): string {
       return side.text ? clip(side.text) : "(none)"
     case "usage":
       return (side.usage as Usage | undefined)
-        ? `${side.usage.input_tokens}→${side.usage.output_tokens}`
+        ? tokenPair(side.usage.input_tokens, side.usage.output_tokens)
         : "—"
   }
 }

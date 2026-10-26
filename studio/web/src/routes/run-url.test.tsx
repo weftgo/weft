@@ -183,6 +183,33 @@ describe("the run page's URL (G2)", () => {
     )
   })
 
+  it("a view key pressed again goes back to the view before it, as the panel's tabs do (U21.1-fix)", async () => {
+    const { router } = renderApp(`/runs/${RUN}`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-span]")).toBeTruthy()
+    )
+    const at = async (want: Record<string, unknown>, absent: string[] = []) =>
+      waitFor(() => {
+        expect(router.state.location.search).toMatchObject(want)
+        for (const k of absent)
+          expect(router.state.location.search).not.toHaveProperty(k)
+      })
+    fireEvent.keyDown(window, { key: "r" })
+    await at({ view: "raw" })
+    fireEvent.keyDown(window, { key: "s" })
+    await at({ view: "story" })
+    fireEvent.keyDown(window, { key: "s" }) // again: raw, the view before
+    await at({ view: "raw" })
+    fireEvent.keyDown(window, { key: "q" })
+    await at({ view: "story", pane: "request" })
+    fireEvent.keyDown(window, { key: "q" }) // again: raw
+    await at({ view: "raw" }, ["pane"])
+    fireEvent.keyDown(window, { key: "w" })
+    await at({}, ["view"])
+    fireEvent.keyDown(window, { key: "w" }) // again: raw
+    await at({ view: "raw" })
+  })
+
   it("q opens the step's Request pane, again closes it; o follows the header's open in app (U21.1, UX-F-04)", async () => {
     const { router } = renderApp(`/runs/${RUN}`)
     await waitFor(() =>
@@ -196,10 +223,11 @@ describe("the run page's URL (G2)", () => {
         pane: "request",
       })
     )
-    fireEvent.keyDown(window, { key: "q" })
-    await waitFor(() =>
+    fireEvent.keyDown(window, { key: "q" }) // again: the waterfall, before it
+    await waitFor(() => {
       expect(router.state.location.search).not.toHaveProperty("pane")
-    )
+      expect(router.state.location.search).not.toHaveProperty("view")
+    })
     // o clicks the header's open in app link (none here without a page
     // URL: the disabled verb is a button, so nothing happens).
     const clicked = vi.fn()

@@ -89,7 +89,7 @@ import type {
   ThreadMode,
   VariantFields,
 } from "@/lib/experiment-body"
-import { relativeTime, spanMs } from "@/lib/format"
+import { relativeTime, spanMs, tokenPair } from "@/lib/format"
 import { copyText } from "@/lib/json"
 import {
   keepEditedTitle,
@@ -2222,8 +2222,10 @@ function ResultCard({
           {experiment.row && (
             <>
               <span>
-                {experiment.row.usage.input_tokens}→
-                {experiment.row.usage.output_tokens} tok
+                {tokenPair(
+                  experiment.row.usage.input_tokens,
+                  experiment.row.usage.output_tokens
+                )}
               </span>
               <span>{latency(experiment.row)}</span>
               {costCapable ? (

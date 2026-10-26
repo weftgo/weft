@@ -469,6 +469,22 @@ describe('remembered per origin (localStorage["weft.devtools"])', () => {
     ).toBe("s_01-t2")
   })
 
+  it('a stored tab from before U21.1 ("timeline") opens the story tab; "waterfall" is the tab\'s id now', async () => {
+    fakeStudio(baseRoutes())
+    localStorage.setItem(STORE_KEY, JSON.stringify({ v: 1, tab: "timeline" }))
+    let el = await open()
+    expect($(el, "[role=tab][aria-selected=true]")?.getAttribute("id")).toBe(
+      "weft-tab-story"
+    )
+    el.remove()
+    await settle()
+    localStorage.setItem(STORE_KEY, JSON.stringify({ v: 1, tab: "waterfall" }))
+    el = await open()
+    expect($(el, "[role=tab][aria-selected=true]")?.getAttribute("id")).toBe(
+      "weft-tab-waterfall"
+    )
+  })
+
   it("an explicit data-mode float|dock wins over what data-position implies", async () => {
     fakeStudio(baseRoutes())
     let el = await open({ "data-position": "left-dock", "data-mode": "float" })

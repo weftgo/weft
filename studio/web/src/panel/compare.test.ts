@@ -278,7 +278,7 @@ describe("the panel's compare of an identical scripted replay from step 1", () =
       '[data-weft-diff-step="1"] [data-weft-diff-cell="usage"]'
     )!
     expect(usage.getAttribute("data-state")).toBe("differs")
-    expect(usage.textContent).toContain("b 0→0")
+    expect(usage.textContent).toContain("b 0 in · 0 out")
     expect(
       box
         .querySelector(

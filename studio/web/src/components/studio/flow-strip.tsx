@@ -2,8 +2,8 @@
 // between them (results fed back into the next request), the end
 // state last. Click a pill to select that step in the waterfall.
 import type { FlowPill } from "@/lib/trace"
-import { statusOf } from "@/lib/status"
-import { statusClass } from "@/lib/status-class"
+import { STATUS, statusOf } from "@/lib/status"
+import { statusClass, TONE_TEXT } from "@/lib/status-class"
 import { END_WORDS, endGlyph } from "@/lib/timeline"
 import type { TurnEnd } from "@/lib/timeline"
 
@@ -68,11 +68,13 @@ export function FlowStrip({
               {p.finish ? (
                 <span
                   className={`ml-1.5 font-normal ${
-                    p.finish === "tool_calls"
-                      ? "text-ev-tool"
-                      : p.finish === "stop" || p.finish === "end_turn"
-                        ? "text-ev-result"
-                        : "text-ev-error"
+                    TONE_TEXT[
+                      p.finish === "tool_calls"
+                        ? "tool"
+                        : p.finish === "stop" || p.finish === "end_turn"
+                          ? "result"
+                          : "error"
+                    ]
                   }`}
                 >
                   {p.finish}
@@ -85,11 +87,15 @@ export function FlowStrip({
                   {END_WORDS[ended.kind]}
                 </span>
               ) : p.bad ? (
-                <span className="ml-1.5 font-normal text-status-bad">
-                  failed
+                <span
+                  className={`ml-1.5 font-normal ${statusClass("failed").text}`}
+                >
+                  {STATUS.failed.word}
                 </span>
               ) : p.open ? (
-                <span className="ml-1.5 font-normal text-status-run-ink">
+                <span
+                  className={`ml-1.5 font-normal ${statusClass("running").text}`}
+                >
                   …
                 </span>
               ) : null}

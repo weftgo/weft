@@ -1318,7 +1318,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       document.querySelector<HTMLElement>('[data-variant="A"]')!
     // The row is re-read on the card's 1 s settle tick.
     await waitFor(
-      () => expect(within(card()).getByText("50→20 tok")).toBeTruthy(),
+      () => expect(within(card()).getByText("50 in · 20 out")).toBeTruthy(),
       { timeout: 10_000 }
     )
   }, 20_000)

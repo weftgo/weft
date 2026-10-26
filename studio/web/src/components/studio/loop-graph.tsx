@@ -46,6 +46,14 @@ import {
   toolMarks,
 } from "@/lib/loopgraph"
 import type { EndTone, LoopCall, LoopGraph, LoopTool } from "@/lib/loopgraph"
+import type { Role } from "@/lib/palette"
+import {
+  ROLE_SVG,
+  statusClass,
+  studioVar,
+  TONE_SVG,
+  TONE_TEXT,
+} from "@/lib/status-class"
 import { sumCost } from "@/lib/cost"
 import type { CostView } from "@/lib/cost"
 import type { HoleMark } from "@/lib/honesty"
@@ -66,23 +74,24 @@ const MAX_TOOLS = 12
 /** An edge's click target, in px: at least the 24 px WCAG 2.5.8 asks. */
 const HIT = 24
 
-/** The palette's roles as the literal classes Tailwind needs. */
-const STROKE: Record<EndTone | "error" | "idle", string> = {
-  ok: "stroke-status-ok",
-  bad: "stroke-status-bad",
-  parked: "stroke-status-parked",
-  running: "stroke-status-run",
-  error: "stroke-ev-error",
-  idle: "stroke-border",
+/** Each end tone's status role (lib/palette.ts's ROLE): its paints are
+ * lib/status-class.ts's, never a literal here (U21.1-fix, UX-F-01). */
+const END_ROLE: Record<EndTone, Role> = {
+  ok: "succeeded",
+  bad: "failed",
+  parked: "parked",
+  running: "running",
 }
-const TEXT: Record<EndTone | "error" | "idle", string> = {
-  ok: "fill-status-ok",
-  bad: "fill-status-bad",
-  parked: "fill-status-parked",
-  running: "fill-status-run-ink",
-  error: "fill-ev-error",
-  idle: "fill-foreground",
-}
+const paint = (k: "stroke" | "fill") =>
+  ({
+    ...(Object.fromEntries(
+      Object.entries(END_ROLE).map(([t, r]) => [t, ROLE_SVG[studioVar(r)][k]])
+    ) as Record<EndTone, string>),
+    error: TONE_SVG.error[k],
+    idle: k === "stroke" ? "stroke-border" : "fill-foreground",
+  }) satisfies Record<EndTone | "error" | "idle", string>
+const STROKE = paint("stroke")
+const TEXT = paint("fill")
 
 const toolTone = (t: LoopTool): keyof typeof STROKE =>
   t.parked || t.denied
@@ -405,7 +414,7 @@ export function LoopGraphView({
             <button
               key={`${ins.kind}${i}`}
               type="button"
-              className="min-h-6 rounded-md border px-1.5 py-0.5 text-ev-error hover:bg-secondary"
+              className={`min-h-6 rounded-md border px-1.5 py-0.5 hover:bg-secondary ${TONE_TEXT.error}`}
               data-insight={ins.kind}
               onClick={() => {
                 if (ins.node.startsWith("o:")) {
@@ -811,7 +820,7 @@ export function LoopGraphView({
         </div>
       ) : graph.offered === null && offeredError ? (
         <p
-          className="font-mono text-[11px] text-status-bad"
+          className={`font-mono text-[11px] ${statusClass("failed").text}`}
           data-loop-offered-hole
           data-read-failed
         >

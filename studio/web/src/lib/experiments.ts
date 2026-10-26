@@ -9,7 +9,7 @@ import { fetchRuns, nextCursor } from "./api"
 import { isScripted } from "./cost"
 import { editMarks } from "./edits"
 import { producedTexts } from "./events"
-import { plural, tokenPair, tokens } from "./format"
+import { plural, tokenPair, tokenTotal } from "./format"
 import type { ExperimentRow, PageCursor, RunRow, SessionRow } from "./api"
 import type { TranscriptBatch } from "./events"
 import { stepDiffView } from "./stepdiff"
@@ -218,10 +218,10 @@ export function answerText(batches: TranscriptBatch[]): string | null {
   return producedTexts(batches).at(-1) || null
 }
 
-/** usageWords is a run's tokens in a cell: "15 tok" (in + out), the
- * split in its title (usageTitle). */
+/** usageWords is a run's tokens in a cell: "15 tokens" (in + out,
+ * lib/format.ts's tokenTotal), the split in its title (usageTitle). */
 export function usageWords(r: Pick<RunRow, "usage">): string {
-  return `${tokens(r.usage.input_tokens + r.usage.output_tokens)} tok`
+  return tokenTotal(r.usage.input_tokens + r.usage.output_tokens)
 }
 
 export function usageTitle(r: Pick<RunRow, "usage">): string {

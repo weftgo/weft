@@ -79,7 +79,7 @@ describe("StepDiffTable", () => {
 
 // A8's Done line on the web table (UX-C-04, UX-D-15): an identical
 // scripted replay from step 1 reads "kept · same" — step 0 the
-// source's, not re-run, step 1 the same (its 0→0 usage shown, never a
+// source's, not re-run, step 1 the same (its 0 in · 0 out usage shown, never a
 // change) — and nothing is marked changed.
 describe("StepDiffTable over diff-replay.golden.json", () => {
   it("reads kept · same on every row, no changed marker", async () => {
@@ -103,7 +103,7 @@ describe("StepDiffTable over diff-replay.golden.json", () => {
       '[data-diff-run="pg_replay"][data-diff-cell="usage"]'
     )!
     expect(usage.getAttribute("data-diff-state")).toBe("differs")
-    expect(usage.textContent).toContain("0→0")
+    expect(usage.textContent).toContain("0 in · 0 out")
     expect(
       rows[0]
         .querySelector('[data-diff-run="pg_replay"][data-diff-cell="text"]')!

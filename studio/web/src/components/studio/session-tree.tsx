@@ -13,7 +13,7 @@ import type { CSSProperties } from "react"
 
 import type { RunRow, TimelineDoc, TimelineTurn } from "@/lib/api"
 import { summarizerView } from "@/lib/cost"
-import { tokens, tokenPair } from "@/lib/format"
+import { tokenPair } from "@/lib/format"
 import { runLink, sessionViewLink } from "@/lib/links"
 import { sessionTree, TREE, treeRows } from "@/lib/session-tree"
 import type { TreeNode } from "@/lib/session-tree"
@@ -160,8 +160,7 @@ export function SessionTree({
                   <TitleText t={title} />
                 </span>
                 <span className="shrink-0 font-mono text-[11px] text-faint tabular-nums">
-                  {tokens(t.usage.input_tokens)} /{" "}
-                  {tokens(t.usage.output_tokens)} tok
+                  {tokenPair(t.usage.input_tokens, t.usage.output_tokens)}
                 </span>
                 {costCapable && sum ? (
                   <CostText

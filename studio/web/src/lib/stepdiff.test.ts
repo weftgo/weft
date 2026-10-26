@@ -58,7 +58,7 @@ describe("stepDiffView over diff.golden.json (a tool result differs at step 3)",
     expect(cellText(r.b.side, "tool_results")).toBe("order 3 lost")
     expect(cellText(r.a.side, "system")).toBe("You are a support agent.")
     expect(cellText(r.a.side, "text")).toBe("(none)")
-    expect(cellText(r.a.side, "usage")).toBe("10→5")
+    expect(cellText(r.a.side, "usage")).toBe("10 in · 5 out")
     expect(cellText(v.rows[4].b.side, "text")).toBe("all looked up")
     expect(cellText(null, "text")).toBe("—")
   })
@@ -239,7 +239,7 @@ describe("diff-replay.golden.json (A8: a scripted replay of a two-step run from 
       [0, null],
       [1, 0],
     ])
-    expect(cellText(v.rows[1].b.side, "usage")).toBe("0→0")
+    expect(cellText(v.rows[1].b.side, "usage")).toBe("0 in · 0 out")
     expect(summaryWords(v)).toBe(
       "no step changed of 1 · 1 kept (not re-run) · usage differs (0 tokens)"
     )

@@ -21,6 +21,7 @@ import { Link } from "@tanstack/react-router"
 import { ApiError, postCancel } from "@/lib/api"
 import {
   duration,
+  FIRST_TOKEN,
   elapsed,
   relativeTime,
   tokens as fmtTokens,
@@ -268,9 +269,9 @@ export function LiveTable({
           ) : null}
           <TableHead
             className="text-right"
-            title="time to first token of the last finished step"
+            title="time to first token (TTFT) of the last finished step"
           >
-            TTFT
+            {FIRST_TOKEN}
           </TableHead>
           <TableHead>started</TableHead>
           <TableHead title="the conversation this run is a turn of (its public id under it)">

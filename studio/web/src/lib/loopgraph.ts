@@ -17,7 +17,7 @@
 // catalog's (null when it was not read: the renderer says so with a
 // hole badge). Plain TypeScript, no React.
 import { RETRY_RESULT } from "./error-kind"
-import { plural } from "./format"
+import { plural, tokenPair } from "./format"
 import type { FoldedRun } from "./events"
 import type { HoleMark } from "./honesty"
 import { FAILED_WORD, stoppedByWords } from "./stopped-by"
@@ -601,11 +601,9 @@ export const modelLine = (g: LoopGraph) =>
   plural(g.steps.length, "step") +
   (g.retries ? ` · ↻ ${plural(g.retries, "retry", "retries")}` : "")
 
-/** The end node's tokens: "1,246 → 62 tok". */
+/** The end node's tokens: "1,246 in · 62 out" (lib/format.ts). */
 export const endTokens = (e: LoopEnd) =>
-  e.tokens
-    ? `${e.tokens.input.toLocaleString("en-US")} → ${e.tokens.output.toLocaleString("en-US")} tok`
-    : ""
+  e.tokens ? tokenPair(e.tokens.input, e.tokens.output, true) : ""
 
 /** The panel's loop line, as chips: the model, each tool with its
  * marks (it selects its first call's step), the end. */

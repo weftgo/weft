@@ -54,6 +54,12 @@ export const TONE_TEXT: Record<keyof typeof TONE, string> = {
   never: "text-ev-error",
 }
 
+/** The SVG paints of the error-as-data tone (TONE_STUDIO.error): the
+ * loop graph's errored tool node (palette.test.ts holds it). */
+export const TONE_SVG = {
+  error: { fill: "fill-ev-error", stroke: "stroke-ev-error" },
+} as const
+
 /** A small thread link inside a toned line (U34-fix3's treatment, the
  * decided / resumed cards' links, U13.2): foreground text, the underline
  * always on in the thread colour — never told apart by its colour alone

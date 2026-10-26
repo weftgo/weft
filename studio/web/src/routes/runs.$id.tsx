@@ -80,7 +80,12 @@ import { useDocumentTitle } from "@/hooks/use-document-title"
 import { editKey, impliedFromStep, putEdit, schemaOf } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 import { replayBounds } from "@/lib/experiment-body"
-import type { ReplayLinkState, RunScale, RunSearch } from "@/lib/links"
+import type {
+  ReplayLinkState,
+  RunScale,
+  RunSearch,
+  ViewName,
+} from "@/lib/links"
 import { failedAtStep } from "@/lib/summarize"
 import { flowFromFold, spansFromFold } from "@/lib/trace"
 import {
@@ -301,6 +306,19 @@ function RunPage() {
   const view: View =
     search.view ??
     (search.pane && search.step !== undefined ? "story" : "waterfall")
+  // The view a view key toggles from (U21.1-fix): the page's view, a
+  // step's open Request pane reading as the request view (lib/keys.ts's
+  // VIEW_KEYS); the view before it is where a second press goes back,
+  // as the panel's tabs do.
+  const keyView: ViewName =
+    view === "story" && search.pane === "request" ? "request" : view
+  const lastView = useRef<ViewName>(keyView)
+  const prevView = useRef<ViewName>("waterfall")
+  useEffect(() => {
+    if (keyView === lastView.current) return
+    prevView.current = lastView.current
+    lastView.current = keyView
+  }, [keyView])
   const [layout, setLayout] = useState<Layout>(readLayout)
   const { has, caps, why: capsWhy, loading: capsLoading } = useCapabilities()
   const liveCapable = has("live")
@@ -1510,34 +1528,34 @@ function RunPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isPlainShortcut(e) || !run.data) return
-      const setView = (v: View) =>
-        void navigate({
-          search: (prev) => {
-            const next = prev.view === v || v === "waterfall" ? undefined : v
-            return {
-              ...prev,
-              view: next,
-              pane: next === "story" ? prev.pane : undefined,
-            }
-          },
-        })
       // The view keys both surfaces bind (lib/keys.ts's VIEW_KEYS:
-      // s · w · q · r); request is a step's pane here — the story at
-      // the step named (else step 0), its Request pane open.
-      const v = VIEW_KEYS[e.key]
-      if (v === "request")
+      // s · w · q · r, and l the logs): a view; on it already, the view
+      // before it (the panel's tabs alike). Request is a step's pane
+      // here — the story at the step named (else step 0), its Request
+      // pane open.
+      const setView = (v: ViewName) => {
+        const to = keyView === v ? prevView.current : v
         void navigate({
           search: (prev) =>
-            prev.view === "story" && prev.pane === "request"
-              ? { ...prev, pane: undefined }
-              : {
+            to === "request"
+              ? {
                   ...prev,
                   view: "story",
                   step: prev.step ?? 0,
                   pane: "request",
+                }
+              : {
+                  ...prev,
+                  view: to === "waterfall" ? undefined : to,
+                  pane:
+                    to === "story" && prev.pane !== "request"
+                      ? prev.pane
+                      : undefined,
                 },
         })
-      else if (v) setView(v)
+      }
+      const v = VIEW_KEYS[e.key]
+      if (v) setView(v)
       else if (e.key === "l") setView("logs")
       else if (e.key === "o")
         // o (lib/keys.ts's KEY_OPEN): the run in your app — the header's
@@ -1585,6 +1603,7 @@ function RunPage() {
     navigate,
     run.data,
     view,
+    keyView,
     treeRows,
     selKey,
     select,

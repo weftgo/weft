@@ -132,6 +132,13 @@ export function tokenPair(
   return `${n(input)} in · ${n(output)} out`
 }
 
+/** tokenTotal is one total of tokens, where a cell has room for one
+ * number (an experiment's grid cell): "15 tokens", compact. The rule
+ * (U21.1-fix): a split of input and output is always tokenPair's
+ * "60 in · 30 out"; a single total says "tokens" in full — never "tok". */
+export const tokenTotal = (n: number) =>
+  `${tokens(n)} ${n === 1 ? "token" : "tokens"}`
+
 /** The time to first token's words on both surfaces (UX-F-16): "first
  * token 180 ms" — never "ttft". */
 export const FIRST_TOKEN = "first token"

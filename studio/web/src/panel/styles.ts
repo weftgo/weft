@@ -148,11 +148,11 @@ export const PANEL_CSS = `
 }
 @container (min-width: 480px) { [data-w]:before { content: attr(data-w) " "; } }
 .weft-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--weft-faint); flex: none; }
-.weft-dot.weft-on { background: var(--weft-ok); }
-.weft-dot.weft-run { background: var(--weft-status-run); }
+.weft-dot.weft-on { background: var(--weft-${ROLE.live}); }
+.weft-dot.weft-run { background: var(--weft-${ROLE.running}); }
 .weft-dot.weft-run, .weft-fab-pulse { animation: weft-pulse 1.2s infinite; }
 @keyframes weft-pulse { 50% { opacity: .35; } }
-.weft-fab-running { border-color: var(--weft-status-run); }
+.weft-fab-running { border-color: var(--weft-${ROLE.running}); }
 .weft-fab-count { color: var(--weft-status-run-ink); font-variant-numeric: tabular-nums; }
 .weft-howto { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
 @media (prefers-reduced-motion: reduce) { .weft-dot.weft-run, .weft-fab-pulse { animation: none; } }
@@ -200,9 +200,9 @@ ${statusRules()}
 .weft-note, .weft-stream, [data-key=text] { font-family: var(--weft-font-prose); }
 .weft-reason { color: var(--weft-faint); margin-top: 4px; }
 .weft-loop { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; color: var(--weft-dim); }
-.weft-loop [data-tone=error] { color: var(--weft-warn); }
-.weft-loop [data-tone=parked] { color: var(--weft-parked); }
-.weft-loop [data-tone=bad] { color: var(--weft-err); }
+.weft-loop [data-tone=error] { color: var(--weft-${TONE.error}); }
+.weft-loop [data-tone=parked] { color: var(--weft-${ROLE.parked}); }
+.weft-loop [data-tone=bad] { color: var(--weft-${ROLE.failed}); }
 details.weft-collapsible > summary {
   cursor: pointer; color: var(--weft-dim); padding: 3px 0; list-style: none;
 }

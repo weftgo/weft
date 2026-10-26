@@ -46,6 +46,7 @@ describe("the glossary's TERMS (U21.1)", () => {
         "failed",
         "interrupted",
         "parked",
+        "approve",
         "gap",
         "derived",
         "compacted",
@@ -53,6 +54,7 @@ describe("the glossary's TERMS (U21.1)", () => {
         "appOwned",
         "waterfall",
         "trace",
+        "span",
       ])
     )
     for (const k of CORE_TERMS) expect(TERMS[k], k).toBeDefined()
@@ -79,6 +81,17 @@ describe("the glossary's TERMS (U21.1)", () => {
     const words = new Set(entries.map(([, t]) => t.term))
     for (const [k, t] of entries)
       for (const a of t.aliases) expect(words.has(a), `${k}: ${a}`).toBe(false)
+  })
+
+  it("the audit's retired words are aliases; the parked call's own line is not", () => {
+    expect(TERMS.approve.aliases).toEqual(["continue", "skip"])
+    expect(TERMS.experiment.aliases).toEqual([
+      "✎ Experiment",
+      "Run experiment ▶",
+    ])
+    expect(TERMS.fork.aliases.length).toBeGreaterThan(0)
+    // "awaiting a decision" stays the parked call's line (lib/status.ts).
+    expect(TERMS.parked.aliases).toEqual(["pending approval"])
   })
 
   it("the status words' tooltips are lib/status.ts's hints", () => {

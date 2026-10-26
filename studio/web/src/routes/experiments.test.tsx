@@ -1060,7 +1060,7 @@ describe("/experiments/{id}'s grid cell", () => {
     )
     const c = cell("A×1")
     expect(c.querySelector("[data-run-status]")?.textContent).toBeTruthy()
-    expect(c.querySelector("[data-cell-tokens]")?.textContent).toMatch(/ tok$/)
+    expect(c.querySelector("[data-cell-tokens]")?.textContent).toMatch(/ tokens$/)
     expect(c.querySelector("[data-cell-cost]")?.textContent).toContain("$0.01")
     expect(c.querySelector("[data-cell-engine]")?.textContent).toContain(
       "live · "

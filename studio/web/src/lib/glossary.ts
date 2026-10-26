@@ -162,12 +162,13 @@ export const SCOPE: Term = {
 export const FLOW: Term = {
   term: "flow",
   short:
-    "flow — a group of conversations this page declared (the scope's ;flow=)",
+    "flow — the run's weft.flow: the scope's flow=, stamped on each run; it filters lists",
   long: [
-    "A named group of conversations a page declares in its scope (;flow=).",
+    "A flow is run metadata (weft.flow): scope.Header stamps the scope's flow= on every run",
+    "its handler starts (scope.WithFlow in code). Studio's lists and the panel filter by it.",
     "The step pills above Studio's waterfall are the step strip, not a flow.",
   ].join("\n"),
-  docs: PANEL,
+  docs: `${RC}#2-the-identity-chain`,
   aliases: ["flow strip"],
   group: "work",
 }
@@ -264,7 +265,7 @@ export const EXPERIMENT: Term = {
     "or a single replay saved from the drawer. /experiments lists them.",
   ].join("\n"),
   docs: PG,
-  aliases: [],
+  aliases: ["✎ Experiment", "Run experiment ▶"],
   group: "replay",
 }
 
@@ -277,7 +278,7 @@ export const FORK: Term = {
     '(weft.session.forked_from = <session>#<entry>). Its rows say "fork of s_…#12".',
   ].join("\n"),
   docs: `${RC}#thread--the-sessions-state-log`,
-  aliases: [],
+  aliases: ["experiments forked from", "· fork"],
   group: "replay",
 }
 
@@ -364,7 +365,21 @@ export const PARKED: Term = {
     'Approve or deny on its page; a resume turn continues it ("parked → t4").',
   ].join("\n"),
   docs: `${THREAD}#11-approvals-operations`,
-  aliases: ["awaiting decision", "pending approval"],
+  aliases: ["pending approval"],
+  group: "state",
+}
+
+export const APPROVE: Term = {
+  term: "approve",
+  short:
+    "approve — let a parked tool call run; deny refuses it; resolve… answers it yourself",
+  long: [
+    "A parked call waits for a decision: approve runs it, deny refuses it with a reason,",
+    'resolve… supplies its result. The outcome reads "approved by <who> · resumed as t2"',
+    'or "denied: <reason>"; weft.Approve and weft.Deny are the API\'s words.',
+  ].join("\n"),
+  docs: `${THREAD}#11-approvals-operations`,
+  aliases: ["continue", "skip"],
   group: "state",
 }
 
@@ -459,6 +474,19 @@ export const TRACE: Term = {
   group: "machinery",
 }
 
+export const SPAN: Term = {
+  term: "span",
+  short:
+    "span — one timed operation of a trace: invoke_agent, chat or execute_tool",
+  long: [
+    "A span is one timed operation OpenTelemetry records: the run (invoke_agent),",
+    "a model call (chat), a tool call (execute_tool). The waterfall draws them as bars.",
+  ].join("\n"),
+  docs: `${RC}#3-spans`,
+  aliases: [],
+  group: "machinery",
+}
+
 export const TOKENS: Term = {
   term: "tokens",
   short: 'tokens — what the model read and wrote: "60 in · 30 out"',
@@ -510,6 +538,7 @@ export const TERMS = {
   failed: FAILED,
   interrupted: INTERRUPTED,
   parked: PARKED,
+  approve: APPROVE,
   gap: GAP,
   derived: DERIVED,
   compacted: COMPACTED,
@@ -517,6 +546,7 @@ export const TERMS = {
   appOwned: APP_OWNED,
   waterfall: WATERFALL,
   trace: TRACE,
+  span: SPAN,
   tokens: TOKENS,
   firstToken: FIRST_TOKEN,
 } as const satisfies Record<string, Term>

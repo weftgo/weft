@@ -11,7 +11,7 @@
 // narrow window folds the quieter columns (COL). The running dot pulses once per 2 s (reduced motion stops
 // it, styles.css).
 import { Check, Copy } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 
@@ -453,27 +453,29 @@ function LineageChips({
   run: Pick<RunRow, "forked_from" | "experiment_id" | "meta">
   runs: readonly RunRow[]
 }) {
-  const chips = lineageOf(run, runs).filter((l) => l.kind !== "experiment")
+  const chips = lineageOf(run, runs)
   if (!chips.length) return null
   return (
     <div className="truncate font-mono text-[11px] text-faint" data-replay-chip>
-      {chips.map((l) =>
-        l.src !== undefined ? (
-          <Link
-            key={l.kind}
-            {...runLink(l.src, { step: l.step })}
-            className="text-muted-foreground hover:text-thread-ink hover:underline"
-            title={l.title}
-            data-lineage={l.kind}
-          >
-            {l.text}
-          </Link>
-        ) : (
-          <span key={l.kind} title={l.title} data-lineage={l.kind}>
-            {l.text}{" "}
-          </span>
-        )
-      )}
+      {chips.map((l, i) => (
+        <Fragment key={l.kind}>
+          {i ? " " : null}
+          {l.src !== undefined ? (
+            <Link
+              {...runLink(l.src, { step: l.step })}
+              className="text-muted-foreground hover:text-thread-ink hover:underline"
+              title={l.title}
+              data-lineage={l.kind}
+            >
+              {l.text}
+            </Link>
+          ) : (
+            <span title={l.title} data-lineage={l.kind}>
+              {l.text}
+            </span>
+          )}
+        </Fragment>
+      ))}
     </div>
   )
 }

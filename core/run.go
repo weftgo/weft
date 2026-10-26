@@ -55,10 +55,14 @@ type runConfig struct {
 	// Parallelism): a *Set flag per knob, the Thinking shape. execute
 	// validates the lower-only rules (a raise is ErrInvalidRunOption,
 	// before any model call) and resolves the effective values.
-	system         string
-	systemSet      bool
-	maxSteps       int
-	maxStepsSet    bool
+	system      string
+	systemSet   bool
+	maxSteps    int
+	maxStepsSet bool
+	// keptSteps is KeptSteps: how many of the turn's steps the input
+	// already ends with (a replay's kept prefix) — counted toward the
+	// turn's guards, never re-run.
+	keptSteps      int
 	parallelism    int
 	parallelismSet bool
 	// onlyTools narrows the run to the named tools among the agent's
@@ -212,6 +216,31 @@ func (o runIDOption) applyRun(c *runConfig) { c.id = string(o) }
 // replays, idempotent retries, and correlating with an outer system's own
 // ids. Empty values are ignored.
 func RunID(id string) RunOption { return runIDOption(id) }
+
+type keptStepsOption int
+
+func (o keptStepsOption) applyRun(c *runConfig) {
+	if o > 0 {
+		c.keptSteps = int(o)
+	}
+}
+
+// KeptSteps says the run continues a turn whose first n steps its
+// input already holds: the run's Messages end with those steps (each
+// one assistant message and its tool results), kept from an earlier
+// run of the same turn — a replay from step n (weft/runtime's
+// from_step) is fed the source's steps 0..n-1 that way. The kept steps
+// count toward the turn's guards as if this run had made them:
+// MaxSteps budgets the whole turn (this run makes at most MaxSteps − n
+// model calls, none when n reaches it), and DetectLoops' streak starts
+// from the kept steps' tool calls, so an unchanged replay stops where
+// the turn it continues stopped. The usage limit and MaxModelRetries
+// count this run's own spend and retries only (the kept steps' usage is
+// not in the input), and StopWhen conditions see this run's own
+// StepRecords. The run's own steps are still indexed from 0 —
+// StepStart, StepRecord and RunError name them, not the turn's
+// ordinals. n ≤ 0 is ignored.
+func KeptSteps(n int) RunOption { return keptStepsOption(n) }
 
 type onlyToolsOption struct{ names []string }
 

@@ -156,8 +156,13 @@ func checkScripted(in scriptedInputs) ([]scriptedStep, scriptedMatch) {
 // recorded step called tools and the source ended there for a reason
 // the replay does not repeat (a failure, a cancel, a retry or usage
 // limit — weft.run.stopped_by "", canceled, model_retries_exceeded,
-// usage_limit), not at a boundary it does (parked, max_steps, a
-// StopWhen condition), and the replay's max_steps leaves it a step.
+// usage_limit), not at a boundary it does (parked, max_steps,
+// loop_detected, a StopWhen condition), and the replay's max_steps
+// leaves it a step. max_steps and loop_detected repeat from any
+// from_step because the runtime runs the replay with core.KeptSteps:
+// the kept steps count toward the turn's step budget and loop streak,
+// so count against max_steps is the turn's count, as here. A scripted
+// replay reports no usage, so a usage limit never trips again.
 func (in scriptedInputs) asksPastEnd(count int) bool {
 	if count == 0 || in.pending > 0 {
 		return false

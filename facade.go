@@ -1335,6 +1335,23 @@ func ResumeOf(runID string) RunOption { return core.ResumeOf(runID) }
 // ids. Empty values are ignored.
 func RunID(id string) RunOption { return core.RunID(id) }
 
+// KeptSteps says the run continues a turn whose first n steps its
+// input already holds: the run's Messages end with those steps (each
+// one assistant message and its tool results), kept from an earlier
+// run of the same turn — a replay from step n (weft/runtime's
+// from_step) is fed the source's steps 0..n-1 that way. The kept steps
+// count toward the turn's guards as if this run had made them:
+// MaxSteps budgets the whole turn (this run makes at most MaxSteps − n
+// model calls, none when n reaches it), and DetectLoops' streak starts
+// from the kept steps' tool calls, so an unchanged replay stops where
+// the turn it continues stopped. The usage limit and MaxModelRetries
+// count this run's own spend and retries only (the kept steps' usage is
+// not in the input), and StopWhen conditions see this run's own
+// StepRecords. The run's own steps are still indexed from 0 —
+// StepStart, StepRecord and RunError name them, not the turn's
+// ordinals. n ≤ 0 is ignored.
+func KeptSteps(n int) RunOption { return core.KeptSteps(n) }
+
 // OnlyTools narrows this run to the named tools among the agent's
 // registered ones — the ToolSource snapshot when one exists, fetched
 // fresh per step as ever. Narrowing only: the playground cannot add a

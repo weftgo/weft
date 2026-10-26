@@ -635,20 +635,16 @@ func (l *link) steering(runID string) (core.RunOption, func()) {
 	}
 }
 
-// chainStepBound is the substitute chain's step budget when the agent's
-// manifest names none.
-const chainStepBound = 64
-
-// stepLimit is the step budget a command's whole substitute chain may
-// spend: the command's own max_steps, else the agent's cap.
-func (l *link) stepLimit(cmd command) int {
-	if n := int(cmd.Overrides.Options["max_steps"]); n > 0 {
-		return n
+// keptSteps is how many of the source turn's steps a command's run is
+// fed as its kept prefix (from_step on an ephemeral replay; 0 for a
+// fresh input or a fork): core.KeptSteps counts them toward the turn's
+// guards, so an unchanged replay from step n stops where the source
+// stopped (its MaxSteps, its DetectLoops streak).
+func keptSteps(cmd command) int {
+	if cmd.src == nil || cmd.Thread == "fork" || cmd.Source == nil || cmd.Source.FromStep <= 0 {
+		return 0
 	}
-	if e, ok := l.reg.entry(cmd.Agent); ok && e.Limits.MaxSteps > 0 {
-		return e.Limits.MaxSteps
-	}
-	return chainStepBound
+	return cmd.Source.FromStep
 }
 
 // execute runs the command as one ephemeral run of its agent and
@@ -672,6 +668,9 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 
 	res, err := agent.Generate(ctx, append(l.runOptions(cmd, runID), steer)...)
 	spent := usageOf(res, err)
+	// base is the source ordinal of the current leg's step 0: the
+	// failure text names the source's ordinals (outcome).
+	base := keptSteps(cmd)
 
 	// Substitute (§6 rule 3, the default mode): a parked side-effect
 	// call that matches a recorded call of the source (same tool, same
@@ -692,7 +691,7 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 			kept = cmd.kept
 		}
 		records := recordedCalls(cmd.src.steps[cut:], kept)
-		steps, limit := numSteps(res), l.stepLimit(cmd)
+		steps := numSteps(res)
 		breaks := map[string]bool{}
 		for _, t := range l.breakpointTools(cmd.Agent) {
 			breaks[t] = true
@@ -728,16 +727,15 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 			if !all {
 				break // a real miss: parked for a human decision
 			}
-			if steps >= limit {
-				// Every leg is a fresh run with a fresh MaxSteps: a model
-				// that calls a substituted tool at every step would chain
-				// forever. The chain as a whole gets the agent's budget.
-				err = fmt.Errorf("the substitute chain spent %d steps, the agent's budget is %d", steps, limit)
-				break
-			}
+			// Every leg continues the same turn: the kept steps and the
+			// legs before it count toward its guards (core.KeptSteps), so
+			// the chain as a whole gets the turn's MaxSteps — a model that
+			// calls a substituted tool at every step ends max_steps, as
+			// the source would have — and its loop streak runs across legs.
+			base = keptSteps(cmd) + steps
 			runID = newID("pg_")
 			opts := l.overrideOptions(cmd)
-			opts = append(opts, core.Messages(res.Messages...))
+			opts = append(opts, core.Messages(res.Messages...), core.KeptSteps(base))
 			opts = append(opts, resolves...)
 			opts = append(opts, steer, core.RunID(runID))
 			res, err = agent.Generate(ctx, opts...)
@@ -745,7 +743,7 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 			steps += numSteps(res)
 		}
 	}
-	status, errText = l.outcome(cmd, runID, res, err, spent, nil)
+	status, errText = l.outcome(cmd, runID, res, err, spent, nil, base)
 	return status, runID, errText
 }
 
@@ -880,7 +878,7 @@ func (l *link) awaitTurn(ackID string, cmd command, s *thread.Session, turn *thr
 	}()
 	res, err := turn.Wait()
 	runID = turn.RunID() // a turn re-run after an overflow reports the re-run's id
-	status, errText = l.outcome(cmd, runID, res, err, usageOf(res, err), s)
+	status, errText = l.outcome(cmd, runID, res, err, usageOf(res, err), s, 0)
 	return status, runID, errText
 }
 
@@ -1087,11 +1085,19 @@ func (l *link) scriptedFor(cmd command) core.Model {
 // text, the budget tally, and — when the run parked — the parkedRun a
 // decision resumes. spent is everything the command's runs used (every
 // leg of a chain, a failed run's partial usage); sess is the fork's
-// session when the run was a turn of one.
-func (l *link) outcome(cmd command, runID string, res *core.RunResult, err error, spent core.Usage, sess *thread.Session) (status, errText string) {
+// session when the run was a turn of one. base is the source ordinal
+// of the run's step 0 (a replay's kept steps, the chain's earlier legs):
+// the failure text names the step in the source's ordinals, as the
+// scripted miss and the step compare do — one numbering for the
+// replay's outcome, said in the text.
+func (l *link) outcome(cmd command, runID string, res *core.RunResult, err error, spent core.Usage, sess *thread.Session, base int) (status, errText string) {
 	status = "succeeded"
 	if err != nil {
 		status, errText = "failed", err.Error()
+		var re *core.RunError
+		if base > 0 && errors.As(err, &re) {
+			errText = fmt.Sprintf("weft: run failed at step %d (the source's step ordinal; this run's step %d): %v", base+re.Step, re.Step, re.Err)
+		}
 		slog.Warn("weft/runtime: playground run failed",
 			"command_id", cmd.CommandID, "run_id", runID, "err", err)
 		var miss *scriptedMiss
@@ -1322,7 +1328,7 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, parkedRunID, runID, co
 	defer release()
 	opts = append(opts, steer, core.RunID(runID))
 	res, err := agent.Generate(ctx, opts...)
-	status, errText = l.outcome(pr.cmd, runID, res, err, usageOf(res, err), nil)
+	status, errText = l.outcome(pr.cmd, runID, res, err, usageOf(res, err), nil, 0)
 	return status, runID, errText
 }
 
@@ -1344,6 +1350,9 @@ func (l *link) runOptions(cmd command, runID string) []core.RunOption {
 	opts := l.overrideOptions(cmd)
 	if len(cmd.prefix) > 0 {
 		opts = append(opts, core.Messages(cmd.prefix...))
+	}
+	if n := keptSteps(cmd); n > 0 {
+		opts = append(opts, core.KeptSteps(n))
 	}
 	if cmd.Input != nil && *cmd.Input != "" {
 		opts = append(opts, core.Prompt(*cmd.Input))

@@ -438,6 +438,17 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	}
 
 	state := &loopState{retries: map[string]int{}}
+	// A run that continues a turn (KeptSteps) spends what is left of the
+	// turn's step budget, and its loop streak starts from the kept
+	// steps' tool calls: an unchanged replay reaches the turn's stop.
+	if k := cfg.keptSteps; k > 0 {
+		maxSteps = max(maxSteps-k, 0)
+		if a.detectLoops > 0 {
+			for _, calls := range keptCalls(cfg.messages, k) {
+				state.advance(stepSignature(calls))
+			}
+		}
+	}
 	for step := 0; step < maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
 			return fail(step, err)
@@ -826,7 +837,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// Cancellation during the last allowed step's tools is reported as
 	// cancellation, not as step exhaustion: the cause wins over the budget.
 	if err := ctx.Err(); err != nil {
-		return fail(maxSteps-1, err)
+		return fail(max(maxSteps-1, 0), err)
 	}
 	// The model still wanted tools after its last allowed step. The
 	// transcript, including the final step's tool results, rides on the
@@ -1088,18 +1099,43 @@ func (a *Agent) guard(res *RunResult, rec *StepRecord, st *loopState) error {
 		}
 	}
 	if a.detectLoops > 0 {
-		sig := stepSignature(rec.ToolCalls)
-		if sig == st.lastSig && st.streak > 0 {
-			st.streak++
-		} else {
-			st.streak = 1
-		}
-		st.lastSig = sig
+		st.advance(stepSignature(rec.ToolCalls))
 		if st.streak >= a.detectLoops {
 			return fmt.Errorf("%w: %d identical steps in a row", ErrLoopDetected, st.streak)
 		}
 	}
 	return nil
+}
+
+// advance moves the loop detector past one step with signature sig.
+func (st *loopState) advance(sig uint64) {
+	if sig == st.lastSig && st.streak > 0 {
+		st.streak++
+	} else {
+		st.streak = 1
+	}
+	st.lastSig = sig
+}
+
+// keptCalls is the tool calls of the last n assistant messages of msgs,
+// oldest first — the kept steps KeptSteps names (one assistant message
+// per step). Fewer when msgs holds fewer.
+func keptCalls(msgs []Message, n int) [][]ToolCallPart {
+	var out [][]ToolCallPart
+	for i := len(msgs) - 1; i >= 0 && len(out) < n; i-- {
+		if msgs[i].Role != RoleAssistant {
+			continue
+		}
+		var calls []ToolCallPart
+		for _, p := range msgs[i].Content {
+			if c, ok := p.(ToolCallPart); ok {
+				calls = append(calls, c)
+			}
+		}
+		out = append(out, calls)
+	}
+	slices.Reverse(out)
+	return out
 }
 
 // stepSignature hashes a step's tool calls — name and raw argument

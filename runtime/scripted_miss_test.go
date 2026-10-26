@@ -168,7 +168,7 @@ func TestFinishedAckCarriesTheTypedMiss(t *testing.T) {
 		id  string
 		err error
 	}{{"cmd_miss", miss}, {"cmd_plain", errors.New("boom")}} {
-		status, errText := l.outcome(command{CommandID: c.id}, "pg_"+c.id, nil, c.err, core.Usage{}, nil)
+		status, errText := l.outcome(command{CommandID: c.id}, "pg_"+c.id, nil, c.err, core.Usage{}, nil, 0)
 		l.postAck(ack{CommandID: c.id, State: "finished", RunID: "pg_" + c.id, Status: status, Error: errText})
 	}
 	got := f.ackOf(t, "cmd_miss", "finished")

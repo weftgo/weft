@@ -23,6 +23,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "../lib/api"
 import { queryClient } from "../lib/query"
 import { ROLE } from "../lib/palette"
+import { BILL_TITLE, costLine } from "../lib/cost"
+import { TERMS } from "../lib/glossary"
+import { keyText, PANEL_KEYMAP, STUDIO_KEYMAP, VIEW_KEYS } from "../lib/keys"
+import { rowView } from "../lib/run-row"
+import { tokenPair } from "../lib/format"
+import { timingLine } from "../lib/attempts"
+import { KbdHelpBody } from "../components/studio/kbd-help"
+import { RunCost } from "../components/studio/cost"
 import { AWAITING, STATUS, statusOf } from "../lib/status"
 import { statusClass } from "../lib/status-class"
 import { PANEL_CSS } from "./styles"
@@ -126,7 +134,7 @@ import { choose } from "../test/select"
 import type { ReplayDraft } from "../lib/replay"
 import { DRAWER_ORDER } from "../lib/drawer-spec"
 import { RUNS_IN } from "../lib/runs-in"
-import { playgroundLink } from "../lib/links"
+import { playgroundLink, VIEWS } from "../lib/links"
 import {
   DERIVED,
   STOCK as DERIVED_STOCK,
@@ -1692,7 +1700,7 @@ describe("a derived run on both surfaces (I1.3)", () => {
     // The header's total leaves the unknown turn out (Studio's session
     // and list totals read the row the same way: "—", the API's reason).
     const stats = $(el, "[data-weft-stats]")!
-    expect(stats.textContent).toBe("1 run · — tok")
+    expect(stats.textContent).toBe("1 run · —")
     expect(stats.getAttribute("title")).toContain(reason)
     el.remove()
     await settle()
@@ -3078,9 +3086,7 @@ describe("a replayed run's cost on both surfaces (A5.3)", () => {
       const studio = read(document.querySelector("[data-result-cost]"))
       expect(panel.text).toBe(text)
       expect(panel).toEqual(studio)
-      expect(panel.wrapper).toBe(
-        "the run's whole bill: its own model calls + its subagents'"
-      )
+      expect(panel.wrapper).toBe(BILL_TITLE)
     })
 })
 
@@ -3568,7 +3574,7 @@ describe("a resume and an experiment on both surfaces (U6-fix)", () => {
       "s_01-t4": `● succeeded t4 ${RESUME} · 1 step · 811ms`,
       // t4 resumed t3 (U1): its word is the decided park's.
       "s_01-t3": `● parked → t4 t3 ${PROMPT} · 1 step · 1.0s`,
-      pg_x1: "↳ replay of t3 · scripted · ● failed · 1 step · 2.5s",
+      pg_x1: "↻ replay of t3 · step 0 · scripted · ● failed · 1 step · 2.5s",
     })
     const rows = Object.fromEntries(
       all(el, ".weft-turn").map((r) => [
@@ -4130,25 +4136,25 @@ describe("the run tree on both surfaces (U8.3)", () => {
       timeout: 5_000,
     })
     click(all(el, ".weft-turn")[0])
-    await vi.waitFor(() => expect($(el, "#weft-tab-timeline")).toBeTruthy(), {
+    await vi.waitFor(() => expect($(el, "#weft-tab-waterfall")).toBeTruthy(), {
       timeout: 5_000,
     })
-    click($(el, "#weft-tab-timeline"))
+    click($(el, "#weft-tab-waterfall"))
     await vi.waitFor(
       () =>
         expect(
-          $(el, `#weft-tp-timeline [data-key="${CSS.escape(`tl:r:${OPS}`)}"]`)
+          $(el, `#weft-tp-waterfall [data-key="${CSS.escape(`tl:r:${OPS}`)}"]`)
         ).toBeTruthy(),
       { timeout: 5_000 }
     )
-    const panel = (all(el, "#weft-tp-timeline .weft-tl") as HTMLElement[]).map(
+    const panel = (all(el, "#weft-tp-waterfall .weft-tl") as HTMLElement[]).map(
       (n) => [
         n.dataset.key!.slice(3), // tl:<row key>
         n.querySelector(".weft-wf-name")!.getAttribute("title"),
         ...kinds(n),
       ]
     )
-    const handoff = $(el, `#weft-tp-timeline [data-weft-handoff]`)!
+    const handoff = $(el, `#weft-tp-waterfall [data-weft-handoff]`)!
     el.remove()
     await settle()
     cleanup()
@@ -4269,11 +4275,11 @@ describe("the child row's label on both surfaces, whatever spans each read (U8.3
       timeout: 5_000,
     })
     click(all(el, ".weft-turn")[0])
-    await vi.waitFor(() => expect($(el, "#weft-tab-timeline")).toBeTruthy(), {
+    await vi.waitFor(() => expect($(el, "#weft-tab-waterfall")).toBeTruthy(), {
       timeout: 5_000,
     })
-    click($(el, "#weft-tab-timeline"))
-    const at = `#weft-tp-timeline [data-key="${CSS.escape(`tl:r:${OPS}`)}"]`
+    click($(el, "#weft-tab-waterfall"))
+    const at = `#weft-tp-waterfall [data-key="${CSS.escape(`tl:r:${OPS}`)}"]`
     await vi.waitFor(() => expect($(el, at)).toBeTruthy(), { timeout: 5_000 })
     const panel = $(el, `${at} .weft-tl-l`)!.textContent
     el.remove()
@@ -5236,5 +5242,265 @@ describe("the engine per command on both drawers (U17)", () => {
     })
     expect(r.build).toBeNull()
     expect(r.held).toBe(false)
+  })
+})
+
+// The shared libs (U21.1, UX-F-01): every word a run row reads — the
+// status word and hint, the keys, the view names, the row's fields and
+// lineage, the formats — is computed once in lib and drawn by both
+// renderers; each contract is one named test below.
+describe("the shared libs on both surfaces (U21.1)", () => {
+  const turn = (n: number, o: Partial<RunRow>) =>
+    runRow({
+      id: `s_01-t${n}`,
+      turn: n,
+      started: AT(n * 10_000),
+      finished: AT(n * 10_000 + 811),
+      last_seen: AT(n * 10_000 + 811),
+      ...o,
+    })
+  /** The panel, session-scoped, over these rows (pricing on). */
+  const panelOver = async (rows: RunRow[], caps: string[] = ["ingest"]) => {
+    const fake = new FakeStudio()
+      .on("GET meta", { ...META, capabilities: caps })
+      .on("GET sessions", { total: 1, sessions: [SESSION], next_before: null })
+      .on("GET runs", { total: rows.length, runs: rows, next_before: null })
+    for (const r of rows)
+      fake
+        .on(`GET runs/${r.id}`, { ...r, children: [], holes: [] })
+        .on(`GET runs/${r.id}/events`, pagedEvents(events(), { done: true }))
+        .on(
+          `GET runs/${r.id}/transcript`,
+          transcript([user("where is 42?")], [assistant("It shipped.")])
+        )
+        .on(`GET runs/${r.id}/spans`, { spans: [] })
+        .on(`GET runs/${r.id}/requests`, pagedRequests(OK_REQUESTS()))
+        .on(`GET runs/${r.id}/tools`, golden<object>("tools-ok"))
+    fake.install()
+    return mount(ATTRS)
+  }
+  const done = async (el: WeftDevtools) => {
+    el.remove()
+    await settle()
+    cleanup()
+  }
+
+  it("status words: STATUS's word, hint and role on the panel's turn chip and Studio's runs list", async () => {
+    // The hints are the glossary's tooltips (lib/glossary.ts).
+    expect(TERMS.running.short).toBe(`running — ${STATUS.running.hint}`)
+    const rows = [
+      turn(4, { status: "running", finished: null }),
+      turn(3, {}),
+      turn(2, { status: "failed", err: "boom" }),
+      turn(1, { status: "interrupted", finished: null }),
+    ]
+    const el = await panelOver(rows)
+    await vi.waitFor(() => expect(all(el, ".weft-turn")).toHaveLength(4), {
+      timeout: 5_000,
+    })
+    const panel = all(el, ".weft-turn").map((r) => {
+      const c = r.querySelector(".weft-row1 > .weft-chip")!
+      return [c.textContent, c.getAttribute("title")]
+    })
+    await done(el)
+    const { container } = await renderWithRouter(
+      createElement(RunsTable, { runs: rows })
+    )
+    const studio = [...container.querySelectorAll("[data-status]")].map((c) => [
+      c.textContent,
+      c.getAttribute("title"),
+    ])
+    const want = rows.map((r) => {
+      const s = statusOf(r, rows)
+      return [s.word, s.hint]
+    })
+    expect(panel).toEqual(want)
+    expect(studio).toEqual(want)
+    expect(want.map(([w]) => w)).toEqual([
+      "running",
+      "succeeded",
+      "failed",
+      "interrupted",
+    ])
+  })
+
+  it("keys: one KEYMAP, both help overlays draw it, a key both bind means one thing", async () => {
+    // A key on both surfaces is one binding: the same action.
+    const panelKeys = new Map(PANEL_KEYMAP.map((b) => [keyText(b), b.action]))
+    const studioKeys = new Map(STUDIO_KEYMAP.map((b) => [keyText(b), b.action]))
+    const shared = [...panelKeys.keys()].filter((k) => studioKeys.has(k))
+    expect(shared.sort()).toEqual(
+      ["/", "?", "[ / ]", "j / k", "o", "s / w / q / r"].sort()
+    )
+    for (const k of shared) expect(panelKeys.get(k), k).toBe(studioKeys.get(k))
+    // The panel's ? list draws PANEL_KEYMAP.
+    const el = await panelOver([turn(1, {})])
+    await vi.waitFor(() => expect(all(el, ".weft-turn")).toHaveLength(1), {
+      timeout: 5_000,
+    })
+    const dock = $(el, ".weft-dock") as HTMLElement
+    dock.focus()
+    dock.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "?",
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+      })
+    )
+    await settle()
+    expect(all(el, ".weft-keys dt").map((n) => n.textContent)).toEqual(
+      PANEL_KEYMAP.map(keyText)
+    )
+    expect(all(el, ".weft-keys dd").map((n) => n.textContent)).toEqual(
+      PANEL_KEYMAP.map((b) => b.action)
+    )
+    await done(el)
+    // Studio's ? dialog draws STUDIO_KEYMAP.
+    const { container } = await renderWithRouter(createElement(KbdHelpBody))
+    expect(
+      [...container.querySelectorAll("[data-keys]")].map((r) =>
+        r.getAttribute("data-keys")
+      )
+    ).toEqual(STUDIO_KEYMAP.map((b) => b.keys.join(" ")))
+    for (const b of STUDIO_KEYMAP)
+      expect(container.textContent).toContain(b.action)
+    // The view keys open lib/links.ts's VIEWS on both.
+    for (const v of Object.values(VIEW_KEYS)) expect(VIEWS[v!]).toBe(v)
+  })
+
+  it("views: the panel's tabs and Studio's view tabs say lib/links.ts's VIEWS", async () => {
+    const el = await panelOver([turn(1, {})])
+    await vi.waitFor(() => expect(all(el, "[role=tab]")).toHaveLength(4), {
+      timeout: 5_000,
+    })
+    const panel = all(el, "[role=tab]").map((t) => t.textContent)
+    expect(panel).toEqual([
+      VIEWS.story,
+      VIEWS.request,
+      VIEWS.waterfall,
+      VIEWS.raw,
+    ])
+    await done(el)
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serve({ doc: {}, events: events() }, true)
+    renderApp(`/runs/${RUN}`)
+    const tabs = await waitFor(() => {
+      const t = [...document.querySelectorAll("[role=tab]")]
+      expect(t.length).toBeGreaterThanOrEqual(3)
+      return t
+    })
+    const studio = tabs.map((t) => t.textContent)
+    expect(studio.slice(0, 3)).toEqual([
+      VIEWS.waterfall,
+      VIEWS.story,
+      VIEWS.raw,
+    ])
+    // Every label both draw is VIEWS's; "trace" is the /traces page's.
+    for (const w of [...panel, ...studio]) expect(w).not.toBe("trace")
+  })
+
+  it("row fields: rowView's tokens and lineage on the panel's turn row and Studio's runs list", async () => {
+    const t3 = turn(3, { usage: { input_tokens: 1234, output_tokens: 56 } })
+    const x1 = runRow({
+      id: "pg_x1",
+      playground: true,
+      session_id: "",
+      turn: 0,
+      forked_from: "s_01-t3#1",
+      experiment_id: "exp_1",
+      started: AT(60_000),
+      finished: AT(60_811),
+      last_seen: AT(60_811),
+    })
+    const view3 = rowView(t3, [t3, x1])
+    const viewX = rowView(x1, [t3, x1])
+    expect(view3).toMatchObject({
+      turn: "t3",
+      steps: "1 step",
+      tokens: "1.2k in · 56 out",
+      took: "811ms",
+      lineage: [],
+    })
+    expect(viewX.lineage.map((l) => l.text)).toEqual([
+      "↻ replay of t3 · step 1",
+    ])
+    const el = await panelOver([x1, t3])
+    await vi.waitFor(
+      () =>
+        expect(
+          all(el, ".weft-turn-pick option, .weft-turn").length
+        ).toBeGreaterThan(0),
+      {
+        timeout: 5_000,
+      }
+    )
+    await vi.waitFor(() =>
+      expect($(el, '[data-weft-run="s_01-t3"] .weft-row2')).toBeTruthy()
+    )
+    const row2 = $(el, '[data-weft-run="s_01-t3"] .weft-row2')!
+    expect([...row2.children].map((c) => c.textContent)).toEqual(
+      expect.arrayContaining([view3.steps, view3.tokens, view3.took])
+    )
+    // The replay's lineage chip: on its row, else in the picker.
+    const chip =
+      $(el, '[data-weft-run="pg_x1"] [data-weft-chip="experiment"]')
+        ?.textContent ??
+      all(el, ".weft-turn-pick option").find(
+        (o) => o.getAttribute("value") === "pg_x1"
+      )?.textContent
+    expect(chip).toContain(viewX.lineage[0].text)
+    await done(el)
+    const { container } = await renderWithRouter(
+      createElement(RunsTable, { runs: [x1, t3] })
+    )
+    const tr = (id: string) =>
+      [...container.querySelectorAll("tr")].find((r) =>
+        r.textContent.includes(id)
+      )!
+    expect(tr("pg_x1").querySelector("[data-replay-chip]")!.textContent).toBe(
+      viewX.lineage[0].text
+    )
+    expect(tr("s_01-t3").textContent).toContain(view3.tokens)
+  })
+
+  it("formats: tokens, first token and own · delegated alike on both surfaces", async () => {
+    expect(tokenPair(60, 30)).toBe("60 in · 30 out")
+    expect(tokenPair(12_400, 3_100, true)).toBe("12,400 in · 3,100 out")
+    expect(timingLine(1, 1)).toBe("1 ms · first token 1 ms")
+    expect(costLine("$0.0012", "$0.0040")).toBe(
+      "$0.0012 own · $0.0040 delegated"
+    )
+    const r = turn(1, {
+      cost_usd: 0.0012,
+      cost_known: true,
+      delegated_cost_usd: 0.004,
+      delegated_cost_known: true,
+    })
+    const el = await panelOver([r], ["ingest", "pricing"])
+    const panel = await vi.waitFor(
+      () => {
+        const n = $(el, "[data-weft-turn-cost]")
+        expect(n).toBeTruthy()
+        return n!.textContent
+      },
+      { timeout: 5_000 }
+    )
+    await done(el)
+    const { container } = await renderWithRouter(
+      createElement(RunCost, { run: r, hasChildren: true })
+    )
+    const studio = [...container.querySelector("[data-run-cost]")!.children]
+      .map((c) => c.textContent)
+      .join(" ")
+      .replace(/ · /g, "·")
+      .replace(/·/g, " · ")
+    expect(panel).toBe(costLine("$0.0012", "$0.0040"))
+    expect(studio).toBe(panel)
   })
 })

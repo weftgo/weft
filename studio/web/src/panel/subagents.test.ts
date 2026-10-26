@@ -157,7 +157,7 @@ describe("the panel's subagent badge (A10)", () => {
     const closed = $(el, `[data-weft-child="${CHILD}"]`)!
     // The nested row, before it is opened: agent, status, usage.
     expect(closed.querySelector("summary")?.textContent).toBe(
-      "subagent researcher · succeeded · 10→5 tok"
+      "subagent researcher · succeeded · 10 in · 5 out"
     )
     expect(closed.querySelector("summary")?.getAttribute("aria-expanded")).toBe(
       "false"
@@ -329,7 +329,7 @@ describe("the panel's subagent badge (A10)", () => {
     block = $(el, `[data-weft-child="${CHILD}"]`)!
     expect(block.getAttribute("open")).toBe("")
     expect(block.querySelector("summary")?.textContent).toBe(
-      "subagent researcher · succeeded · 10→5 tok"
+      "subagent researcher · succeeded · 10 in · 5 out"
     )
     expect(
       block.querySelector('[data-weft-request="0"]')?.textContent
@@ -366,7 +366,7 @@ describe("a delegated session in the panel's story (U14)", () => {
     const row = $(el, `[data-weft-child="${CSS.escape(`${POOL}-t1`)}"]`)!
     expect(row).toBeTruthy()
     expect(row.querySelector("summary")?.textContent).toBe(
-      "delegated session market-analyst · succeeded · 10→5 tok"
+      "delegated session market-analyst · succeeded · 10 in · 5 out"
     )
     const badge = $(
       el,

@@ -119,7 +119,7 @@ describe("a derived run's page (the Done line)", () => {
       .closest(".space-y-2\\.5")!.textContent
     expect(top).not.toMatch(/\b0 events\b/)
     expect(top).toContain("2 steps")
-    expect(top).toContain("1,717 in / 78 out")
+    expect(top).toContain("1,717 in · 78 out")
 
     // The story: the banner says why there is no transcript, and the fix.
     const note = document.querySelector<HTMLElement>(
@@ -134,8 +134,8 @@ describe("a derived run's page (the Done line)", () => {
     // Every step card: the one derived hole (the stock words), its
     // usage and price as served, its request and messages badged.
     const usage: Record<string, string> = {
-      "0": "812 in / 41 out",
-      "1": "905 in / 37 out",
+      "0": "812 in · 41 out",
+      "1": "905 in · 37 out",
     }
     for (const n of ["0", "1"]) {
       const card = document.querySelector<HTMLElement>(`[data-step="${n}"]`)!
@@ -241,18 +241,18 @@ describe("a derived run's page (the Done line)", () => {
     expect(card.querySelector("[data-cost]")!.getAttribute("data-cost")).toBe(
       "unknown"
     )
-    expect(card.textContent).not.toContain("0 in / 0 out")
+    expect(card.textContent).not.toContain("0 in · 0 out")
     // The header too: the run's own figure is "—" in the run's reason.
     const runReason = (derivedBodies.runNoUsage as { cost_reason: string })
       .cost_reason
     expect(runReason).toMatch(/report no \(or zero\) usage/)
-    expect(document.body.textContent).not.toContain("0 in / 0 out")
+    expect(document.body.textContent).not.toContain("0 in · 0 out")
     const head = document.querySelector<HTMLElement>("[data-header-usage]")!
     expect(head.getAttribute("data-header-usage")).toBe("unknown")
     expect(
       head.querySelector("[data-usage='unknown']")!.getAttribute("title")
     ).toBe(runReason)
-    expect(head.textContent).not.toContain("0 in / 0 out")
+    expect(head.textContent).not.toContain("0 in · 0 out")
 
     renderApp("/runs")
     await waitFor(() =>

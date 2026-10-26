@@ -94,6 +94,6 @@ describe("formatting edges", () => {
       usageSummary(
         {} as unknown as { input_tokens: number; output_tokens: number }
       )
-    ).toBe("0 in / 0 out")
+    ).toBe("0 in · 0 out")
   })
 })

@@ -259,9 +259,8 @@ describe("the footer's content line (said on evidence only)", () => {
 
 describe("the turn chips (the run row's attrs)", () => {
   it("scripted (its zero only when the row's usage is zero), fork of, experiment of — each titled with the attribute it reads", () => {
-    const label = (id: string) => (id === "s_01-t3" ? "t3" : id)
     const chips = (over: Parameters<typeof runRow>[0]) =>
-      turnChips(runRow(over), label).map((c) => [c.textContent, c.title])
+      turnChips(runRow(over), []).map((c) => [c.textContent, c.title])
     expect(chips({})).toEqual([])
     expect(SCRIPTED_MODEL).toEqual({
       provider: "weft/runtime",
@@ -279,14 +278,14 @@ describe("the turn chips (the run row's attrs)", () => {
       })[0][0]
     ).toBe("scripted")
     const fork = chips({ meta: { "weft.session.forked_from": "s_01#e_3" } })
-    expect(fork[0][0]).toBe("fork of s_01#e_3")
+    expect(fork[0][0]).toBe("⑃ fork of s_01#e_3")
     expect(fork[0][1]).toContain("weft.session.forked_from")
     const exp = chips({
       playground: true,
       forked_from: "s_01-t3#1",
       experiment_id: "exp_1",
     })
-    expect(exp[0][0]).toBe("replay of t3 · step 1")
+    expect(exp[0][0]).toBe("↻ replay of t3 · step 1")
     expect(exp[0][1]).toContain("weft.forked_from = s_01-t3#1")
     expect(exp[0][1]).toContain("weft.experiment.id exp_1")
     expect(chips({ playground: true, experiment_id: "exp_2" })[0]).toEqual([
@@ -299,13 +298,10 @@ describe("the turn chips (the run row's attrs)", () => {
   // the problems chip is named, and a decided park's stored pending
   // draws no ✋ (W7-prep).
   it("the problems chip: named, and no parked part on a decided park", () => {
-    const label = (id: string) => id
     const probs = (status: string) =>
-      turnChips(
-        runRow({ pending: 1, attempts_retried: 1 }),
-        label,
-        status
-      ).find((c) => c.getAttribute("data-weft-chip") === "problems")!
+      turnChips(runRow({ pending: 1, attempts_retried: 1 }), [], status).find(
+        (c) => c.getAttribute("data-weft-chip") === "problems"
+      )!
     const open = probs("parked")
     expect(open.textContent).toBe("↻1 ✋")
     expect(open.getAttribute("role")).toBe("img")
@@ -343,8 +339,8 @@ describe("the turn chips (the run row's attrs)", () => {
     await vi.waitFor(() => expect(all(el, "[data-weft-chip]").length).toBe(3))
     const of = (kind: string) => $(el, `[data-weft-chip="${kind}"]`)!
     expect(of("scripted").textContent).toBe("scripted · 0 tokens")
-    expect(of("experiment").textContent).toBe("replay of t3 · step 0")
-    expect(of("fork").textContent).toBe("fork of s_01#e_3")
+    expect(of("experiment").textContent).toBe("↻ replay of t3 · step 0")
+    expect(of("fork").textContent).toBe("⑃ fork of s_01#e_3")
     expect(of("experiment").closest('[data-key="pg_1"]')).toBeTruthy()
   })
 })

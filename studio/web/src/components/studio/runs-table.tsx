@@ -33,7 +33,7 @@ import {
   duration,
   elapsed,
   relativeTime,
-  tokens,
+  tokenPair,
   UNNAMED_AGENT,
   UNNAMED_AGENT_HINT,
 } from "@/lib/format"
@@ -53,7 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { forkSource } from "@/lib/experiments"
+import { lineageOf } from "@/lib/run-row"
 import { costView, delegatedView } from "@/lib/cost"
 import { CacheHint, CostText } from "@/components/studio/cost"
 import { DerivedChip } from "@/components/studio/hole-badge"
@@ -279,9 +279,9 @@ function TokensCell({ usage }: { usage: RunRow["usage"] }) {
   const cell = (
     <span
       className="font-mono tabular-nums"
-      title={`${usage.input_tokens.toLocaleString()} in / ${usage.output_tokens.toLocaleString()} out`}
+      title={tokenPair(usage.input_tokens, usage.output_tokens, true)}
     >
-      {tokens(usage.input_tokens)} / {tokens(usage.output_tokens)}
+      {tokenPair(usage.input_tokens, usage.output_tokens)}
     </span>
   )
   if (!splits) return cell
@@ -443,20 +443,37 @@ function SortHead({
   )
 }
 
-/** A replayed run's source step (plan F1): forked_from's run and
- * from_step — the step ordinal — linked literally. */
-function ReplayChip({ run }: { run: Pick<RunRow, "forked_from"> }) {
-  const src = forkSource(run)
-  if (!src) return null
+/** A run's lineage chips (plan F1, U21.1 UX-F-06): lib/run-row.ts's
+ * lineageOf — "↻ replay of t3 · step 1" linked to the source step,
+ * "⑃ fork of s_01#12" — the panel's turn chips' words. */
+function LineageChips({
+  run,
+  runs,
+}: {
+  run: Pick<RunRow, "forked_from" | "experiment_id" | "meta">
+  runs: readonly RunRow[]
+}) {
+  const chips = lineageOf(run, runs).filter((l) => l.kind !== "experiment")
+  if (!chips.length) return null
   return (
     <div className="truncate font-mono text-[11px] text-faint" data-replay-chip>
-      ↻ replay of{" "}
-      <Link
-        {...runLink(src.runID, { step: src.fromStep })}
-        className="text-muted-foreground hover:text-thread-ink hover:underline"
-      >
-        {src.runID} · step {src.fromStep}
-      </Link>
+      {chips.map((l) =>
+        l.src !== undefined ? (
+          <Link
+            key={l.kind}
+            {...runLink(l.src, { step: l.step })}
+            className="text-muted-foreground hover:text-thread-ink hover:underline"
+            title={l.title}
+            data-lineage={l.kind}
+          >
+            {l.text}
+          </Link>
+        ) : (
+          <span key={l.kind} title={l.title} data-lineage={l.kind}>
+            {l.text}{" "}
+          </span>
+        )
+      )}
     </div>
   )
 }
@@ -529,7 +546,7 @@ export function RunsTable({
               sortKey="cost"
               sort={sort}
               label="cost"
-              title="the run's own cost, priced at read time; its subagents' apart"
+              title="the run's own cost, priced at read time; delegated (its child runs') apart"
               className={`text-right ${COL.cost}`}
             />
           ) : null}
@@ -674,7 +691,7 @@ function RunTableRow({
               </Link>
             </div>
           ) : null}
-          <ReplayChip run={run} />
+          <LineageChips run={run} runs={runs} />
           <DerivedChip row={run} />
           <StoppedByLine run={run} />
           <ProblemBadges run={run} status={statusOf(run, runs).key} />

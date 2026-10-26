@@ -181,7 +181,7 @@ import { CostText, useCostCapable } from "@/components/studio/cost"
 import { StatusChip } from "@/components/studio/runs-table"
 import { AWAITING } from "@/lib/status"
 import { DECIDE_FIELD, DONE, VERB, VERB_TITLE } from "@/lib/decisions"
-import { formatUSD, lostCellCost, sumCost } from "@/lib/cost"
+import { BILL_TITLE, formatUSD, lostCellCost, sumCost } from "@/lib/cost"
 import {
   appGoneScope,
   OWN_RUNTIME,
@@ -2227,10 +2227,7 @@ function ResultCard({
               </span>
               <span>{latency(experiment.row)}</span>
               {costCapable ? (
-                <span
-                  title="the run's whole bill: its own model calls + its subagents'"
-                  data-result-cost
-                >
+                <span title={BILL_TITLE} data-result-cost>
                   <CostText v={sumCost([experiment.row])} />
                 </span>
               ) : null}
@@ -2403,10 +2400,7 @@ export function CompareTable({
               <th className="px-3 py-1 font-normal">latency</th>
               <th className="px-3 py-1 font-normal">steps</th>
               {costCapable ? (
-                <th
-                  className="px-3 py-1 font-normal"
-                  title="the run's whole bill: its own model calls + its subagents'"
-                >
+                <th className="px-3 py-1 font-normal" title={BILL_TITLE}>
                   cost
                 </th>
               ) : null}

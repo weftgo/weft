@@ -36,7 +36,7 @@ describe("RunsTable", () => {
     expect(screen.getAllByText("wefttest/script").length).toBe(4)
 
     // Token columns: r_ok carries 10/4 (S4.3's row).
-    expect(screen.getByText("10 / 4")).toBeTruthy()
+    expect(screen.getByText("10 in · 4 out")).toBeTruthy()
 
     // The session column links each turn to its thread (S4.7).
     expect(screen.getAllByText(/s_orders/).length).toBeGreaterThanOrEqual(3)

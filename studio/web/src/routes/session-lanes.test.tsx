@@ -737,7 +737,7 @@ describe("trip-planner: the abandoned branch and the forks (UX-B-08, UX-B-07)", 
     expect(node(2).textContent).toContain(
       "branched · the leaf moved off this line · the left branch summarized"
     )
-    expect(node(2).textContent).toContain("summarizer 10 in / 5 out")
+    expect(node(2).textContent).toContain("summarizer 10 in · 5 out")
     // t1 and t3: the current path, t3 continuing t1 on lisbon-v1.
     for (const n of [1, 3]) {
       expect(node(n).hasAttribute("data-on-path")).toBe(true)
@@ -995,7 +995,7 @@ describe("research-notebook: context size per turn and the summarizer's cost (UX
     expect(drawer.getAttribute("data-mark-drawer")).toBe("e_c3")
     expect(
       drawer.querySelector('[data-drawer-row="summarizer"]')?.textContent
-    ).toBe("10 in / 5 out")
+    ).toBe("10 in · 5 out")
     await noViolations(container)
   })
 })

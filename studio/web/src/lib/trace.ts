@@ -7,7 +7,7 @@
 // positions).
 import type { Span as TimedSpan } from "./api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "./events"
-import { UNNAMED_AGENT } from "./format"
+import { tokenPair, UNNAMED_AGENT } from "./format"
 import { earliestStart, instantMs, spanTree } from "./waterfall"
 
 /** The time axis's domain, lib/waterfall.ts's (one implementation). */
@@ -80,7 +80,7 @@ export interface TimedRow {
 }
 
 function usage(u?: { input_tokens: number; output_tokens: number }): string {
-  return u ? `${u.input_tokens} in / ${u.output_tokens} out` : ""
+  return u ? tokenPair(u.input_tokens, u.output_tokens, true) : ""
 }
 
 function bytesOf(s: string): number {

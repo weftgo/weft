@@ -362,7 +362,7 @@ describe("markDetail", () => {
       { lane: "compaction", entry: "e_k" }
     )
     expect(markDetail(c, turns).rows.find((r) => r.k === "summarizer")?.v).toBe(
-      "1.8k in / 60 out"
+      "1.8k in · 60 out"
     )
   })
 })
@@ -461,7 +461,7 @@ describe("summarizerView (UX-B-13)", () => {
       cache: "not_reported",
     })
     expect(known?.text).toBe("+ summarizer $0.0003")
-    expect(known?.title).toMatch(/1,800 in \/ 60 out tokens/)
+    expect(known?.title).toMatch(/1,800 in · 60 out tokens/)
     const unpriced = summarizerView({
       usage: { input_tokens: 10, output_tokens: 5 },
       cost_usd: null,

@@ -392,8 +392,9 @@ describe("the run header", () => {
       cost.querySelector('[data-cost-part="delegated"] [data-cost]')!
         .textContent
     ).toBe("$0.0050")
+    // "$x own · $y delegated" (lib/cost.ts's COST_PARTS, the panel's).
     expect(cost.textContent).toMatch(
-      /own\s*\$0\.01\s*·\s*delegated\s*\$0\.0050/
+      /\$0\.01\s*own\s*·\s*\$0\.0050\s*delegated/
     )
   })
 

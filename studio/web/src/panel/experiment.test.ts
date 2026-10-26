@@ -1190,7 +1190,7 @@ describe("the Studio hand-off (P2-17)", () => {
     const prompt = $(el, ".weft-drawer textarea") as HTMLTextAreaElement
     prompt.value = "typed after the pane was drawn"
     prompt.dispatchEvent(new Event("input", { bubbles: true }))
-    const link = button(el, "compare in Studio")!
+    const link = button(el, "open in playground ⤢")!
     link.dispatchEvent(
       new Event("pointerdown", { bubbles: true, composed: true })
     )

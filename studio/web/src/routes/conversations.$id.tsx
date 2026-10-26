@@ -16,7 +16,7 @@ import type { RunRow } from "@/lib/api"
 import { openLive, throttle } from "@/lib/live"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
-import { tokens } from "@/lib/format"
+import { tokenPair } from "@/lib/format"
 import {
   CONVERSATION,
   conversationCost,
@@ -183,7 +183,7 @@ function ConversationPage() {
           data-conversation-counts
         >
           {CONVERSATION.counts(turns, nested + orphans.length)} ·{" "}
-          {tokens(usage.input_tokens)} in / {tokens(usage.output_tokens)} out
+          {tokenPair(usage.input_tokens, usage.output_tokens)}
         </span>
         {costCapable && turns.length ? (
           <ConversationCost turns={turns} />

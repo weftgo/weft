@@ -57,7 +57,7 @@ import { approvalFactsOf } from "@/lib/approvals-view"
 import { busyEndSpans } from "@/lib/timeline"
 import { useBusyEnd } from "@/components/studio/busy-end"
 import { applyTranscript, fold, linkView } from "@/lib/events"
-import { isPlainShortcut } from "@/lib/keys"
+import { isPlainShortcut, VIEW_KEYS } from "@/lib/keys"
 import { overrideOf, overrideParallelism } from "@/lib/request-pane"
 import { callFactsOf } from "@/lib/cards"
 import { toolFactsOf } from "@/lib/error-kind"
@@ -74,6 +74,7 @@ import {
   replaySearch,
   runLink,
   traceSelectionLink,
+  VIEWS,
 } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { editKey, impliedFromStep, putEdit, schemaOf } from "@/lib/edits"
@@ -1503,7 +1504,8 @@ function RunPage() {
     [navigate]
   )
 
-  // Keys: r toggles raw, s the story, w the waterfall; j/k walk the
+  // Keys: r toggles raw, s the story, w the waterfall, q a step's
+  // Request, o the app; j/k walk the
   // run tree's rows (A4); n jumps to a step (the story's scrubber).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1519,10 +1521,30 @@ function RunPage() {
             }
           },
         })
-      if (e.key === "r") setView("raw")
+      // The view keys both surfaces bind (lib/keys.ts's VIEW_KEYS:
+      // s · w · q · r); request is a step's pane here — the story at
+      // the step named (else step 0), its Request pane open.
+      const v = VIEW_KEYS[e.key]
+      if (v === "request")
+        void navigate({
+          search: (prev) =>
+            prev.view === "story" && prev.pane === "request"
+              ? { ...prev, pane: undefined }
+              : {
+                  ...prev,
+                  view: "story",
+                  step: prev.step ?? 0,
+                  pane: "request",
+                },
+        })
+      else if (v) setView(v)
       else if (e.key === "l") setView("logs")
-      else if (e.key === "s") setView("story")
-      else if (e.key === "w") setView("waterfall")
+      else if (e.key === "o")
+        // o (lib/keys.ts's KEY_OPEN): the run in your app — the header's
+        // "open in app", when it has a page to open.
+        document
+          .querySelector<HTMLAnchorElement>("a[data-open-in-app]")
+          ?.click()
       else if (e.key === "n") {
         e.preventDefault()
         if (view !== "story") setView("story")
@@ -1744,9 +1766,10 @@ function RunPage() {
           >
             <div className="flex flex-wrap items-center gap-3">
               <TabsList>
-                <TabsTrigger value="waterfall">waterfall</TabsTrigger>
-                <TabsTrigger value="story">story</TabsTrigger>
-                <TabsTrigger value="raw">raw</TabsTrigger>
+                {/* The views' labels (lib/links.ts's VIEWS): the panel's tabs say the same. */}
+                <TabsTrigger value="waterfall">{VIEWS.waterfall}</TabsTrigger>
+                <TabsTrigger value="story">{VIEWS.story}</TabsTrigger>
+                <TabsTrigger value="raw">{VIEWS.raw}</TabsTrigger>
                 <TabsTrigger value="logs" data-logs-tab>
                   {LOGS.view}
                 </TabsTrigger>

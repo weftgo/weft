@@ -35,6 +35,19 @@ import type { Scope } from "./scope"
  * "trace" is the /traces page's word only (U8.2). */
 export type RunView = "waterfall" | "story" | "raw" | "logs"
 
+/** The run's views as both surfaces name them (U21.1, UX-F-05): one
+ * label each — Studio's view tabs (request is a step's pane there) and
+ * the panel's tabs (request is a tab), the same case. "trace" names the
+ * /traces page only. Each id is the label: ?view= carries it. */
+export const VIEWS = {
+  waterfall: "waterfall",
+  story: "story",
+  request: "request",
+  raw: "raw",
+  logs: "logs",
+} as const
+export type ViewName = keyof typeof VIEWS
+
 /** The run tree's scale (lib/waterfall.ts's Scale): wall time from the
  * run's spans, or stream order (the replay playhead's); or the call
  * graph over the same spans (lib/graph.ts, U9.2). */

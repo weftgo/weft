@@ -23,7 +23,13 @@ import { metaQuery, sessionQuery, timelineQuery } from "@/lib/api"
 import { openLive, throttle } from "@/lib/live"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { fetchSessionForks, nestExperiments } from "@/lib/experiments"
-import { absoluteTime, relativeTime, tokens, UNNAMED_AGENT } from "@/lib/format"
+import {
+  absoluteTime,
+  relativeTime,
+  tokenPair,
+  tokens,
+  UNNAMED_AGENT,
+} from "@/lib/format"
 import { IdChip, StatusChip, TitleText } from "@/components/studio/runs-table"
 import { OrderSwitch, SessionTurns } from "@/components/studio/session-turns"
 import { NotFound } from "@/components/studio/not-found"
@@ -291,8 +297,8 @@ function SessionPage() {
         <SessionCounts row={s} />
         <span className="text-xs text-muted-foreground">{s.agent}</span>
         <span className="font-mono text-[11px] text-faint" data-session-counts>
-          {exchangesWords(tlTurns)} · {tokens(s.usage.input_tokens)} in /{" "}
-          {tokens(s.usage.output_tokens)} out
+          {exchangesWords(tlTurns)} ·{" "}
+          {tokenPair(s.usage.input_tokens, s.usage.output_tokens)}
         </span>
         {ids ? (
           <span
@@ -626,8 +632,8 @@ function DelegatedSessions({
               </span>
             ) : null}
             <span className="font-mono text-[11px] text-faint">
-              {turnsWord(d.turns)} · {tokens(d.usage.input_tokens)} in /{" "}
-              {tokens(d.usage.output_tokens)} out
+              {turnsWord(d.turns)} ·{" "}
+              {tokenPair(d.usage.input_tokens, d.usage.output_tokens)}
             </span>
             {costCapable ? <Cost fields={d} chip={false} /> : null}
           </li>

@@ -828,7 +828,7 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 	// The cause is carried: one child whose figure is unknown (running,
 	// its end never arrived, its children unreadable) makes the
 	// delegated figure unknown, not unpriced.
-	del := tally(parts, "subagent run", true)
+	del := tally(parts, "child run", true)
 	if n := c.hiddenSubs[rec.ID]; n > 0 {
 		del = scopeCutDelegated(del, n)
 	}
@@ -843,9 +843,9 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 // "unknown" when any part is not known yet (a run still running, its
 // end never arrived: it has a price, its usage has not arrived), else
 // "unpriced"; and its reason is one line counting the runs — never one
-// clause per run: "2 of 3 subagent runs unpriced: no price for
-// openai/x, acme/y", "1 of 3 subagent runs' cost not known yet (p/0/c:
-// running: …)". noun names a run of the set ("subagent run", "turn",
+// clause per run: "2 of 3 child runs unpriced: no price for
+// openai/x, acme/y", "1 of 3 child runs' cost not known yet (p/0/c:
+// running: …)". noun names a run of the set ("child run", "turn",
 // "run"). nested counts each part's own subagents as runs of the set (a
 // run's delegated figure covers every descendant); without it a part is
 // one run, unknown or unpriced by its whole bill (a session's turn, an
@@ -914,7 +914,7 @@ func scopeCutDelegated(del cost, n int) cost {
 	del.runs += n
 	del.unknown += n
 	del.known, del.usd, del.badge = false, 0, costUnknown
-	why := fmt.Sprintf("%d of %d subagent runs carry another public id, or none: a panel token does not read their cost", n, del.runs)
+	why := fmt.Sprintf("%d of %d child runs carry another public id, or none: a panel token does not read their cost", n, del.runs)
 	if del.reason != "" {
 		why += "; " + del.reason
 	}

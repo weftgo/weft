@@ -94,11 +94,12 @@ describe("the tabs", () => {
     let el = await mount(BASE)
     const list = $(el, "[role=tablist]")!
     const tabs = all(el, "[role=tab]")
+    // lib/links.ts's VIEWS (U21.1, UX-F-05): Studio's words and case.
     expect(tabs.map((t) => t.textContent)).toEqual([
-      "Story",
-      "Request",
-      "Timeline",
-      "Raw",
+      "story",
+      "request",
+      "waterfall",
+      "raw",
     ])
     expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual([
       "true",
@@ -138,13 +139,13 @@ describe("the tabs", () => {
     key(tab(el, "story"), { key: "ArrowLeft" }) // wraps
     await settle()
     expect(tab(el, "raw").getAttribute("aria-selected")).toBe("true")
-    click(tab(el, "timeline"))
+    click(tab(el, "waterfall"))
     await settle()
     // Remembered: a reload opens the Timeline tab.
     el.remove()
     await settle()
     el = await mount(BASE)
-    expect(tab(el, "timeline").getAttribute("aria-selected")).toBe("true")
+    expect(tab(el, "waterfall").getAttribute("aria-selected")).toBe("true")
     expect($(el, ".weft-timeline")).not.toBeNull()
   })
 
@@ -183,7 +184,7 @@ describe("the tabs", () => {
     await settle()
     expect(tab(el, "story").getAttribute("aria-selected")).toBe("true")
     // From the Timeline, r and r again land back on the Timeline.
-    click(tab(el, "timeline"))
+    click(tab(el, "waterfall"))
     await settle()
     dock(el).focus()
     key(dock(el), { key: "r" })
@@ -191,13 +192,13 @@ describe("the tabs", () => {
     expect(tab(el, "raw").getAttribute("aria-selected")).toBe("true")
     key(dock(el), { key: "r" })
     await settle()
-    expect(tab(el, "timeline").getAttribute("aria-selected")).toBe("true")
+    expect(tab(el, "waterfall").getAttribute("aria-selected")).toBe("true")
   })
 
   it("⤢ carries the step being read from any tab (G1)", async () => {
     fakeStudio(baseRoutes())
     const el = await mount(BASE)
-    click(tab(el, "timeline"))
+    click(tab(el, "waterfall"))
     await settle()
     dock(el).focus()
     key(dock(el), { key: "J" })
@@ -228,7 +229,7 @@ describe("the timeline", () => {
     const el = await mount(BASE)
     // The story no longer carries the waterfall: it moved.
     expect($(el, ".weft-wf")).toBeNull()
-    click(tab(el, "timeline"))
+    click(tab(el, "waterfall"))
     await settle()
     const tl = $(el, ".weft-timeline")!
     expect(tl.getAttribute("data-axis")).toBe("time")
@@ -280,7 +281,7 @@ describe("the timeline", () => {
     ])
     fakeStudio(routes)
     const el = await mount(BASE)
-    click(tab(el, "timeline"))
+    click(tab(el, "waterfall"))
     await settle()
     expect($(el, ".weft-timeline")!.getAttribute("data-axis")).toBe("seq")
     expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
@@ -309,7 +310,7 @@ describe("the timeline", () => {
   it("U8.3: a row's click selects its step in Story (what ⤢ carries)", async () => {
     fakeStudio(baseRoutes())
     const el = await mount(BASE)
-    click(tab(el, "timeline"))
+    click(tab(el, "waterfall"))
     await settle()
     const head = () =>
       all(el, ".weft-head a").find((n) => n.textContent === "⤢")!
@@ -340,7 +341,7 @@ describe("the timeline", () => {
     }
     fakeStudio(routes)
     const el = await mount(BASE)
-    click(tab(el, "timeline"))
+    click(tab(el, "waterfall"))
     await settle()
     expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
       "0 ms",
@@ -388,16 +389,16 @@ describe("the tabs keep the story (review)", () => {
     fakeStudio(routes)
     const el = await mount(BASE)
     const story = $(el, "#weft-tp-story")!
-    click(tab(el, "timeline"))
+    click(tab(el, "waterfall"))
     await settle()
     expect($(el, "#weft-tp-story")).toBe(story)
     expect(story.hasAttribute("hidden")).toBe(true)
-    expect($(el, "#weft-tp-timeline")).not.toBeNull()
+    expect($(el, "#weft-tp-waterfall")).not.toBeNull()
     click(tab(el, "story"))
     await settle()
     expect($(el, "#weft-tp-story")).toBe(story)
     expect(story.hasAttribute("hidden")).toBe(false)
-    expect($(el, "#weft-tp-timeline")).toBeNull()
+    expect($(el, "#weft-tp-waterfall")).toBeNull()
   })
 
   it("⤢ from the Raw tab carries the step being read", async () => {
@@ -1222,7 +1223,7 @@ describe("the timeline's rows from the keyboard (P7)", () => {
     ])
     fakeStudio(routes)
     const el = await mount(BASE)
-    click(tab(el, "timeline"))
+    click(tab(el, "waterfall"))
     await settle()
     const rows = all(el, ".weft-tl") as HTMLElement[]
     expect(rows.map((n) => [n.getAttribute("role"), n.tabIndex])).toEqual([

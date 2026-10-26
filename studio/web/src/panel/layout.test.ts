@@ -174,7 +174,7 @@ describe("the modes (D1)", () => {
     const routes = baseRoutes()
     fakeStudio(routes)
     const el = await mount({ ...BASE })
-    expect(text(el, ".weft-fab-cost")).toBe(" · 10→4")
+    expect(text(el, ".weft-fab-cost")).toBe(" · 10 in · 4 out")
     el.remove()
     const running = runRow({ status: "running", finished: null })
     routes["runs?public_id=pub_orders&limit=50"] = {
@@ -863,6 +863,49 @@ describe("the keyboard (only inside the panel, except Alt+W)", () => {
     )
     key(dock(el), { key: "s" }) // s alone is nothing
     expect(opened).toHaveBeenCalledTimes(1)
+  })
+
+  it("the shared keymap (U21.1, UX-F-04): [ ] step as J / K, o opens in Studio as g s, s · w · q · r the views", async () => {
+    fakeStudio(twoTurns())
+    const opened = vi.fn()
+    vi.stubGlobal("open", opened)
+    const el = await open()
+    const d = () => dock(el)
+    const sel = () =>
+      $(el, "[role=tab][aria-selected=true]")?.getAttribute("id") ?? ""
+    d().focus()
+    expect(key(d(), { key: "]" }).defaultPrevented).toBe(true)
+    await settle()
+    key(d(), { key: "]" })
+    await settle()
+    expect($(el, ".weft-head a")!.getAttribute("href")).toContain("step=1")
+    key(d(), { key: "[" })
+    await settle()
+    expect($(el, ".weft-head a")!.getAttribute("href")).toContain("step=0")
+    key(d(), { key: "o" })
+    expect(opened).toHaveBeenCalledWith(
+      "http://studio.test/studio/runs/s_01-t2?step=0&view=story",
+      "_blank",
+      "noopener"
+    )
+    // Each view key opens its tab; again, the tab before it.
+    for (const [k, id] of [
+      ["w", "waterfall"],
+      ["q", "request"],
+      ["r", "raw"],
+      ["s", "story"],
+    ]) {
+      d().focus()
+      key(d(), { key: k })
+      await settle()
+      expect(sel(), k).toBe(`weft-tab-${id}`)
+    }
+    d().focus()
+    key(d(), { key: "w" })
+    await settle()
+    key(d(), { key: "w" })
+    await settle()
+    expect(sel()).toBe("weft-tab-story")
   })
 
   it("Alt+Shift+W cycles float → right → bottom → left → top → float; the header button does the same", async () => {

@@ -310,7 +310,7 @@ func TestCostSubagents(t *testing.T) {
 	_, _, body = get(t, h, "/studio/api/runs/p2")
 	decode(t, body, &doc)
 	if usd(doc.CostUSD) != "0.06" || doc.DelegatedCostUSD != nil || doc.DelegatedCostKnown ||
-		doc.DelegatedCostReason != "1 of 1 subagent runs unpriced: no price for acme/mystery-1" ||
+		doc.DelegatedCostReason != "1 of 1 child runs unpriced: no price for acme/mystery-1" ||
 		!slices.Equal(doc.DelegatedUnpricedModels, []string{"acme/mystery-1"}) {
 		t.Errorf("p2: own %s delegated %s known %v reason %q; want own 0.06, delegated null and unknown, one line naming acme/mystery-1",
 			usd(doc.CostUSD), usd(doc.DelegatedCostUSD), doc.DelegatedCostKnown, doc.DelegatedCostReason)
@@ -868,7 +868,7 @@ func TestCostRunningChildIsUnknown(t *testing.T) {
 	_, _, body = get(t, h, "/studio/api/runs/p")
 	var run costRow
 	decode(t, body, &run)
-	if want := "1 of 1 subagent runs' cost not known yet (p/0/c: running: "; run.DelegatedCostKnown || !strings.HasPrefix(run.DelegatedCostReason, want) {
+	if want := "1 of 1 child runs' cost not known yet (p/0/c: running: "; run.DelegatedCostKnown || !strings.HasPrefix(run.DelegatedCostReason, want) {
 		t.Errorf("run's delegated cost: known %v reason %q; want unknown, prefix %q", run.DelegatedCostKnown, run.DelegatedCostReason, want)
 	}
 }

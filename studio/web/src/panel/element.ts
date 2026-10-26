@@ -30,7 +30,9 @@ import {
   runtimesLink,
   settingsLink,
   tracePage,
+  VIEWS,
 } from "../lib/links"
+import { keyText, PANEL_KEYMAP, VIEW_KEYS } from "../lib/keys"
 import { installMarkerRung, markerOf } from "./markers"
 import {
   keepEditedTitle,
@@ -103,6 +105,7 @@ import { stepDiffBlock } from "./compare"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
 import {
   atLeastCost,
+  BILL_TITLE,
   isScripted,
   summarizerView,
   sumRuns,
@@ -239,6 +242,7 @@ import type { AgentView } from "./client"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import {
   duration,
+  tokenPair,
   ordinalOf,
   plural,
   relativeTime,
@@ -261,6 +265,7 @@ import type { HeaderRung } from "./detect"
 import type { Marker, MarkerRung } from "./markers"
 import { parseScope, serializeScope } from "../lib/scope"
 import { clip as clipTitle, turnLabel, turnTitle } from "../lib/title"
+import { lineageOf } from "../lib/run-row"
 import { panelStudioVersion } from "./version"
 import type { Scope } from "../lib/scope"
 import {
@@ -521,24 +526,11 @@ function typing(e: KeyboardEvent): boolean {
   )
 }
 
-/** SHORTCUTS is the keyboard, in one place (the ? overlay and the
- * README's table). Every key but Alt+W fires only with focus in the
- * panel. */
-export const SHORTCUTS: readonly (readonly [string, string])[] = [
-  [
-    "Alt+W",
-    "toggle the dock from the page, not while a text field has focus (Ctrl+Shift+W too, where delivered)",
-  ],
-  ["Alt+Shift+W", "next layout: float, dock right, bottom, left, top"],
-  ["Esc", "close (this list first); the page's own Esc handlers still run"],
-  ["j / k", "next / previous turn"],
-  ["J / K", "next / previous step"],
-  ["g s", "open the turn (and step) in Studio"],
-  ["r", "the Raw tab (again: back to the tab before it)"],
-  ["/", "filter: the raw tree's on the Raw tab, else the turn list's"],
-  ["← / →", "on the tabs: the previous / next tab"],
-  ["?", "this list"],
-]
+/** SHORTCUTS is the keyboard (lib/keys.ts's PANEL_KEYMAP: the ? list
+ * and the README's table). Every key but Alt+W fires only with focus
+ * in the panel. */
+export const SHORTCUTS: readonly (readonly [string, string])[] =
+  PANEL_KEYMAP.map((b) => [keyText(b), b.action])
 
 /** A conversation the panel knows of (plan C3.3's switcher). */
 export interface KnownScope {
@@ -2094,6 +2086,7 @@ export class WeftDevtools extends HTMLElement {
     if (e.ctrlKey || e.metaKey || e.altKey || !this.shown) return
     const k = e.key
     const chord = this.gAt > 0 && Date.now() - this.gAt < 1_500
+    const view = VIEW_KEYS[k.toLowerCase()]
     this.gAt = 0
     let done = true
     if (chord && k === "s") this.openInStudio()
@@ -2110,9 +2103,13 @@ export class WeftDevtools extends HTMLElement {
     } else if (k === "?") {
       this.keys = !this.keys
       this.render(this.last)
-    } else if ((k === "r" || k === "R") && this.model) this.toggleRaw()
+    } else if (view && this.model)
+      // s · w · q · r (lib/keys.ts): a view; again, back (R too: raw).
+      this.view(view)
+    else if (k === "o") this.openInStudio()
     else if (k === "j" || k === "k") this.turnKey(k === "j" ? 1 : -1)
-    else if (k === "J" || k === "K") this.stepKey(k === "J" ? 1 : -1)
+    else if (k === "J" || k === "]") this.stepKey(1)
+    else if (k === "K" || k === "[") this.stepKey(-1)
     else if (k === "/") {
       // D4: the open Raw tab's filter, else the turn list's; on the
       // Request tab (E1.2) an open tree's filter, else the turn list's.
@@ -2411,7 +2408,13 @@ export class WeftDevtools extends HTMLElement {
   }
 
   toggleRaw() {
-    this.setTab(this.lay.tab === "raw" ? this.prevTab : "raw")
+    this.view("raw")
+  }
+
+  /** view opens a view's tab (its key, lib/keys.ts's VIEW_KEYS); on it
+   * already, the tab before it. */
+  private view(id: string) {
+    this.setTab(this.lay.tab === id ? this.prevTab : id)
   }
 
   /** toggle flips the dock; from hidden it opens (Alt+W, open()). */
@@ -2867,10 +2870,10 @@ export class WeftDevtools extends HTMLElement {
         el(
           "span",
           "weft-fab-cost",
-          ` · ${known ? `${tokens(r.usage.input_tokens)}→${tokens(r.usage.output_tokens)}` : "—"}`,
+          ` · ${known ? tokenPair(r.usage.input_tokens, r.usage.output_tokens) : "—"}`,
           {
             title: known
-              ? "the current turn's tokens, input→output"
+              ? "the current turn's tokens"
               : "the current turn's usage: known when it finishes",
           }
         )
@@ -2927,16 +2930,17 @@ export class WeftDevtools extends HTMLElement {
     for (const r of rows) {
       // What the user recognises (U6): "● parked t3 How many units… ·
       // 2 steps · 811ms" (a resume in turnTitle's words, as Studio's
-      // session page); an experiment in its card's order, "↳ replay of
+      // session page); an experiment in its card's order, "↻ replay of
       // t3 · scripted · ● failed · 2 steps · 811ms". The id is the
       // option's title only.
       const t = turnTitle(prevTurn(r, s.turns), r)
-      const src = r.forked_from && this.rowOf(r.forked_from.split("#")[0])
       const tail = `${stepCount(r.steps)} · ${duration(r.started, r.finished)}`
+      // A replay's lineage in the runs list's words (lib/run-row.ts).
+      const line = r.forked_from && lineageOf(r, s.turns).at(-1)?.text
       option(
         sel,
-        r.forked_from
-          ? `↳ replay of ${src ? turnLabel(src) || shortId(src.id) : "a turn"} · ${engineWord(r)} · ● ${this.st(r).word} · ${tail}`
+        line
+          ? `${line} · ${engineWord(r)} · ● ${this.st(r).word} · ${tail}`
           : `${["●", this.st(r).word, turnLabel(r), clipTitle(t.text)].filter(Boolean).join(" ")} · ${tail}`,
         { value: r.id, "data-key": r.id, title: `${r.id}\n${t.full}` },
         r.id === s.selected
@@ -3021,11 +3025,11 @@ export class WeftDevtools extends HTMLElement {
     // No turn at all reads "—" too (UX-F-33): nothing known, not 0→0.
     const tok = !known.length
       ? "—"
-      : `${unknown ? "≥" : ""}${tokens(inTok)}→${tokens(outTok)}`
+      : `${unknown ? "≥" : ""}${tokenPair(inTok, outTok)}`
     // "turn" is a session's word (UX-F-13): a list no session scopes
     // counts runs; "1 turn" singular.
     const count = s.turns.length
-    const stats = `${count}${s.turnsCapped ? "+" : ""} ${s.session ? "turn" : "run"}${count - 1 || s.turnsCapped ? "s" : ""} · ${tok} tok`
+    const stats = `${count}${s.turnsCapped ? "+" : ""} ${s.session ? "turn" : "run"}${count - 1 || s.turnsCapped ? "s" : ""} · ${tok}`
     h.append(
       el("span", "", stats, {
         title: unknown ? `${stats} — ${unknown.cost_reason ?? ""}` : stats,
@@ -4134,7 +4138,7 @@ export class WeftDevtools extends HTMLElement {
       const b = el(
         "button",
         `weft-tab${sel ? " weft-active" : ""}`,
-        id[0].toUpperCase() + id.slice(1),
+        VIEWS[id as keyof typeof VIEWS],
         {
           type: "button",
           role: "tab",
@@ -4391,7 +4395,7 @@ export class WeftDevtools extends HTMLElement {
             : []),
           tab === "raw"
             ? this.rawView(t)
-            : tab === "timeline"
+            : tab === "waterfall"
               ? renderTimeline(t, s.selectedStep, this.base)
               : this.requestView(s, t),
         ]),
@@ -5147,14 +5151,7 @@ export class WeftDevtools extends HTMLElement {
       }),
       // What the record says this turn is (D5): scripted, a fork, an
       // experiment of a turn the list names.
-      ...turnChips(
-        r,
-        (id) => {
-          const src = this.rowOf(id)
-          return src?.turn ? `t${src.turn}` : shortId(id)
-        },
-        chip.key
-      ),
+      ...turnChips(r, turns, chip.key),
       el("span", "weft-when", when),
     ])
     const usage = r.usage
@@ -5168,11 +5165,7 @@ export class WeftDevtools extends HTMLElement {
             title: r.cost_reason ?? "",
             "data-weft-usage": "unknown",
           })
-        : el(
-            "span",
-            "",
-            `${tokens(usage.input_tokens)}→${tokens(usage.output_tokens)}`
-          ),
+        : el("span", "", tokenPair(usage.input_tokens, usage.output_tokens)),
       el("span", "", duration(r.started, r.finished) || "…"),
     ])
     // Its cost beside its tokens (A5.3), only where Studio prices usage.
@@ -5193,7 +5186,7 @@ export class WeftDevtools extends HTMLElement {
     // together: "turn 3, parked, <title>, 2 steps, 60 in 30 out, 3h ago".
     row.setAttribute(
       "aria-label",
-      `${r.turn ? `turn ${r.turn}` : "run"}, ${chip.word}, ${clipTitle(t.text)}, ${stepCount(r.steps)}${derivedUsageUnknown(r) ? "" : `, ${tokens(usage.input_tokens)} in ${tokens(usage.output_tokens)} out`}, ${when}`
+      `${r.turn ? `turn ${r.turn}` : "run"}, ${chip.word}, ${clipTitle(t.text)}, ${stepCount(r.steps)}${derivedUsageUnknown(r) ? "" : `, ${tokenPair(usage.input_tokens, usage.output_tokens)}`}, ${when}`
     )
     if (r.err) row.append(el("div", "weft-reason", r.err))
     on(row, "click", () => this.go(this.model?.select(r.id, true)))
@@ -5214,9 +5207,7 @@ export class WeftDevtools extends HTMLElement {
     const card = el("div", "weft-step weft-xres")
     const usage = r.row?.usage
     const stats = [
-      usage
-        ? `${tokens(usage.input_tokens)}→${tokens(usage.output_tokens)} tok`
-        : "",
+      usage ? tokenPair(usage.input_tokens, usage.output_tokens) : "",
       r.row ? duration(r.row.started, r.row.finished) : "",
     ]
       .filter(Boolean)
@@ -5245,7 +5236,7 @@ export class WeftDevtools extends HTMLElement {
       if (r.row)
         head.insertBefore(
           el("span", "", [costText(sumRuns([r.row]))], {
-            title: "the run's whole bill: its own model calls + its subagents'",
+            title: BILL_TITLE,
             "data-weft-result-cost": "",
           }),
           head.lastChild
@@ -5322,7 +5313,9 @@ export class WeftDevtools extends HTMLElement {
       })
       head.append(save)
     }
-    const compare = el("a", "weft-btn", "compare in Studio", {
+    // UX-F-06: the playground, so named — "compare in Studio" is the
+    // /compare link's (compare.ts) alone.
+    const compare = el("a", "weft-btn", "open in playground ⤢", {
       title:
         "open the Studio playground with this run, step and the current overrides carried over",
     })
@@ -7309,7 +7302,7 @@ function renderStep(
       el("span", "weft-badge weft-info", line, { "data-weft-attempts": "" })
     )
   if (step.finish) {
-    const timing = timingLine(step.finish.latencyMs, step.finish.ttftMs, "ttft")
+    const timing = timingLine(step.finish.latencyMs, step.finish.ttftMs)
     if (timing) head.append(el("span", "", timing, { "data-weft-timing": "" }))
   }
   const own = stepHoles(step, ctx?.child ? ctx.child.doc?.holes : t?.doc?.holes)
@@ -7608,7 +7601,7 @@ function loadedOnly(
 
 /** usageLine renders usage with the cached/reasoning splits §2 names. */
 function usageLine(u: Usage): string {
-  const parts = [`${tokens(u.input_tokens)}→${tokens(u.output_tokens)} tok`]
+  const parts = [tokenPair(u.input_tokens, u.output_tokens)]
   if (u.cached_input_tokens)
     parts.push(`${tokens(u.cached_input_tokens)} cached`)
   if (u.reasoning_tokens) parts.push(`${tokens(u.reasoning_tokens)} reasoning`)

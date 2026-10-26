@@ -351,13 +351,15 @@ when one is not the adapter's default; the "insert a message" lines
 show on hover or focus.
 
 The views (plan D4). The open turn has four tabs, a `role="tablist"`
-(`←`/`→`, `Home`/`End` move and select; one tab stop): **Story** (the
-step story above, and the playground's drawer and result), **Request**
-(the step's request, below), **Timeline** (the spans waterfall
+(`←`/`→`, `Home`/`End` move and select; one tab stop), labelled with
+`src/lib/links.ts`'s `VIEWS` as Studio's run page labels its views:
+**story** (the
+step story above, and the playground's drawer and result), **request**
+(the step's request, below), **waterfall** (before U21.1 "Timeline"; the spans waterfall
 at the column's full width over a time axis — ms from the run's first
 span — or, on a run without spans, its steps and tool calls placed by
 the event sequence, `seq`, the position in the run's event stream, a
-step before its calls) and **Raw**. Its rows are `src/lib/waterfall.ts`'s
+step before its calls) and **raw**. Its rows are `src/lib/waterfall.ts`'s
 run tree (U8.1), the one row model both renderers draw:
 `waterfallRows({runId, status, spans, fold, total, children, expanded}, scale?)`
 gives run › step › model call (› attempt) / tool (lane) › child run on a
@@ -988,7 +990,7 @@ read and write is guarded, so a private window just forgets.
 `localStorage.removeItem("weft.devtools")` resets everything (and turns
 `debug` off).
 
-The keyboard (`src/panel/element.ts`'s `SHORTCUTS`, the `?` list).
+The keyboard (`src/lib/keys.ts`'s `PANEL_KEYMAP`, the `?` list; a key Studio binds too — `j`/`k`, `[`/`]`, `s`/`w`/`q`/`r`, `o`, `/`, `?` — means the same there, `STUDIO_KEYMAP`).
 `Alt+W` is the one key the panel hears on `window`; every other key is
 heard on its shadow root, so it fires only while focus is inside the
 panel — a key typed into your page never reaches it, and keys typed
@@ -1000,10 +1002,10 @@ puts focus in it, so the keys below work at once.
 | `Alt+W` | toggle the dock from the page — not while a text field has focus (`Ctrl+Shift+W` too, where the browser delivers it) |
 | `Alt+Shift+W` | next layout: float, dock right, bottom, left, top |
 | `Esc` | close (the `?` list first); it is not stopped, so your page's own `document` Esc handlers (a modal) still run — the panel never blocks them |
-| `j` / `k` | next / previous turn |
-| `J` / `K` | next / previous step (⤢ carries it) |
-| `g s` | open the turn and step in Studio (`lib/links.ts`, the link ⤢ carries), in a new tab |
-| `r` | the Raw tab (again: back to the tab before it) |
+| `j` / `k` | next / previous item of the list in focus (the turns) |
+| `[` / `]` | previous / next step (⤢ carries it); `J` / `K` too |
+| `s` / `w` / `q` / `r` | the story · waterfall · request · raw tab (again: back to the tab before it) |
+| `o` | open the turn and step in Studio (`lib/links.ts`, the link ⤢ carries), in a new tab; `g s` too |
 | `/` | focus the filter: the raw tree's on the Raw tab, else the turn list's |
 | `←` / `→` | on the tabs: previous / next tab (`Home` / `End`: first / last) |
 | `?` | the key list |
@@ -1093,8 +1095,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 283,764 B raw / 95,558 B gzip
-(93.3 KiB, the bundle of the ledger's row "P10a-pre-web-fix"; 10,938 B — 10.7 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 285,221 B raw / 96,090 B gzip
+(93.8 KiB, the bundle of the ledger's row "U21.1"; 10,406 B — 10.2 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

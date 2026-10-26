@@ -10,7 +10,7 @@
 /** What the attempt line says: the answering attempt's number (0 when
  * the step ended with none answering), how many attempts the step
  * made, the model asked for and the one that answered. */
-import { plural } from "./format"
+import { FIRST_TOKEN, plural } from "./format"
 
 export interface AttemptFacts {
   n: number
@@ -135,16 +135,15 @@ export function msText(ms: number): string {
 }
 
 /** timingLine is the step's latency and TTFT: "1.2 s · first token
- * 180 ms" (the panel words the second "ttft"). An absent value is not
+ * 180 ms", both surfaces (FIRST_TOKEN, U21.1). An absent value is not
  * measured and is left out, never written 0; null when neither is. */
 export function timingLine(
   latencyMs: number | undefined,
-  ttftMs: number | undefined,
-  ttftWord = "first token"
+  ttftMs: number | undefined
 ): string | null {
   const parts: string[] = []
   if (latencyMs && latencyMs > 0) parts.push(msText(latencyMs))
-  if (ttftMs && ttftMs > 0) parts.push(`${ttftWord} ${msText(ttftMs)}`)
+  if (ttftMs && ttftMs > 0) parts.push(`${FIRST_TOKEN} ${msText(ttftMs)}`)
   return parts.length ? parts.join(" · ") : null
 }
 

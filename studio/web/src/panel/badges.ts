@@ -7,7 +7,7 @@
 // response's when the server sent them (badge, reason, fix, holes[]),
 // the table's else. element.ts and the Request tab (E1.2) call these;
 // no other panel file spells a hole's words (badges.test.ts greps).
-import { REPLAY_WORDS } from "../lib/replay"
+import { lineageOf } from "../lib/run-row"
 import { el } from "./render"
 import { plural } from "../lib/format"
 import type { Meta, RunRow } from "../lib/api"
@@ -34,6 +34,7 @@ import type { Truncation } from "../lib/events"
 import {
   CACHE_HINT,
   cacheNotReported,
+  COST_PARTS,
   costView,
   delegatedView,
   SCRIPTED_HINT,
@@ -250,12 +251,13 @@ export { SCRIPTED_MODEL }
 
 /** A turn's chips (D5): what its record says it is, beside its id —
  * each plain text, its title naming the attribute it is read from.
- * label names a run the list holds ("t3"), else its short id. status
- * is the turn's statusOf key (problemBadges: a decided park draws no
- * parked part). */
+ * runs are the turns the list holds: a replay's source reads "t3" when
+ * it is one of them (lib/run-row.ts's lineageOf, Studio's runs list's
+ * words). status is the turn's statusOf key (problemBadges: a decided
+ * park draws no parked part). */
 export function turnChips(
   r: RunRow,
-  label: (runId: string) => string,
+  runs: readonly { id: string; turn?: number }[] | null,
   status?: string
 ): HTMLElement[] {
   const out: HTMLElement[] = []
@@ -267,22 +269,10 @@ export function turnChips(
   // ModelInfo): the run's model, not a weft.* attr — none is stamped.
   const sc = scriptedChip(r)
   if (sc) chip(sc, SCRIPTED_HINT, "scripted")
-  const fork = r.meta["weft.session.forked_from"] as string | undefined
-  if (fork)
-    chip(
-      `fork of ${fork}`,
-      `weft.session.forked_from = ${fork}: a thread fork's run (<session>#<entry>)`,
-      "fork"
-    )
-  if (r.forked_from) {
-    const [src, step] = r.forked_from.split("#")
-    chip(
-      REPLAY_WORDS.of(label(src), step),
-      `weft.forked_from = ${r.forked_from}: a playground experiment of run ${src}${step ? ` from step ${step}` : ""}${r.experiment_id ? ` (weft.experiment.id ${r.experiment_id})` : ""}`,
-      "experiment"
-    )
-  } else if (r.experiment_id)
-    chip("experiment", `weft.experiment.id = ${r.experiment_id}`, "experiment")
+  // Its lineage (U21.1, UX-F-06): "⑃ fork of s_01#12", "↻ replay of
+  // t3 · step 1" — Studio's runs list's chips, lib/run-row.ts's words.
+  for (const l of lineageOf(r, runs))
+    chip(l.text, l.title, l.kind === "fork" ? "fork" : "experiment")
   // The turn's state marks (U16, UX-B-30; lib/turn-chips.ts): thread
   // compacted the session after it, the sessions its calls delegated.
   if (r.session_compactions)
@@ -472,7 +462,12 @@ export function turnCost(r: RunRow, sum?: CostView | null): HTMLElement {
   })
   const d = delegatedView(r)
   if ("delegated_cost_known" in r && (!d.known || d.usd! > 0))
-    n.append(" + ", costText(d), " delegated")
+    // "$x own · $y delegated" (lib/cost.ts's COST_PARTS): Studio's words.
+    n.append(
+      ` ${COST_PARTS.own}${COST_PARTS.sep}`,
+      costText(d),
+      ` ${COST_PARTS.delegated}`
+    )
   if (own.known && cacheNotReported(r))
     n.append(
       " ",

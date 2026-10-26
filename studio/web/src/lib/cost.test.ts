@@ -540,12 +540,10 @@ describe("a page's one unpriced line (U7)", () => {
   it("delegatedView badges pricing.go's one-line tally words", () => {
     const d = (reason: string) =>
       delegatedView({ ...priced(1, null), delegated_cost_reason: reason }).badge
-    expect(d("2 of 3 subagent runs unpriced: no price for x/y")).toBe(
-      "unpriced"
-    )
+    expect(d("2 of 3 child runs unpriced: no price for x/y")).toBe("unpriced")
     expect(
       d(
-        "1 of 3 subagent runs' cost not known yet (r/0/c1: running: usage arrives at run end); 1 unpriced: no price for x/y"
+        "1 of 3 child runs' cost not known yet (r/0/c1: running: usage arrives at run end); 1 unpriced: no price for x/y"
       )
     ).toBe("unknown")
   })

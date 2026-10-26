@@ -344,7 +344,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect(text(el, ".weft-title")).toBe("orders · pub_orders")
     expect($(el, ".weft-dot")?.className).toContain("weft-on")
     expect(text(el, ".weft-head")).toContain("2 turns")
-    expect(text(el, ".weft-head")).toContain("→")
+    expect(text(el, ".weft-head")).toContain("20 in · 8 out")
     const link = $(el, ".weft-head a") as HTMLAnchorElement
     expect(link.getAttribute("href")).toBe(
       "http://studio.test/studio/runs/r_ok"

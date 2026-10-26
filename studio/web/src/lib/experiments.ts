@@ -9,27 +9,15 @@ import { fetchRuns, nextCursor } from "./api"
 import { isScripted } from "./cost"
 import { editMarks } from "./edits"
 import { producedTexts } from "./events"
-import { plural, tokens } from "./format"
+import { plural, tokenPair, tokens } from "./format"
 import type { ExperimentRow, PageCursor, RunRow, SessionRow } from "./api"
 import type { TranscriptBatch } from "./events"
 import { stepDiffView } from "./stepdiff"
+import { forkSource } from "./run-row"
 import type { DiffDoc } from "./stepdiff"
 
-/** The run an experiment was forked from, and the step it continued
- * at: forked_from is "<run id>#<from_step>". A run id may itself hold
- * a "#", so the step is whatever follows the LAST one. */
-export function forkSource(row: Pick<RunRow, "forked_from">): {
-  runID: string
-  fromStep: number
-} | null {
-  const ff = row.forked_from
-  if (!ff) return null
-  const i = ff.lastIndexOf("#")
-  if (i < 0) return { runID: ff, fromStep: 0 }
-  const step = Number(ff.slice(i + 1))
-  if (!Number.isInteger(step) || step < 0) return { runID: ff, fromStep: 0 }
-  return { runID: ff.slice(0, i), fromStep: step }
-}
+// forkSource is lib/run-row.ts's (U21.1): the lineage chips read it.
+export { forkSource }
 
 /** nestExperiments groups the playground runs under the turns they
  * forked: source run id → its experiments, oldest first. Runs that
@@ -237,7 +225,7 @@ export function usageWords(r: Pick<RunRow, "usage">): string {
 }
 
 export function usageTitle(r: Pick<RunRow, "usage">): string {
-  return `${r.usage.input_tokens} in / ${r.usage.output_tokens} out`
+  return tokenPair(r.usage.input_tokens, r.usage.output_tokens, true)
 }
 
 /** idTail is a run id as a cell shows it: its tail (ULIDs share their

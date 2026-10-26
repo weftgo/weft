@@ -6,7 +6,7 @@
 // saved experiment), all gated on capability "pricing".
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { RunRow } from "../lib/api"
-import { CACHE_HINT } from "../lib/cost"
+import { BILL_TITLE, CACHE_HINT } from "../lib/cost"
 import {
   $,
   all,
@@ -98,7 +98,9 @@ describe("a turn's cost beside its tokens", () => {
     })
     expect(c.textContent).toBe("$0.0029")
     // Beside the tokens, in the second line.
-    expect($(el, ".weft-turn .weft-row2")!.textContent).toContain("10→4")
+    expect($(el, ".weft-turn .weft-row2")!.textContent).toContain(
+      "10 in · 4 out"
+    )
   })
 
   it("an unpriced model: — with pricing.go's reason as the title and in the accessible text, never $0.00", async () => {
@@ -144,7 +146,7 @@ describe("a turn's cost beside its tokens", () => {
       }),
     ])
     const rows = all(el, ".weft-turn [data-weft-turn-cost]")
-    expect(rows[0].textContent).toBe("$0.0029 + $0.0011 delegated")
+    expect(rows[0].textContent).toBe("$0.0029 own · $0.0011 delegated")
     const parts = rows[1].querySelectorAll("[data-weft-cost]")
     expect(cost(parts[0])).toEqual({ text: "$0.0020", title: "$0.002000 USD" })
     expect(cost(parts[1])).toEqual({ text: "—", title: why })
@@ -210,7 +212,9 @@ describe("the header's summed cost", () => {
       `/settings?price=${encodeURIComponent("openai/kimi-k2.7-code")}`
     )
     // The tokens' total beside it is untouched.
-    expect($(el, "[data-weft-stats]")!.textContent).toBe("2 turns · 20→8 tok")
+    expect($(el, "[data-weft-stats]")!.textContent).toBe(
+      "2 turns · 20 in · 8 out"
+    )
   })
 
   it("older turns not loaded: ≥ the loaded turns' sum, never a whole figure, the title says so", async () => {
@@ -398,7 +402,7 @@ describe("the experiment's cost in the result pane", () => {
     // The folded figure says what it folds (the playground's wrapper title).
     expect(
       $(el, ".weft-xres [data-weft-result-cost]")!.getAttribute("title")
-    ).toBe("the run's whole bill: its own model calls + its subagents'")
+    ).toBe(BILL_TITLE)
     const x = $(el, ".weft-xres [data-weft-experiment-cost]")!
     expect(x.textContent).toBe("2 replays of this turn: $0.0070")
   })

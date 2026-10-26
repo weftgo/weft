@@ -572,7 +572,7 @@ describe("the experiment chip leads back to its source", () => {
     fakeStudio(r, REPLAY_META)
     const el = await mount()
     expect(text(el, '[data-key="pg_1"] [data-weft-chip="experiment"]')).toBe(
-      "replay of t1 · step 2"
+      "↻ replay of t1 · step 2"
     )
     const back = $(el, '[data-key="pg_1"] button[data-weft-source]')!
     expect(back.closest(".weft-turn")).toBeNull() // beside the row button, never inside it
@@ -777,7 +777,7 @@ describe("F1.3 review fixes", () => {
     click(runButton(el))
     await settle(60)
     const href = all(el, ".weft-xres a")
-      .find((a) => a.textContent === "compare in Studio")!
+      .find((a) => a.textContent === "open in playground ⤢")!
       .getAttribute("href")!
     expect(href).toContain(`run=${encodeURIComponent(CHILD)}`)
     expect(href).toContain("step=1")

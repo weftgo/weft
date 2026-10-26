@@ -183,6 +183,38 @@ describe("the run page's URL (G2)", () => {
     )
   })
 
+  it("q opens the step's Request pane, again closes it; o follows the header's open in app (U21.1, UX-F-04)", async () => {
+    const { router } = renderApp(`/runs/${RUN}`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-span]")).toBeTruthy()
+    )
+    fireEvent.keyDown(window, { key: "q" })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        view: "story",
+        step: 0,
+        pane: "request",
+      })
+    )
+    fireEvent.keyDown(window, { key: "q" })
+    await waitFor(() =>
+      expect(router.state.location.search).not.toHaveProperty("pane")
+    )
+    // o clicks the header's open in app link (none here without a page
+    // URL: the disabled verb is a button, so nothing happens).
+    const clicked = vi.fn()
+    const a = document.createElement("a")
+    a.setAttribute("data-open-in-app", "https://app.test/")
+    a.addEventListener("click", (e) => {
+      e.preventDefault()
+      clicked()
+    })
+    document.body.append(a)
+    fireEvent.keyDown(window, { key: "o" })
+    expect(clicked).toHaveBeenCalledTimes(1)
+    a.remove()
+  })
+
   it("copies the page as it stands from the header, without a token", async () => {
     renderApp(`/runs/${RUN}?view=raw&q=step`)
     const button = await screen.findByRole("button", { name: "copy link" })

@@ -160,3 +160,24 @@ export const DIFF_STUDIO: Record<keyof typeof DIFF, string> = {
   del: "status-bad",
   changed: "ev-error",
 }
+
+/** The gap (hole) badge roles (U21.1, UX-F-07; lib/honesty.ts's tone):
+ * a loss (truncated, redacted, interrupted…) in the error-as-data
+ * mustard, a note (derived, compacted, hidden…) neutral — the panel's
+ * .weft-warn-badge / .weft-tag in HOLE's token, Studio's HoleBadge in
+ * HOLE_STUDIO's variable: the same hex per theme (palette.test.ts). */
+export const HOLE = { loss: "warn", note: "dim" } as const
+export const HOLE_STUDIO: Record<keyof typeof HOLE, string> = {
+  loss: "ev-error",
+  note: "muted-foreground",
+}
+
+/** Every semantic role table, by name (palette.test.ts walks them):
+ * each maps a meaning to the panel token it is drawn in; Studio draws
+ * the variable beside it. */
+export const ROLE_TABLES = {
+  status: ROLE,
+  kind: TONE,
+  diff: DIFF,
+  hole: HOLE,
+} as const

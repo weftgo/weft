@@ -1,6 +1,6 @@
 // The panel's step line carries the step's attempts and timing (plan
 // A4.2, parity with the run page): "attempt 4 of 4 · fallback to glm-b"
-// from the request rows the Request line already reads, "1.2 s · ttft
+// from the request rows the Request line already reads, "1.2 s · first token
 // 180 ms" from the folded step_finish — no new fetch; a run from before
 // A4 (no step_finish latency, no attempt rows) shows the not_recorded
 // badge from the shared table.
@@ -90,7 +90,7 @@ describe("the panel's step line (A4.2)", () => {
       "attempt 4 of 4 · fallback to glm-b"
     )
     expect(head.querySelector("[data-weft-timing]")?.textContent).toBe(
-      "1.2 s · ttft 180 ms"
+      "1.2 s · first token 180 ms"
     )
     expect(head.querySelector('[data-hole="not_recorded"]')).toBeNull()
     // No fetch of its own: the step route is never asked.

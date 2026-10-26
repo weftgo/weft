@@ -4,7 +4,7 @@ import type { DecisionDoc, Message, WireEvent } from "./api"
 import { decidedCall } from "./decisions"
 import type { FoldedStep } from "./events"
 import { msText } from "./attempts"
-import { byteSize } from "./format"
+import { byteSize, FIRST_TOKEN, tokenPair } from "./format"
 import { AWAITING } from "./status"
 import { CHIP_CATALOG, CHIP_PROMPT_CHANGED } from "./request-pane"
 import { endCard, failedAtStep, stopDetail, stoppedByWords } from "./stopped-by"
@@ -189,11 +189,12 @@ function steerText(messages: Message[] | null | undefined): string {
     .trim()
 }
 
-/** "12 in / 3 out", zeros when the usage is missing. */
+/** "12 in · 3 out" (lib/format.ts's tokenPair), zeros when the usage
+ * is missing. */
 function inOut(
   u: { input_tokens?: number; output_tokens?: number } | undefined
 ): string {
-  return `${u?.input_tokens ?? 0} in / ${u?.output_tokens ?? 0} out`
+  return tokenPair(u?.input_tokens, u?.output_tokens, true)
 }
 
 /** A one-line, human summary: what happened, in the machine's voice.
@@ -311,8 +312,7 @@ export function tokensWord(u?: {
   input_tokens?: number
   output_tokens?: number
 }): string {
-  const n = (v?: number) => (v ?? 0).toLocaleString("en-US")
-  return `${n(u?.input_tokens)} in · ${n(u?.output_tokens)} out`
+  return tokenPair(u?.input_tokens, u?.output_tokens, true)
 }
 
 /** A step's verdict: its words and whether it reads as a failure. */
@@ -363,7 +363,8 @@ export function stepVerdict(
   const took = f?.latencyMs && f.latencyMs > 0 ? f.latencyMs : ms
   if (took !== undefined && Number.isFinite(took) && took >= 0)
     parts.push(msText(took))
-  if (f?.ttftMs && f.ttftMs > 0) parts.push(`first token ${msText(f.ttftMs)}`)
+  if (f?.ttftMs && f.ttftMs > 0)
+    parts.push(`${FIRST_TOKEN} ${msText(f.ttftMs)}`)
   return { text: parts.join(" · "), bad }
 }
 

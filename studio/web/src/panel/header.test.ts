@@ -54,7 +54,7 @@ describe("a turn row's accessible name (UX-F-32)", () => {
     const el = await mount()
     const row = $(el, '.weft-turn[data-weft-run="s_01-t1"]')!
     const name = row.getAttribute("aria-label") ?? ""
-    expect(name).toMatch(/^turn 1, succeeded, .+, 1 step, 10 in 4 out, \S.*$/)
+    expect(name).toMatch(/^turn 1, succeeded, .+, 1 step, 10 in · 4 out, \S.*$/)
     // The visible title and when are the row's own words.
     expect(name).toContain(text(el, ".weft-turn .weft-when"))
   })
@@ -97,7 +97,7 @@ describe("the empty states (UX-F-33)", () => {
   it("no turn reads no usage (—, not 0→0) and draws no 'select a turn'", async () => {
     fakeStudio(empty())
     const el = await mount()
-    expect(text(el, "[data-weft-stats]")).toBe("0 runs · — tok")
+    expect(text(el, "[data-weft-stats]")).toBe("0 runs · —")
     expect(text(el, ".weft-turns")).toContain("no turns yet — run your app")
     expect(text(el, ".weft-main")).not.toContain("select a turn")
   })

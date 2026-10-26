@@ -166,7 +166,7 @@ describe("a derived turn in the panel", () => {
     expect($(el, ".weft-turn")!.textContent).not.toContain("0→0")
     // The header's total leaves the unknown turn out: "—", the reason its title.
     const stats = $(el, "[data-weft-stats]")!
-    expect(stats.textContent).toBe("1 run · — tok")
+    expect(stats.textContent).toBe("1 run · —")
     expect(stats.getAttribute("title")).toContain(reason)
   })
 
@@ -202,7 +202,7 @@ describe("a derived turn in the panel", () => {
     )
     saysStock(tp.textContent, "failed request tab")
     expect(tp.textContent).not.toContain("could not be read")
-    const tl = await tab(el, "timeline")
+    const tl = await tab(el, "waterfall")
     expect(
       [...tl.querySelectorAll(".weft-tl .weft-tl-l")].map((n) => n.textContent)
     ).toEqual(["support", "step 0", "model · gpt-5-2025-08-07"])
@@ -220,7 +220,7 @@ describe("a derived turn in the panel", () => {
 
   it("Timeline: the derived line, then the real spans on a time axis", async () => {
     const el = await open()
-    const tp = await tab(el, "timeline")
+    const tp = await tab(el, "waterfall")
     await vi.waitFor(() =>
       expect(tp.querySelector(".weft-timeline[data-axis='time']")).toBeTruthy()
     )

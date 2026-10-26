@@ -69,7 +69,6 @@ describe("attempts", () => {
 
   it("says timing without inventing a zero", () => {
     expect(timingLine(1200, 180)).toBe("1.2 s · first token 180 ms")
-    expect(timingLine(1200, 180, "ttft")).toBe("1.2 s · ttft 180 ms")
     expect(timingLine(40, undefined)).toBe("40 ms")
     expect(timingLine(undefined, undefined)).toBeNull()
     expect(msText(63_000)).toBe("1m03s")

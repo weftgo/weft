@@ -6,6 +6,14 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Changed
+
+- **Breaking:** the devtools panel's Timeline tab is the **waterfall** tab (U21.1; UX-F-05): its id is `waterfall` (`#weft-tab-waterfall`, the stored layout's `tab`), and a stored `tab: "timeline"` opens the default story tab. Both renderers label the run's views from `lib/links.ts`'s `VIEWS` — waterfall · story · request · raw, the same lower case; "trace" names the OTel `/traces` page only.
+- **Breaking:** studio's `delegated_cost_reason` says "child runs", the glossary's word for a subagent's run: `1 of 3 child runs unpriced: …`, `1 of 3 child runs' cost not known yet (…)`, `N of M child runs carry another public id, or none: …` (U21.1; UX-F-15) — goldens `runs`, `run-sub`, `search`.
+- Studio and the devtools panel (U21.1; UX-F-01, UX-F-04, UX-F-06, UX-F-07, UX-F-16): the shared libs. `lib/glossary.ts` `TERMS` — 33 concepts, each a tooltip (≤ 90 characters), a 2–4 line entry, a docs anchor and the words it retires, one export per term (the panel bundles none of it yet). `lib/status.ts`'s hints are the glossary's tooltips ("running — the run is reporting now", "parked — waiting for a decision on a tool call (approve / deny)"). `lib/palette.ts` `HOLE` / `HOLE_STUDIO` and `ROLE_TABLES` (status · kind · diff · hole), each role one hex on both renderers per theme; /live's "● live" is drawn in the live role (green), no longer the running colour. `lib/keys.ts` `PANEL_KEYMAP` / `STUDIO_KEYMAP`, drawn by both `?` overlays, a key both bind one binding: `j`/`k` the list in focus, `[`/`]` the step (the panel's `J`/`K` kept), `s`/`w`/`q`/`r` the story · waterfall · request · raw view on both (Studio's `q` opens the step's Request pane), `o` open it elsewhere (the panel's run in Studio, `g s` kept; Studio's in your app). `lib/run-row.ts` `rowView` / `lineageOf`: a replay reads "↻ replay of t3 · step 1" and a thread fork's run "⑃ fork of s_…#12" on Studio's runs list and the panel's turn chips and picker alike. `lib/format.ts` `tokenPair` ("60 in · 30 out") and `FIRST_TOKEN` (the panel's "60→30 tok" and "ttft" are gone); `lib/cost.ts` `COST_PARTS` / `costLine`: "$0.0012 own · $0.0040 delegated" on the run header and the panel's turn row, `BILL_TITLE` the replayed run's whole-bill hover. The panel's result-pane button that opens the playground says "open in playground ⤢" (UX-F-06: "compare in Studio" is the /compare link's). `palette.test.ts` "every role, one hex on both renderers"; `parity.test.ts` "the shared libs on both surfaces (U21.1)".
+
 ## 0.19.0 — 2026-10-26
 
 ### Added

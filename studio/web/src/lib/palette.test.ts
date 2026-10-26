@@ -6,8 +6,20 @@ import { readdirSync, readFileSync, statSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
-import { INK, PALETTE, ROLE, STUDIO_NAMES, TONE, TONE_STUDIO } from "./palette"
-import type { Role } from "./palette"
+import {
+  DIFF_STUDIO as DIFF_VARS,
+  HOLE,
+  HOLE_STUDIO,
+  INK,
+  PALETTE,
+  ROLE,
+  ROLE_TABLES,
+  STUDIO_NAMES,
+  TONE,
+  TONE_STUDIO,
+} from "./palette"
+import type { DIFF, Role } from "./palette"
+import { PANEL_CSS as PANEL_RULES } from "../panel/styles"
 import { STATUS } from "./status"
 import { ROLE_CLASS, ROLE_SVG, studioVar } from "./status-class"
 
@@ -366,5 +378,89 @@ describe("Studio's tinted surfaces and code window (U34-fix4)", () => {
     expect(sum).toContain('delta: "bg-faint-deco",')
     expect(sum).toContain('delta: "border-faint-deco/40",')
     expect(sum).toContain('delta: "text-faint",')
+  })
+})
+
+describe("every role, one hex on both renderers (U21.1, UX-F-01, UX-F-07)", () => {
+  // ROLE_TABLES is every meaning → token table the renderers draw:
+  // status (ROLE: the chips, the live dot), kind (TONE: the run tree's
+  // rows), diff (DIFF) and hole (HOLE: the gap badges). Each role's
+  // panel token and Studio variable are one hex in each theme.
+  const studioOf = (table: string, key: string, token: string): string => {
+    if (table === "status") return studioVar(key as Role)
+    if (table === "kind") return TONE_STUDIO[key as keyof typeof TONE]
+    if (table === "diff") return DIFF_VARS[key as keyof typeof DIFF]
+    if (table === "hole") return HOLE_STUDIO[key as keyof typeof HOLE]
+    throw new Error(`no Studio side for ${table}.${key} (${token})`)
+  }
+  it("the tables are the four meanings", () => {
+    expect(Object.keys(ROLE_TABLES)).toEqual(["status", "kind", "diff", "hole"])
+  })
+  for (const [theme, sel] of [
+    ["light", ":root"],
+    ["dark", ".dark"],
+  ] as const)
+    it(`${theme}: each ROLE_TABLES role resolves to the same hex on both`, () => {
+      const studio = studioTokens(sel)
+      const seen: string[] = []
+      for (const [table, roles] of Object.entries(ROLE_TABLES))
+        for (const [key, token] of Object.entries(roles)) {
+          const v = studioOf(table, key, token)
+          expect(studio[v], `${table}.${key}: --${v}`).toMatch(/^#[0-9a-f]{6}$/)
+          expect(
+            PALETTE[theme][token],
+            `${table}.${key}: --weft-${token} vs --${v}`
+          ).toBe(studio[v])
+          seen.push(`${table}.${key}`)
+        }
+      // The audit's §1.1 roles, every one pinned.
+      expect(seen).toEqual(
+        expect.arrayContaining([
+          "status.running",
+          "status.succeeded",
+          "status.failed",
+          "status.interrupted",
+          "status.parked",
+          "status.live",
+          "kind.step",
+          "kind.tool",
+          "kind.result",
+          "kind.error",
+          "hole.loss",
+          "hole.note",
+          "diff.add",
+          "diff.del",
+          "diff.changed",
+        ])
+      )
+    })
+
+  it("the renderers draw the roles, never a literal", () => {
+    // The panel: the gap badges and the live / running dot.
+    expect(PANEL_RULES).toContain(
+      `.weft-tag { border: 1px solid var(--weft-line); color: var(--weft-${HOLE.note}); }`
+    )
+    expect(PANEL_RULES).toContain(
+      `.weft-warn-badge { color: var(--weft-${HOLE.loss}); border-color: var(--weft-${HOLE.loss}); }`
+    )
+    expect(PANEL_RULES).toContain(
+      `.weft-dot.weft-on { background: var(--weft-${ROLE.live}); }`
+    )
+    expect(PANEL_RULES).toContain(
+      `.weft-dot.weft-run { background: var(--weft-${ROLE.running}); }`
+    )
+    // Studio: the HoleBadge's two tones, and /live's "● live" in the
+    // live role (it read the running colour before U21.1).
+    const badge = readFileSync(
+      resolve(process.cwd(), "src/components/studio/hole-badge.tsx"),
+      "utf8"
+    )
+    expect(badge).toContain(`text-${HOLE_STUDIO.note}`)
+    expect(badge).toContain(`text-${HOLE_STUDIO.loss}`)
+    const live = readFileSync(
+      resolve(process.cwd(), "src/routes/live.tsx"),
+      "utf8"
+    )
+    expect(live).toContain('tone: statusClass("live").text,')
   })
 })

@@ -55,6 +55,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { statusClass } from "@/lib/status-class"
 
 interface LiveSearch {
   /** The run whose story the side pane shows. */
@@ -239,7 +240,8 @@ const CONN_WORDS: Record<Conn, { text: string; title: string; tone: string }> =
     live: {
       text: "● live",
       title: "the all stream is open: rows update as frames arrive",
-      tone: "text-status-run-ink",
+      // The live role (UX-F-07): the panel's live dot's colour.
+      tone: statusClass("live").text,
     },
     reconnecting: {
       text: "reconnecting…",

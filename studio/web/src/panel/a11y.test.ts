@@ -131,7 +131,7 @@ async function rawAndKeys(el: WeftDevtools) {
   await settle()
 }
 async function timeline(el: WeftDevtools) {
-  ;(el.shadowRoot!.querySelector("#weft-tab-timeline") as HTMLElement).click()
+  ;(el.shadowRoot!.querySelector("#weft-tab-waterfall") as HTMLElement).click()
   await settle()
 }
 

@@ -73,7 +73,7 @@ import {
 } from "@/lib/stopped-by"
 import type { LoopRepeats } from "@/lib/stopped-by"
 import type { HoleMark } from "@/lib/honesty"
-import { tokens } from "@/lib/format"
+import { tokenPair } from "@/lib/format"
 import { replayBounds } from "@/lib/experiment-body"
 import { bytes, STORY_SHAPE, stepHasProblem } from "@/lib/summarize"
 import { CodeWin } from "@/components/studio/codewin"
@@ -228,7 +228,7 @@ export function Usage({
         splits.length ? ` (${splits.join(", ")})` : ""
       }`}
     >
-      {tokens(usage.input_tokens)} in / {tokens(usage.output_tokens)} out
+      {tokenPair(usage.input_tokens, usage.output_tokens)}
       {splits.length ? (
         <span className="text-muted-foreground"> · {splits.join(" · ")}</span>
       ) : null}

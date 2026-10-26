@@ -21,7 +21,13 @@ import type {
 import { sessionTree } from "@/lib/session-tree"
 import { summarizerView } from "@/lib/cost"
 import { WHO_HOLE } from "@/lib/decisions"
-import { absoluteTime, duration, stepCount, tokens } from "@/lib/format"
+import {
+  absoluteTime,
+  duration,
+  stepCount,
+  tokenPair,
+  tokens,
+} from "@/lib/format"
 import { runLink, sessionLink } from "@/lib/links"
 import { statusOf, turnTag } from "@/lib/status"
 import { statusClass, THREAD_LINK, TONE_TEXT } from "@/lib/status-class"
@@ -460,8 +466,11 @@ function ContextLaneRow({
           <CostText v={sum} chip={false} label="summarizer" />
         ) : t?.summarizer ? (
           <span className="text-faint">
-            summarizer {tokens(t.summarizer.usage.input_tokens)} in /{" "}
-            {tokens(t.summarizer.usage.output_tokens)} out
+            summarizer{" "}
+            {tokenPair(
+              t.summarizer.usage.input_tokens,
+              t.summarizer.usage.output_tokens
+            )}
           </span>
         ) : null}
       </div>
@@ -611,10 +620,7 @@ function TurnRow({
           {row && derivedUsageUnknown(row) ? (
             <UnknownTokens reason={row.cost_reason} />
           ) : (
-            <>
-              {tokens(t.usage.input_tokens)} / {tokens(t.usage.output_tokens)}{" "}
-              tok
-            </>
+            tokenPair(t.usage.input_tokens, t.usage.output_tokens)
           )}
         </span>
         {costCapable && row ? (

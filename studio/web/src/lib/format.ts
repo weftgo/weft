@@ -116,10 +116,29 @@ export function tokens(n: number): string {
   return String(n)
 }
 
+/** tokenPair is the one token format both surfaces write (U21.1,
+ * UX-F-16): "60 in · 30 out" — compact ("12.4k in · 3.1k out"), or
+ * with exact the whole counts ("12,400 in · 3,100 out"). A missing
+ * side is 0. */
+export function tokenPair(
+  input: number | undefined,
+  output: number | undefined,
+  exact = false
+): string {
+  const n = (v: number | undefined) => {
+    const x = Number.isFinite(v) ? (v as number) : 0
+    return exact ? x.toLocaleString("en-US") : tokens(x)
+  }
+  return `${n(input)} in · ${n(output)} out`
+}
+
+/** The time to first token's words on both surfaces (UX-F-16): "first
+ * token 180 ms" — never "ttft". */
+export const FIRST_TOKEN = "first token"
+
+/** usageSummary is a usage's tokenPair, exact. */
 export function usageSummary(u: Usage): string {
-  const n = (v: number | undefined) =>
-    (Number.isFinite(v) ? (v as number) : 0).toLocaleString()
-  return `${n(u.input_tokens)} in / ${n(u.output_tokens)} out`
+  return tokenPair(u.input_tokens, u.output_tokens, true)
 }
 
 /** byteSize is a byte count in words: "92 B", "12.3 KB" — or, with

@@ -2,77 +2,20 @@
 // tooling. Keys fire only on a bare press outside a text box; a held
 // ctrl/⌘/alt always goes to the browser.
 import { Kbd } from "@/components/ui/kbd"
+import { STUDIO_KEYMAP } from "@/lib/keys"
+import type { KeyBinding } from "@/lib/keys"
 
-export interface Binding {
-  keys: string[]
-  action: string
-  where?: string
-}
-
-export const bindings: Binding[] = [
-  {
-    keys: ["⌘K"],
-    action:
-      "command palette: find a run, session, trace or experiment; jump to a page",
-  },
-  { keys: ["/"], action: "focus the search box", where: "runs" },
-  { keys: ["j", "k"], action: "next / previous row (or ↓ ↑)", where: "runs" },
-  { keys: ["enter"], action: "open the selected run", where: "runs" },
-  {
-    keys: ["w", "s", "r", "l"],
-    action: "waterfall · story · raw · logs views",
-    where: "run",
-  },
-  {
-    keys: ["j", "k"],
-    action: "next / previous row in the waterfall",
-    where: "run",
-  },
-  {
-    keys: ["t"],
-    action: "the waterfall's scale: time · order · graph",
-    where: "run",
-  },
-  {
-    keys: ["↑", "↓", "←", "→"],
-    action: "move / fold in the waterfall (tree focused)",
-    where: "run",
-  },
-  { keys: ["space"], action: "play / pause replay", where: "run" },
-  {
-    keys: ["[", "]"],
-    action: "previous / next step or tool event",
-    where: "run",
-  },
-  { keys: [",", "."], action: "one event back / forward", where: "run" },
-  {
-    keys: ["{", "}"],
-    action: "previous / next turn of the run's session",
-    where: "run",
-  },
-  {
-    keys: ["n"],
-    action:
-      "jump to step: the story's scrubber (←→ home end on it; a number + enter in its box)",
-    where: "run",
-  },
-  {
-    keys: ["home", "end"],
-    action: "first event / the end — live while running (bar focused)",
-    where: "run",
-  },
-  { keys: ["g", "r"], action: "go to runs" },
-  { keys: ["g", "a"], action: "go to agents" },
-  { keys: ["y"], action: "copy a link to this page as it stands" },
-  { keys: ["?"], action: "this help" },
-]
+/** The bindings: lib/keys.ts's STUDIO_KEYMAP — the panel's ? list
+ * draws PANEL_KEYMAP, the keys both bind one binding (U21.1, UX-F-04). */
+export const bindings: readonly KeyBinding[] = STUDIO_KEYMAP
 
 export function KbdHelpBody() {
   return (
     <div className="grid gap-1">
       {bindings.map((b) => (
         <div
-          key={b.action}
+          key={b.keys.join(" ") + b.action}
+          data-keys={b.keys.join(" ")}
           className="flex items-center justify-between gap-6 py-0.5"
         >
           <span className="flex gap-1">
@@ -84,6 +27,7 @@ export function KbdHelpBody() {
           </span>
           <span className="flex items-center gap-2 text-sm text-muted-foreground">
             {b.action}
+            {b.note ? <span className="text-faint">({b.note})</span> : null}
             {b.where ? (
               <span className="font-mono text-[10px] text-faint uppercase">
                 {b.where}

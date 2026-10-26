@@ -11,7 +11,7 @@
 // this trace: the graph does not draw them. Plain TypeScript, no React:
 // Studio only (the panel links here).
 import type { RunRow, Span } from "./api"
-import { plural } from "./format"
+import { plural, tokenPair } from "./format"
 import type { HoleMark } from "./honesty"
 import { statusOf } from "./status"
 import type { Status, StatusKey, StatusRow } from "./status"
@@ -288,7 +288,7 @@ export function nodeLine(n: GraphNode): string {
     plural(n.calls, n.kind === "agent" ? "run" : "call"),
     `slowest ${took(n.slowest)}`,
   ]
-  if (n.tokens) parts.push(`${n.tokens.input}→${n.tokens.output} tok`)
+  if (n.tokens) parts.push(tokenPair(n.tokens.input, n.tokens.output))
   if (n.fails) parts.push(`${n.fails} failed`)
   return parts.join(" · ")
 }

@@ -31,7 +31,7 @@ import {
   whoUnrecorded,
 } from "./decisions"
 import { compactionLine } from "./compaction"
-import { absoluteTime, plural, tokens } from "./format"
+import { absoluteTime, plural, tokenPair, tokens } from "./format"
 import { runLink, sessionLink, sessionSearch, sessionViewLink } from "./links"
 import type { RunLink, SessionLink, SessionSearch, SessionView } from "./links"
 import type { TONE } from "./palette"
@@ -751,11 +751,7 @@ export function markDetail(
   if (m.kind === "compaction" || m.kind === "branch") {
     const u = f.summarizer_usage as
       { input_tokens?: number; output_tokens?: number } | undefined
-    if (u)
-      row(
-        "summarizer",
-        `${tokens(u.input_tokens ?? 0)} in / ${tokens(u.output_tokens ?? 0)} out`
-      )
+    if (u) row("summarizer", tokenPair(u.input_tokens, u.output_tokens))
   }
   row(
     "filed under",

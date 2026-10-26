@@ -39,7 +39,7 @@ describe("StepList", () => {
     // agent, its own usage, and the link to its own run page.
     expect(screen.getByText(/subagent/)).toBeTruthy()
     expect(screen.getByText("researcher")).toBeTruthy()
-    expect(screen.getAllByText(/9 in \/ 5 out/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/9 in · 5 out/).length).toBeGreaterThan(0)
     // The call row: name, an args summary, the ok pill and the size.
     expect(screen.getByText('{"prompt":"status of order 42"}')).toBeTruthy()
     expect(screen.getByText("ok")).toBeTruthy()
@@ -324,7 +324,7 @@ it("renders a steered user turn between the steps (ADR 0019)", async () => {
 describe("StepList's subagent child rows (A10)", () => {
   // A child's usage is the record's only once the run ended — a
   // running child's zeros read "usage at finish", an interrupted one's
-  // "—" beside its interrupted badge; never "0 in / 0 out".
+  // "—" beside its interrupted badge; never "0 in · 0 out".
   it("a running child's row says its usage comes at the finish; an interrupted one's is a dash and a badge", async () => {
     const zero = { input_tokens: 0, output_tokens: 0 }
     for (const [status, want] of [
@@ -347,7 +347,7 @@ describe("StepList's subagent child rows (A10)", () => {
         `[data-child-row="${subDoc.children[0].id}"]`
       )!
       expect(row.querySelector("[data-child-usage]")?.textContent).toBe(want)
-      expect(row.textContent).not.toContain("0 in / 0 out")
+      expect(row.textContent).not.toContain("0 in · 0 out")
       expect(Boolean(row.querySelector('[data-hole="interrupted"]'))).toBe(
         status === "interrupted"
       )
@@ -385,7 +385,7 @@ describe("StepList's subagent child rows (A10)", () => {
       "researcher"
     )
     expect(row?.querySelector("[data-child-usage]")?.textContent).toBe(
-      "9 in / 5 out"
+      "9 in · 5 out"
     )
   })
 

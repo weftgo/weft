@@ -187,7 +187,7 @@ describe("subagents on the run page (A10)", () => {
       "succeeded"
     )
     expect(row.querySelector("[data-child-usage]")?.textContent).toBe(
-      "10 in / 5 out"
+      "10 in · 5 out"
     )
     const link = within(row).getByRole("link", { name: /open run/ })
     expect(decodeURIComponent(link.getAttribute("href") ?? "")).toContain(

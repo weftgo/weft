@@ -13,7 +13,7 @@ import type { CSSProperties } from "react"
 
 import type { RunRow, TimelineDoc, TimelineTurn } from "@/lib/api"
 import { summarizerView } from "@/lib/cost"
-import { tokens } from "@/lib/format"
+import { tokens, tokenPair } from "@/lib/format"
 import { runLink, sessionViewLink } from "@/lib/links"
 import { sessionTree, TREE, treeRows } from "@/lib/session-tree"
 import type { TreeNode } from "@/lib/session-tree"
@@ -240,8 +240,7 @@ function TreeMark({
       {fork ? <ForkState f={fork} /> : null}
       {u ? (
         <span className="text-faint">
-          summarizer {tokens(u.input_tokens ?? 0)} in /{" "}
-          {tokens(u.output_tokens ?? 0)} out
+          summarizer {tokenPair(u.input_tokens, u.output_tokens)}
         </span>
       ) : null}
     </li>

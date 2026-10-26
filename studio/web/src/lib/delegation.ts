@@ -241,7 +241,7 @@ export const STARTED_BY = {
 export const DELEGATED_BLOCK = {
   eyebrow: "delegated sessions",
   usage: (inTok: string, outTok: string) =>
-    `delegated ${inTok} in / ${outTok} out`,
+    `delegated ${inTok} in · ${outTok} out`,
   usageTitle:
     "every session delegated under this one, any depth — beside the session's own usage, never folded into it",
   more: "more delegated sessions than are listed here: the first 100, newest first (the delegated figures count every one)",

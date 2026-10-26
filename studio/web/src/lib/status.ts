@@ -58,31 +58,33 @@ export function statusPick(v: string): string {
   return Object.hasOwn(STATUS, v) ? STATUS[v as StatusKey].word : ANY_STATUS
 }
 
-/** The table: the six words, and the decided park ("parked → tN"). */
+/** The table: the six words, and the decided park ("parked → tN").
+ * The hints are the glossary's tooltips (lib/glossary.ts reads them
+ * from here, U21.1): the audit's §2.1 words. */
 export const STATUS: Record<StatusKey, StatusWords> = {
   running: {
     word: "running",
-    hint: "the recorder's heartbeat is fresh",
+    hint: "the run is reporting now",
     role: "running",
   },
   succeeded: {
     word: "succeeded",
-    hint: "finished with a result",
+    hint: "finished with an answer",
     role: "succeeded",
   },
   failed: {
     word: "failed",
-    hint: "the loop returned an error",
+    hint: "the loop returned an error (see why)",
     role: "failed",
   },
   interrupted: {
     word: "interrupted",
-    hint: "stored as running, but the heartbeat went stale — a crash or kill",
+    hint: "stopped reporting for 30 s: crashed or killed",
     role: "interrupted",
   },
   parked: {
     word: "parked",
-    hint: "pending",
+    hint: "waiting for a decision on a tool call (approve / deny)",
     role: "parked",
   },
   cancelled: {

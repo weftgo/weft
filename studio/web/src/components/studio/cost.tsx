@@ -7,6 +7,7 @@ import type { CostFields, DelegatedCostFields, RunRow } from "@/lib/api"
 import {
   CACHE_HINT,
   cacheNotReported,
+  COST_PARTS,
   costView,
   delegatedView,
   SCRIPTED_HINT,
@@ -167,8 +168,9 @@ export function CacheHint({
   )
 }
 
-/** RunCost is a run's own figure and, when it has subagent runs, its
- * delegated one beside it: "own $x · delegated $y", two numbers. */
+/** RunCost is a run's own figure and, when it has child runs, its
+ * delegated one beside it: "$x own · $y delegated" (lib/cost.ts's
+ * COST_PARTS, the panel's turn row's words), two numbers. */
 export function RunCost({
   run,
   hasChildren,
@@ -190,15 +192,15 @@ export function RunCost({
     )
   return (
     <span className="inline-flex items-center gap-1.5" data-run-cost>
-      <span>own</span>
       <span data-cost-part="own">
         <CostText v={own} />
       </span>
-      <span className="text-faint">·</span>
-      <span>delegated</span>
+      <span>{COST_PARTS.own}</span>
+      <span className="text-faint">{COST_PARTS.sep.trim()}</span>
       <span data-cost-part="delegated">
         <CostText v={delegatedView(run)} />
       </span>
+      <span>{COST_PARTS.delegated}</span>
       <CacheHint fields={run} />
     </span>
   )

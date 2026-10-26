@@ -10,7 +10,7 @@ import type { RunDoc, StatsGroup } from "./api"
 import type { RunsSearch } from "./links"
 import { costView } from "./cost"
 import type { CostView } from "./cost"
-import { spanMs, tokens } from "./format"
+import { spanMs, tokenPair, tokens } from "./format"
 
 /** The windows the Agents page offers (its ?window=, the API's since). */
 export const STATS_WINDOWS = ["24h", "7d"] as const
@@ -135,7 +135,7 @@ export function groupMetrics(g: StatsGroup, runLevel = true): Metric[] {
       key: "tokens",
       label: "tokens",
       value: `${tokens(g.input_tokens)} → ${tokens(g.output_tokens)}`,
-      title: `${g.input_tokens.toLocaleString()} in / ${g.output_tokens.toLocaleString()} out — the calls' own usage, subagents apart`,
+      title: `${tokenPair(g.input_tokens, g.output_tokens, true)} — the calls' own usage, child runs' apart`,
       series: s.map((b) => b.input_tokens + b.output_tokens),
     },
     {

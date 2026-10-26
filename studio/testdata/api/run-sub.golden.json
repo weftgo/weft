@@ -39,7 +39,7 @@
   "cache": "exact",
   "delegated_cost_usd": null,
   "delegated_cost_known": false,
-  "delegated_cost_reason": "1 of 1 subagent runs unpriced: no price for openai/kimi-k2.7-code",
+  "delegated_cost_reason": "1 of 1 child runs unpriced: no price for openai/kimi-k2.7-code",
   "delegated_unpriced_models": [
     "openai/kimi-k2.7-code"
   ],

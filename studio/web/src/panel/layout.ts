@@ -29,7 +29,7 @@ export interface Layout {
   /** The user's theme choice (D2, the ◐ button): "light", "dark", or "" for auto. */
   theme: string
   raw: boolean
-  /** The open turn's tab (D4): story, request, timeline or raw (raw
+  /** The open turn's tab (D4): story, request, waterfall or raw (raw
    * mirrors it, so a v1 reader that knows only raw still agrees). */
   tab: string
   /** The §5.3 force-on switch, migrated from localStorage.weft_debug. */
@@ -37,7 +37,7 @@ export interface Layout {
 }
 
 /** The turn view's tabs (D4), in their order. */
-export const TABS = ["story", "request", "timeline", "raw"]
+export const TABS = ["story", "request", "waterfall", "raw"]
 
 /** The one key the panel keeps, per origin. */
 export const STORE_KEY = "weft.devtools"

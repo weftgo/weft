@@ -14,7 +14,7 @@
 //     (unpricedLine), never a sentence per row (U7).
 // The devtools panel imports it too (A5.3: a turn's cost, the header's
 // sum, the result pane's): the same figures and words on both surfaces.
-import { plural } from "./format"
+import { plural, tokenPair } from "./format"
 import type { CostFields, DelegatedCostFields, RunRow } from "./api"
 import { isDerived } from "./honesty"
 import { CELL_REASONS, CELL_WORDS } from "./stepdiff"
@@ -124,6 +124,20 @@ function view(
   }
 }
 
+/** The bill's two parts in words (U21.1, UX-F-15, UX-F-16): "$0.0012
+ * own · $0.0040 delegated" — the figure, then its word — on the
+ * panel's turn row and Studio's run header alike; delegated is a cost
+ * and usage word only (lib/glossary.ts). */
+export const COST_PARTS = { own: "own", delegated: "delegated", sep: " · " }
+
+/** costLine is the two parts as one line: "$x own · $y delegated". */
+export const costLine = (own: string, delegated: string) =>
+  `${own} ${COST_PARTS.own}${COST_PARTS.sep}${delegated} ${COST_PARTS.delegated}`
+
+/** A whole bill's hover (a replayed run's result, both surfaces). */
+export const BILL_TITLE =
+  "the run's whole bill: own + delegated (its model calls and its child runs')"
+
 /** costView reads an object's own cost block. */
 export function costView(f: CostFields | null | undefined): CostView {
   return view(
@@ -156,7 +170,7 @@ export function summarizerView(
 ): CostView | null {
   if (!f) return null
   const v = costView(f)
-  const toks = `${f.usage.input_tokens.toLocaleString()} in / ${f.usage.output_tokens.toLocaleString()} out`
+  const toks = tokenPair(f.usage.input_tokens, f.usage.output_tokens, true)
   // An estimate (cost_badge "estimate"): known, priced at a stand-in
   // model's rates — "≈", its reason in the title.
   const est = v.known && f.cost_badge === ESTIMATE_BADGE
@@ -176,13 +190,13 @@ export function summarizerView(
 
 /** The reason words studio/pricing.go gives a model no pricing row
  * matches (or a run that names none): what makes a figure "unpriced"
- * rather than "unknown" (tally's "n of m subagent runs unpriced", a
+ * rather than "unknown" (tally's "n of m child runs unpriced", a
  * Studio before U7's "no row … matches"). */
 const UNPRICED_WORDS =
   /unpriced|has no price|\bno row\b.*\bmatches\b|reported no model/
 
 /** The words studio/pricing.go's tally gives a delegated reason when
- * any child's part is unknown ("1 of 3 subagent runs' cost not known
+ * any child's part is unknown ("1 of 3 child runs' cost not known
  * yet (…)"; before U7 "…'s cost is not known yet: …"): the whole is
  * unknown then, whatever unpriced child it goes on to count. */
 const UNKNOWN_LEAD = /not known yet/

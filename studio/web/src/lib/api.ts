@@ -2821,7 +2821,15 @@ export interface ExperimentRow extends CostFields {
     side_effects?: string
     thread?: string
   }[]
-  inputs: { key: string; source_run_id?: string; text?: string }[]
+  /** Each row; from_step is the row's own step (a multi-source matrix,
+   * UX-C-37: each source from its own failing step), absent the
+   * experiment's from_step. */
+  inputs: {
+    key: string
+    source_run_id?: string
+    text?: string
+    from_step?: number
+  }[]
   /** The matrix's pass predicate (UX plan D8), stored and returned
    * verbatim — its language is the playground's; at most 4096 bytes. */
   pass_predicate?: string

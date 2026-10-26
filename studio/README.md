@@ -2361,8 +2361,35 @@ lint rule `controlRules` (eslint.config.js, pinned by
 Tailwind palette class (`text-red-500`, `bg-amber-100`, Tailwind 4.3's
 mauve/mist/olive/taupe, …) and an arbitrary colour (`text-[#…]`,
 `bg-[rgb(…)]`, `border-[oklch(…)]`) in the
-playground, the experiment form and the split, density and select
-components.
+playground, the experiment form, the multi-source matrix and the split,
+density and select components.
+
+### One failure class, one matrix, a pass predicate (U24.2)
+
+The runs list's error-class facet (capability `stats`) groups a failed
+list by its normalised error text; a picked class offers "Experiment on
+these N →", the playground's multi-source matrix
+(`/playground?sources=<ids>&agent=<name>`, at most 20 runs): one row per
+source run, each continuing from its own failing step with its own
+prefix (the input's `from_step`), the agent's models as columns, and the
+estimate before Run — "28 cells · ≈ 34k tokens · ≈ $0.012" — from the
+source steps' recorded usage priced at each column's model, "cost
+unknown: <why>" for an unpriced one. The pass predicate, saved verbatim
+on the experiment and judged by the grid (`src/lib/predicate.ts`, the one
+place it is read):
+
+```
+predicate := clause { AND clause }
+clause    := status ( = | != ) succeeded | failed | interrupted | running
+           | answer ( ~ | !~ ) /regex/flags      (JavaScript RegExp)
+           | answer ( = | != ) "text"            (the whole last answer)
+           | ( steps | tokens | cost ) ( < | <= | = | >= | > ) <number>
+```
+
+Empty is `status = succeeded`. A clause whose fact is not known — the
+answer not read, an unpriced cost — leaves the cell "? not judged",
+never a pass. The grid tallies each column ("5/7 · $0.0021") and names
+the cheapest column passing every row and the cheapest overall.
 
 Keyboard: `⌘K` jumps to any recent run, `/` filters, `j`/`k` move,
 `enter` opens, `w`/`s`/`r` switch waterfall/story/raw, `t` steps the

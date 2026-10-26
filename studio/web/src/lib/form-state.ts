@@ -728,7 +728,9 @@ export function cellBody(
   if (!ev || !ei)
     throw new Error(`no cell ${variant}×${input} in experiment ${exp.id}`)
   const fv = form.variants.find((v) => v.key === variant)
-  const fromStep = form.step ?? 0
+  // A multi-source matrix's row keeps its own step (UX-C-37); else the
+  // experiment's one step.
+  const fromStep = ei.from_step ?? form.step ?? 0
   const sideEffects = fv?.side_effects ?? "substitute"
   const body: PlaygroundRunBody = {
     runtime: target.runtime,

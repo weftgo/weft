@@ -1599,7 +1599,7 @@ func experiments(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		db := open(t)
 		defer func() { _ = db.Close() }()
 
-		fromStep := 2
+		fromStep, rowStep := 2, 4
 		e := obsdb.Experiment{
 			ID: "exp_1", Name: "tracking-link prompt", Agent: "acme-support",
 			Variants: []obsdb.ExperimentVariant{
@@ -1609,6 +1609,8 @@ func experiments(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 			Inputs: []obsdb.ExperimentInput{
 				{Key: "1", SourceRunID: "s_1-t1"},
 				{Key: "2", Text: "angry user"},
+				// A multi-source row with its own step (UX-C-37).
+				{Key: "3", SourceRunID: "s_2-t1", FromStep: &rowStep},
 			},
 			// The pass predicate (D8): stored and returned verbatim.
 			PassPredicate: `status = succeeded AND answer ~ /\d+ units/`,
@@ -1639,8 +1641,9 @@ func experiments(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		if len(got.Variants) != 2 || got.Variants[1].Key != "B" || string(got.Variants[1].Overrides) != `{"instructions":"new"}` {
 			t.Errorf("variants = %+v, want the wire shapes verbatim", got.Variants)
 		}
-		if len(got.Inputs) != 2 || got.Inputs[1].Text != "angry user" {
-			t.Errorf("inputs = %+v", got.Inputs)
+		if len(got.Inputs) != 3 || got.Inputs[1].Text != "angry user" || got.Inputs[0].FromStep != nil ||
+			got.Inputs[2].FromStep == nil || *got.Inputs[2].FromStep != 4 || got.Inputs[2].SourceRunID != "s_2-t1" {
+			t.Errorf("inputs = %+v, want each row's own step kept", got.Inputs)
 		}
 		// The rest of the command, kept as sent (plan F5.1): the modes,
 		// the step, the source, the edits verbatim, the variant's own

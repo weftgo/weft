@@ -83,6 +83,15 @@ import {
   useCostCapable,
 } from "@/components/studio/cost"
 import { Button } from "@/components/ui/button"
+import {
+  CheapestLine,
+  PASS_WORDS,
+  PredicateField,
+  VerdictChip,
+  tallies,
+  useVerdicts,
+} from "@/components/studio/pass-predicate"
+import { DEFAULT_PREDICATE, parsePredicate, passRate } from "@/lib/predicate"
 import { NotFound } from "@/components/studio/not-found"
 import { isNotFound } from "@/lib/not-found"
 import {
@@ -414,6 +423,19 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
         : [...cur, runID].slice(-2)
     )
 
+  // The pass predicate (UX-C-38): the definition's, or one the reader
+  // is trying (null: the saved one); every cell judged under it.
+  const [predEdit, setPredEdit] = useState<string | null>(null)
+  const predText = predEdit ?? exp?.pass_predicate ?? DEFAULT_PREDICATE
+  const parsedPred = parsePredicate(predText)
+  const latestOf = (v: string, i: string) =>
+    placed?.cells.get(cellKey(v, i))?.at(-1)
+  const verdicts = useVerdicts(
+    exp,
+    latestOf,
+    parsedPred.ok ? parsedPred.pred : null
+  )
+
   if (q.isPending)
     return <p className="p-6 text-xs text-muted-foreground">loading…</p>
   if (q.isError && isNotFound(q.error))
@@ -431,8 +453,13 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
     )
   if (!exp || !form || !placed) return null
 
-  const latest = (v: string, i: string) =>
-    placed.cells.get(cellKey(v, i))?.at(-1)
+  const latest = latestOf
+  const columnName = (key: string) => {
+    const o = exp.variants.find((v) => v.key === key)?.overrides
+    const m = o && typeof o === "object" && "model" in o ? String(o.model) : ""
+    return m ? `${key} (${m})` : key
+  }
+  const cols = parsedPred.ok ? tallies(exp, verdicts, latest, columnName) : []
   const variantTotal = (v: string) =>
     sumCost(
       exp.inputs.flatMap((i) => placed.cells.get(cellKey(v, i.key)) ?? [])
@@ -555,6 +582,16 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
         </p>
       ) : null}
 
+      <PredicateField
+        exp={exp}
+        value={predText}
+        onChange={setPredEdit}
+        maySave={mayRun}
+        onSaved={() => {
+          setPredEdit(null)
+          void qc.invalidateQueries({ queryKey: experimentQuery(id).queryKey })
+        }}
+      />
       <div className="overflow-x-auto rounded-lg border" data-scroll-box="">
         <table className="w-full text-xs">
           <caption className="sr-only">
@@ -628,6 +665,9 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                               onChange={() => togglePick(run.id)}
                             />
                             <RunStatus run={run} />
+                            <VerdictChip
+                              v={verdicts.get(cellKey(v.key, i.key))}
+                            />
                             <CellAnswer run={run} />
                             <span
                               className="font-mono text-muted-foreground"
@@ -715,8 +755,32 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
               </tr>
             ))}
           </tbody>
-          {costCapable ? (
-            <tfoot>
+          <tfoot>
+            {cols.length ? (
+              <tr className="border-t text-muted-foreground" data-pass-row>
+                <th
+                  scope="row"
+                  className="px-3 py-2 text-left font-normal"
+                  title={PASS_WORDS.rowHint}
+                >
+                  {PASS_WORDS.row}
+                </th>
+                <td />
+                {cols.map((c) => (
+                  <td
+                    key={c.key}
+                    className="px-3 py-2 font-mono"
+                    data-pass-rate={c.key}
+                  >
+                    {passRate(c)}
+                    {costCapable
+                      ? ` · ${c.usd === null ? "unpriced" : formatUSD(c.usd)}`
+                      : ""}
+                  </td>
+                ))}
+              </tr>
+            ) : null}
+            {costCapable ? (
               <tr className="border-t text-muted-foreground">
                 <th
                   scope="row"
@@ -725,6 +789,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                 >
                   cost
                 </th>
+                <td />
                 {exp.variants.map((v) => (
                   <td
                     key={v.key}
@@ -735,10 +800,11 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                   </td>
                 ))}
               </tr>
-            </tfoot>
-          ) : null}
+            ) : null}
+          </tfoot>
         </table>
       </div>
+      <CheapestLine cols={cols} />
 
       {placed.loose.length ? (
         <div className="space-y-1 text-xs" data-loose-runs>

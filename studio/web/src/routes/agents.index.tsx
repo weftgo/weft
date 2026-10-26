@@ -5,12 +5,14 @@
 // connected runtime holds it, remembered once that runtime is gone —
 // never a remembered one shown as live.
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 
-import type { ManifestAgent, ManifestSource } from "@/lib/api"
+import type { ManifestAgent, ManifestSource, StatsPage } from "@/lib/api"
 import { ApiError, deleteProposal, manifestQuery, studioToken } from "@/lib/api"
-import { absoluteTime } from "@/lib/format"
+import { absoluteTime, UNNAMED_AGENT } from "@/lib/format"
+import { STATS_WINDOWS, STATS_WORDS, statsWindowOf } from "@/lib/stats"
+import type { StatsWindow } from "@/lib/stats"
 import { copyText } from "@/lib/json"
 import { notifySave } from "@/lib/notify"
 import {
@@ -19,6 +21,12 @@ import {
   PROPOSAL_POINTER,
 } from "@/lib/saves"
 import { AgentCard } from "@/components/studio/agent-cards"
+import {
+  AgentCharts,
+  AgentStatsStrip,
+  ToolStatsLine,
+  useStats,
+} from "@/components/studio/agent-stats"
 import { TextDiff } from "@/components/studio/step-request"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { HoleBadge } from "@/components/studio/hole-badge"
@@ -26,6 +34,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 
 export const Route = createFileRoute("/agents/")({
+  // The stats window rides the URL (?window=24h|7d, UX-A-14).
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { window?: StatsWindow } =>
+    search.window === undefined ? {} : { window: statsWindowOf(search.window) },
   component: AgentsPage,
 })
 
@@ -47,6 +60,8 @@ function AgentsPage() {
     refetchInterval: (q) => (refused(q.state.error) ? false : REFRESH_MS),
   })
   const caps = useCapabilities()
+  const window = statsWindowOf(Route.useSearch().window)
+  const stats = useStats("agent", window)
   if (manifest.isPending) {
     return (
       <div className="flex justify-center py-24">
@@ -96,6 +111,14 @@ function AgentsPage() {
           {PROPOSAL_POINTER}.
         </p>
       )}
+      {caps.has("stats") ? (
+        <AgentsStats
+          window={window}
+          page={stats.data}
+          error={stats.isError ? stats.error.message : undefined}
+          registered={manifest.data.agents.map((a) => a.name)}
+        />
+      ) : null}
       {manifest.data.agents.map((a) => (
         <div key={`${a.name}:${a.manifest_hash ?? ""}`} className="space-y-1">
           <AgentSources agent={a} sources={sources} />
@@ -105,7 +128,116 @@ function AgentsPage() {
             </p>
           )}
           {a.proposed && <Proposed agent={a} caps={caps.caps} />}
-          <AgentCard agent={a} />
+          {caps.has("stats") && stats.data ? (
+            <AgentStatsStrip
+              group={stats.data.groups.find((g) => g.key === a.name)}
+              window={window}
+              bucketMs={stats.data.bucket_ms}
+              since={stats.data.since}
+            />
+          ) : null}
+          {caps.has("stats") ? (
+            <AgentToolsCard agent={a} window={window} />
+          ) : (
+            <AgentCard agent={a} />
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** AgentToolsCard is the manifest card with each tool's numbers over
+ * the window under it (by=tool, this agent's calls). */
+function AgentToolsCard({
+  agent,
+  window,
+}: {
+  agent: ManifestAgent
+  window: StatsWindow
+}) {
+  const tools = useStats("tool", window, agent.name)
+  return (
+    <AgentCard
+      agent={agent}
+      toolExtra={(name) =>
+        tools.data ? (
+          <ToolStatsLine
+            group={tools.data.groups.find((g) => g.key === name)}
+            window={window}
+          />
+        ) : null
+      }
+    />
+  )
+}
+
+/** AgentsStats is the page's numbers: the window picker (in the URL),
+ * a chart per metric across the agents, and the agents seen in runs
+ * that no manifest registers (dimmed, their strip only). */
+function AgentsStats({
+  window,
+  page,
+  error,
+  registered,
+}: {
+  window: StatsWindow
+  page?: StatsPage
+  error?: string
+  registered: string[]
+}) {
+  const navigate = useNavigate({ from: "/agents/" })
+  const unregistered = (page?.groups ?? []).filter(
+    (g) => !registered.includes(g.key)
+  )
+  return (
+    <div className="space-y-2" data-agents-stats>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="eyebrow">numbers · {STATS_WORDS.window(window)}</span>
+        {STATS_WINDOWS.map((w) => (
+          <button
+            key={w}
+            type="button"
+            aria-pressed={w === window}
+            className={`rounded-full border px-2 py-px font-mono text-[11px] ${w === window ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-accent"}`}
+            onClick={() =>
+              void navigate({ search: { window: w === "24h" ? undefined : w } })
+            }
+          >
+            {w}
+          </button>
+        ))}
+        <span className="text-[11px] text-faint">{STATS_WORDS.appRuns}</span>
+      </div>
+      {error ? (
+        <p className="text-xs text-status-bad" role="alert">
+          the numbers could not be read: {error}
+        </p>
+      ) : null}
+      {page ? <AgentCharts groups={page.groups} window={window} /> : null}
+      {page?.groups_cut ? (
+        <p className="text-[11px] text-faint">
+          {page.groups_cut} more agents not shown (the stats route's cap)
+        </p>
+      ) : null}
+      {unregistered.map((g) => (
+        <div
+          key={g.key || "(unnamed)"}
+          className="space-y-1 rounded-lg border border-dashed px-4 py-2 opacity-70"
+          data-unregistered={g.key}
+        >
+          <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+            <span className="font-medium">{g.key || UNNAMED_AGENT}</span>
+            <span className="text-[11px] text-faint">
+              {STATS_WORDS.unregistered}
+            </span>
+          </p>
+          <AgentStatsStrip
+            group={g}
+            window={window}
+            bucketMs={page!.bucket_ms}
+            since={page!.since}
+          />
         </div>
       ))}
     </div>

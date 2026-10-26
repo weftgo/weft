@@ -22,6 +22,10 @@ import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { ChevronDown, RefreshCw, Radio, Search, X } from "lucide-react"
 
 import { fetchRuns, fetchSearch, nextCursor } from "@/lib/api"
+import {
+  ErrorClassFacet,
+  ExperimentOnThese,
+} from "@/components/studio/error-class-facet"
 import type { PageCursor, RunsPage } from "@/lib/api"
 import { openLive, throttle } from "@/lib/live"
 import { isPlainShortcut } from "@/lib/keys"
@@ -160,7 +164,11 @@ function RunsPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/runs/" })
   const router = useRouter()
+  const { has, why } = useCapabilities()
   const filters = filtersFromSearch(search)
+  // error_class needs capability "stats": without it the chip says
+  // not applied and nothing sends it (the server would answer 501).
+  if (!has("stats")) delete filters.error_class
   const queryClient = useQueryClient()
 
   // Pages accumulate through the next_before cursor; interrupted and
@@ -170,8 +178,11 @@ function RunsPage() {
   // A grant refused for good (a panel token is never granted an agent's
   // stream, plan C5): following polls the list instead, and says so.
   const [liveRefused, setLiveRefused] = useState(false)
-  const { has, why } = useCapabilities()
-  const caps = { search: has("search"), pricing: has("pricing") }
+  const caps = {
+    search: has("search"),
+    pricing: has("pricing"),
+    stats: has("stats"),
+  }
   // The Cost column (plan A5): drawn under capability "pricing" only.
   const costCapable = caps.pricing
   const sortKey: RunSortKey = effectiveSort(search, caps) ?? "started"
@@ -711,6 +722,19 @@ function RunsPage() {
         </p>
       ) : null}
 
+      {/* The failures' error classes (UX-C-37): search's facet, a pick
+          the error_class chip; one class picked hands its runs to the
+          multi-source matrix. */}
+      {searching && searchPage.data?.pages[0]?.facets ? (
+        <ErrorClassFacet
+          facets={searchPage.data.pages[0].facets}
+          picked={search.error_class}
+          onPick={(c) => setSearch({ error_class: c })}
+        />
+      ) : null}
+      {search.error_class && caps.stats && caps.search ? (
+        <ExperimentOnThese runs={loaded} total={total} />
+      ) : null}
       {page.isPending ? (
         <div className="flex justify-center py-24">
           <Spinner />

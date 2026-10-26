@@ -164,6 +164,7 @@ func TestExperimentCommandFields(t *testing.T) {
 		{`{"id":"e","thread":"branch",` + matrix + `}`, "thread must be ephemeral or fork"},
 		{`{"id":"e","variants":[{"key":"B","engine":"x"}],"inputs":[{"key":"1"}]}`, `variant \"B\": engine must be live or scripted`},
 		{`{"id":"e","from_step":-1,` + matrix + `}`, "from_step must be a step ordinal"},
+		{`{"id":"e","variants":[{"key":"A"}],"inputs":[{"key":"1","source_run_id":"r","from_step":-2}]}`, "inputs[0].from_step must be a step ordinal"},
 		{`{"id":"e","transcript_edits":{"kind":"reply"},` + matrix + `}`, "transcript_edits must be a list"},
 		{`{"id":"e","variants":[{"key":"A","overrides":{}},{"key":"B","overrides":["model"]}],"inputs":[{"key":"1"}]}`, "variants[1].overrides must be an object"},
 		{`{"id":"e","variants":[{"key":"A","overrides":"m2"}],"inputs":[{"key":"1"}]}`, "variants[0].overrides must be an object"},

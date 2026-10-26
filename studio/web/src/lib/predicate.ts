@@ -1,0 +1,263 @@
+// The experiment's pass predicate (UX plan D8; UX-C-38, UX-C-16): the
+// language the playground's matrix form writes, the server stores
+// verbatim (obsdb's pass_predicate, at most 4096 bytes) and the
+// experiment grid evaluates — here, the one place it is read.
+//
+// The language, small on purpose:
+//
+//	predicate := clause { AND clause }          (AND in any case)
+//	clause    := status ( = | != ) <status word>
+//	           | answer ( ~ | !~ ) /regex/flags   (JavaScript RegExp; flags i m s u)
+//	           | answer ( = | != ) "text"         (the whole answer, exact)
+//	           | ( steps | tokens | cost ) ( < | <= | = | >= | > ) <number>
+//
+// status is the run's derived status (succeeded, failed, interrupted,
+// running); answer the run's last own assistant text (the cell's answer
+// line's source); steps its step count; tokens its input + output
+// tokens; cost its whole bill in USD (own + delegated). An empty
+// predicate is the default, `status = succeeded`. A clause that reads a
+// fact not known (an answer not read yet, an unpriced cost) makes the
+// cell's verdict unknown — never a pass or a fail it did not earn; a
+// known fail wins over an unknown (AND).
+
+/** The predicate a matrix starts with, and an empty one means. */
+export const DEFAULT_PREDICATE = "status = succeeded"
+
+type Num = "steps" | "tokens" | "cost"
+type Clause =
+  | { field: "status"; neg: boolean; word: string }
+  | { field: "answer"; neg: boolean; re: RegExp }
+  | { field: "answer"; neg: boolean; text: string }
+  | { field: Num; op: "<" | "<=" | "=" | ">=" | ">"; n: number }
+
+export interface Predicate {
+  /** The text as read (trimmed; the default when empty). */
+  text: string
+  clauses: Clause[]
+  /** A clause reads the answer: the grid then reads each cell's. */
+  needsAnswer: boolean
+}
+
+/** The facts one cell is judged on (null: not known). */
+export interface CellFacts {
+  status: string
+  answer?: string | null
+  steps?: number | null
+  tokens?: number | null
+  cost?: number | null
+}
+
+/** A cell's verdict: pass, fail, or unknown (a fact the predicate
+ * reads is not known yet — or at all). */
+export type Verdict = "pass" | "fail" | "unknown"
+
+/** The words a verdict is drawn with. */
+export const VERDICT_WORDS: Record<Verdict, string> = {
+  pass: "✓ pass",
+  fail: "✗ fail",
+  unknown: "? not judged",
+}
+
+const STATUS_WORDS = ["succeeded", "failed", "interrupted", "running"]
+const CLAUSE =
+  /^(status|answer|steps|tokens|cost)\s*(!~|~|!=|<=|>=|=|<|>)\s*([\s\S]+)$/
+
+/** parsePredicate reads a predicate: the parsed clauses, or the first
+ * clause's error in words. */
+export function parsePredicate(
+  src: string | undefined
+): { ok: true; pred: Predicate } | { ok: false; error: string } {
+  const text = (src ?? "").trim() || DEFAULT_PREDICATE
+  const clauses: Clause[] = []
+  // AND splits clauses outside a /regex/ or a "text".
+  for (const part of splitAnd(text)) {
+    const m = CLAUSE.exec(part.trim())
+    if (!m)
+      return {
+        ok: false,
+        error: `“${part.trim()}” is not a clause: status = <word>, answer ~ /re/, answer = "text", or steps / tokens / cost <op> <number>`,
+      }
+    const [, field, op, raw] = m
+    const v = raw.trim()
+    if (field === "status") {
+      if (op !== "=" && op !== "!=")
+        return { ok: false, error: "status takes = or !=" }
+      if (!STATUS_WORDS.includes(v))
+        return {
+          ok: false,
+          error: `status is one of ${STATUS_WORDS.join(", ")} (not “${v}”)`,
+        }
+      clauses.push({ field, neg: op === "!=", word: v })
+    } else if (field === "answer") {
+      if (op === "~" || op === "!~") {
+        const rm = /^\/([\s\S]*)\/([imsu]*)$/.exec(v)
+        if (!rm) return { ok: false, error: "answer ~ takes /regex/flags" }
+        try {
+          clauses.push({
+            field,
+            neg: op === "!~",
+            re: new RegExp(rm[1], rm[2]),
+          })
+        } catch (e) {
+          return {
+            ok: false,
+            error: `answer ~ ${v}: ${e instanceof Error ? e.message : String(e)}`,
+          }
+        }
+      } else if (op === "=" || op === "!=") {
+        const sm = /^"((?:[^"\\]|\\.)*)"$/.exec(v)
+        if (!sm) return { ok: false, error: 'answer = takes a "quoted text"' }
+        clauses.push({
+          field,
+          neg: op === "!=",
+          text: sm[1].replace(/\\(.)/g, "$1"),
+        })
+      } else return { ok: false, error: "answer takes ~, !~, = or !=" }
+    } else {
+      const n = Number(v)
+      if (!v || !Number.isFinite(n) || op === "~" || op === "!~" || op === "!=")
+        return {
+          ok: false,
+          error: `${field} takes <, <=, =, >= or > and a number`,
+        }
+      clauses.push({
+        field: field as Num,
+        op: op as "<" | "<=" | "=" | ">=" | ">",
+        n,
+      })
+    }
+  }
+  return {
+    ok: true,
+    pred: {
+      text,
+      clauses,
+      needsAnswer: clauses.some((c) => c.field === "answer"),
+    },
+  }
+}
+
+/** splitAnd cuts at the word AND outside /…/ and "…". */
+function splitAnd(s: string): string[] {
+  const out: string[] = []
+  let cur = ""
+  let quote = ""
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (quote) {
+      cur += c
+      if (c === "\\" && i + 1 < s.length) cur += s[++i]
+      else if (c === quote) quote = ""
+      continue
+    }
+    if ((c === "/" || c === '"') && /[~=]\s*$/.test(cur)) {
+      quote = c
+      cur += c
+      continue
+    }
+    const and = /^\s+and\s+/i.exec(s.slice(i))
+    if (and && cur.trim()) {
+      out.push(cur)
+      cur = ""
+      i += and[0].length - 1
+      continue
+    }
+    cur += c
+  }
+  out.push(cur)
+  return out
+}
+
+function one(c: Clause, f: CellFacts): Verdict {
+  const v = (b: boolean): Verdict => (b ? "pass" : "fail")
+  switch (c.field) {
+    case "status":
+      return v((f.status === c.word) !== c.neg)
+    case "answer": {
+      if (f.answer === undefined || f.answer === null) return "unknown"
+      const hit = "re" in c ? c.re.test(f.answer) : f.answer === c.text
+      return v(hit !== c.neg)
+    }
+    default: {
+      const x = f[c.field]
+      if (x === undefined || x === null) return "unknown"
+      switch (c.op) {
+        case "<":
+          return v(x < c.n)
+        case "<=":
+          return v(x <= c.n)
+        case "=":
+          return v(x === c.n)
+        case ">=":
+          return v(x >= c.n)
+        case ">":
+          return v(x > c.n)
+      }
+    }
+  }
+}
+
+/** judge is a cell's verdict under p: every clause must pass; a known
+ * fail wins over an unknown. A run still running is not judged. */
+export function judge(p: Predicate, f: CellFacts): Verdict {
+  if (f.status === "running") return "unknown"
+  let out: Verdict = "pass"
+  for (const c of p.clauses) {
+    const r = one(c, f)
+    if (r === "fail") return "fail"
+    if (r === "unknown") out = "unknown"
+  }
+  return out
+}
+
+/** One column's tally under the predicate. */
+export interface ColumnTally {
+  key: string
+  /** The column's label (its model). */
+  label: string
+  pass: number
+  fail: number
+  unknown: number
+  /** Rows with no run yet. */
+  missing: number
+  /** The column's bill (USD), null when any run's is not known. */
+  usd: number | null
+}
+
+/** The grid's summary line (the audit's "cheapest model passing every
+ * row: kimi ($0.0108) · cheapest overall: glm (5/7)"). */
+export interface MatrixSummary {
+  /** The cheapest column whose every row passed (null: none did, or a
+   * passing column's bill is not known — said in why). */
+  cheapestPassing: ColumnTally | null
+  /** The cheapest column with a known bill, with its pass rate. */
+  cheapestOverall: ColumnTally | null
+  /** Why a part is missing ("" when both are there). */
+  why: string
+}
+
+/** passRate is "5/7" — the rows judged pass of the rows. */
+export const passRate = (t: ColumnTally): string =>
+  `${t.pass}/${t.pass + t.fail + t.unknown + t.missing}`
+
+/** summarize picks the cheapest passing column and the cheapest
+ * overall. A column with an unknown verdict or a missing row cannot
+ * be "passing every row" yet; a bill not known never counts as $0. */
+export function summarize(cols: ColumnTally[]): MatrixSummary {
+  const priced = cols.filter((c) => c.usd !== null)
+  const byCost = (a: ColumnTally, b: ColumnTally) => a.usd! - b.usd!
+  const allPass = cols.filter(
+    (c) => c.fail === 0 && c.unknown === 0 && c.missing === 0 && c.pass > 0
+  )
+  const passingPriced = allPass.filter((c) => c.usd !== null).sort(byCost)
+  const cheapestPassing = passingPriced.at(0) ?? null
+  const cheapestOverall = [...priced].sort(byCost).at(0) ?? null
+  const why = !allPass.length
+    ? "no column passed every row"
+    : !cheapestPassing
+      ? "the passing columns' cost is not known (unpriced)"
+      : !cheapestOverall
+        ? "no column's cost is known"
+        : ""
+  return { cheapestPassing, cheapestOverall, why }
+}

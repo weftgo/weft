@@ -220,6 +220,12 @@ export function answerLine(batches: TranscriptBatch[]): string | null {
     : line
 }
 
+/** answerText is a run's whole last own assistant text (the pass
+ * predicate's answer, lib/predicate.ts), null when it produced none. */
+export function answerText(batches: TranscriptBatch[]): string | null {
+  return producedTexts(batches).at(-1) || null
+}
+
 /** usageWords is a run's tokens in a cell: "15 tok" (in + out), the
  * split in its title (usageTitle). */
 export function usageWords(r: Pick<RunRow, "usage">): string {

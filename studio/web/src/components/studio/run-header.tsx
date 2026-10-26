@@ -7,6 +7,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { ArrowUpRight, Check, Link2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
+import { VsTypical } from "@/components/studio/agent-stats"
 import {
   sessionQuery,
   storedManifestQuery,
@@ -771,6 +772,9 @@ export function RunHeader({
         >
           {timing}
         </span>
+        {/* This run against its agent's typical (UX-E-25): the stats
+            route's 7d group, n ≥ 5 (agent-stats.tsx). */}
+        <VsTypical doc={doc} />
       </div>
 
       {holes.length > 0 ? (

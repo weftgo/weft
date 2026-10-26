@@ -35,6 +35,9 @@ export const RUN_SORTS = ["duration", "tokens", "cost"] as const
 export interface FilterCaps {
   search: boolean
   pricing: boolean
+  /** The database aggregates (capability "stats"): the error_class
+   * filter and facet. */
+  stats?: boolean
 }
 
 /** A non-empty string, or a number the router parsed from one. */
@@ -135,6 +138,8 @@ export function validateRunsSearch(
     before: str(search.before),
     sort,
     experiment_id: str(search.experiment_id),
+    error_type: str(search.error_type),
+    error_class: str(search.error_class),
   }
   if (out.min_tokens !== undefined) out.min_tokens = Math.floor(out.min_tokens)
   return out
@@ -167,6 +172,8 @@ export function filtersFromSearch(s: RunsSearch): RunsFilters {
     filters.experiment_id = s.experiment_id
     if (!s.experiments) filters.playground = true
   }
+  if (s.error_type) filters.error_type = s.error_type
+  if (s.error_class) filters.error_class = s.error_class
   if (s.before) filters.before = s.before
   if (s.parent) filters.parent = s.parent
   else if (s.subagents === "all") filters.all = true
@@ -225,6 +232,10 @@ export function viaSearch(search: RunsSearch, caps: FilterCaps): boolean {
   if (!caps.search) return false
   const s = usable(search)
   if (effectiveSort(s, caps)) return true
+  // The failures' error-class facet is search's (UX-C-37): a failed
+  // list, or one class of it, reads /api/search where the database
+  // aggregates.
+  if (caps.stats && (s.status === "failed" || s.error_class)) return true
   return SEARCH_ONLY.some((k) =>
     k !== "min_cost"
       ? s[k] !== undefined
@@ -241,6 +252,7 @@ export function searchFiltersFrom(
   const s = usable(search)
   const { before: _b, before_id: _bi, ...base } = filtersFromSearch(s)
   const out: SearchFilters = { ...base }
+  if (!caps.stats) delete out.error_class
   if (s.q) out.q = s.q
   if (s.tool) out.tool = s.tool
   if (s.model) out.model = s.model
@@ -360,6 +372,7 @@ export interface RunChip {
 const ROWS_ONLY = "the loaded rows only"
 const NEEDS_SEARCH = "needs the search capability"
 const NEEDS_PRICING = "needs the pricing capability"
+const NEEDS_STATS = "needs the stats capability"
 const BAD_WHEN = "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone"
 
 /** runChips is every set filter as a chip, in the toolbar's order. */
@@ -394,6 +407,13 @@ export function runChips(s: RunsSearch, caps: FilterCaps): RunChip[] {
     )
   if (s.model) push("model", `model ${s.model}`)
   if (s.error) push("error", `error ~ ${s.error}`)
+  if (s.error_type) push("error_type", `kind ${s.error_type}`)
+  if (s.error_class)
+    push(
+      "error_class",
+      `error class “${s.error_class}”`,
+      caps.stats ? {} : { applied: false, note: NEEDS_STATS }
+    )
   for (const k of ["since", "until"] as const) {
     const v = s[k]
     if (v)
@@ -493,6 +513,8 @@ export const CLEARED: Partial<RunsSearch> = {
   tag: undefined,
   parent: undefined,
   experiment_id: undefined,
+  error_type: undefined,
+  error_class: undefined,
 }
 
 /** dedupeTraces keeps each trace's first row, in page order: a trace

@@ -181,6 +181,8 @@ import { AWAITING } from "@/lib/status"
 import { DECIDE_FIELD, DONE, VERB, VERB_TITLE } from "@/lib/decisions"
 import { formatUSD, lostCellCost, sumCost } from "@/lib/cost"
 import { OWN_RUNTIME, SCOPE_OWN, SCOPE_RUNTIME_ONLY } from "@/lib/honesty"
+import { SourceMatrix } from "@/components/studio/source-matrix"
+import { sourcesOf } from "@/lib/matrix"
 
 // The command's pure halves and the form's controls live in shared
 // modules (plan F1: the run page's replay drawer renders the same
@@ -223,6 +225,9 @@ interface PlaygroundSearch {
   experiment?: string
   /** The form's draft in this browser (plan F5): lib/drafts.ts. */
   exp?: string
+  /** A multi-source matrix's source runs, comma-separated (UX-C-37:
+   * the runs list's "experiment on these N"): the page is that form. */
+  sources?: string
 }
 
 /** A search value as text: the router parses values as JSON, so an
@@ -271,6 +276,7 @@ function parseHandoff(search: Record<string, unknown>): PlaygroundSearch {
     edits: str(search.edits),
     experiment: str(search.experiment),
     exp: str(search.exp),
+    sources: str(search.sources),
   }
 }
 
@@ -394,7 +400,7 @@ function useHandoff(): PlaygroundSearch & {
 }
 
 function PlaygroundPage() {
-  const { experiment } = useSearch({ from: "/playground" })
+  const { experiment, sources, agent } = useSearch({ from: "/playground" })
   useDocumentTitle({ page: "playground", experiment })
   const caps = useCapabilities()
   if (caps.loading)
@@ -402,6 +408,9 @@ function PlaygroundPage() {
   if (caps.error) return <CapsUnread error={caps.error} />
   if (!caps.has("playground"))
     return <NoPlayground why={caps.why("playground")} />
+  // The multi-source matrix (UX-C-37): its own form over the runs.
+  const many = sourcesOf(sources)
+  if (many.length) return <SourceMatrix sources={many} agentName={agent} />
   return <Playground caps={caps.caps} />
 }
 

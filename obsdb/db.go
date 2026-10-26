@@ -374,11 +374,15 @@ type ExperimentVariant struct {
 }
 
 // ExperimentInput is one row of the matrix: a key, a source run to
-// take the turn from, or a literal text.
+// take the turn from, or a literal text. FromStep is the row's own
+// step (UX-C-37's multi-source matrix: each source run continues from
+// its own failing step, keeping its own prefix); nil, the experiment's
+// ExperimentCommand.FromStep.
 type ExperimentInput struct {
 	Key         string `json:"key"`
 	SourceRunID string `json:"source_run_id,omitempty"`
 	Text        string `json:"text,omitempty"`
+	FromStep    *int   `json:"from_step,omitempty"`
 }
 
 // Status is a run's derived state. running, succeeded and failed are

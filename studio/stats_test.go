@@ -496,3 +496,36 @@ func TestStatsScriptedZeroUsage(t *testing.T) {
 		}
 	}
 }
+
+// TestStatsScriptedBesideIdleModel (P10a-pre-go carried LOW): a group
+// whose scripted calls sit beside a real model's calls that reported no
+// usage is not the scripted $0 — the real model's part is unknown, so
+// the group's cost is too.
+func TestStatsScriptedBesideIdleModel(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	runs := []statsRun{
+		{id: "sm_0", agent: "orders", provider: "weft/runtime", model: "scripted", playground: true,
+			at: time.Hour, dur: time.Second, steps: []statsStep{{dur: 2 * time.Millisecond}}},
+		{id: "sm_1", agent: "orders", provider: "anthropic", model: "claude-sonnet-4-5", playground: true,
+			at: 2 * time.Hour, dur: time.Second, steps: []statsStep{{dur: 2 * time.Millisecond, failed: true}}},
+	}
+	for _, r := range runs {
+		if err := db.Write(context.Background(), r.batch()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := Handler(DB(db))
+	for _, pg := range []string{"true", "all"} {
+		_, _, body := get(t, h, "/studio/api/stats?by=agent&playground="+pg+"&"+statsWindow)
+		if strings.Contains(body, `"cost_badge":"scripted"`) {
+			t.Errorf("playground=%s: a real model's idle part beside scripted ones read the scripted $0:\n%s", pg, body)
+		}
+		if !strings.Contains(body, `"cost_known":false,"cost_badge":"unknown","cost_reason":"no model usage recorded"`) {
+			t.Errorf("playground=%s: want the unknown cost, no usage recorded:\n%s", pg, body)
+		}
+	}
+}

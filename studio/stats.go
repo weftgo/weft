@@ -333,13 +333,17 @@ func (s *Server) statsCost(by obsdb.StatsBy, g obsdb.StatsGroup) cost {
 // statsCost's rule, for a group's own calls and its delegated ones.
 func (s *Server) priceModels(models []obsdb.ModelUsage, usage core.Usage) cost {
 	out := cost{known: true, cache: cacheOf(usage)}
-	var unpriced, parts, scriptedParts, scriptedIdle int
+	var unpriced, parts, scriptedParts, scriptedIdle, otherIdle int
 	for _, m := range models {
 		if m.Usage == (core.Usage{}) {
 			// A scripted model reports no usage by design: its part is an
-			// exact $0, not "no usage recorded".
+			// exact $0, not "no usage recorded". Any other model's idle
+			// part (its calls failed before usage arrived) is not scripted:
+			// it keeps the group off the scripted label.
 			if s.pricing.price(m.Provider, m.Model, m.Usage).badge == costScripted {
 				scriptedIdle++
+			} else {
+				otherIdle++
 			}
 			continue
 		}
@@ -360,7 +364,7 @@ func (s *Server) priceModels(models []obsdb.ModelUsage, usage core.Usage) cost {
 		out.usd += c.usd
 	}
 	switch {
-	case parts == 0 && scriptedIdle > 0:
+	case parts == 0 && scriptedIdle > 0 && otherIdle == 0:
 		// Every call was scripted (zero usage by design): an exact $0,
 		// as each of its runs reads.
 		return cost{known: true, badge: costScripted, reason: scriptedReason, cache: cacheExact}
@@ -371,7 +375,7 @@ func (s *Server) priceModels(models []obsdb.ModelUsage, usage core.Usage) cost {
 	case unpriced > 0:
 		out.known, out.usd, out.badge = false, 0, costUnpriced
 		out.reason = fmt.Sprintf("%d of %d models unpriced: no price for %s", unpriced, parts, strings.Join(capModels(out.models), ", "))
-	case parts > 0 && scriptedParts == parts:
+	case parts > 0 && scriptedParts == parts && otherIdle == 0:
 		// Every model is scripted: the exact $0 says so (pricing.go).
 		out.badge, out.reason, out.cache = costScripted, scriptedReason, cacheExact
 	}

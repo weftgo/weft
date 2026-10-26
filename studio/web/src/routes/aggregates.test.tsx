@@ -1,0 +1,454 @@
+// U24.2's Done line through the real route tree against a fake Studio
+// answering in the Go goldens: the Agents page shows the seeded agents'
+// numbers (stats-agent / stats-tool goldens, studio/stats_test.go's
+// arena-shaped day), each linking to the runs it counts; "usage limit"
+// groups 7 runs into one facet (search-usage-limit golden,
+// TestUsageLimitOneFacetOneMatrix) and one matrix; the matrix states
+// its estimate before Run — its live cells never run here, its scripted
+// ones may — and the grid judges cells under the pass predicate with
+// the cheapest-passing summary.
+import {
+  cleanup,
+  configure,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { setStudioToken } from "@/lib/api"
+import type {
+  ExperimentRow,
+  Manifest,
+  PlaygroundRunBody,
+  RunDoc,
+  RunRow,
+  SearchPage,
+} from "@/lib/api"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { resetDrafts } from "@/lib/drafts"
+import { resetNotices } from "@/lib/notify"
+import { renderApp, stubBrowser } from "@/test/app"
+import { experiment, priced } from "@/test/experiment-fixture"
+import { FakeEventSource } from "@/test/fake-event-source"
+import { FakeStudio, golden } from "@/test/fake-studio"
+import { choose } from "@/test/select"
+
+configure({ asyncUtilTimeout: 10_000 })
+vi.setConfig({ testTimeout: 30_000 })
+
+const CAPS = [
+  "live",
+  "playground",
+  "runtimes",
+  "pricing",
+  "stats",
+  "search",
+  "steps",
+]
+const meta = () => ({
+  ...golden<Record<string, unknown>>("meta"),
+  capabilities: CAPS,
+  capabilities_off: undefined,
+})
+const agent = (name: string, tools: string[] = []) => ({
+  name,
+  model: { provider: "zai", name: "glm-5.3-flash" },
+  instructions: "",
+  policy: {
+    parallelism: 4,
+    max_steps: 10,
+    max_result_bytes: 65536,
+    max_model_retries: 3,
+  },
+  tools: tools.map((t) => ({
+    name: t,
+    description: "",
+    input_schema: { type: "object" },
+  })),
+})
+const PRICING = {
+  source: "default",
+  dated: "2026-10-01",
+  models: (
+    JSON.parse(
+      readFileSync(resolve(process.cwd(), "../pricing.json"), "utf8")
+    ) as {
+      models: unknown[]
+    }
+  ).models,
+}
+const usagePage = golden<SearchPage>("search-usage-limit")
+const usageRuns = usagePage.runs.filter((r) => r.error_type === "usage_limit")
+const USAGE_CLASS =
+  "weft: run failed at step N: weft: run exceeded its usage limit (input N/N, output N/N)"
+const runtimes = {
+  runtimes: [
+    {
+      id: "rt_1",
+      host: "laptop",
+      pid: 1,
+      service: "arena",
+      env: "dev",
+      connected: true,
+      connected_since: "2020-01-01T00:00:00Z",
+      last_seen: "2020-01-01T00:00:00Z",
+      agents: [
+        {
+          name: "researcher",
+          model_provider: "zai",
+          models: ["anthropic/claude-haiku-4-5", "zai/glm-5.3-flash"],
+          tools: [],
+        },
+      ],
+    },
+  ],
+}
+
+let studio: FakeStudio
+beforeEach(() => {
+  stubBrowser()
+  resetNotices()
+  resetDrafts()
+  FakeEventSource.reset()
+  vi.stubGlobal("EventSource", FakeEventSource)
+  setStudioToken("")
+  studio = new FakeStudio()
+    .on("GET meta", meta())
+    .on("GET runtimes", runtimes)
+    .on("GET settings/pricing", PRICING)
+    .on("GET stats", (req) =>
+      golden(`stats-${(req.query.get("by") ?? "").replace("_", "-")}`)
+    )
+  for (const r of usageRuns) {
+    studio.on(`GET runs/${r.id}`, {
+      ...r,
+      children: [],
+      holes: [],
+      compactions: [],
+    } satisfies RunDoc)
+    // Each source step bills 1,000 in / 200 out.
+    for (let n = 0; n < r.steps; n++)
+      studio.on(`GET runs/${r.id}/steps/${n}`, {
+        run_id: r.id,
+        step: n,
+        status: "failed",
+        model: { requested: "glm-5.3-flash" },
+        attempts: [],
+        messages_in: {},
+        events: [],
+        tool_calls: [],
+        children: [],
+        holes: [],
+        usage: { input_tokens: 1000, output_tokens: 200 },
+      })
+  }
+  studio.install()
+})
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+  resetDrafts()
+})
+
+describe("the Agents page's numbers (UX-A-14, UX-E-25)", () => {
+  beforeEach(() => {
+    const manifest: Manifest = {
+      weft: 1,
+      agents: [agent("researcher", ["web_search"]), agent("director")],
+      sources: [],
+    }
+    studio.on("GET manifest", manifest)
+  })
+
+  it("shows the seeded agents' numbers, each linking to the runs it counts", async () => {
+    renderApp("/agents")
+    const strip = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(
+        '[data-agent-stats="researcher"]'
+      )
+      expect(el).toBeTruthy()
+      return el!
+    })
+    const metric = (k: string) =>
+      strip.querySelector<HTMLElement>(`[data-metric="${k}"]`)!.textContent
+    expect(metric("runs")).toContain("5")
+    expect(metric("failed")).toContain("60%")
+    expect(metric("duration")).toContain("p50 3.0s · p95 5.0s")
+    expect(metric("ttft")).toContain("p50 600ms")
+    expect(metric("tokens")).toContain("176 → 58")
+    // An unpriced model: the badge, never $0.
+    expect(metric("cost")).toContain("unpriced")
+    expect(metric("cost")).not.toContain("$0")
+    // Every number links to the group's runs_query read into /runs.
+    const link = within(strip).getByRole("link", { name: "runs →" })
+    const u = new URL(link.getAttribute("href")!, "http://studio")
+    expect(u.pathname).toBe("/runs")
+    expect(u.searchParams.get("agent")).toBe("researcher")
+    expect(u.searchParams.get("subagents")).toBe("all")
+    expect(u.searchParams.get("experiments")).toBe("off")
+    expect(u.searchParams.get("since")).toBe("2020-01-01T00:00:00Z")
+    // director's own figures, and its subagents' bill apart, never summed.
+    const director = document.querySelector<HTMLElement>(
+      '[data-agent-stats="director"]'
+    )!
+    expect(
+      director.querySelector('[data-metric="cost"]')!.textContent
+    ).toContain("$0.0020")
+    const del = director.querySelector<HTMLElement>(
+      '[data-metric="delegated"]'
+    )!
+    expect(del.textContent).toContain("1 runs")
+    expect(del.getAttribute("title")).toContain("never summed across agents")
+    // The charts: one per metric, across the agents.
+    const cost = document.querySelector<HTMLElement>('[data-chart="cost"]')!
+    expect(
+      cost.querySelector('[data-bar="researcher"]')!.textContent
+    ).toContain("unpriced")
+    expect(cost.querySelector('[data-bar="director"]')!.textContent).toContain(
+      "$0.0020"
+    )
+    expect(
+      document.querySelector(
+        '[data-chart="failure_rate"] [data-bar="researcher"]'
+      )!.textContent
+    ).toContain("60%")
+    // orders ran but no manifest names it: dimmed, its strip alone.
+    expect(document.querySelector('[data-unregistered="orders"]')).toBeTruthy()
+    // The tool rows: p50 and failure rate (by=tool).
+    const tool = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(
+        '[data-tool-stats="web_search"]'
+      )
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(tool.textContent).toContain("4 calls")
+    expect(tool.textContent).toContain("failed 25%")
+    expect(tool.textContent).toContain("p50 300ms · p95 2.0s")
+    expect(
+      studio
+        .calls("GET stats")
+        .some(
+          (r) =>
+            r.query.get("agent") === "researcher" &&
+            r.query.get("by") === "tool"
+        )
+    ).toBe(true)
+  })
+
+  it("rides the window in the URL", async () => {
+    const { router } = renderApp("/agents")
+    await screen.findByRole("button", { name: "7d" })
+    fireEvent.click(screen.getByRole("button", { name: "7d" }))
+    await waitFor(() =>
+      expect(
+        studio.calls("GET stats").some((r) => r.query.get("since") === "7d")
+      ).toBe(true)
+    )
+    expect(router.state.location.search).toMatchObject({ window: "7d" })
+  })
+})
+
+describe("usage limit: one facet, one matrix (UX-C-37, UX-C-38)", () => {
+  beforeEach(() => {
+    studio.on("GET search", (req) => {
+      if (req.query.get("error_class") === USAGE_CLASS)
+        return { ...usagePage, total: usageRuns.length, runs: usageRuns }
+      return usagePage
+    })
+  })
+
+  it("groups the 7 usage-limit runs into one facet whose pick hands them to one matrix", async () => {
+    const { router } = renderApp("/runs?status=failed&agent=researcher")
+    const facet = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(
+        `[data-error-class="${CSS.escape(USAGE_CLASS)}"]`
+      )
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(facet.textContent).toContain("7")
+    fireEvent.click(within(facet).getByRole("radio"))
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        error_class: USAGE_CLASS,
+      })
+    )
+    const go = await screen.findByRole("link", {
+      name: "Experiment on these 7 →",
+    })
+    const u = new URL(go.getAttribute("href")!, "http://studio")
+    expect(u.pathname).toBe("/playground")
+    expect(u.searchParams.get("agent")).toBe("researcher")
+    expect(u.searchParams.get("sources")!.split(",").sort()).toEqual(
+      usageRuns.map((r) => r.id).sort()
+    )
+    expect(studio.calls("GET search").at(-1)!.query.get("error_class")).toBe(
+      USAGE_CLASS
+    )
+  })
+
+  it("states the matrix's estimate before Run, and runs no live cell", async () => {
+    const ids = usageRuns.map((r) => r.id).join(",")
+    renderApp(`/playground?sources=${ids}&agent=researcher`)
+    await screen.findByText(/matrix · researcher · 7 source runs × 2 models/)
+    const line = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(
+        "[data-matrix-estimate-line]"
+      )!
+      expect(el.textContent).toMatch(/^14 cells · ≈ [\d.]+k tokens · /)
+      return el
+    })
+    // glm has no price: cost unknown with why, never $0.
+    expect(line.textContent).toContain(
+      "cost unknown: zai/glm-5.3-flash: zai/glm-5.3-flash has no price"
+    )
+    const cols = document.querySelector(
+      "[data-matrix-estimate-columns]"
+    )!.textContent
+    expect(cols).toMatch(/anthropic\/claude-haiku-4-5 ≈ \$0\.\d+/)
+    // Each row continues from its own failing step.
+    for (const r of usageRuns) {
+      const at = /at step (\d+)/.exec(r.err)![1]
+      expect(
+        document.querySelector(`[data-source-row="${r.id}"]`)!.textContent
+      ).toContain(`from step ${at}`)
+    }
+    // Remove the unpriced column: the whole estimate is known.
+    fireEvent.click(
+      screen.getByRole("button", { name: "remove zai/glm-5.3-flash" })
+    )
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-matrix-estimate-line]")!.textContent
+      ).toMatch(/^7 cells · ≈ [\d.]+k tokens · ≈ \$0\.\d+$/)
+    )
+    expect(
+      screen.getByRole("button", { name: /Run matrix live · ≈ \$0\./ })
+    ).toBeTruthy()
+    // Live cells are never run here.
+    expect(studio.calls("POST playground/runs")).toHaveLength(0)
+    expect(studio.calls("POST experiments")).toHaveLength(0)
+  })
+
+  it("saves one experiment, each row its source and step, and issues its scripted cells", async () => {
+    const posted: PlaygroundRunBody[] = []
+    let saved: ExperimentRow | undefined
+    studio
+      .on("POST experiments", (req) => {
+        saved = req.body as ExperimentRow
+        return saved
+      })
+      .on("POST playground/runs", (req) => {
+        posted.push(req.body as PlaygroundRunBody)
+        return { command_id: `c${posted.length}`, state: "queued" }
+      })
+    const ids = usageRuns.map((r) => r.id).join(",")
+    renderApp(`/playground?sources=${ids}&agent=researcher`)
+    await screen.findByText(/7 source runs × 2 models/)
+    fireEvent.click(
+      screen.getByRole("button", { name: "remove anthropic/claude-haiku-4-5" })
+    )
+    fireEvent.click(
+      screen.getByRole("button", { name: "remove zai/glm-5.3-flash" })
+    )
+    // The agent's own model, scripted: a free re-check of the recordings.
+    await choose(screen.getByLabelText("add a model"), "(own)", {
+      action: true,
+    })
+    await choose(
+      screen.getByLabelText("engine for the agent's model"),
+      "scripted"
+    )
+    fireEvent.change(screen.getByLabelText("pass predicate"), {
+      target: {
+        value: String.raw`status = succeeded AND answer ~ /\d+ units/`,
+      },
+    })
+    const run = await screen.findByRole("button", {
+      name: "Run matrix on scripted · 0 tokens",
+    })
+    await waitFor(() => expect(run.hasAttribute("disabled")).toBe(false))
+    fireEvent.click(run)
+    await waitFor(() => expect(posted).toHaveLength(7))
+    expect(saved!.agent).toBe("researcher")
+    expect(saved!.pass_predicate).toBe(
+      String.raw`status = succeeded AND answer ~ /\d+ units/`
+    )
+    expect(saved!.inputs.map((i) => i.source_run_id).sort()).toEqual(
+      usageRuns.map((r) => r.id).sort()
+    )
+    for (const b of posted) {
+      const src = usageRuns.find((r) => r.id === b.source?.run_id)!
+      expect(b.engine).toBe("scripted")
+      expect(b.experiment_id).toBe(saved!.id)
+      expect(b.source?.from_step).toBe(
+        Number(/at step (\d+)/.exec(src.err)![1])
+      )
+    }
+    expect(
+      await screen.findByRole("link", { name: "open the grid" })
+    ).toBeTruthy()
+  })
+})
+
+describe("the grid's pass predicate (UX-C-38, UX-C-16)", () => {
+  const exp = (pass_predicate?: string): ExperimentRow => ({
+    ...experiment,
+    pass_predicate,
+    runs: experiment.runs!.map((r: RunRow, i) => ({
+      ...r,
+      ...priced(0.01 * (i + 1)),
+    })),
+  })
+
+  it("judges each cell, tallies each column and names the cheapest passing", async () => {
+    studio.on("GET experiments/exp_tone", exp("status = succeeded"))
+    renderApp("/experiments/exp_tone")
+    await waitFor(() =>
+      expect(document.querySelector('[data-pass-rate="A"]')?.textContent).toBe(
+        "2/2 · $0.03"
+      )
+    )
+    expect(document.querySelector('[data-pass-rate="B"]')!.textContent).toBe(
+      "1/2 · $0.07"
+    )
+    expect(
+      document
+        .querySelector('[data-cell="B×2"] [data-verdict]')!
+        .getAttribute("data-verdict")
+    ).toBe("fail")
+    const line = document.querySelector("[data-cheapest]")!
+    expect(
+      line
+        .querySelector("[data-cheapest-passing]")!
+        .getAttribute("data-cheapest-passing")
+    ).toBe("A")
+    expect(line.textContent).toContain("cheapest overall: A (2/2)")
+  })
+
+  it("never passes a cell whose answer it could not read", async () => {
+    studio.on("GET experiments/exp_tone", exp("answer ~ /units/"))
+    renderApp("/experiments/exp_tone")
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector('[data-cell="A×1"] [data-verdict]')
+          ?.getAttribute("data-verdict")
+      ).toBe("unknown")
+    )
+    expect(document.querySelector("[data-cheapest]")!.textContent).toContain(
+      "no column passed every row"
+    )
+    // A bad predicate says why, and judges nothing.
+    fireEvent.change(screen.getByLabelText("pass predicate"), {
+      target: { value: "status = done" },
+    })
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "status is one of"
+    )
+  })
+})

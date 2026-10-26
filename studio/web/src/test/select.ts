@@ -41,8 +41,14 @@ async function close(trigger: HTMLElement) {
 }
 
 /** choose picks the option whose value is `value`; on a radio group
- * (the engine's, data-value on its fieldset) it clicks that radio. */
-export async function choose(trigger: HTMLElement, value: string) {
+ * (the engine's, data-value on its fieldset) it clicks that radio. An
+ * action select (one that resets after the pick: the matrix's "add a
+ * model") is not waited on to show the value. */
+export async function choose(
+  trigger: HTMLElement,
+  value: string,
+  opts: { action?: boolean } = {}
+) {
   if (trigger.tagName === "FIELDSET") {
     const r = trigger.querySelector<HTMLInputElement>(
       `input[type="radio"][value="${value}"]`
@@ -78,12 +84,13 @@ export async function choose(trigger: HTMLElement, value: string) {
     fireEvent.pointerDown(opt, { pointerType: "mouse" })
     fireEvent.click(opt)
   })
-  await waitFor(() => {
-    if (valueOf(trigger) !== value)
-      throw new Error(
-        `${trigger.getAttribute("aria-label")} is ${valueOf(trigger)}, not ${value}`
-      )
-  })
+  if (!opts.action)
+    await waitFor(() => {
+      if (valueOf(trigger) !== value)
+        throw new Error(
+          `${trigger.getAttribute("aria-label")} is ${valueOf(trigger)}, not ${value}`
+        )
+    })
   await close(trigger)
 }
 

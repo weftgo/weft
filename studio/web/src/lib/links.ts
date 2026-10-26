@@ -296,6 +296,9 @@ export interface PlaygroundSearch {
   /** The form's draft in this browser's IndexedDB (plan F5,
    * lib/drafts.ts): the page writes it once the form is saved. */
   exp?: string
+  /** A multi-source matrix's source runs, comma-separated (UX-C-37:
+   * the runs list's "experiment on these N", lib/matrix.ts). */
+  sources?: string
 }
 
 /** The playground's state a link carries (G2): see PlaygroundSearch. */
@@ -379,6 +382,11 @@ export interface RunsSearch {
   sort?: "duration" | "tokens" | "cost"
   /** One experiment's runs (weft.experiment.id, plan F5). */
   experiment_id?: string
+  /** A failed run's kind, exact (U4: usage_limit, max_steps, …). */
+  error_type?: string
+  /** A failure class, exact: the error-class facet's string (UX-C-37,
+   * capability "stats"). */
+  error_class?: string
 }
 
 export interface RunsLink {
@@ -631,6 +639,12 @@ export function playgroundLink(
   return hash
     ? { to: "/playground", search: {}, hash }
     : { to: "/playground", search: {} }
+}
+
+/** matrixLink is the playground's multi-source matrix over these runs
+ * of one agent (UX-C-37): one row per run, from its failing step. */
+export function matrixLink(sources: string, agent: string): PlaygroundLink {
+  return { to: "/playground", search: { sources, agent } }
 }
 
 /** playgroundStateLink is the playground with its own state in the

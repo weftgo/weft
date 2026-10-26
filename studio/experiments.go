@@ -161,6 +161,11 @@ func checkExperiment(b experimentBody) string {
 	if b.FromStep != nil && *b.FromStep < 0 {
 		return "from_step must be a step ordinal (0 or more)"
 	}
+	for i, in := range b.Inputs {
+		if in.FromStep != nil && *in.FromStep < 0 {
+			return fmt.Sprintf("inputs[%d].from_step must be a step ordinal (0 or more)", i)
+		}
+	}
 	if !jsonIs(b.TranscriptEdits, '[') {
 		return "transcript_edits must be a list"
 	}

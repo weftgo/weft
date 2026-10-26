@@ -4,6 +4,7 @@
 // and the source file:line as text (opening it inline is T2a). Every
 // policy chip is titled with what it does (lib/policy.ts, U26).
 import { ChevronRight } from "lucide-react"
+import type { ReactNode } from "react"
 
 import type { ManifestAgent, ManifestTool } from "@/lib/api"
 import { agentPolicyChips, toolPolicyChips } from "@/lib/policy"
@@ -87,7 +88,7 @@ function PolicyChips({ tool }: { tool: ManifestTool }) {
   return <Chips chips={toolPolicyChips(tool)} />
 }
 
-function ToolCard({ tool }: { tool: ManifestTool }) {
+function ToolCard({ tool, extra }: { tool: ManifestTool; extra?: ReactNode }) {
   return (
     <div className="rounded-lg border bg-background px-3 py-2">
       <div className="flex flex-wrap items-baseline gap-2">
@@ -110,11 +111,19 @@ function ToolCard({ tool }: { tool: ManifestTool }) {
       <div className="mt-1.5">
         <PolicyChips tool={tool} />
       </div>
+      {extra ? <div className="mt-1.5">{extra}</div> : null}
     </div>
   )
 }
 
-export function AgentCard({ agent }: { agent: ManifestAgent }) {
+export function AgentCard({
+  agent,
+  toolExtra,
+}: {
+  agent: ManifestAgent
+  /** A tool's numbers under its card (agent-stats.tsx's tool rows). */
+  toolExtra?: (tool: string) => ReactNode
+}) {
   return (
     <div className="space-y-2 rounded-lg border bg-background px-4 py-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -145,7 +154,7 @@ export function AgentCard({ agent }: { agent: ManifestAgent }) {
           <span className="eyebrow">tools · {agent.tools.length}</span>
           <div className="grid gap-2 md:grid-cols-2">
             {agent.tools.map((t) => (
-              <ToolCard key={t.name} tool={t} />
+              <ToolCard key={t.name} tool={t} extra={toolExtra?.(t.name)} />
             ))}
           </div>
         </div>

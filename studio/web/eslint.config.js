@@ -90,6 +90,7 @@ export const controlRules = {
 export const controlFiles = [
   "src/routes/playground.tsx",
   "src/components/studio/experiment-form.tsx",
+  "src/components/studio/source-matrix.tsx",
   "src/components/studio/split-pane.tsx",
   "src/components/studio/density-toggle.tsx",
   "src/components/ui/select-field.tsx",

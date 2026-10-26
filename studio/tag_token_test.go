@@ -3,6 +3,7 @@ package studio
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -429,6 +430,8 @@ func TestAuthMatrixTagToken(t *testing.T) {
 		{"GET", "/api/runs/%s/export?format=json&tree=1", "", 200, 403},
 		{"GET", "/api/runs/%s/logs", "", 403, 403},     // a read token never reads app logs
 		{"GET", "/api/runs/%s/requests", "", 403, 403}, // nor prompts
+		{"GET", "/api/runs/%s/commands", "", 403, 403}, // commands are a public id's (I4-fix)
+		{"GET", "/api/runs/%s/steps/0", "", 404, 403},  // r_b1b has no step: 404 inside the scope
 		{"GET", "/api/diff?a=r_b1a&b=%s", "", 200, 403},
 		{"GET", "/api/sessions/%s", "", 200, 403},
 		{"GET", "/api/sessions/%s/timeline", "", 200, 403},
@@ -505,5 +508,258 @@ func TestNarrowTags(t *testing.T) {
 	}
 	if got, ok := narrowTags(nil, nil); !ok || got != nil {
 		t.Errorf("narrowTags(nil, nil) = %v, %v; want nil, true", got, ok)
+	}
+}
+
+// statsSpan is one span of the I4-fix stats fixture: an invoke_agent
+// root or a chat call with usage, its run's metadata on it.
+func statsSpan(trace, span, parent, run, agent, op string, in, out int64, meta map[string]any, extra map[string]any) obsdb.Span {
+	a := map[string]any{"weft.run.id": run, "gen_ai.operation.name": op, "gen_ai.agent.name": agent,
+		"gen_ai.provider.name": "wefttest", "gen_ai.request.model": "m"}
+	if op == "chat" {
+		a["gen_ai.usage.input_tokens"], a["gen_ai.usage.output_tokens"], a["weft.step.index"] = in, out, int64(0)
+	}
+	for k, v := range meta {
+		a[k] = v
+	}
+	for k, v := range extra {
+		a[k] = v
+	}
+	at := time.Now().Add(-5 * time.Minute)
+	return obsdb.Span{TraceID: trace, SpanID: span, ParentSpanID: parent, Name: op + " " + agent, Kind: 1,
+		Start: at, End: at.Add(time.Second), StatusCode: 1, Service: "stats", Attrs: a,
+		Resource: map[string]any{"service.name": "stats"}}
+}
+
+// tagStatsStudio (I4-fix finding 1): a tagged parent pr_p (director)
+// whose Subagent child pr_p/0/call_1 (helper) carries no tag and spent
+// 1000 in / 500 out, and an untagged run pr_q of another agent.
+func tagStatsStudio(t *testing.T) *httptest.Server {
+	t.Helper()
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	b1 := map[string]any{"arena.batch": "b1"}
+	const tr, tq = "000000000000000000000000000000a1", "000000000000000000000000000000a2"
+	child := map[string]any{"weft.parent.run.id": "pr_p", "weft.parent.call.id": "call_1"}
+	if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{
+		statsSpan(tr, "00000000000000a1", "", "pr_p", "director", "invoke_agent", 0, 0, b1, nil),
+		statsSpan(tr, "00000000000000a2", "00000000000000a1", "pr_p", "director", "chat", 10, 5, b1, nil),
+		statsSpan(tr, "00000000000000a3", "00000000000000a2", "pr_p/0/call_1", "helper", "invoke_agent", 0, 0, nil, child),
+		statsSpan(tr, "00000000000000a4", "00000000000000a3", "pr_p/0/call_1", "helper", "chat", 1000, 500, nil, child),
+		statsSpan(tq, "00000000000000b1", "", "pr_q", "other", "invoke_agent", 0, 0, nil, nil),
+		statsSpan(tq, "00000000000000b2", "00000000000000b1", "pr_q", "other", "chat", 7, 7, nil, nil),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	srv := New(DB(db), Token("srv"), Playground(true))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// TestTagTokenStats (I4-fix 1, 8): /api/stats under a tag token reads
+// the tagged runs alone, and by=agent's delegated bill never sums a
+// descendant without the tags — 0 for the untagged child (the server
+// token reads its 1000 / 500).
+func TestTagTokenStats(t *testing.T) {
+	ts := tagStatsStudio(t)
+	tok := mintTag(t, ts, `{"tags":{"arena.batch":"b1"}}`)
+	since, until := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
+	read := func(bearer string) map[string]statsGroup {
+		t.Helper()
+		code, body := tcall(t, ts, http.MethodGet, "/api/stats?by=agent&since="+since+"&until="+until, bearer, "")
+		if code != http.StatusOK {
+			t.Fatalf("stats: %d %s", code, body)
+		}
+		var page struct {
+			Groups []statsGroup `json:"groups"`
+		}
+		if err := json.Unmarshal([]byte(body), &page); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]statsGroup{}
+		for _, g := range page.Groups {
+			out[g.Key] = g
+		}
+		return out
+	}
+	all := read("srv")
+	if d := all["director"].Delegated; d == nil || d.Runs != 1 || d.InputTokens != 1000 || d.OutputTokens != 500 {
+		t.Fatalf("server token: director's delegated = %+v, want 1 run, 1000 / 500 (the fixture's child)", d)
+	}
+	tagged := read(tok)
+	if _, ok := tagged["other"]; ok {
+		t.Errorf("tag token: the untagged pr_q's agent is a group: %+v", tagged)
+	}
+	g, ok := tagged["director"]
+	if !ok || g.Runs != 1 || g.InputTokens != 10 {
+		t.Errorf("tag token: director = %+v, want its 1 tagged run, 10 in", g)
+	}
+	if d := g.Delegated; d != nil && (d.Runs != 0 || d.InputTokens != 0 || d.OutputTokens != 0 || (d.CostUSD != nil && *d.CostUSD != 0)) {
+		t.Errorf("tag token: director's delegated = %+v, want nothing — the child carries no tag", d)
+	}
+	// The tree and its export leave the untagged child out, said in the
+	// tag scope's words (I4-fix 4, 8).
+	code, body := tcall(t, ts, http.MethodGet, "/api/runs/pr_p/spans?tree=1", tok, "")
+	if code != http.StatusOK || strings.Contains(body, `"pr_p/0/call_1"`) || !strings.Contains(body, "without your token's tags") {
+		t.Errorf("spans?tree=1 under the tag token: %d %s, want the child's spans out, a hidden hole in the tag scope's words", code, body)
+	}
+	code, body = tcall(t, ts, http.MethodGet, "/api/runs/pr_p/export?format=json&tree=1", tok, "")
+	if code != http.StatusOK || strings.Contains(body, `"id":"pr_p/0/call_1"`) || !strings.Contains(body, "without your token's tags") {
+		t.Errorf("export?tree=1 under the tag token: %d %s, want the child out, a hidden hole in the tag scope's words", code, body)
+	}
+	// The run document: the child hidden, counted, in the tag words.
+	if _, body := tcall(t, ts, http.MethodGet, "/api/runs/pr_p", tok, ""); !strings.Contains(body, "1 child run is without your token's tags") {
+		t.Errorf("pr_p under the tag token: %s, want the hidden child in the tag scope's words", body)
+	}
+	if code, _ := tcall(t, ts, http.MethodGet, "/api/traces/000000000000000000000000000000a2", tok, ""); code != http.StatusForbidden {
+		t.Errorf("the untagged pr_q's trace: %d, want 403", code)
+	}
+}
+
+// TestTagTokenOwnTrace (I4-fix 8): a trace every span of which carries
+// the token's tags is read whole (200); a step of an own run reads, of
+// an untagged run is 403.
+func TestTagTokenOwnTrace(t *testing.T) {
+	ts, _ := tagTokenStudio(t)
+	tok := mintTag(t, ts, `{"tags":{"arena.batch":"b1"}}`)
+	if code, body := tcall(t, ts, http.MethodGet, "/api/runs/s_mix-t1/steps/0", tok, ""); code != http.StatusOK {
+		t.Errorf("steps/0 of an own run: %d %s", code, body)
+	}
+	if code, _ := tcall(t, ts, http.MethodGet, "/api/runs/s_mix-t2/steps/0", tok, ""); code != http.StatusForbidden {
+		t.Errorf("steps/0 of an untagged run: %d, want 403", code)
+	}
+	if code, body := tcall(t, ts, http.MethodGet, "/api/traces/00000000000000000000000000000001", tok, ""); code != http.StatusOK || !strings.Contains(body, "r_b1a") {
+		t.Errorf("r_b1a's trace under the tag token: %d %s, want 200", code, body)
+	}
+}
+
+// TestTagTokenCommands (I4-fix 3): the command routes are a public id's
+// — a tag-only token is refused both (403), before any lookup.
+func TestTagTokenCommands(t *testing.T) {
+	ts, _ := tagTokenStudio(t)
+	tok := mintTag(t, ts, `{"tags":{"arena.batch":"b1"}}`)
+	for _, path := range []string{"/api/playground/commands/cmd_nobody", "/api/runs/r_b1a/commands"} {
+		if code, body := tcall(t, ts, http.MethodGet, path, tok, ""); code != http.StatusForbidden || !strings.Contains(body, "reads no command") {
+			t.Errorf("GET %s under a tag-only token: %d %s, want 403", path, code, body)
+		}
+	}
+	// A token with a public id beside its tags keeps the public id's rule.
+	both := mintTag(t, ts, `{"public_id":"arena:b1:x","tags":{"arena.batch":"b1"}}`)
+	if code, body := tcall(t, ts, http.MethodGet, "/api/runs/r_b1a/commands", both, ""); code != http.StatusOK {
+		t.Errorf("GET /api/runs/r_b1a/commands under public id + tags: %d %s, want 200", code, body)
+	}
+}
+
+// TestTagTokenMintBounds (I4-fix 5): no weft.* key but weft.flow, at
+// most 16 pairs, 256 bytes a key or value — a 400 naming why.
+func TestTagTokenMintBounds(t *testing.T) {
+	ts, _ := tagTokenStudio(t)
+	many := map[string]string{}
+	for i := range 17 {
+		many[fmt.Sprintf("k%d", i)] = "v"
+	}
+	manyJSON, _ := json.Marshal(map[string]any{"tags": many})
+	long := strings.Repeat("x", 257)
+	for _, c := range []struct {
+		body, why string
+	}{
+		{`{"tags":{"weft.public_id":"pub_1"}}`, "weft record attribute"},
+		{`{"tags":{"weft.session.id":"s_1"}}`, "weft record attribute"},
+		{string(manyJSON), "at most 16 pairs"},
+		{`{"tags":{"k":"` + long + `"}}`, "at most 256 bytes"},
+		{`{"tags":{"` + long + `":"v"}}`, "at most 256 bytes"},
+	} {
+		if code, body := tcall(t, ts, http.MethodPost, "/api/panel-tokens", "srv", c.body); code != http.StatusBadRequest || !strings.Contains(body, c.why) {
+			t.Errorf("mint %.60s: %d %s, want 400 saying %q", c.body, code, body, c.why)
+		}
+	}
+	// weft.flow is run metadata a token may name; 16 pairs and 256 bytes pass.
+	mintTag(t, ts, `{"tags":{"weft.flow":"f_checkout"}}`)
+	delete(many, "k16")
+	ok16, _ := json.Marshal(map[string]any{"tags": many})
+	mintTag(t, ts, string(ok16))
+	mintTag(t, ts, `{"tags":{"k":"`+strings.Repeat("x", 256)+`"}}`)
+}
+
+// TestTagTokenAgentLane (I4-fix 2, 8): under a tag-only token,
+// tag.<k>=<v>&agent= is the agent's runs narrowed by the tags — the
+// stream and its grant open, and deliver the batch's runs of that agent
+// alone; a token with a public id keeps agent= alone refused. A record
+// frame of a tagged run reaches the token's public_id= stream.
+func TestTagTokenAgentLane(t *testing.T) {
+	ts, hub := tagTokenStudio(t)
+	tok := mintTag(t, ts, `{"tags":{"arena.batch":"b1"}}`)
+	open := func(query, bearer string) *http.Response {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/live"+query, nil)
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			t.Fatalf("live%s: %d %s", query, resp.StatusCode, b)
+		}
+		return resp
+	}
+	lane := open("?tag.arena.batch=b1&agent=director&kinds=run", tok)
+	bare := open("?agent=director&kinds=run", tok) // the token's tags still filter it
+	code, body := tcall(t, ts, http.MethodPost, "/api/live-grant", tok, `{"tag.arena.batch":"b1","agent":"director","kinds":"run"}`)
+	if code != http.StatusOK {
+		t.Fatalf("live-grant tag + agent under the tag token: %d %s", code, body)
+	}
+	var g struct {
+		Sig string `json:"sig"`
+	}
+	_ = json.Unmarshal([]byte(body), &g)
+	granted := open("?tag.arena.batch=b1&agent=director&kinds=run&sig="+g.Sig, "")
+	pubLane := open("?public_id=pub_z&kinds=run,event", tok)
+	pubTok := mintTag(t, ts, `{"public_id":"pub_z"}`)
+	if code, _ := tcall(t, ts, http.MethodGet, "/api/live?agent=director", pubTok, ""); code != http.StatusForbidden {
+		t.Errorf("agent= alone under a public id token: %d, want 403", code)
+	}
+
+	ctx := context.Background()
+	b1 := map[string]string{"arena.batch": "b1"}
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_an", PublicID: "pub_z", Agent: "analyst", Meta: b1}))
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_d2", PublicID: "pub_z", Agent: "director", Meta: map[string]string{"arena.batch": "b2"}}))
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_dn", PublicID: "pub_z", Agent: "director"}))
+	untagged := pubRecord("r_dn", "pub_z", "", 1)
+	hub.Publish(ctx, obsdb.RecordFrame(untagged))
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_d1", PublicID: "pub_z", Agent: "director", Meta: b1}))
+	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_d1", "pub_z", "", 1)))
+
+	read := func(resp *http.Response, n int) string {
+		var out []string
+		for _, f := range readSSE(t, resp, n, 5*time.Second) {
+			var d struct {
+				RunID string `json:"run_id"`
+				Run   struct {
+					ID string `json:"id"`
+				} `json:"run"`
+			}
+			_ = json.Unmarshal([]byte(f.data), &d)
+			out = append(out, f.event+":"+d.RunID+d.Run.ID)
+		}
+		return strings.Join(out, " ")
+	}
+	for name, resp := range map[string]*http.Response{"tag + agent": lane, "agent alone": bare, "granted": granted} {
+		if got := read(resp, 1); got != "run:r_d1" {
+			t.Errorf("the tag token's %s lane: %q, want run:r_d1 (the batch's director run alone)", name, got)
+		}
+	}
+	if got, want := read(pubLane, 3), "run:r_an run:r_d1 record:r_d1"; got != want {
+		t.Errorf("the tag token's public_id= lane: %q, want %q (the tagged runs and the tagged run's record, never the untagged run's)", got, want)
 	}
 }

@@ -187,7 +187,9 @@ export function answerLiveGrant(
     const tokExp = claims.exp ? Date.parse(claims.exp) : NaN
     if (!Number.isFinite(tokExp) || tokExp <= now)
       return refuse(401, "unauthorized", "bad or expired token")
-    if (s.sel === "agent")
+    // A tag-only token's agent= stream is the agent's runs narrowed by
+    // its tags (I4-fix): granted; any other panel token's is refused.
+    if (s.sel === "agent" && !(claims.tags && !claims.public_id))
       return refuse(
         403,
         "forbidden",

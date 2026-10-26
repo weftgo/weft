@@ -1386,7 +1386,7 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	if hidden > 0 {
 		// A panel token's run document lists its public id's children
 		// only (inScope); the rest are one counted hole, never named.
-		holes = append(holes, hiddenChildrenHole(hidden))
+		holes = append(holes, hiddenChildrenHole(hidden, panelScope(r)))
 	}
 	doc.Holes = holes
 	comps, err := s.db.Compactions(r.Context(), id)
@@ -1982,7 +1982,7 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 	if rt.Hidden {
 		doc.Holes = append(doc.Holes, treeHole{
 			Hole:   string(obsdb.HoleHidden),
-			Reason: hiddenTreeReason(rt.HiddenCount),
+			Reason: hiddenTreeReason(rt.HiddenCount, sc),
 			Fix:    "open the tree with the server (dev) token",
 			Count:  rt.HiddenCount,
 		})
@@ -2349,7 +2349,7 @@ walk:
 		hiddenFront, hiddenFloor = front, hiddenFloor || floor
 	}
 	if hidden > 0 {
-		h := hiddenDelegatedHole(hidden, hiddenFloor)
+		h := hiddenDelegatedHole(hidden, hiddenFloor, len(pub.Tags) > 0)
 		doc.DelegatedHoles = append(doc.DelegatedHoles, h)
 		if why != "" {
 			why += "; "
@@ -2491,7 +2491,16 @@ func (s *Server) scopedSessionIDs(ctx context.Context, parents []string, sc read
 // n delegated sessions a panel token's scope left out: counted, never
 // named — at least n (count_floor) when the hidden subtrees were more
 // than the walk counts.
-func hiddenDelegatedHole(n int, floor bool) stepHole {
+func hiddenDelegatedHole(n int, floor, tagged bool) stepHole {
+	if tagged {
+		// A tag-scoped token (I4-fix): a session listed only by a turn
+		// with its tags.
+		r := fmt.Sprintf("%d delegated sessions have no turn with your token's tags (or are of another public id): your token's access does not reach them, so they are left out and the delegated figures do not cover them", n)
+		if floor {
+			r = fmt.Sprintf("at least %d delegated sessions have no turn with your token's tags, or sit under one (past %d hidden ones the deeper levels are not counted): your token's access does not reach them, so they are left out and the delegated figures do not cover them", n, delegatedTreeCap)
+		}
+		return stepHole{Hole: string(obsdb.HoleHidden), Reason: r, Fix: "open the session with the server (dev) token", Count: n, CountFloor: floor}
+	}
 	r := fmt.Sprintf("%d delegated sessions carry another public id, or none: a panel token reads its own public id's sessions, so they are left out and the delegated figures do not cover them", n)
 	switch {
 	case floor:

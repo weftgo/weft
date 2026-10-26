@@ -830,7 +830,7 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 	// delegated figure unknown, not unpriced.
 	del := tally(parts, "child run", true)
 	if n := c.hiddenSubs[rec.ID]; n > 0 {
-		del = scopeCutDelegated(del, n)
+		del = scopeCutDelegated(del, n, len(c.scope.Tags) > 0)
 	}
 	if why := usagePending(rec); why != "" {
 		return runCost{own: cost{badge: costUnknown, reason: why, cache: cacheOf(own)}, delegated: del}
@@ -910,11 +910,14 @@ func tally(parts []runCost, noun string, nested bool) cost {
 // (coster.prime): not known — the token reads no part of their bill —
 // counted, the hidden runs never named; a reason the visible parts had
 // follows the scope's.
-func scopeCutDelegated(del cost, n int) cost {
+func scopeCutDelegated(del cost, n int, tagged bool) cost {
 	del.runs += n
 	del.unknown += n
 	del.known, del.usd, del.badge = false, 0, costUnknown
 	why := fmt.Sprintf("%d of %d child runs carry another public id, or none: a panel token does not read their cost", n, del.runs)
+	if tagged { // a tag-scoped token (I4-fix)
+		why = fmt.Sprintf("%d of %d child runs are without your token's tags (or of another public id): your token's access does not reach their cost", n, del.runs)
+	}
 	if del.reason != "" {
 		why += "; " + del.reason
 	}

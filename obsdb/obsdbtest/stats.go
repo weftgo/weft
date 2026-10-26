@@ -479,10 +479,12 @@ func statsSpanBeforeRun(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 // every Subagent descendant of its runs whose agent is another, each
 // call once — beside its own usage; a descendant of the same agent is
 // its own run, and a panel token's scope leaves out a descendant of
-// another public id.
+// another public id, or one without its tags.
 func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
+		// Every run but dl-p/1/call_3 carries the tag stats.batch=b1 on
+		// its spans (run metadata on every span), so its row's meta.
 		run := func(id, agent, public string, at time.Duration, in, out int64) statRun {
 			r := statRun{id: id, agent: agent, public: public, start: at, dur: time.Second}
 			r.spans = func(r statRun) []obsdb.Span {
@@ -491,7 +493,13 @@ func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 					p := r.id[:strings.LastIndex(r.id[:i], "/")]
 					root.Attrs["weft.parent.run.id"], root.Attrs["weft.parent.call.id"] = p, r.id[i+1:]
 				}
-				return []obsdb.Span{r.chat("c0", 0, "m-"+agent, 10*time.Millisecond, 100*time.Millisecond, in, out, -1, 1), root}
+				spans := []obsdb.Span{r.chat("c0", 0, "m-"+agent, 10*time.Millisecond, 100*time.Millisecond, in, out, -1, 1), root}
+				if r.id != "dl-p/1/call_3" {
+					for _, sp := range spans {
+						sp.Attrs["stats.batch"] = "b1"
+					}
+				}
+				return spans
 			}
 			return r
 		}
@@ -535,6 +543,17 @@ func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		want = []string{"boss own=153/16 delegated=20/2 runs=1 [m-helper 20/2]", "helper own=20/2 delegated=3/1 runs=1 [m-boss 3/1]"}
 		if got := delegated(q); !slices.Equal(got, want) {
 			t.Errorf("delegated under pub_d =\n %v\nwant\n %v", got, want)
+		}
+		// A tag scope (RunQuery.Meta, a tag-scoped panel token: I4-fix)
+		// holds the descendants to it as the public id does: the
+		// untagged helper below dl-p is not delegated, with or without
+		// a public id.
+		for _, pub := range []string{"", "pub_d"} {
+			q := statsQ(obsdb.StatsByAgent)
+			q.PublicID, q.Meta = pub, map[string]string{"stats.batch": "b1"}
+			if got := delegated(q); !slices.Equal(got, want) {
+				t.Errorf("delegated under tag stats.batch=b1 (public id %q) =\n %v\nwant\n %v", pub, got, want)
+			}
 		}
 		// Every other by reads none.
 		page, err := a.Stats(ctx(), statsQ(obsdb.StatsByModel))

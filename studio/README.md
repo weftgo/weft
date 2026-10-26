@@ -125,24 +125,34 @@ anything outside the token's public id.
 A token can instead (or as well) be scoped to a **batch of runs** by
 their metadata (I4, capability `panel_token_tags`): `POST
 /api/panel-tokens {"tags": {"arena.batch": "20261014-1606"}, "ttl":
-"1h"}` — `public_id`, `tags`, or both; every pair non-empty — signs the
+"1h"}` — `public_id`, `tags`, or both; at most 16 pairs, each key and
+value non-empty and at most 256 bytes, and no `weft.*` key but
+`weft.flow` (the others are the record contract's attributes: a 400
+says which) — signs the
 tags into the token like the public id, and every read it makes is held
 to them the way a public id token's is held to its public id: the runs
 list, search, stats and traces carry the tags as a filter (traces:
-every span carries them), a single run without them is 403 (the rule
+every span carries them; stats' `by=agent` delegated bill sums only
+descendants carrying them), a single run without them is 403 (the rule
 another public id's run gets; an unknown id stays 404) with its steps,
 spans, logs, export and tree, a session lists only its tagged turns
-(`SessionQuery.Meta` scopes turns before the grouping), and the live
-stream and its grant deliver only tagged runs — the panel's
-`data-scope="tag.arena.batch=…"` lane included, across every public id
-of the batch. A request narrows (more tags, `flow=`, `agent=`,
+(`SessionQuery.Meta` scopes turns before the grouping; its
+`compacted` filter still reads the whole session's compaction markers,
+which carry no metadata), and the live stream and its grant deliver
+only tagged runs — the panel's `data-scope="tag.arena.batch=…"` lane
+included, across every public id of the batch, and with `;agent=…` the
+agent's runs of the batch (a tag-only token's `agent=` stream is held
+to its tags; a public id's token still gets 403 for `agent=` alone). A request narrows (more tags, `flow=`, `agent=`,
 `public_id=`) but never widens: another value of a token's tag key is
 403. A child run is read by its own row: a Subagent child inherits its
 parent's metadata (`core.WithMetadata`) and is in the batch; a pool or
 thread child session's turn carries only the tags its app gave it, and
 is otherwise a counted `hidden` hole. A token with tags is read-only
 (`"playground": true` beside `tags` is a 400), and a tag-only token
-resolves no public id (`/api/public/{id}` is 403). Metadata is
+resolves no public id (`/api/public/{id}` is 403) and reads no command
+(`/api/playground/commands/{id}`, `/api/runs/{id}/commands`: 403 —
+commands are a public id's). Its hidden holes say "without your
+token's tags". Metadata is
 caller-written — unlike the public id, which the app hands out — so a
 tag scope is only as tight as the app's own tagging: minting stays the
 server token's, and a tag your app lets a user set is a tag that user

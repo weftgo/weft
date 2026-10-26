@@ -908,7 +908,7 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		})
 	}
 	if hiddenKids > 0 {
-		h := hiddenChildrenHole(hiddenKids)
+		h := hiddenChildrenHole(hiddenKids, pub)
 		holes.also(obsdb.HoleHidden, h.Reason, h.Fix)
 		cur := holes[obsdb.HoleHidden]
 		cur.Count = hiddenKids

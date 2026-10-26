@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -387,9 +389,17 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 	// re-scanned r per chat span (15.5 s at 4,000 runs;
 	// TestStatsDelegatedScale guards it).
 	if q.By == obsdb.StatsByAgent {
+		// The descendant c is held to the query's scope as a listed run
+		// is: its public id, and every meta pair on its own row
+		// (RunQuery.Meta's json_each rule) — a tag-scoped panel token
+		// never sums an untagged child (I4-fix).
 		scope, sargs := "", []any{since}
 		if q.PublicID != "" {
 			scope, sargs = " AND c.public_id = ?", append(sargs, q.PublicID)
+		}
+		for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
+			scope += " AND EXISTS (SELECT 1 FROM json_each(c.meta) AS cj WHERE cj.key = ? AND cj.value = ?)"
+			sargs = append(sargs, k, q.Meta[k])
 		}
 		below := statsBelowSQL(scope)
 		if err := query(`SELECT k, provider, model, SUM(input_tokens), SUM(output_tokens),

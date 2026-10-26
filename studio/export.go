@@ -210,7 +210,7 @@ func (s *Server) collectSubtree(r *http.Request, x *runExport) ([]*runExport, []
 	if hidden > 0 {
 		holes = append(holes, treeHole{
 			Hole:   string(obsdb.HoleHidden),
-			Reason: fmt.Sprintf("%d subagent runs carry another public id, or none: a panel token reads its own public id's runs, so they and their subtrees are left out", hidden),
+			Reason: hiddenSubagentsReason(hidden, scopeOf(ctx)),
 			Fix:    "export the tree with the server (dev) token",
 			Count:  hidden,
 		})
@@ -501,7 +501,7 @@ func (s *Server) collectExportOf(ctx context.Context, c *coster, det obsdb.RunDe
 		return nil, err
 	}
 	if x.hiddenKids > 0 {
-		x.runHoles = append(x.runHoles, hiddenChildrenHole(x.hiddenKids))
+		x.runHoles = append(x.runHoles, hiddenChildrenHole(x.hiddenKids, scopeOf(ctx)))
 	}
 	if x.events, x.gaps, err = allEvents(ctx, s.db, id); err != nil {
 		return nil, err
@@ -1299,4 +1299,14 @@ func anyValueOf(v any) *commonpb.AnyValue {
 		return &commonpb.AnyValue{}
 	}
 	return &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: fmt.Sprint(v)}}
+}
+
+// hiddenSubagentsReason is the tree export's hidden hole's reason: the
+// subagent runs (and their subtrees) the scope left out — another
+// public id's, or, under a token with tags (I4-fix), those without them.
+func hiddenSubagentsReason(n int, sc readScope) string {
+	if len(sc.Tags) > 0 {
+		return fmt.Sprintf("%d subagent runs are without your token's tags (or of another public id): your token's access does not reach them, so they and their subtrees are left out", n)
+	}
+	return fmt.Sprintf("%d subagent runs carry another public id, or none: a panel token reads its own public id's runs, so they and their subtrees are left out", n)
 }

@@ -538,7 +538,7 @@ func (mb *markBuilder) holes(runs []obsdb.RunRow, all, truncatedAt int, page boo
 		var why []string
 		switch {
 		case mb.hidden > 0 && mb.tagged:
-			why = append(why, fmt.Sprintf("%d of %s marks lie outside your token's scope (another public id, a run without its tags, or no run)", mb.hidden, whose))
+			why = append(why, fmt.Sprintf("%d of %s marks are beyond your token's access (another public id, a run without its tags, or no run)", mb.hidden, whose))
 		case mb.hidden > 0:
 			why = append(why, fmt.Sprintf("%d of %s marks carry another public id than your token's", mb.hidden, whose))
 		}

@@ -805,7 +805,7 @@ func TestDiffWalkResumesPastLostStepStart(t *testing.T) {
 // is (a read token), said by the side's explicit system_hidden — never by
 // the hole's count, which stays.
 func TestDiffSideHiddenChildrenCount(t *testing.T) {
-	kids := hiddenChildrenHole(2)
+	kids := hiddenChildrenHole(2, readScope{})
 	text := "be brief"
 	open := diffSideOf(stepDoc{Status: stepOK, sysText: &text, Holes: []stepHole{kids}}, &text, true)
 	if len(open.Holes) == 0 || open.Holes[0].Hole != string(obsdb.HoleHidden) || open.Holes[0].Count != 2 || open.SystemHidden {

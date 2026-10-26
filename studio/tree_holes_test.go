@@ -215,16 +215,16 @@ func TestSpansTreeGolden(t *testing.T) {
 // TestHiddenHoleReasonsCount (P8-pre-web #2): the hidden holes' reasons
 // say their count in the right number, and the hole carries it.
 func TestHiddenHoleReasonsCount(t *testing.T) {
-	if got := hiddenChildrenHole(1); !strings.HasPrefix(got.Reason, "1 child run carries ") || !strings.HasSuffix(got.Reason, "so it is left out") || got.Count != 1 {
-		t.Errorf("hiddenChildrenHole(1) = %+v, want \"1 child run carries … so it is left out\", count 1", got)
+	if got := hiddenChildrenHole(1, readScope{}); !strings.HasPrefix(got.Reason, "1 child run carries ") || !strings.HasSuffix(got.Reason, "so it is left out") || got.Count != 1 {
+		t.Errorf("hiddenChildrenHole(1, readScope{}) = %+v, want \"1 child run carries … so it is left out\", count 1", got)
 	}
-	if got := hiddenChildrenHole(2); !strings.HasPrefix(got.Reason, "2 child runs carry ") || !strings.HasSuffix(got.Reason, "so they are left out") || got.Count != 2 {
+	if got := hiddenChildrenHole(2, readScope{}); !strings.HasPrefix(got.Reason, "2 child runs carry ") || !strings.HasSuffix(got.Reason, "so they are left out") || got.Count != 2 {
 		t.Errorf("hiddenChildrenHole(2) = %+v, want \"2 child runs carry … so they are left out\", count 2", got)
 	}
-	if got := hiddenTreeReason(1); !strings.HasPrefix(got, "1 run of this tree carries ") {
-		t.Errorf("hiddenTreeReason(1) = %q, want \"1 run of this tree carries …\"", got)
+	if got := hiddenTreeReason(1, readScope{}); !strings.HasPrefix(got, "1 run of this tree carries ") {
+		t.Errorf("hiddenTreeReason(1, readScope{}) = %q, want \"1 run of this tree carries …\"", got)
 	}
-	if got := hiddenTreeReason(3); !strings.HasPrefix(got, "3 runs of this tree carry ") {
-		t.Errorf("hiddenTreeReason(3) = %q, want \"3 runs of this tree carry …\"", got)
+	if got := hiddenTreeReason(3, readScope{}); !strings.HasPrefix(got, "3 runs of this tree carry ") {
+		t.Errorf("hiddenTreeReason(3, readScope{}) = %q, want \"3 runs of this tree carry …\"", got)
 	}
 }

@@ -385,18 +385,25 @@ func scopeKids(sc readScope, kids []obsdb.RunRow) ([]obsdb.RunRow, int) {
 // run document or a step whose n child runs a panel token's scope left
 // out: counted, never named — their ids and public ids are another
 // app's.
-func hiddenChildrenHole(n int) stepHole {
+func hiddenChildrenHole(n int, sc readScope) stepHole {
 	return stepHole{
 		Hole:   string(obsdb.HoleHidden),
-		Reason: hiddenChildrenReason(n),
+		Reason: hiddenChildrenReason(n, sc),
 		Fix:    "open the run with the server (dev) token",
 		Count:  n,
 	}
 }
 
 // hiddenChildrenReason is the hidden children hole's reason, its count
-// in the right number: "1 child run carries …, so it is left out".
-func hiddenChildrenReason(n int) string {
+// in the right number: "1 child run carries …, so it is left out";
+// under a token with tags (I4-fix), the runs without them.
+func hiddenChildrenReason(n int, sc readScope) string {
+	if len(sc.Tags) > 0 {
+		if n == 1 {
+			return "1 child run is without your token's tags (or of another public id): your token's access does not reach it, so it is left out"
+		}
+		return fmt.Sprintf("%d child runs are without your token's tags (or of another public id): your token's access does not reach them, so they are left out", n)
+	}
 	if n == 1 {
 		return "1 child run carries another public id, or none: a panel token reads its own public id's runs, so it is left out"
 	}
@@ -405,8 +412,15 @@ func hiddenChildrenReason(n int) string {
 
 // hiddenTreeReason is the span tree's hidden hole's reason
 // (runs/{id}/spans?tree=1): how many runs of the tree the scope left
-// out, their subtrees' runs counted, never named.
-func hiddenTreeReason(n int) string {
+// out, their subtrees' runs counted, never named; under a token with
+// tags (I4-fix), the runs without them.
+func hiddenTreeReason(n int, sc readScope) string {
+	if len(sc.Tags) > 0 {
+		if n == 1 {
+			return "1 run of this tree is without your token's tags (or of another public id): your token's access does not reach it, so its spans are left out"
+		}
+		return fmt.Sprintf("%d runs of this tree are without your token's tags, or of another public id (or sit under one that is): your token's access does not reach them, so their spans are left out", n)
+	}
 	if n == 1 {
 		return "1 run of this tree carries another public id, or none: a panel token reads its own public id's runs, so its spans are left out"
 	}
@@ -586,6 +600,14 @@ func (s *Server) scopeLive(w http.ResponseWriter, r *http.Request, sel obsdb.Sel
 	case sel.SessionID != "":
 		return s.scopeSessionID(w, r, sel.SessionID)
 	default: // agent: not a public-id-shaped scope
+		// A tag-only token's agent= stream (data-scope
+		// "tag.arena.batch=b1;agent=director", I4-fix) is every run of
+		// the agent narrowed by its tags: serveLive's filter carries
+		// them (liveTokenMeta), frame by frame, so agent= narrows a tag
+		// scope as it narrows any other.
+		if id.panel.PublicID == "" && len(id.panel.Tags) > 0 {
+			return true
+		}
 		forbidden(w, r)
 		return false
 	}
@@ -636,11 +658,9 @@ func (s *Server) servePanelTokens(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, r, "public_id or tags is required")
 		return
 	}
-	for k, v := range req.Tags {
-		if k == "" || v == "" {
-			badRequest(w, r, "tags: every key and value must be non-empty (run metadata pairs, e.g. {\"arena.batch\": \"b1\"})")
-			return
-		}
+	if msg := checkMintTags(req.Tags); msg != "" {
+		badRequest(w, r, msg)
+		return
 	}
 	if len(req.Tags) > 0 && req.Playground {
 		badRequest(w, r, "a token with tags is read-only: \"playground\": true takes a public id alone")
@@ -676,6 +696,37 @@ func (s *Server) servePanelTokens(w http.ResponseWriter, r *http.Request) {
 		Scope    string            `json:"scope"`
 		Exp      time.Time         `json:"exp"`
 	}{tok, claims.PublicID, claims.Tags, claims.Scope, claims.Exp})
+}
+
+// Bounds on a minted token's tags (I4-fix): the token rides every
+// request's Authorization header, so its claims stay small.
+const (
+	maxMintTags     = 16
+	maxMintTagBytes = 256
+)
+
+// checkMintTags is the mint's rule for tags, "" when they pass, else
+// the 400's reason: every key and value non-empty and at most
+// maxMintTagBytes, at most maxMintTags pairs, and no weft.* key but
+// weft.flow — the others are the record contract's own attributes
+// (weft.public_id, weft.session.id, …), whose scope is the public id's
+// or none: a tag token never stands in for one.
+func checkMintTags(tags map[string]string) string {
+	if len(tags) > maxMintTags {
+		return fmt.Sprintf("tags: at most %d pairs (%d given)", maxMintTags, len(tags))
+	}
+	for _, k := range slices.Sorted(maps.Keys(tags)) {
+		v := tags[k]
+		switch {
+		case k == "" || v == "":
+			return "tags: every key and value must be non-empty (run metadata pairs, e.g. {\"arena.batch\": \"b1\"})"
+		case len(k) > maxMintTagBytes || len(v) > maxMintTagBytes:
+			return fmt.Sprintf("tags: %q: a key or value is at most %d bytes", k, maxMintTagBytes)
+		case strings.HasPrefix(k, "weft.") && k != flowKey:
+			return fmt.Sprintf("tags: %q is a weft record attribute, not run metadata: of the weft.* keys a tag token takes weft.flow alone (scope a token to a public id with \"public_id\")", k)
+		}
+	}
+	return ""
 }
 
 // ── CORS (S4.6) ────────────────────────────────────────────────────

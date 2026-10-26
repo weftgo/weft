@@ -968,6 +968,19 @@ func contains(s []string, v string) bool {
 	return false
 }
 
+// tagOnlyCommands refuses a tag-only panel token on the command routes
+// (I4-fix), and reports whether it did: a command is a public id's
+// (who sent it), a tag-only token names none — and is read-only, so it
+// sends none to read back.
+func tagOnlyCommands(w http.ResponseWriter, r *http.Request) bool {
+	if p := idFrom(r).panel; p != nil && p.PublicID == "" {
+		writeError(w, r, http.StatusForbidden, "forbidden",
+			"a tag-scoped panel token reads no command: commands are a public id's (mint the token with \"public_id\")")
+		return true
+	}
+	return false
+}
+
 // ── GET /api/playground/commands/{id} ─────────────────────────────
 
 // servePlaygroundCommand answers §10.4's lifecycle row — §10.5's five
@@ -976,6 +989,9 @@ func contains(s []string, v string) bool {
 func (s *Server) servePlaygroundCommand(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
+		if tagOnlyCommands(w, r) {
+			return
+		}
 		cmd, ok := rs.CommandOf(id)
 		if ok {
 			if pid := idFrom(r).panel; pid != nil && cmd.PublicID != pid.PublicID {
@@ -1003,7 +1019,7 @@ func (s *Server) servePlaygroundCommand(rs *linkruntime.RuntimeServer) http.Hand
 func (s *Server) serveRunCommands(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := r.PathValue("id")
-		if !s.scopeRunID(w, r, runID) {
+		if tagOnlyCommands(w, r) || !s.scopeRunID(w, r, runID) {
 			return
 		}
 		cmds := rs.CommandsOn(runID)

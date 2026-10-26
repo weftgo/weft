@@ -2,6 +2,8 @@ package clickhouse
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -106,12 +108,23 @@ func statsSpans(runs string) string {
 // a '/', its ancestors the ids cut at every <step>/<call> pair — joined
 // to the group's runs among its ancestors, kept when the descendant's
 // own agent is another, each (agent, span) once. SQLite reads the same
-// set as an id range below each run. Binds: the window's start, the
-// public id when pub is set, runs'.
-func statsBelow(runs, pub string) string {
+// set as an id range below each run. The descendant is held to the
+// query's scope: its spans to the public id (pub), its own run row to
+// every meta pair (RunQuery.Meta's rule over the collapsed row: a
+// tag-scoped panel token never sums an untagged child, I4-fix). Binds:
+// the window's start, the public id when pub is set, runs', then the
+// meta pairs (key, key, value each, in key order).
+func statsBelow(runs, pub string, meta map[string]string) string {
 	scope := ""
 	if pub != "" {
 		scope = " AND PublicId = ?"
+	}
+	cmeta, ccond := "", ""
+	if len(meta) > 0 {
+		cmeta = ", max(Meta) AS cmeta"
+		for range meta {
+			ccond += " AND JSONHas(c.cmeta, ?) AND JSONExtractString(c.cmeta, ?) = ?"
+		}
 	}
 	return `SELECT DISTINCT ragent AS k, dTrace, dSpan, dRun, dProvider, dModel, dIn, dOut, dCached, dCacheWrite, dReasoning
 	FROM (SELECT dTrace, dSpan, dRun, dProvider, dModel, dIn, dOut, dCached, dCacheWrite, dReasoning, dParent
@@ -129,9 +142,9 @@ func statsBelow(runs, pub string) string {
 			AND Timestamp >= fromUnixTimestamp64Nano(?)` + scope + `
 		LIMIT 1 BY TraceId, SpanId) ARRAY JOIN dAnc AS dParent) AS d
 	INNER JOIN (` + runs + `) AS r ON d.dParent = r.rid
-	INNER JOIN (SELECT RunId AS cid, max(Agent) AS cagent FROM weft_runs WHERE position(RunId, '/') > 0 GROUP BY RunId) AS c
+	INNER JOIN (SELECT RunId AS cid, max(Agent) AS cagent` + cmeta + ` FROM weft_runs WHERE position(RunId, '/') > 0 GROUP BY RunId) AS c
 		ON c.cid = d.dRun
-	WHERE c.cagent != r.ragent`
+	WHERE c.cagent != r.ragent` + ccond
 }
 
 // statsKeyCH is the group key's column and the span op a span-level
@@ -267,11 +280,14 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 		}
 	}
 	if q.By == obsdb.StatsByAgent {
-		below, bargs := statsBelow(runs, q.PublicID), []any{q.Since.UnixNano()}
+		below, bargs := statsBelow(runs, q.PublicID, q.Meta), []any{q.Since.UnixNano()}
 		if q.PublicID != "" {
 			bargs = append(bargs, q.PublicID)
 		}
 		bargs = append(bargs, rargs...)
+		for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
+			bargs = append(bargs, k, k, q.Meta[k])
+		}
 		if err := query(`SELECT k, dProvider, dModel, toInt64(sum(dIn)), toInt64(sum(dOut)), toInt64(sum(dCached)),
 			toInt64(sum(dCacheWrite)), toInt64(sum(dReasoning)) FROM (`+below+`) GROUP BY k, dProvider, dModel`, bargs,
 			func(rows driver.Rows) error {

@@ -550,11 +550,11 @@ func TestDelegatedHiddenScoped(t *testing.T) {
 // TestHiddenDelegatedFloor (P9-pre-web-fix3 F6): past the walk's cap
 // the hidden count is a floor, said so — count_floor and "at least".
 func TestHiddenDelegatedFloor(t *testing.T) {
-	h := hiddenDelegatedHole(7, true)
+	h := hiddenDelegatedHole(7, true, false)
 	if !h.CountFloor || h.Count != 7 || !strings.Contains(h.Reason, "at least 7") {
 		t.Errorf("floor hole = %+v, want count_floor, 7, at least", h)
 	}
-	if h := hiddenDelegatedHole(1, false); h.CountFloor || !strings.HasPrefix(h.Reason, "1 delegated session ") {
+	if h := hiddenDelegatedHole(1, false, false); h.CountFloor || !strings.HasPrefix(h.Reason, "1 delegated session ") {
 		t.Errorf("exact hole = %+v", h)
 	}
 }

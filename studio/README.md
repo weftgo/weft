@@ -2394,9 +2394,13 @@ Empty is `status = succeeded`. A clause whose fact is not known — the
 answer not read, content off, stripped or unreadable, an unpriced cost —
 leaves the cell "? not judged" with its reason, never a pass. A pattern
 is tested on the answer's first 8 KiB (a miss past it is not judged), a
-pattern nesting quantifiers (`(a+)+`) or using a backreference is
-refused when typed, and every other one runs in a worker bounded at
-250 ms per answer (past it: not judged). The predicate is Studio's
+pattern whose unboundedly quantified group holds an unbounded
+quantifier at any depth (`(a+)+`, `((a+)b)*`; classes, escapes and a
+bounded `{m,n}` do not count) or that uses a backreference is refused
+when typed, and every other one runs in a worker bounded at
+250 ms per answer (past it: not judged). The answer is read for every
+cell of the first 20 rows; while any cell is not judged the grid names
+no cheapest column, and pass rates read "n/m judged". The predicate is Studio's
 alone: the server stores `pass_predicate` verbatim (at most 4,096
 bytes) and validates nothing in it, and verdicts are drawn by Studio's
 grid only — no API route judges a cell. The grid tallies each column ("5/7 · $0.0021") and names

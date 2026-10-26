@@ -229,7 +229,10 @@ describe("priceAt against studio/testdata/pricing-cases.json", () => {
   it("reads a malformed glob as no match (Go's ErrBadPattern)", () => {
     expect(globRe("claude-[")).toBeNull()
     expect(globRe("a\\")).toBeNull()
-    expect(globRe("[]a]")!.test("]")).toBe(true)
+    expect(globRe("[]a]")).toBeNull()
+    expect(globRe("[a-]")).toBeNull()
+    expect(globRe("[-a]")).toBeNull()
+    expect(globRe("[\\-a]")!.test("-")).toBe(true)
     expect(globRe("[^a-c]x")!.test("dx")).toBe(true)
     expect(globRe("[^a-c]x")!.test("bx")).toBe(false)
   })

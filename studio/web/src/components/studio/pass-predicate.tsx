@@ -11,7 +11,8 @@ import { useState } from "react"
 import { postExperiment, transcriptQuery } from "@/lib/api"
 import type { ExperimentRow, RunRow } from "@/lib/api"
 import { sumCost } from "@/lib/cost"
-import { VS_CHIP_CELLS, answerText } from "@/lib/experiments"
+import { answerText } from "@/lib/experiments"
+import { MATRIX_SOURCES_MAX } from "@/lib/matrix"
 import { cellKey } from "@/lib/form-state"
 import {
   DEFAULT_PREDICATE,
@@ -40,14 +41,17 @@ export const PASS_WORDS = {
 /** The most cells whose transcript the verdicts read (the vs-source
  * chip's bound, VS_CHIP_CELLS): past it an answer clause reads "not
  * judged", said by VERDICT_CAP_WORDS. */
-export const VERDICT_CELLS = VS_CHIP_CELLS
+export const VERDICT_ROWS = MATRIX_SOURCES_MAX
 
+/** The words of a cell past VERDICT_ROWS (its row's answer not read). */
 export const VERDICT_CAP_WORDS = (n: number) =>
-  `the answer is read for the first ${n} cells only (each is a transcript read): not judged`
+  `the answer is read for the first ${n} rows only (each cell is a transcript read): not judged`
 
 /** useVerdicts judges every cell's latest run under p: the answer (a
- * transcript read, only when a clause reads it, the first
- * VERDICT_CELLS cells), steps, tokens and the run's whole bill. Each
+ * transcript read, only when a clause reads it, for every cell of the
+ * first VERDICT_ROWS rows — the matrix's own bound, MATRIX_SOURCES_MAX
+ * rows × its columns, so no column is ever left out; the vs-source
+ * chip keeps its own cap), steps, tokens and the run's whole bill. Each
  * answer ~ clause runs through lib/regex-run.ts (capped text, risky
  * shapes refused, a worker with a timeout), memoised per (run id,
  * predicate text) in the query cache — never re-run on a render or a
@@ -58,16 +62,21 @@ export function useVerdicts(
   p: Predicate | null
 ): Map<string, Judged> {
   const cells = (exp?.variants ?? []).flatMap((v) =>
-    (exp?.inputs ?? []).map((i) => ({
+    (exp?.inputs ?? []).map((i, row) => ({
       key: cellKey(v.key, i.key),
       run: latest(v.key, i.key),
+      row,
     }))
   )
   const needs = !!p?.needsAnswer
   const read = (n: number) => {
     const r = cells[n].run
     return (
-      needs && n < VERDICT_CELLS && !!r && r.status !== "running" && !r.settling
+      needs &&
+      cells[n].row < VERDICT_ROWS &&
+      !!r &&
+      r.status !== "running" &&
+      !r.settling
     )
   }
   const ts = useQueries({
@@ -86,9 +95,11 @@ export function useVerdicts(
       const answer = answers[n]
       return {
         queryKey: ["verdict-regex", c.run?.id ?? "", p?.text ?? ""],
-        queryFn: () =>
+        // The query's signal: a job a newer predicate or an unmounted
+        // grid let go is skipped in the runner's queue, never run.
+        queryFn: ({ signal }: { signal: AbortSignal }) =>
           Promise.all(
-            jobs.map((j) => testRegex(j.source, j.flags, answer ?? ""))
+            jobs.map((j) => testRegex(j.source, j.flags, answer ?? "", signal))
           ),
         enabled: jobs.length > 0 && answer !== null,
         staleTime: Infinity,
@@ -111,8 +122,8 @@ export function useVerdicts(
     })
     out.set(
       c.key,
-      judged.verdict === "unknown" && needs && n >= VERDICT_CELLS
-        ? { verdict: "unknown", why: VERDICT_CAP_WORDS(VERDICT_CELLS) }
+      judged.verdict === "unknown" && needs && c.row >= VERDICT_ROWS
+        ? { verdict: "unknown", why: VERDICT_CAP_WORDS(VERDICT_ROWS) }
         : judged
     )
   })
@@ -158,7 +169,9 @@ export function tallies(
         continue
       }
       runs.push(r)
-      t[verdicts.get(cellKey(v.key, i.key))?.verdict ?? "unknown"]++
+      const j = verdicts.get(cellKey(v.key, i.key))
+      t[j?.verdict ?? "unknown"]++
+      if ((j?.verdict ?? "unknown") === "unknown") t.why ??= j?.why
     }
     const bill = sumCost(runs)
     t.usd = bill.known ? (bill.usd ?? 0) : null

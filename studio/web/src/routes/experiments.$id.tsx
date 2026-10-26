@@ -90,7 +90,7 @@ import {
   PASS_WORDS,
   PredicateField,
   VERDICT_CAP_WORDS,
-  VERDICT_CELLS,
+  VERDICT_ROWS,
   VerdictChip,
   tallies,
   useVerdicts,
@@ -130,7 +130,18 @@ export const ISSUED_WORDS = {
   hint: "the matrix sent this cell; its run has not reached Studio yet — the page reads the experiment again until it does",
   summary: (n: number) =>
     `${n} issued ${n === 1 ? "cell has" : "cells have"} not started: the summary waits for them`,
+  never: (n: number) =>
+    `${n} issued ${n === 1 ? "cell" : "cells"} never started (no run joined in ${Math.round(ISSUED_WAIT.ms / 60_000)} minutes): counted as missing`,
 } as const
+
+/** How long the grid waits for a matrix's issued cells to join (a
+ * test shortens it). */
+export const ISSUED_WAIT = { ms: 2 * 60_000 }
+
+/** topLevel counts an experiment's own runs: a subagent child carries
+ * the experiment's id too, never a cell. */
+const topLevel = (runs: readonly RunRow[] | undefined) =>
+  (runs ?? []).filter((r) => !r.parent_run_id).length
 
 function ExperimentPage() {
   const { id } = Route.useParams()
@@ -180,17 +191,26 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
   const inFlight = Object.values(issued).some((c) => !settled(c.state))
   // A matrix that just issued its cells (U24.2-fix 4): read again until
   // that many runs joined.
+  // Bounded (ISSUED_WAIT): a cell that never joins is then missing.
   const sent = Route.useSearch().issued ?? 0
+  const [gaveUp, setGaveUp] = useState(false)
+  useEffect(() => {
+    if (!sent) return
+    const t = setTimeout(() => setGaveUp(true), ISSUED_WAIT.ms)
+    return () => clearTimeout(t)
+  }, [sent])
   const q = useQuery({
     ...experimentQuery(id),
     refetchInterval: (query) =>
       inFlight ||
-      (query.state.data?.runs?.length ?? 0) < sent ||
+      (!gaveUp && topLevel(query.state.data?.runs) < sent) ||
       (query.state.data?.runs ?? []).some((r) => r.status === "running")
         ? POLL_MS
         : false,
   })
-  const waiting = Math.max(0, sent - (q.data?.runs?.length ?? 0))
+  const unjoined = Math.max(0, sent - topLevel(q.data?.runs))
+  const waiting = gaveUp ? 0 : unjoined
+  const neverStarted = gaveUp ? unjoined : 0
   const exp = q.data
   // The shell polls this key (use-notices.ts), every 5 s while the run
   // controls are drawn: a runtime's coming or going re-gates them.
@@ -626,9 +646,9 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
       />
       {parsedPred.ok &&
       parsedPred.pred.needsAnswer &&
-      exp.variants.length * exp.inputs.length > VERDICT_CELLS ? (
+      exp.inputs.length > VERDICT_ROWS ? (
         <p className="text-xs text-faint" data-verdict-capped>
-          {VERDICT_CAP_WORDS(VERDICT_CELLS)}
+          {VERDICT_CAP_WORDS(VERDICT_ROWS)}
         </p>
       ) : null}
       <div className="overflow-x-auto rounded-lg border" data-scroll-box="">
@@ -854,7 +874,14 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
           {ISSUED_WORDS.summary(waiting)}
         </p>
       ) : (
-        <CheapestLine cols={cols} />
+        <>
+          {neverStarted ? (
+            <p className="font-mono text-xs text-faint" data-issued-never>
+              {ISSUED_WORDS.never(neverStarted)}
+            </p>
+          ) : null}
+          <CheapestLine cols={cols} />
+        </>
       )}
 
       {placed.loose.length ? (

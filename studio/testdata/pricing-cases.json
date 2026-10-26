@@ -3,26 +3,213 @@
   "table": {
     "dated": "2026-10-01",
     "models": [
-      { "provider": "anthropic", "model_glob": "claude-haiku-4-5", "input": 1, "output": 5, "cached_input": 0.1, "cache_write": 1.25 },
-      { "provider": "anthropic", "model_glob": "claude-haiku-4-5-20*", "input": 1, "output": 5 },
-      { "provider": "openai", "model_glob": "o?-mini", "input": 1.1, "output": 4.4, "reasoning": 2 },
-      { "provider": "google", "model_glob": "gemini-[0-9].*-flash", "input": 0.3, "output": 2.5 },
-      { "provider": "wefttest", "model_glob": "priced-script", "input": 2, "output": 2 },
-      { "provider": "*", "model_glob": "glm-*", "input": 0.5, "output": 1 }
+      {
+        "provider": "anthropic",
+        "model_glob": "bad-[a-]",
+        "input": 9,
+        "output": 9
+      },
+      {
+        "provider": "anthropic",
+        "model_glob": "bad-[-a]",
+        "input": 9,
+        "output": 9
+      },
+      {
+        "provider": "anthropic",
+        "model_glob": "claude-haiku-4-5",
+        "input": 1,
+        "output": 5,
+        "cached_input": 0.1,
+        "cache_write": 1.25
+      },
+      {
+        "provider": "anthropic",
+        "model_glob": "claude-haiku-4-5-20*",
+        "input": 1,
+        "output": 5
+      },
+      {
+        "provider": "openai",
+        "model_glob": "o?-mini",
+        "input": 1.1,
+        "output": 4.4,
+        "reasoning": 2
+      },
+      {
+        "provider": "google",
+        "model_glob": "gemini-[0-9].*-flash",
+        "input": 0.3,
+        "output": 2.5
+      },
+      {
+        "provider": "wefttest",
+        "model_glob": "priced-script",
+        "input": 2,
+        "output": 2
+      },
+      {
+        "provider": "*",
+        "model_glob": "glm-*",
+        "input": 0.5,
+        "output": 1
+      }
     ]
   },
   "cases": [
-    { "name": "exact row", "provider": "anthropic", "model": "claude-haiku-4-5", "usage": { "input_tokens": 1000, "output_tokens": 200 }, "known": true, "usd": 0.002 },
-    { "name": "cached and cache-write split", "provider": "anthropic", "model": "claude-haiku-4-5", "usage": { "input_tokens": 1000, "output_tokens": 0, "cached_input_tokens": 400, "cache_write_tokens": 100 }, "known": true, "usd": 0.000665 },
-    { "name": "a * glob", "provider": "anthropic", "model": "claude-haiku-4-5-20251001", "usage": { "input_tokens": 1000000, "output_tokens": 0 }, "known": true, "usd": 1 },
-    { "name": "a * does not cross /", "provider": "anthropic", "model": "claude-haiku-4-5-20/x", "usage": { "input_tokens": 1, "output_tokens": 1 }, "known": false },
-    { "name": "? and reasoning at its rate", "provider": "openai", "model": "o4-mini", "usage": { "input_tokens": 0, "output_tokens": 1000, "reasoning_tokens": 600 }, "known": true, "usd": 0.00296 },
-    { "name": "a class", "provider": "gcp.gemini", "model": "gemini-2.5-flash", "usage": { "input_tokens": 1000000, "output_tokens": 0 }, "known": true, "usd": 0.3 },
-    { "name": "the alias, the class not matching", "provider": "gcp.gemini", "model": "gemini-x.5-flash", "usage": { "input_tokens": 1, "output_tokens": 1 }, "known": false },
-    { "name": "a * provider row, any transport", "provider": "zai", "model": "glm-5.3-flash", "usage": { "input_tokens": 2000000, "output_tokens": 0 }, "known": true, "usd": 1 },
-    { "name": "unknown", "provider": "kimi", "model": "kimi-k2.6", "usage": { "input_tokens": 1, "output_tokens": 1 }, "known": false },
-    { "name": "scripted, no row: an exact $0", "provider": "wefttest", "model": "script", "usage": { "input_tokens": 100, "output_tokens": 100 }, "known": true, "usd": 0, "scripted": true },
-    { "name": "scripted engine", "provider": "weft/runtime", "model": "scripted", "usage": { "input_tokens": 0, "output_tokens": 0 }, "known": true, "usd": 0, "scripted": true },
-    { "name": "a row wins over the scripted rule", "provider": "wefttest", "model": "priced-script", "usage": { "input_tokens": 1000000, "output_tokens": 0 }, "known": true, "usd": 2 }
+    {
+      "name": "exact row",
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "usage": {
+        "input_tokens": 1000,
+        "output_tokens": 200
+      },
+      "known": true,
+      "usd": 0.002
+    },
+    {
+      "name": "cached and cache-write split",
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "usage": {
+        "input_tokens": 1000,
+        "output_tokens": 0,
+        "cached_input_tokens": 400,
+        "cache_write_tokens": 100
+      },
+      "known": true,
+      "usd": 0.000665
+    },
+    {
+      "name": "a * glob",
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001",
+      "usage": {
+        "input_tokens": 1000000,
+        "output_tokens": 0
+      },
+      "known": true,
+      "usd": 1
+    },
+    {
+      "name": "a * does not cross /",
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20/x",
+      "usage": {
+        "input_tokens": 1,
+        "output_tokens": 1
+      },
+      "known": false
+    },
+    {
+      "name": "? and reasoning at its rate",
+      "provider": "openai",
+      "model": "o4-mini",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 1000,
+        "reasoning_tokens": 600
+      },
+      "known": true,
+      "usd": 0.00296
+    },
+    {
+      "name": "a class",
+      "provider": "gcp.gemini",
+      "model": "gemini-2.5-flash",
+      "usage": {
+        "input_tokens": 1000000,
+        "output_tokens": 0
+      },
+      "known": true,
+      "usd": 0.3
+    },
+    {
+      "name": "the alias, the class not matching",
+      "provider": "gcp.gemini",
+      "model": "gemini-x.5-flash",
+      "usage": {
+        "input_tokens": 1,
+        "output_tokens": 1
+      },
+      "known": false
+    },
+    {
+      "name": "a * provider row, any transport",
+      "provider": "zai",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input_tokens": 2000000,
+        "output_tokens": 0
+      },
+      "known": true,
+      "usd": 1
+    },
+    {
+      "name": "unknown",
+      "provider": "kimi",
+      "model": "kimi-k2.6",
+      "usage": {
+        "input_tokens": 1,
+        "output_tokens": 1
+      },
+      "known": false
+    },
+    {
+      "name": "scripted, no row: an exact $0",
+      "provider": "wefttest",
+      "model": "script",
+      "usage": {
+        "input_tokens": 100,
+        "output_tokens": 100
+      },
+      "known": true,
+      "usd": 0,
+      "scripted": true
+    },
+    {
+      "name": "scripted engine",
+      "provider": "weft/runtime",
+      "model": "scripted",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "known": true,
+      "usd": 0,
+      "scripted": true
+    },
+    {
+      "name": "a row wins over the scripted rule",
+      "provider": "wefttest",
+      "model": "priced-script",
+      "usage": {
+        "input_tokens": 1000000,
+        "output_tokens": 0
+      },
+      "known": true,
+      "usd": 2
+    },
+    {
+      "name": "[a-] is a bad pattern: no match",
+      "provider": "anthropic",
+      "model": "bad-a",
+      "usage": {
+        "input_tokens": 1,
+        "output_tokens": 1
+      },
+      "known": false
+    },
+    {
+      "name": "[-a] is a bad pattern: no match",
+      "provider": "anthropic",
+      "model": "bad--",
+      "usage": {
+        "input_tokens": 1,
+        "output_tokens": 1
+      },
+      "known": false
+    }
   ]
 }

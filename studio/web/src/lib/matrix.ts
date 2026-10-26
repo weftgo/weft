@@ -90,7 +90,8 @@ const reEscape = (c: string) => c.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&")
 /** globRe is Go's path.Match for one pattern as a RegExp: * any run of
  * non-"/" characters, ? one non-"/" character, [class] with ^
  * negation, a-z ranges and \ escapes inside, \c a literal c. A
- * malformed pattern (an unclosed class, a trailing \) is null: Go's
+ * malformed pattern (an unclosed or empty class, a bare - or ] where a
+ * class item starts — [-a], [a-], []a] — a trailing \) is null: Go's
  * ErrBadPattern, which lookup reads as no match. */
 export function globRe(glob: string): RegExp | null {
   let re = ""
@@ -102,32 +103,41 @@ export function globRe(glob: string): RegExp | null {
       if (i + 1 >= glob.length) return null
       re += reEscape(glob[++i])
     } else if (c === "[") {
+      // Go's matchChunk: items until a ] that follows at least one; each
+      // item an escape-read char (getEsc: none, or a bare - or ], is a
+      // bad pattern), optionally -hi (the same rule).
       let k = i + 1
       let cls = ""
       if (glob[k] === "^") {
         cls = "^"
         k++
       }
-      let items = 0
-      for (; k < glob.length && (glob[k] !== "]" || items === 0); items++) {
-        let lo = glob[k]
-        if (lo === "\\") {
-          if (k + 1 >= glob.length) return null
-          lo = glob[++k]
+      const esc = (): string | null => {
+        if (k >= glob.length) return null
+        let ch = glob[k]
+        if (ch === "-" || ch === "]") return null
+        if (ch === "\\") {
+          k++
+          if (k >= glob.length) return null
+          ch = glob[k]
         }
         k++
-        if (glob[k] === "-" && k + 1 < glob.length && glob[k + 1] !== "]") {
-          let hi = glob[k + 1]
-          k += 2
-          if (hi === "\\") {
-            if (k >= glob.length) return null
-            hi = glob[k++]
-          }
-          if (hi < lo) return null
-          cls += `${reEscape(lo)}-${reEscape(hi)}`
-        } else cls += reEscape(lo)
+        return ch
       }
-      if (k >= glob.length || items === 0) return null // unclosed or empty
+      let items = 0
+      while (!(glob[k] === "]" && items > 0)) {
+        const lo = esc()
+        if (lo === null) return null
+        let item = reEscape(lo)
+        if (glob[k] === "-") {
+          k++
+          const hi = esc()
+          if (hi === null || hi < lo) return null
+          item = `${reEscape(lo)}-${reEscape(hi)}`
+        }
+        cls += item
+        items++
+      }
       re += `[${cls}]`
       i = k
     } else re += reEscape(c)

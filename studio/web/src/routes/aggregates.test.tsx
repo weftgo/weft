@@ -31,7 +31,8 @@ import { resolve } from "node:path"
 import { resetDrafts } from "@/lib/drafts"
 import { resetNotices } from "@/lib/notify"
 import { renderApp, stubBrowser } from "@/test/app"
-import { experiment, priced } from "@/test/experiment-fixture"
+import { experiment, priced, runOf } from "@/test/experiment-fixture"
+import { ISSUED_WAIT } from "@/routes/experiments.$id"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, golden } from "@/test/fake-studio"
 import { choose } from "@/test/select"
@@ -445,7 +446,7 @@ describe("the grid's pass predicate (UX-C-38, UX-C-16)", () => {
       ).toBe("unknown")
     )
     expect(document.querySelector("[data-cheapest]")!.textContent).toContain(
-      "no column passed every row"
+      "4 cells not judged: no cheapest yet (the answer is not known"
     )
     // A bad predicate says why, and judges nothing.
     fireEvent.change(screen.getByLabelText("pass predicate"), {
@@ -554,5 +555,94 @@ describe("the grid's pass predicate (UX-C-38, UX-C-16)", () => {
       )
     )
     expect(document.querySelector("[data-cell-issued]")).toBeNull()
+  })
+
+  // U24.2-fix2 5: a cell that never joins stops the wait (bounded),
+  // the summary then shown with it missing; a subagent child carrying
+  // the experiment id is no cell.
+  it("bounds the wait for issued cells and counts top-level runs only", async () => {
+    ISSUED_WAIT.ms = 400
+    try {
+      const full = exp("status = succeeded")
+      const runs = full.runs!.filter((r) => r.id !== "pg_b2")
+      runs.push({ ...runs[0], id: "pg_a1/0/call_1", parent_run_id: "pg_a1" })
+      studio.on("GET experiments/exp_tone", { ...full, runs })
+      renderApp("/experiments/exp_tone?issued=4")
+      // Four runs listed, but one is a child: one cell still waits.
+      await waitFor(() =>
+        expect(
+          document.querySelector("[data-issued-waiting]")?.textContent
+        ).toBe("1 issued cell has not started: the summary waits for them")
+      )
+      await waitFor(() =>
+        expect(
+          document.querySelector("[data-issued-never]")?.textContent
+        ).toContain("1 issued cell never started")
+      )
+      expect(document.querySelector("[data-cheapest]")).toBeTruthy()
+      expect(
+        document.querySelector('[data-pass-rate="B"]')!.textContent
+      ).toContain("1/1 judged")
+    } finally {
+      ISSUED_WAIT.ms = 2 * 60_000
+    }
+  })
+
+  // U24.2-fix2 1: a 7 × 4 matrix (28 cells, past the vs-source chip's
+  // 24) judges every cell of every column; the cheapest line names one.
+  it("judges all 28 cells of a 7 × 4 matrix", async () => {
+    const variants = ["A", "B", "C", "D"].map((key) => ({ key, overrides: {} }))
+    const inputs = Array.from({ length: 7 }, (_, n) => ({
+      key: String(n + 1),
+      source_run_id: "r_ok",
+    }))
+    const runs = variants.flatMap((v, col) =>
+      inputs.map((i) => ({
+        ...runOf(`pg_${v.key}${i.key}`, v.key, i.key),
+        ...priced(0.001 * (4 - col)),
+      }))
+    )
+    for (const r of runs)
+      studio.on(`GET runs/${r.id}/transcript`, {
+        batches: [
+          {
+            index: 0,
+            step: 0,
+            input: true,
+            messages: [
+              { role: "user", content: [{ type: "text", text: "q" }] },
+            ],
+          },
+          {
+            index: 1,
+            step: 0,
+            messages: [
+              {
+                role: "assistant",
+                content: [{ type: "text", text: "42 units" }],
+              },
+            ],
+          },
+        ],
+      })
+    studio.on("GET experiments/exp_tone", {
+      ...experiment,
+      variants,
+      inputs,
+      runs,
+      pass_predicate: "answer ~ /units/",
+    })
+    renderApp("/experiments/exp_tone")
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-pass-rate="D"]')?.textContent
+      ).toContain("7/7")
+    )
+    expect(document.querySelectorAll('[data-verdict="pass"]')).toHaveLength(28)
+    expect(
+      document
+        .querySelector("[data-cheapest-passing]")
+        ?.getAttribute("data-cheapest-passing")
+    ).toBe("D")
   })
 })

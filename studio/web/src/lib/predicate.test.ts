@@ -17,6 +17,8 @@ import {
   REGEX_TEXT_CAP,
   REGEX_TIMEOUT_MS,
   REGEX_WORDS,
+  resetRegexRunner,
+  riskyPattern,
   testRegex,
 } from "./regex-run"
 
@@ -105,13 +107,32 @@ describe("summarize", () => {
     expect(s.cheapestOverall?.key).toBe("glm")
     expect(passRate(glm)).toBe("5/7")
   })
-  it("never counts an unpriced column as $0, nor an unjudged one as passing", () => {
+  it("never counts an unpriced column as $0", () => {
     const free = col({ key: "free", pass: 7, usd: null })
-    const pending = col({ key: "pending", pass: 6, unknown: 1, usd: 0.001 })
-    const s = summarize([free, pending])
+    const paid = col({ key: "paid", pass: 6, fail: 1, usd: 0.001 })
+    const s = summarize([free, paid])
     expect(s.cheapestPassing).toBeNull()
     expect(s.why).toContain("not known")
-    expect(s.cheapestOverall?.key).toBe("pending")
+    expect(s.cheapestOverall?.key).toBe("paid")
+  })
+  // U24.2-fix2 1, the backstop: one cell not judged — a cap, a timeout,
+  // an unreadable answer — and no cheapest is claimed, the reason said;
+  // pass rates count the judged rows.
+  it("claims no cheapest while any cell is not judged, and says why", () => {
+    const cheap = col({
+      key: "cheap",
+      pass: 6,
+      unknown: 1,
+      usd: 0.001,
+      why: "timed out",
+    })
+    const dear = col({ key: "dear", pass: 7, usd: 0.4 })
+    const s = summarize([cheap, dear])
+    expect(s.cheapestPassing).toBeNull()
+    expect(s.cheapestOverall).toBeNull()
+    expect(s.why).toBe("1 cell not judged: no cheapest yet (timed out)")
+    expect(passRate(cheap)).toBe("6/6 judged")
+    expect(passRate(dear)).toBe("7/7")
   })
 })
 
@@ -124,6 +145,22 @@ describe("the ReDoS guards (U24.2-fix 1)", () => {
     expect(parsePredicate(String.raw`answer ~ /(\w+\s?)*$/`).ok).toBe(false)
     expect(parsePredicate(String.raw`answer ~ /(.)\1/`).ok).toBe(false)
     expect(performance.now() - t0).toBeLessThan(50)
+  })
+  // U24.2-fix2 3: the screen skips classes and escapes, lets a bounded
+  // inner quantifier through, and sees nested groups.
+  it.each([
+    [String.raw`(\d{1,3}\.)+\d+`, ""],
+    [String.raw`([+-]\d)+`, ""],
+    [String.raw`C:\\1st`, ""],
+    [String.raw`(ab)+c*`, ""],
+    [String.raw`(a+){2,5}`, ""],
+    [String.raw`((a+))+`, REGEX_WORDS.risky],
+    [String.raw`((a+)b)+`, REGEX_WORDS.risky],
+    [String.raw`(?:a*b?)*`, REGEX_WORDS.risky],
+    [String.raw`(a{2,})+`, REGEX_WORDS.risky],
+    [String.raw`(?<n>a)\k<n>`, REGEX_WORDS.risky],
+  ])("riskyPattern(%s)", (src, want) => {
+    expect(riskyPattern(src)).toBe(want)
   })
   it("tests a capped answer: a miss past the cap is not judged", () => {
     const pred = p("answer ~ /needle/")
@@ -152,7 +189,77 @@ describe("the ReDoS guards (U24.2-fix 1)", () => {
 })
 
 describe("testRegex (lib/regex-run.ts)", () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    resetRegexRunner()
+  })
+  // U24.2-fix2 2: a worker that cannot load (CSP, 404, proxy) is said
+  // for every queued job — never read as a timeout — and not respawned.
+  it("says the worker could not start, for every job, spawning it once", async () => {
+    let made = 0
+    class Broken {
+      onerror: ((e: ErrorEvent) => void) | null = null
+      onmessage: unknown = null
+      onmessageerror: unknown = null
+      constructor() {
+        made++
+      }
+      postMessage() {
+        setTimeout(
+          () =>
+            this.onerror?.({
+              message: "refused by CSP",
+              preventDefault() {},
+            } as ErrorEvent),
+          1
+        )
+      }
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", Broken)
+    const outs = await Promise.all([
+      testRegex("a", "", "a"),
+      testRegex("b", "", "b"),
+      testRegex("c", "", "c"),
+    ])
+    for (const o of outs)
+      expect(o).toEqual({
+        why: "the regex worker could not start: refused by CSP",
+      })
+    expect(await testRegex("d", "", "d")).toEqual({
+      why: "the regex worker could not start: refused by CSP",
+    })
+    expect(made).toBe(1)
+  })
+  // U24.2-fix2 4: a job whose query let it go is skipped, never run.
+  it("skips a job whose signal aborted before it ran", async () => {
+    const ran: string[] = []
+    class Echo {
+      onmessage: ((e: MessageEvent) => void) | null = null
+      onerror: unknown = null
+      onmessageerror: unknown = null
+      postMessage(job: { id: number; source: string }) {
+        ran.push(job.source)
+        setTimeout(
+          () =>
+            this.onmessage?.({
+              data: { id: job.id, hit: true },
+            } as MessageEvent),
+          1
+        )
+      }
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", Echo)
+    const gone = new AbortController()
+    const first = testRegex("first", "", "x")
+    const stale = testRegex("stale", "", "x", gone.signal)
+    gone.abort()
+    const last = testRegex("last", "", "x")
+    await Promise.all([first, stale, last])
+    expect(await stale).toEqual({ why: "cancelled" })
+    expect(ran).toEqual(["first", "last"])
+  })
   it("refuses a risky shape without running it", async () => {
     expect(await testRegex("(a+)+$", "", "a".repeat(28) + "!")).toEqual({
       why: REGEX_WORDS.risky,

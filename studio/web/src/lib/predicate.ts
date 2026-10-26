@@ -296,6 +296,9 @@ export interface ColumnTally {
    * its title says why. */
   costWord?: string
   costTitle?: string
+  /** The first unjudged cell's reason (a cap, a timeout, an unreadable
+   * answer), when one is. */
+  why?: string
 }
 
 /** costWords is a column's bill in words: $x, or why not. */
@@ -315,13 +318,32 @@ export interface MatrixSummary {
 }
 
 /** passRate is "5/7" — the rows judged pass of the rows. */
-export const passRate = (t: ColumnTally): string =>
-  `${t.pass}/${t.pass + t.fail + t.unknown + t.missing}`
+/** passRate is "5/7" with every row judged; with some not judged or
+ * missing, "3/4 judged" — the judged rows only, said. */
+export const passRate = (t: ColumnTally): string => {
+  const judged = t.pass + t.fail
+  return t.unknown + t.missing
+    ? `${t.pass}/${judged} judged`
+    : `${t.pass}/${judged}`
+}
+
+/** The summary's words when a cell is not judged. */
+export const UNJUDGED_WORDS = (k: number, why?: string) =>
+  `${k} ${k === 1 ? "cell" : "cells"} not judged: no cheapest yet${why ? ` (${why})` : ""}`
 
 /** summarize picks the cheapest passing column and the cheapest
  * overall. A column with an unknown verdict or a missing row cannot
  * be "passing every row" yet; a bill not known never counts as $0. */
 export function summarize(cols: ColumnTally[]): MatrixSummary {
+  // The backstop: a cell not judged (a cap, a timeout, an unreadable
+  // answer) could be the one that decides — no cheapest is claimed.
+  const unjudged = cols.reduce((n, c) => n + c.unknown, 0)
+  if (unjudged)
+    return {
+      cheapestPassing: null,
+      cheapestOverall: null,
+      why: UNJUDGED_WORDS(unjudged, cols.find((c) => c.why)?.why),
+    }
   const priced = cols.filter((c) => c.usd !== null)
   const byCost = (a: ColumnTally, b: ColumnTally) => a.usd! - b.usd!
   const allPass = cols.filter(

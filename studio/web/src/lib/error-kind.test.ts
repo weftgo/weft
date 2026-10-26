@@ -102,7 +102,7 @@ describe("error kinds (U4)", () => {
     expect(toolFailure("INVALID_INPUT", { input_error: "schema" })?.word).toBe(
       "invalid input · schema"
     )
-    expect(toolFailure("mcp_transport")?.word).toBe("MCP transport")
+    expect(toolFailure("mcp_transport")?.word).toBe("MCP unreachable")
     expect(toolFailure("mcp_tool_error")?.word).toBe("MCP tool error")
     expect(toolFailure("context.Canceled")?.word).toBe("cancelled")
     // A deadline is its own kind, the attempt phrase's word (W7-prep).
@@ -112,6 +112,15 @@ describe("error kinds (U4)", () => {
     expect(toolFailure("context.DeadlineExceeded")?.word).toBe("deadline")
     expect(toolFailure("ORDER_NOT_FOUND")?.word).toBe("ORDER_NOT_FOUND")
     expect(toolFailure("")).toBeNull()
+    // U23.1's facts in lib/onion.ts's words (U23.2): the refusing layer
+    // and the error kind a layer hid.
+    expect(toolFailure("DENIED", { denied_by: "allow" })?.word).toBe(
+      "denied by policy"
+    )
+    expect(toolFailure("DENIED")?.word).toBe("DENIED")
+    expect(toolFailure("INTERNAL", { error_masked: "io.EOF" })?.word).toBe(
+      "INTERNAL ← io.EOF"
+    )
   })
 })
 

@@ -851,3 +851,30 @@ func TestRequestRecordWireFacts(t *testing.T) {
 		}
 	}
 }
+
+// O8: an execute_tool span names the tool's Origin when it is not
+// local (weft.tool.origin) — an app's own word, a Subagent's
+// "subagent" — and a local tool's span carries no key.
+func TestToolSpanNamesItsOrigin(t *testing.T) {
+	tp := newRecProvider()
+	h := func(context.Context, json.RawMessage) (string, error) { return "ok", nil }
+	child := core.New(wefttest.Script(wefttest.Say("done")), core.Name("child"))
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{ID: "a", Name: "local", Args: `{}`},
+			wefttest.Call{ID: "b", Name: "remote", Args: `{}`},
+			wefttest.Call{ID: "c", Name: "ask", Args: `{"prompt":"x"}`}),
+		wefttest.Say("ok")),
+		core.TracerProvider(tp),
+		core.RawTool("local", "L.", nil, h),
+		core.RawTool("remote", "R.", nil, h, core.Origin("mcp:billing")),
+		core.Subagent("ask", "Ask the child.", child))
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"local": "", "remote": "mcp:billing", "ask": "subagent"} {
+		if got := tp.find(t, "execute_tool "+name).attrsMap()["weft.tool.origin"]; got != want {
+			t.Errorf("%s span weft.tool.origin = %q, want %q", name, got, want)
+		}
+	}
+}

@@ -45,6 +45,9 @@ type ToolDef struct {
 	// Origin, by Subagent ("subagent", whatever its child's name), "" =
 	// local.
 	origin string
+	// detail is the origin's identity (OriginDetail): an immutable
+	// copy, shared by clones. Nil when none was given.
+	detail *SourceDetail
 
 	// Per-tool policy, set by ToolOptions. Zero values defer to the
 	// agent; capSet distinguishes "no per-tool cap" from
@@ -617,16 +620,74 @@ func (approvalOption) applyTool(t *ToolDef) { t.approval = true }
 // boundary: the boundary is the sandbox a tool runs in.
 func RequireApproval() ToolOption { return approvalOption{} }
 
+// originName is the tool's Origin, "" for a nil definition.
+func (t *ToolDef) originName() string {
+	if t == nil {
+		return ""
+	}
+	return t.origin
+}
+
 type originOption struct{ name string }
 
 func (o originOption) applyTool(t *ToolDef) { t.origin = o.name }
 
 // Origin names where a tool came from, for the observability record
-// only: it is the tools record's source (ADR 0028 §5), and changes
-// nothing the model sees or the loop does. A tool is "local" by
-// default; Subagent sets "subagent" and weft/mcp's Tools sets "mcp".
-// Any other string is recorded verbatim; the last Origin wins.
+// only: it is the tools record's source (ADR 0028 §5) and the
+// execute_tool span's weft.tool.origin, and changes nothing the model
+// sees or the loop does. A tool is "local" by default; Subagent sets
+// "subagent" and weft/mcp's Tools sets "mcp:<server>" ("mcp" when the
+// server is not named). Any other string is recorded verbatim; the
+// last Origin wins.
 func Origin(name string) ToolOption { return originOption{name} }
+
+// SourceDetail is a tool's origin in parts, for the observability
+// record only (record contract §4, O8): the tools record's
+// source_detail beside its source. weft/mcp's Tools sets it on every
+// tool it imports — the server's name, its transport, the Prefix the
+// import added and the tool's name on the server — and lists the
+// server's tools it could not import in Skipped. Names only: none of
+// it reaches the model, and none of it is part of the catalog hash.
+type SourceDetail struct {
+	// Server names the server the tool came from ("billing").
+	Server string
+	// Transport names how it is reached: "stdio", "http", "sse",
+	// "memory", … — the caller's word; empty when unknown.
+	Transport string
+	// Prefix is what the import prepended to the server's name.
+	Prefix string
+	// RemoteName is the tool's name on the server (the name without
+	// Prefix).
+	RemoteName string
+	// Skipped are the tools of the same source its importer left out
+	// (weft/mcp's ImportError): the tools record lists them once per
+	// source in skipped[], whichever of its tools carries them.
+	Skipped []SkippedImport
+}
+
+// SkippedImport is one tool an importer left out, and why: the tools
+// record's skipped[] entry.
+type SkippedImport struct {
+	// Name is the tool's name on its source; empty when the name
+	// itself was the problem.
+	Name string
+	// Reason is the importer's error text.
+	Reason string
+}
+
+type originDetailOption struct{ d *SourceDetail }
+
+func (o originDetailOption) applyTool(t *ToolDef) { t.detail = o.d }
+
+// OriginDetail sets the tool's origin in parts (SourceDetail), recorded
+// beside its Origin as the tools record's source_detail and skipped[]
+// (record contract §4). The value is copied; the last OriginDetail
+// wins. It changes nothing the model sees or the loop does.
+func OriginDetail(d SourceDetail) ToolOption {
+	c := d
+	c.Skipped = slices.Clone(d.Skipped)
+	return originDetailOption{&c}
+}
 
 // ReplayPolicy is a tool's side-effect class: what a re-run of a
 // recorded conversation (a playground experiment, a replay fixture) may

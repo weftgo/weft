@@ -787,3 +787,18 @@ same content policy:
 
 `docs/record-contract.md` §3 carries the rows; the `run_cards`
 conformance case pins them.
+
+## Amendment (2026-10-26 — the tools record's `source_detail` and `skipped`, U23.2)
+
+§5's tools record gains, additively, `source_detail {server?,
+transport?, prefix?, remote_name?}` on an entry whose tool carries
+`core.OriginDetail` (`weft/mcp` sets it under `mcp.Server`), and a
+top-level `skipped [{name, reason, source?}]` / `skipped_more` — the
+tools an importer left out of an offered source, once per (source,
+name, reason), at most 64. The `source` chip of an MCP tool becomes
+`mcp:<server>` (O8, breaking for a reader matching `mcp`). The
+catalog hash stays canonical JSON over `description`, `name` and
+`schema` only: identity is a record fact, never part of what the
+model was offered. A capped record drops `skipped` with the cut
+entries (counted in its truncated bytes). Record contract §4 and the
+`mcp_mesh` fixture.

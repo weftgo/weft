@@ -12,6 +12,7 @@
 // ordinal (StoryMemory) so it survives the card scrolling away; ?step=
 // scrolls the virtualiser to its card; and a live run's appends follow
 // the end only while the reader is at it.
+import { EFFECT_HINT, STEP_CHIPS_HINT, effectChips } from "@/lib/onion"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -155,6 +156,9 @@ interface Cards {
   facts?: Map<string, CallFacts>
   parked: Map<string, { word: string; hint: string }>
   sources?: Map<string, string>
+  /** Each step's model-call effect chips (lib/onion.ts stepEffectsOf,
+   * U23.2): ↻ retry ×2 · ⇄ fallback · ✎ repaired 1 arg. */
+  steps?: Map<number, string[]>
 }
 const CardsCtx = createContext<Cards | undefined>(undefined)
 
@@ -298,7 +302,9 @@ function CallPill({
   const approval = useContext(ApprovalCtx)?.get(call.callId)
   const cf = cards?.facts?.get(`${step}:${call.callId}`)
   const parked = state === "never" ? cards?.parked.get(call.callId) : undefined
-  const raw = cards?.sources?.get(call.name)
+  // The catalog's source, else the span's own (O8: weft.tool.origin —
+  // a child run's calls, whose catalog the page did not read).
+  const raw = cards?.sources?.get(call.name) ?? cf?.fx?.origin
   // lib/delegation's word for the run it started, not "subagent".
   const src =
     raw === "subagent" && kind && kind !== "subagent"
@@ -389,6 +395,16 @@ function CallPill({
           {APPROVED_BY.chip(approval)}
         </span>
       ) : null}
+      {effectChips(cf?.fx).map((c) => (
+        <span
+          key={c}
+          className="rounded-sm border border-thread/40 px-1.5 py-px font-mono text-[10px] text-thread-ink"
+          title={EFFECT_HINT}
+          data-call-effect={c}
+        >
+          {c}
+        </span>
+      ))}
       <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
         {bytes(new TextEncoder().encode(r.content).length)}
       </span>
@@ -994,6 +1010,7 @@ function StepCard({
           runStatus={runStatus}
           requests={requests}
         />
+        <StepEffects step={step.index} />
         <HoleBadges holes={holes} />
         {costCapable && stepDoc.data ? (
           <span
@@ -1131,9 +1148,30 @@ function Unplaced({ batches }: { batches: PlacedBatch[] }) {
  * (StepList) and the run tree's drawer (span-detail) read the one
  * source, so a parked call reads "awaiting a decision" in both.
  */
+/** A step's model-call effect chips (U23.2), from the run cards. */
+function StepEffects({ step }: { step: number }) {
+  const chips = useContext(CardsCtx)?.steps?.get(step)
+  if (!chips?.length) return null
+  return (
+    <>
+      {chips.map((c) => (
+        <span
+          key={c}
+          className="rounded-sm border border-thread/40 px-1.5 py-px font-mono text-[10px] text-thread-ink"
+          title={STEP_CHIPS_HINT}
+          data-step-effect={c}
+        >
+          {c}
+        </span>
+      ))}
+    </>
+  )
+}
+
 export function RunCards({
   doc,
   pending,
+  stepFx,
   callFacts,
   toolFacts,
   approvals,
@@ -1143,6 +1181,8 @@ export function RunCards({
   doc: RunDoc
   /** The fold's pending calls (FoldedRun.pending). */
   pending: readonly { id: string; name: string }[]
+  /** Each step's model-call effect chips (stepEffectsOf). */
+  stepFx?: Map<number, string[]>
   callFacts?: Map<string, CallFacts>
   toolFacts?: ToolFactsMap
   /** The approved calls by call id (approvalFactsOf). */
@@ -1179,7 +1219,7 @@ export function RunCards({
   for (const r of requests?.doc?.requests ?? [])
     for (const t of r.tools && !isHoleRef(r.tools) ? r.tools.tools : [])
       sources.set(t.name, t.source)
-  const cards: Cards = { facts: callFacts, parked, sources }
+  const cards: Cards = { facts: callFacts, parked, sources, steps: stepFx }
   return (
     <CardsCtx.Provider value={cards}>
       <ToolFactsCtx.Provider value={toolFacts}>
@@ -1228,6 +1268,7 @@ export function StepList({
   stepInputRef,
   toolFacts,
   callFacts,
+  stepFx,
   approvals,
   replayFrom,
 }: {
@@ -1275,6 +1316,8 @@ export function StepList({
   /** The approved calls by call id (approvalFactsOf), when its spans
    * are loaded. */
   approvals?: Map<string, ApprovalFact>
+  /** Each step's model-call effect chips (stepEffectsOf, U23.2). */
+  stepFx?: Map<number, string[]>
 }) {
   // The compactions the run document names (A9.2). A run from before
   // A9 has none in its document and draws no marker: the record is
@@ -1445,6 +1488,7 @@ export function StepList({
       <RunCards
         doc={doc}
         pending={view.pending}
+        stepFx={stepFx}
         callFacts={callFacts}
         toolFacts={toolFacts}
         approvals={approvals}

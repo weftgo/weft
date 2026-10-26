@@ -1345,7 +1345,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			// the call's outcome, before ToolFinish is emitted so no span
 			// operation runs under emitMu (ADR 0016).
 			callCtx, endTool := a.obs.tool(callCtx, rec, c, startSeq, toolStartFacts{timeout: a.callTimeout(def), queue: queue, contentOff: a.content != nil && !*a.content,
-				approvedBy: prov.by, grantID: prov.grant, argsRepaired: rec.takeRepaired(call.ID)})
+				approvedBy: prov.by, grantID: prov.grant, argsRepaired: rec.takeRepaired(call.ID), origin: def.originName()})
 			var retry bool
 			var fail toolFailure
 			var cut int

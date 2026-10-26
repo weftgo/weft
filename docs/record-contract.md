@@ -396,6 +396,7 @@ Name `execute_tool <tool>`, kind Internal, child of `invoke_agent`.
 | event `weft.panic` | `weft.panic.stack` string, `weft.panic.stack_cut` int | `error.type` `panic`, under the development detail level (`otel.DevDetail`, §3's `layer`) with the run's content on alone: the panicking goroutine's stack as the containment recovered it (handler or middleware), capped at 16 KiB on a rune boundary, the rest counted in `weft.panic.stack_cut`. Content (paths, function names, what the panic printed): only the Local and Studio destinations with content on receive it — an OTLP preset gets the span without the event. Captured only once a call panicked, so a default call pays nothing (U23.1; ADR 0016's 2026-10-12 amendment parked it here) |
 | `weft.tool.input_error` | string | `error.type` `INVALID_INPUT` from the loop's own decode: `strict` (an argument field the schema does not declare, under `StrictInput`), `schema` (a value of the wrong type or shape), `syntax` (not one JSON value: malformed, truncated, or trailing data) |
 | `weft.tool.args_repaired` | bool `true` | at start: a model middleware repaired the call's arguments before the loop saw them (`core.Reporter.Repair`; `mw.RepairJSON`) — the `chat` span's `weft.repair` event says how; §6's `repaired` counts it (U23.1, UX-E-10) |
+| `weft.tool.origin` | string | at start: the tool's `Origin` when it is not local (U23.2, O8, UX-S2-08) — `subagent` for a `Subagent`, `mcp:<server>` for a tool `weft/mcp` imported under `mcp.Server(name)` (`mcp` when the server is not named), an app's own word verbatim; absent for a local tool and a call naming no registered tool. What a reader groups a call's server by without the tools record (Studio's call graph draws an `mcp:<server>` node from it, a child run's calls included); a name, never an address. `error.type` tells an MCP call's two failures apart: `mcp_transport` (the `tools/call` exchange failed — the connection, a JSON-RPC error) and `mcp_tool_error` (the server answered `isError`) |
 | `weft.tool.denied_by` | string | an error result a tool layer reported refusing (`core.ToolReporter.Denied`): `allow` (`mw.Allow`; a middleware's own word otherwise). On a resume's denied span (`weft.tool.denied`) always: `approval` (`Deny`, or no decision), or `grant` — with `weft.grant.id` the deny grant that matched (`core.DenyBy`, what `weft/thread` passes) — an id or enum, never the reason (U23.1, UX-E-08) |
 | `weft.tool.error_masked` | string | an error result a tool layer replaced (`core.ToolReporter.Masked`; `mw.MapErrors`, by default as `INTERNAL`): the hidden error's kind, never its text, the first of: its optional `ErrorKind() string` (an app names its own sentinels), a context error's name, its `ErrorType()`, a `ToolError`'s code, a standard library sentinel it matches through `errors.Is` — `io.EOF`, `io.ErrUnexpectedEOF`, `io.ErrClosedPipe`, `io.ErrShortWrite`, `io.ErrNoProgress`, `fs.ErrNotExist` (= `os.ErrNotExist`), `fs.ErrExist`, `fs.ErrPermission`, `fs.ErrInvalid`, `fs.ErrClosed`, `os.ErrDeadlineExceeded`, `os.ErrProcessDone`, `errors.ErrUnsupported` — else its Go type past the standard wrappers (`*net.OpError`; `*errors.errorString` for an `errors.New` value of the app's). `mw.MapErrors` reports nothing for a mapping that only wraps the error (`errors.Is` finds it and the mapped text carries its text) (U23.1, U23.1-fix, UX-E-08) |
 
@@ -607,9 +608,31 @@ rewritten), `request`. A request that was never sent is never recorded.
   (`core.ContentPrompt`) and drops `segments` when its cap cut the text.
 - `tools`: attributes `weft.tools.index`, `weft.catalog.hash`. Body
   `{"hash", "tools": [{name, description, schema, timeout_ms, approval,
-  replay, max_result_bytes, sequential, source, output?}]}` in name
+  replay, max_result_bytes, sequential, source, output?, source_detail?}],
+  skipped?: [{name, reason, source?}], skipped_more?}` in name
   order; `output: true` marks the tool `Output` registered
-  (`submit_output`, the run's typed answer — UX-S1-06).
+  (`submit_output`, the run's typed answer — UX-S1-06). `source` is
+  the tool's `Origin` (`local`, `subagent`, `mcp:<server>` — U23.2,
+  O8: **Breaking** for a reader matching the literal `mcp`, which a
+  tool `weft/mcp` imported under `mcp.Server(name)` no longer reads;
+  without a name it is still `mcp`). `source_detail {server?,
+  transport?, prefix?, remote_name?}` is that origin in parts
+  (`core.OriginDetail`; `weft/mcp` sets the server's name, the
+  `mcp.Transport` word, the `mcp.Prefix` and the tool's name on the
+  server), absent when none was set. `skipped` lists the tools an
+  importer left out of an offered source (`weft/mcp`'s `ImportError`:
+  a non-object schema root, an empty or repeated name), once per
+  (source, name, reason) whichever offered tool carries it, sorted by
+  source then name: `name` the tool's name on its source (empty when
+  the name was the problem, the reason then naming the listing entry),
+  `reason` the importer's text cut at 256 bytes on a rune boundary,
+  `source` the source it would have come from; at most 64, the rest
+  counted in `skipped_more`; absent when nothing was skipped. A source
+  all of whose tools were skipped offers no tool to carry the list, so
+  its skips are not recorded. Neither `source_detail` nor `skipped` is
+  part of the catalog hash (below). A destination's cap drops
+  `skipped` with the entries it cuts, counted in the record's
+  truncated bytes.
 
 **Hashes.** Every text hash is lowercase hex sha256 of the UTF-8 bytes,
 taken before any destination redacts or caps the text:
@@ -1759,6 +1782,7 @@ makes it a turn; its session has a page of its own and, delegated by
 | `thread_content_off` | `thread_approvals` through a content-off destination: every thread record's `content` gone (`weft.content` `none` — no destination asked for content, so `thread` captured none), the ids, enums, the label's `name` and the session title kept |
 | `messages_lost` | the `tool_calls` run with its middle transcript batch dropped (the growth `messages` record at index 1, the assistant's tool call), every event and span kept: `message_count` 3 below `messages_emitted` 4 — `gap` (cause `messages_lost`, "1 of 4 transcript batches were lost"); every event stored, so no `events_lost` |
 | `onion` | the middleware onion recorded (U23.1), the model declaring its wire facts (`wire`: `gateway.example:8443 keys=metadata,provider headers=authorization,x-gateway-route` from a URL carrying credentials and a query — none of them stored), captured through a Studio destination with content on under the development detail level (`otel.DevMode`, `otel.DevDetail`): `mw.Log` › `mw.Retry` › `mw.RepairJSON` around the model, `mw.Audit` › `mw.Allow` › `mw.MapErrors` around the tools. The first request fails with HTTP 503 and `mw.Retry` sends it again (attempt 2 `weft.attempt.layer` `retry`); the answer's lookup arrives fenced (`repairs`: the `weft.repair` event with its `original`; the call `args_repaired`), its delete is refused (`denied_by` `allow`), its refund's `io.EOF` hidden (`error_type` `INTERNAL`, `error_masked` `io.EOF`), its charge's handler panics (`error_type` `panic`, `panic_layer` `handler`; the `weft.panic` event's stack under `repairs`, its text fixed by the generator — a real stack names addresses and this machine's paths); `layers` lists each layer span with its parent; problems `attempts_retried` 1, `tool_errors` 2, `denied` 1, `repaired` 1; none of the six new span keys in `meta`. (`tool_problems`, `retry_fallback`, `approval_denied` and the thread approval cases carry `denied_by` and `weft.attempt.layer` `retry` too.) |
+| `mcp_mesh` | rw.mcp-mesh's shape, MCP identity recorded (U23.2, O8, UX-S2-08): a front desk imports a billing server's tools under `mcp.Server("billing")`, `mcp.Transport("memory")` and `mcp.Prefix("svc_")` beside a local tool, one step calling all four; the tools record's `source` `mcp:billing` and `source_detail` per imported tool, the listing's non-object-root tool in `skipped` with its reason (`sources`); each imported call's `execute_tool` span `origin` `mcp:billing`, the local call none; `svc_legacy_ledger`'s `isError` `mcp_tool_error` and `svc_export_statement`'s failed exchange `mcp_transport` — two tool errors told apart, `problems` `tool_errors` 2; `weft.tool.origin` not in `meta`. (`subagent`, `run_cards`, `pool_child` and `thread_pool` carry `origin` `subagent` too.) |
 | `flow_scope` | a run started under `scope.WithFlow` (what `scope.Header` does for a scope with `flow=`) with `arena.batch` through `core.Metadata`: `weft.flow` and `arena.batch` in `meta`, the pairs `flow=` and `tag.arena.batch=` filter on (§2) |
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...],
@@ -1772,7 +1796,7 @@ backend's store, per session through `obsdb.SessionEventReader`
 the input again; each session lists `summarizer_usage` when it has
 one (and `Session` must agree with the list);
 each run lists every row field of §6 and `derived` (§9's mark, omitted
-when false — every weft run), its `chat` and `tools` lists, its `tree` (§6's run tree: each descendant run with its parent and span count, omitted for a run with none), its `layers` and `repairs` (§3's `layer` spans and `weft.repair` and `weft.panic` events, omitted when none), its `wire` (§4's request records' wire facts, one line per distinct value, omitted when none), and
+when false — every weft run), its `chat` and `tools` lists, its `tree` (§6's run tree: each descendant run with its parent and span count, omitted for a run with none), its `layers` and `repairs` (§3's `layer` spans and `weft.repair` and `weft.panic` events, omitted when none), its `wire` (§4's request records' wire facts, one line per distinct value, omitted when none), its `sources` (§4's tools records' `source_detail` and `skipped`, one line per distinct value, omitted when none), and
 its `holes` — the run-level badge set as the test reads it from the row,
 the events and the compactions (§7's rules; `derived` from the row's mark).
 A case whose `expect.json` carries `pending` (the item that implements it)

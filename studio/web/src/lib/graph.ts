@@ -2,16 +2,19 @@
 // scale. Who called whom, read from the same spans the tree draws
 // (GET /api/runs/{id}/spans?tree=1): every agent a node (its runs, how
 // long the slowest took, how many failed), every MCP server a node
-// (the tools record's source, "mcp" or "mcp:<server>"), every edge a
+// (the execute_tool span's weft.tool.origin, else the tools record's
+// source: "mcp" or "mcp:<server>" — O8), every edge a
 // caller → callee pair with its call count and the slowest call. The
 // selection is the tree's: a node selects its first run's row, and a
 // selected row lights the node its run belongs to.
 //
-// Pool children (thread/pool) are sessions of their own, not runs of
-// this trace: the graph does not draw them. Plain TypeScript, no React:
+// A caller-linked run (thread/pool's child session's turn, O11) is
+// drawn under the run whose call started it when the spans hold it.
+// Plain TypeScript, no React:
 // Studio only (the panel links here).
 import type { RunRow, Span } from "./api"
 import { plural, tokenPair } from "./format"
+import { MCP_FAILURE } from "./onion"
 import type { HoleMark } from "./honesty"
 import { statusOf } from "./status"
 import type { Status, StatusKey, StatusRow } from "./status"
@@ -39,6 +42,12 @@ export interface GraphNode {
    * agent; an MCP node: none) — the status and steps line's fallback
    * where the page holds no row for the run (UX-S3-14). */
   facts: RunFact[]
+  /** An MCP node's failures by kind (U23.2, O8): calls whose
+   * tools/call exchange failed (mcp_transport) and calls the server
+   * answered isError (mcp_tool_error); any other failure counts in
+   * fails alone. */
+  unreachable?: number
+  toolErrors?: number
 }
 
 /** A run as its invoke_agent span says it ended. */
@@ -82,7 +91,13 @@ const ms = (s: Span) => {
  * tree answer's parent_run_id, else core's id rule (<parent>/<step>/<call>,
  * <parent>/resume/<call> under Approve). */
 function parentOf(inv: Span, run: string): string | undefined {
-  const a = str(attrsOf(inv)["weft.parent.run.id"]) ?? inv.parent_run_id
+  const at = attrsOf(inv)
+  const a =
+    str(at["weft.parent.run.id"]) ??
+    inv.parent_run_id ??
+    // A caller-linked run (O11: a thread/pool child session's turn)
+    // hangs under the run whose call started it.
+    str(at["weft.caller.run.id"])
   if (a) return a
   const m = /^(.+)\/(?:\d+|resume)\/[^/]+$/.exec(run)
   return m?.[1]
@@ -176,26 +191,39 @@ export function callGraph(
     if (from) edge(from, agentOf.get(run)!, ms(s), s.status === "error")
   }
   const unsourced = new Set<string>()
-  if (sourceOf)
-    for (const s of spans) {
-      if (opOf(s) !== "execute_tool") continue
-      const run = runOf(s)
+  for (const s of spans) {
+    if (opOf(s) !== "execute_tool") continue
+    const run = runOf(s)
+    const a = attrsOf(s)
+    // The span names its origin since O8 (weft.tool.origin): a child
+    // run's MCP calls are drawn without its catalog. Older spans fall
+    // back on the tools record's source.
+    let src = str(a["weft.tool.origin"])
+    if (!src) {
+      if (!sourceOf) continue
       if (!known(run)) {
         unsourced.add(run)
         continue
       }
-      const from = agentOf.get(run)
-      const tool = str(attrsOf(s)["gen_ai.tool.name"])
-      const src = tool ? sourceOf(run, tool) : undefined
-      if (!from || !src?.startsWith("mcp")) continue
-      const id = `m:${src}`
-      const n = nodeFor(id, "mcp", src)
-      const d = ms(s)
-      n.calls++
-      n.slowest = Math.max(n.slowest, d)
-      if (s.status === "error") n.fails++
-      edge(from, id, d, s.status === "error")
+      const tool = str(a["gen_ai.tool.name"])
+      src = tool ? sourceOf(run, tool) : undefined
     }
+    const from = agentOf.get(run)
+    if (!from || !src?.startsWith("mcp")) continue
+    const id = `m:${src}`
+    const n = nodeFor(id, "mcp", src)
+    const d = ms(s)
+    const failed = s.status === "error"
+    n.calls++
+    n.slowest = Math.max(n.slowest, d)
+    if (failed) {
+      n.fails++
+      const type = str(a["error.type"])
+      if (type === "mcp_transport") n.unreachable = (n.unreachable ?? 0) + 1
+      if (type === "mcp_tool_error") n.toolErrors = (n.toolErrors ?? 0) + 1
+    }
+    edge(from, id, d, failed)
+  }
   // Depth: breadth first from the root's agent; anything it does not
   // reach (a caller with no span) one column past the deepest.
   const root = agentOf.get(rootRun)
@@ -292,6 +320,21 @@ export function nodeLine(n: GraphNode): string {
   if (n.fails) parts.push(`${n.fails} failed`)
   return parts.join(" · ")
 }
+
+/** An MCP server node's third line (U23.2, O8): its failures by kind,
+ * "1 MCP unreachable · 1 MCP tool error" — a transport failure never
+ * reads as a tool error. Null when none of its calls failed so. */
+export function mcpFailLine(n: GraphNode): string | null {
+  const parts: string[] = []
+  if (n.unreachable)
+    parts.push(`${n.unreachable} ${MCP_FAILURE.mcp_transport.word}`)
+  if (n.toolErrors)
+    parts.push(`${n.toolErrors} ${MCP_FAILURE.mcp_tool_error.word}`)
+  return parts.length ? parts.join(" · ") : null
+}
+
+/** An MCP node's hover: its failures' two kinds told apart. */
+export const MCP_NODE_HINT = `an MCP server (the tools' Origin, weft.tool.origin): its calls, the slowest, and failures by kind — ${MCP_FAILURE.mcp_transport.word}: ${MCP_FAILURE.mcp_transport.hint}; ${MCP_FAILURE.mcp_tool_error.word}: ${MCP_FAILURE.mcp_tool_error.hint}`
 
 /** The least a fitted graph is scaled to: below it its text (10 px in
  * the viewBox) drops under 9 px, so the pane scrolls sideways instead —

@@ -2986,12 +2986,1906 @@
       }
     ]
   },
+  "mw.allow": {
+    "run": {
+      "id": "r_allow",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "7ace0000000000000000000000000016",
+      "agent": "ops-shell",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "(manifest)",
+      "weft_version": "(test)",
+      "service": "(test)",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {},
+      "started": "2026-10-01T09:00:00Z",
+      "finished": "2026-10-01T09:00:00Z",
+      "last_seen": "2026-10-01T09:00:00Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 2,
+      "pending": 0,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "events_emitted": 10,
+      "messages_emitted": 4,
+      "denied": 1,
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "cost_usd": 0,
+      "cost_known": true,
+      "cost_badge": "scripted",
+      "cost_reason": "a scripted model: nothing bills it, an exact $0",
+      "cache": "exact",
+      "delegated_cost_usd": 0,
+      "delegated_cost_known": true,
+      "event_count": 10,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+      "request_count": 2,
+      "prompt_preview": "/var is full, free some space.",
+      "children": [],
+      "holes": [],
+      "compactions": []
+    },
+    "events": {
+      "events": [
+        {
+          "pos": 0,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "run_start",
+            "id": "r_allow",
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "agent": "ops-shell",
+            "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "pos": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_start",
+            "run_id": "r_allow",
+            "index": 0
+          }
+        },
+        {
+          "pos": 2,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_allow",
+            "seq": 1,
+            "call_id": "a1",
+            "name": "delete_path",
+            "args": {
+              "path": "/var/lib/postgresql"
+            }
+          }
+        },
+        {
+          "pos": 3,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_allow",
+            "seq": 2,
+            "call_id": "a1",
+            "name": "delete_path",
+            "content": "DENIED: tool \"delete_path\" is not allowed",
+            "is_error": true
+          }
+        },
+        {
+          "pos": 4,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_allow",
+            "seq": 3,
+            "call_id": "a2",
+            "name": "disk_usage",
+            "args": {
+              "path": "/var"
+            }
+          }
+        },
+        {
+          "pos": 5,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_allow",
+            "seq": 4,
+            "call_id": "a2",
+            "name": "disk_usage",
+            "content": "/var: 91% used",
+            "is_error": false
+          }
+        },
+        {
+          "pos": 6,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_finish",
+            "run_id": "r_allow",
+            "index": 0,
+            "reason": "tool_calls",
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            },
+            "latency_ms": 1
+          }
+        },
+        {
+          "pos": 7,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_start",
+            "run_id": "r_allow",
+            "index": 1
+          }
+        },
+        {
+          "pos": 8,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_finish",
+            "run_id": "r_allow",
+            "index": 1,
+            "reason": "stop",
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            },
+            "latency_ms": 1,
+            "ttft_ms": 1
+          }
+        },
+        {
+          "pos": 9,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "run_finish",
+            "run_id": "r_allow",
+            "usage": {
+              "input_tokens": 20,
+              "output_tokens": 10
+            },
+            "steps": 2,
+            "stopped_by": "final_answer"
+          }
+        }
+      ],
+      "next_after": null,
+      "done": true,
+      "gaps": []
+    },
+    "transcript": {
+      "batches": [
+        {
+          "index": 0,
+          "step": 0,
+          "input": true,
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "/var is full, free some space."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "step": 0,
+          "input": false,
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_call",
+                  "id": "a1",
+                  "name": "delete_path",
+                  "args": {
+                    "path": "/var/lib/postgresql"
+                  }
+                },
+                {
+                  "type": "tool_call",
+                  "id": "a2",
+                  "name": "disk_usage",
+                  "args": {
+                    "path": "/var"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "step": 0,
+          "input": false,
+          "messages": [
+            {
+              "role": "tool",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "call_id": "a1",
+                  "name": "delete_path",
+                  "content": "DENIED: tool \"delete_path\" is not allowed",
+                  "is_error": true
+                },
+                {
+                  "type": "tool_result",
+                  "call_id": "a2",
+                  "name": "disk_usage",
+                  "content": "/var: 91% used",
+                  "is_error": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "step": 1,
+          "input": false,
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "I may not delete data; /var is 91% full."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "spans": {
+      "spans": [
+        {
+          "trace_id": "7ace0000000000000000000000000016",
+          "span_id": "5ba0000000000017",
+          "parent_span_id": "",
+          "name": "invoke_agent ops-shell",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.agent.name": "ops-shell",
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.usage.input_tokens": 20,
+            "gen_ai.usage.output_tokens": 10,
+            "weft.instructions.hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "weft.manifest.hash": "(manifest)",
+            "weft.run.events": 10,
+            "weft.run.id": "r_allow",
+            "weft.run.messages": 4,
+            "weft.run.steps": 2,
+            "weft.run.stop_reason": "stop",
+            "weft.run.stopped_by": "final_answer",
+            "weft.version": "(test)"
+          },
+          "events": [],
+          "run_id": "r_allow"
+        },
+        {
+          "trace_id": "7ace0000000000000000000000000016",
+          "span_id": "5ba0000000000018",
+          "parent_span_id": "5ba0000000000017",
+          "name": "chat script",
+          "kind": "client",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.response.finish_reasons": [
+              "tool_calls"
+            ],
+            "gen_ai.response.model": "script",
+            "gen_ai.usage.input_tokens": 10,
+            "gen_ai.usage.output_tokens": 5,
+            "weft.model.tool_calls": 2,
+            "weft.run.id": "r_allow",
+            "weft.step.index": 0,
+            "weft.stream": true
+          },
+          "events": [],
+          "run_id": "r_allow"
+        },
+        {
+          "trace_id": "7ace0000000000000000000000000016",
+          "span_id": "5ba0000000000019",
+          "parent_span_id": "5ba0000000000017",
+          "name": "execute_tool delete_path",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "error",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "error.type": "DENIED",
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "a1",
+            "gen_ai.tool.name": "delete_path",
+            "weft.run.id": "r_allow",
+            "weft.step.index": 0,
+            "weft.tool.denied_by": "allow",
+            "weft.tool.seq": 1
+          },
+          "events": [],
+          "run_id": "r_allow"
+        },
+        {
+          "trace_id": "7ace0000000000000000000000000016",
+          "span_id": "5ba000000000001a",
+          "parent_span_id": "5ba0000000000017",
+          "name": "execute_tool disk_usage",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "a2",
+            "gen_ai.tool.name": "disk_usage",
+            "weft.run.id": "r_allow",
+            "weft.step.index": 0,
+            "weft.tool.queue_ms": 1,
+            "weft.tool.result_bytes": 14,
+            "weft.tool.seq": 3
+          },
+          "events": [],
+          "run_id": "r_allow"
+        },
+        {
+          "trace_id": "7ace0000000000000000000000000016",
+          "span_id": "5ba000000000001b",
+          "parent_span_id": "5ba0000000000017",
+          "name": "chat script",
+          "kind": "client",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.response.finish_reasons": [
+              "stop"
+            ],
+            "gen_ai.response.model": "script",
+            "gen_ai.usage.input_tokens": 10,
+            "gen_ai.usage.output_tokens": 5,
+            "weft.model.tool_calls": 0,
+            "weft.run.id": "r_allow",
+            "weft.step.index": 1,
+            "weft.stream": true,
+            "weft.ttft_ms": 1
+          },
+          "events": [],
+          "run_id": "r_allow"
+        }
+      ]
+    },
+    "requests": {
+      "requests": [
+        {
+          "index": 0,
+          "step": 0,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+              "names": [
+                "delete_path",
+                "disk_usage"
+              ]
+            },
+            "sequential_tools": true,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+            "tools": [
+              {
+                "name": "delete_path",
+                "description": "rm -rf a path on the host.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "disk_usage",
+                "description": "df -h for a mount.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          },
+          "raw": null,
+          "raw_badge": "not_recorded",
+          "raw_reason": "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+          "raw_fix": "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+        },
+        {
+          "index": 1,
+          "step": 1,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 1,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 2,
+              "count": 3
+            },
+            "tools": {
+              "catalog_hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+              "names": [
+                "delete_path",
+                "disk_usage"
+              ]
+            },
+            "sequential_tools": true,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+            "tools": [
+              {
+                "name": "delete_path",
+                "description": "rm -rf a path on the host.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "disk_usage",
+                "description": "df -h for a mount.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          },
+          "raw": null,
+          "raw_badge": "not_recorded",
+          "raw_reason": "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+          "raw_fix": "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+        }
+      ]
+    },
+    "tools": {
+      "catalogs": [
+        {
+          "hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+          "tools": [
+            {
+              "name": "delete_path",
+              "description": "rm -rf a path on the host.",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": false,
+              "source": "local"
+            },
+            {
+              "name": "disk_usage",
+              "description": "df -h for a mount.",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": false,
+              "source": "local"
+            }
+          ],
+          "content": "",
+          "truncated_bytes": 0
+        }
+      ]
+    },
+    "steps": [
+      {
+        "run_id": "r_allow",
+        "step": 0,
+        "status": "ok",
+        "reason": "tool_calls",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": "2026-10-01T09:00:00Z",
+        "latency_ms": 1,
+        "model": {
+          "provider": "wefttest",
+          "requested": "script",
+          "answered": "script"
+        },
+        "request": {
+          "index": 0,
+          "step": 0,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+              "names": [
+                "delete_path",
+                "disk_usage"
+              ]
+            },
+            "sequential_tools": true,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+            "tools": [
+              {
+                "name": "delete_path",
+                "description": "rm -rf a path on the host.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "disk_usage",
+                "description": "df -h for a mount.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          }
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "model": "script",
+            "provider": "wefttest",
+            "outcome": "ok",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z",
+            "span_id": "5ba0000000000018",
+            "request_index": 0
+          }
+        ],
+        "messages_in": {
+          "index": 0,
+          "count": 1
+        },
+        "events": [
+          {
+            "pos": 1,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_start",
+              "run_id": "r_allow",
+              "index": 0
+            }
+          },
+          {
+            "pos": 2,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_allow",
+              "seq": 1,
+              "call_id": "a1",
+              "name": "delete_path",
+              "args": {
+                "path": "/var/lib/postgresql"
+              }
+            }
+          },
+          {
+            "pos": 3,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_allow",
+              "seq": 2,
+              "call_id": "a1",
+              "name": "delete_path",
+              "content": "DENIED: tool \"delete_path\" is not allowed",
+              "is_error": true
+            }
+          },
+          {
+            "pos": 4,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_allow",
+              "seq": 3,
+              "call_id": "a2",
+              "name": "disk_usage",
+              "args": {
+                "path": "/var"
+              }
+            }
+          },
+          {
+            "pos": 5,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_allow",
+              "seq": 4,
+              "call_id": "a2",
+              "name": "disk_usage",
+              "content": "/var: 91% used",
+              "is_error": false
+            }
+          },
+          {
+            "pos": 6,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_finish",
+              "run_id": "r_allow",
+              "index": 0,
+              "reason": "tool_calls",
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+              },
+              "latency_ms": 1
+            }
+          }
+        ],
+        "tool_calls": [
+          {
+            "call_id": "a1",
+            "name": "delete_path",
+            "seq": 1,
+            "args": {
+              "path": "/var/lib/postgresql"
+            },
+            "result": {
+              "content": "DENIED: tool \"delete_path\" is not allowed",
+              "is_error": true,
+              "bytes": 41
+            },
+            "span": {
+              "id": "5ba0000000000019",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "error"
+            }
+          },
+          {
+            "call_id": "a2",
+            "name": "disk_usage",
+            "seq": 3,
+            "args": {
+              "path": "/var"
+            },
+            "result": {
+              "content": "/var: 91% used",
+              "is_error": false,
+              "bytes": 14
+            },
+            "span": {
+              "id": "5ba000000000001a",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "ok"
+            }
+          }
+        ],
+        "children": [],
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "cost_badge": "scripted",
+        "cost_reason": "a scripted model: nothing bills it, an exact $0",
+        "cache": "exact",
+        "holes": []
+      },
+      {
+        "run_id": "r_allow",
+        "step": 1,
+        "status": "ok",
+        "reason": "stop",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": "2026-10-01T09:00:00Z",
+        "latency_ms": 1,
+        "ttft_ms": 1,
+        "model": {
+          "provider": "wefttest",
+          "requested": "script",
+          "answered": "script"
+        },
+        "request": {
+          "index": 1,
+          "step": 1,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 1,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 2,
+              "count": 3
+            },
+            "tools": {
+              "catalog_hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+              "names": [
+                "delete_path",
+                "disk_usage"
+              ]
+            },
+            "sequential_tools": true,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "cbf5367bede2399b6053c8684eff3154e2144657c06b9aeea717de92495abd34",
+            "tools": [
+              {
+                "name": "delete_path",
+                "description": "rm -rf a path on the host.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "disk_usage",
+                "description": "df -h for a mount.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          }
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "model": "script",
+            "provider": "wefttest",
+            "outcome": "ok",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z",
+            "span_id": "5ba000000000001b",
+            "request_index": 1
+          }
+        ],
+        "messages_in": {
+          "index": 2,
+          "count": 3
+        },
+        "events": [
+          {
+            "pos": 7,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_start",
+              "run_id": "r_allow",
+              "index": 1
+            }
+          },
+          {
+            "pos": 8,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_finish",
+              "run_id": "r_allow",
+              "index": 1,
+              "reason": "stop",
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+              },
+              "latency_ms": 1,
+              "ttft_ms": 1
+            }
+          }
+        ],
+        "tool_calls": [],
+        "children": [],
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "cost_badge": "scripted",
+        "cost_reason": "a scripted model: nothing bills it, an exact $0",
+        "cache": "exact",
+        "holes": []
+      }
+    ]
+  },
+  "mw.repairjson": {
+    "run": {
+      "id": "r_repair",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "7ace000000000000000000000000001c",
+      "agent": "echoer",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "(manifest)",
+      "weft_version": "(test)",
+      "service": "(test)",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {},
+      "started": "2026-10-01T09:00:00Z",
+      "finished": "2026-10-01T09:00:00Z",
+      "last_seen": "2026-10-01T09:00:00Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 2,
+      "pending": 0,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "repaired": 1,
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "cost_usd": 0,
+      "cost_known": true,
+      "cost_badge": "scripted",
+      "cost_reason": "a scripted model: nothing bills it, an exact $0",
+      "cache": "exact",
+      "delegated_cost_usd": 0,
+      "delegated_cost_known": true,
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+      "request_count": 2,
+      "prompt_preview": "x",
+      "children": [],
+      "holes": [],
+      "compactions": []
+    },
+    "events": {
+      "events": [
+        {
+          "pos": 0,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "run_start",
+            "id": "r_repair",
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "agent": "echoer",
+            "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "pos": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_start",
+            "run_id": "r_repair",
+            "index": 0
+          }
+        },
+        {
+          "pos": 2,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_repair",
+            "seq": 1,
+            "call_id": "f1",
+            "name": "echo",
+            "args": {
+              "msg": "fenced"
+            }
+          }
+        },
+        {
+          "pos": 3,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_repair",
+            "seq": 2,
+            "call_id": "f1",
+            "name": "echo",
+            "content": "fenced",
+            "is_error": false
+          }
+        },
+        {
+          "pos": 4,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_finish",
+            "run_id": "r_repair",
+            "index": 0,
+            "reason": "tool_calls",
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            },
+            "latency_ms": 1
+          }
+        },
+        {
+          "pos": 5,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_start",
+            "run_id": "r_repair",
+            "index": 1
+          }
+        },
+        {
+          "pos": 6,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_finish",
+            "run_id": "r_repair",
+            "index": 1,
+            "reason": "stop",
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            },
+            "latency_ms": 1,
+            "ttft_ms": 1
+          }
+        },
+        {
+          "pos": 7,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "run_finish",
+            "run_id": "r_repair",
+            "usage": {
+              "input_tokens": 20,
+              "output_tokens": 10
+            },
+            "steps": 2,
+            "stopped_by": "final_answer"
+          }
+        }
+      ],
+      "next_after": null,
+      "done": true,
+      "gaps": []
+    },
+    "transcript": {
+      "batches": [
+        {
+          "index": 0,
+          "step": 0,
+          "input": true,
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "x"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "step": 0,
+          "input": false,
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_call",
+                  "id": "f1",
+                  "name": "echo",
+                  "args": {
+                    "msg": "fenced"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "step": 0,
+          "input": false,
+          "messages": [
+            {
+              "role": "tool",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "call_id": "f1",
+                  "name": "echo",
+                  "content": "fenced",
+                  "is_error": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "step": 1,
+          "input": false,
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "ok"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "spans": {
+      "spans": [
+        {
+          "trace_id": "7ace000000000000000000000000001c",
+          "span_id": "5ba000000000001d",
+          "parent_span_id": "",
+          "name": "invoke_agent echoer",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.agent.name": "echoer",
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.usage.input_tokens": 20,
+            "gen_ai.usage.output_tokens": 10,
+            "weft.instructions.hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "weft.manifest.hash": "(manifest)",
+            "weft.run.events": 8,
+            "weft.run.id": "r_repair",
+            "weft.run.messages": 4,
+            "weft.run.steps": 2,
+            "weft.run.stop_reason": "stop",
+            "weft.run.stopped_by": "final_answer",
+            "weft.version": "(test)"
+          },
+          "events": [],
+          "run_id": "r_repair"
+        },
+        {
+          "trace_id": "7ace000000000000000000000000001c",
+          "span_id": "5ba000000000001e",
+          "parent_span_id": "5ba000000000001d",
+          "name": "chat script",
+          "kind": "client",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.response.finish_reasons": [
+              "tool_calls"
+            ],
+            "gen_ai.response.model": "script",
+            "gen_ai.usage.input_tokens": 10,
+            "gen_ai.usage.output_tokens": 5,
+            "weft.model.tool_calls": 1,
+            "weft.run.id": "r_repair",
+            "weft.step.index": 0,
+            "weft.stream": true
+          },
+          "events": [
+            {
+              "time": "2026-10-01T09:00:00Z",
+              "name": "weft.repair",
+              "attrs": {
+                "gen_ai.tool.call.id": "f1",
+                "weft.repair.bytes_after": 16,
+                "weft.repair.bytes_before": 28,
+                "weft.repair.kind": "fence"
+              }
+            }
+          ],
+          "run_id": "r_repair"
+        },
+        {
+          "trace_id": "7ace000000000000000000000000001c",
+          "span_id": "5ba000000000001f",
+          "parent_span_id": "5ba000000000001d",
+          "name": "execute_tool echo",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "f1",
+            "gen_ai.tool.name": "echo",
+            "weft.run.id": "r_repair",
+            "weft.step.index": 0,
+            "weft.tool.args_repaired": true,
+            "weft.tool.result_bytes": 6,
+            "weft.tool.seq": 1
+          },
+          "events": [],
+          "run_id": "r_repair"
+        },
+        {
+          "trace_id": "7ace000000000000000000000000001c",
+          "span_id": "5ba0000000000020",
+          "parent_span_id": "5ba000000000001d",
+          "name": "chat script",
+          "kind": "client",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.response.finish_reasons": [
+              "stop"
+            ],
+            "gen_ai.response.model": "script",
+            "gen_ai.usage.input_tokens": 10,
+            "gen_ai.usage.output_tokens": 5,
+            "weft.model.tool_calls": 0,
+            "weft.run.id": "r_repair",
+            "weft.step.index": 1,
+            "weft.stream": true,
+            "weft.ttft_ms": 1
+          },
+          "events": [],
+          "run_id": "r_repair"
+        }
+      ]
+    },
+    "requests": {
+      "requests": [
+        {
+          "index": 0,
+          "step": 0,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+              "names": [
+                "echo"
+              ]
+            },
+            "sequential_tools": false,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+            "tools": [
+              {
+                "name": "echo",
+                "description": "Echo.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "msg": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "msg"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          },
+          "raw": null,
+          "raw_badge": "not_recorded",
+          "raw_reason": "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+          "raw_fix": "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+        },
+        {
+          "index": 1,
+          "step": 1,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 1,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 2,
+              "count": 3
+            },
+            "tools": {
+              "catalog_hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+              "names": [
+                "echo"
+              ]
+            },
+            "sequential_tools": false,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+            "tools": [
+              {
+                "name": "echo",
+                "description": "Echo.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "msg": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "msg"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          },
+          "raw": null,
+          "raw_badge": "not_recorded",
+          "raw_reason": "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+          "raw_fix": "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+        }
+      ]
+    },
+    "tools": {
+      "catalogs": [
+        {
+          "hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+          "tools": [
+            {
+              "name": "echo",
+              "description": "Echo.",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "msg": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "msg"
+                ]
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": false,
+              "source": "local"
+            }
+          ],
+          "content": "",
+          "truncated_bytes": 0
+        }
+      ]
+    },
+    "steps": [
+      {
+        "run_id": "r_repair",
+        "step": 0,
+        "status": "ok",
+        "reason": "tool_calls",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": "2026-10-01T09:00:00Z",
+        "latency_ms": 1,
+        "model": {
+          "provider": "wefttest",
+          "requested": "script",
+          "answered": "script"
+        },
+        "request": {
+          "index": 0,
+          "step": 0,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+              "names": [
+                "echo"
+              ]
+            },
+            "sequential_tools": false,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+            "tools": [
+              {
+                "name": "echo",
+                "description": "Echo.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "msg": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "msg"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          }
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "model": "script",
+            "provider": "wefttest",
+            "outcome": "ok",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z",
+            "span_id": "5ba000000000001e",
+            "request_index": 0
+          }
+        ],
+        "messages_in": {
+          "index": 0,
+          "count": 1
+        },
+        "events": [
+          {
+            "pos": 1,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_start",
+              "run_id": "r_repair",
+              "index": 0
+            }
+          },
+          {
+            "pos": 2,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_repair",
+              "seq": 1,
+              "call_id": "f1",
+              "name": "echo",
+              "args": {
+                "msg": "fenced"
+              }
+            }
+          },
+          {
+            "pos": 3,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_repair",
+              "seq": 2,
+              "call_id": "f1",
+              "name": "echo",
+              "content": "fenced",
+              "is_error": false
+            }
+          },
+          {
+            "pos": 4,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_finish",
+              "run_id": "r_repair",
+              "index": 0,
+              "reason": "tool_calls",
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+              },
+              "latency_ms": 1
+            }
+          }
+        ],
+        "tool_calls": [
+          {
+            "call_id": "f1",
+            "name": "echo",
+            "seq": 1,
+            "args": {
+              "msg": "fenced"
+            },
+            "result": {
+              "content": "fenced",
+              "is_error": false,
+              "bytes": 6
+            },
+            "span": {
+              "id": "5ba000000000001f",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "ok"
+            }
+          }
+        ],
+        "children": [],
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "cost_badge": "scripted",
+        "cost_reason": "a scripted model: nothing bills it, an exact $0",
+        "cache": "exact",
+        "holes": []
+      },
+      {
+        "run_id": "r_repair",
+        "step": 1,
+        "status": "ok",
+        "reason": "stop",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": "2026-10-01T09:00:00Z",
+        "latency_ms": 1,
+        "ttft_ms": 1,
+        "model": {
+          "provider": "wefttest",
+          "requested": "script",
+          "answered": "script"
+        },
+        "request": {
+          "index": 1,
+          "step": 1,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 1,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 2,
+              "count": 3
+            },
+            "tools": {
+              "catalog_hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+              "names": [
+                "echo"
+              ]
+            },
+            "sequential_tools": false,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "1accf7c67fa58f39c0f180738702a2f56f1416a074d78e41725087203699e0d7",
+            "tools": [
+              {
+                "name": "echo",
+                "description": "Echo.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "msg": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "msg"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          }
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "model": "script",
+            "provider": "wefttest",
+            "outcome": "ok",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z",
+            "span_id": "5ba0000000000020",
+            "request_index": 1
+          }
+        ],
+        "messages_in": {
+          "index": 2,
+          "count": 3
+        },
+        "events": [
+          {
+            "pos": 5,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_start",
+              "run_id": "r_repair",
+              "index": 1
+            }
+          },
+          {
+            "pos": 6,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_finish",
+              "run_id": "r_repair",
+              "index": 1,
+              "reason": "stop",
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+              },
+              "latency_ms": 1,
+              "ttft_ms": 1
+            }
+          }
+        ],
+        "tool_calls": [],
+        "children": [],
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "cost_badge": "scripted",
+        "cost_reason": "a scripted model: nothing bills it, an exact $0",
+        "cache": "exact",
+        "holes": []
+      }
+    ]
+  },
   "mw.retry": {
     "run": {
       "id": "r_retry",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000016",
+      "trace_id": "7ace0000000000000000000000000021",
       "agent": "support",
       "model": {
         "provider": "wefttest",
@@ -3140,8 +5034,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000016",
-          "span_id": "5ba0000000000017",
+          "trace_id": "7ace0000000000000000000000000021",
+          "span_id": "5ba0000000000022",
           "parent_span_id": "",
           "name": "invoke_agent support",
           "kind": "internal",
@@ -3171,9 +5065,9 @@
           "run_id": "r_retry"
         },
         {
-          "trace_id": "7ace0000000000000000000000000016",
-          "span_id": "5ba0000000000018",
-          "parent_span_id": "5ba0000000000017",
+          "trace_id": "7ace0000000000000000000000000021",
+          "span_id": "5ba0000000000023",
+          "parent_span_id": "5ba0000000000022",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -3201,9 +5095,9 @@
           "run_id": "r_retry"
         },
         {
-          "trace_id": "7ace0000000000000000000000000016",
-          "span_id": "5ba0000000000019",
-          "parent_span_id": "5ba0000000000018",
+          "trace_id": "7ace0000000000000000000000000021",
+          "span_id": "5ba0000000000024",
+          "parent_span_id": "5ba0000000000023",
           "name": "attempt",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -3224,9 +5118,9 @@
           "run_id": "r_retry"
         },
         {
-          "trace_id": "7ace0000000000000000000000000016",
-          "span_id": "5ba000000000001a",
-          "parent_span_id": "5ba0000000000018",
+          "trace_id": "7ace0000000000000000000000000021",
+          "span_id": "5ba0000000000025",
+          "parent_span_id": "5ba0000000000023",
           "name": "attempt",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -3249,9 +5143,9 @@
           "run_id": "r_retry"
         },
         {
-          "trace_id": "7ace0000000000000000000000000016",
-          "span_id": "5ba000000000001b",
-          "parent_span_id": "5ba0000000000018",
+          "trace_id": "7ace0000000000000000000000000021",
+          "span_id": "5ba0000000000026",
+          "parent_span_id": "5ba0000000000023",
           "name": "attempt",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -3439,7 +5333,7 @@
             "error": "503 Service Unavailable: overloaded",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000019",
+            "span_id": "5ba0000000000024",
             "request_index": 0
           },
           {
@@ -3454,7 +5348,7 @@
             "error": "503 Service Unavailable: overloaded",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000001a",
+            "span_id": "5ba0000000000025",
             "request_index": 1
           },
           {
@@ -3466,7 +5360,7 @@
             "wait_ms": 1,
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000001b",
+            "span_id": "5ba0000000000026",
             "request_index": 2
           }
         ],
@@ -3521,7 +5415,7 @@
       "id": "r_prepare",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace000000000000000000000000001c",
+      "trace_id": "7ace0000000000000000000000000027",
       "agent": "classifier",
       "model": {
         "provider": "",
@@ -3755,8 +5649,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace000000000000000000000000001c",
-          "span_id": "5ba000000000001d",
+          "trace_id": "7ace0000000000000000000000000027",
+          "span_id": "5ba0000000000028",
           "parent_span_id": "",
           "name": "invoke_agent classifier",
           "kind": "internal",
@@ -3784,9 +5678,9 @@
           "run_id": "r_prepare"
         },
         {
-          "trace_id": "7ace000000000000000000000000001c",
-          "span_id": "5ba000000000001e",
-          "parent_span_id": "5ba000000000001d",
+          "trace_id": "7ace0000000000000000000000000027",
+          "span_id": "5ba0000000000029",
+          "parent_span_id": "5ba0000000000028",
           "name": "chat",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -3810,9 +5704,9 @@
           "run_id": "r_prepare"
         },
         {
-          "trace_id": "7ace000000000000000000000000001c",
-          "span_id": "5ba000000000001f",
-          "parent_span_id": "5ba000000000001d",
+          "trace_id": "7ace0000000000000000000000000027",
+          "span_id": "5ba000000000002a",
+          "parent_span_id": "5ba0000000000028",
           "name": "execute_tool ping",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -3833,9 +5727,9 @@
           "run_id": "r_prepare"
         },
         {
-          "trace_id": "7ace000000000000000000000000001c",
-          "span_id": "5ba0000000000020",
-          "parent_span_id": "5ba000000000001d",
+          "trace_id": "7ace0000000000000000000000000027",
+          "span_id": "5ba000000000002b",
+          "parent_span_id": "5ba0000000000028",
           "name": "chat",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -4118,7 +6012,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000001e",
+            "span_id": "5ba0000000000029",
             "request_index": 0
           }
         ],
@@ -4189,7 +6083,7 @@
               "bytes": 4
             },
             "span": {
-              "id": "5ba000000000001f",
+              "id": "5ba000000000002a",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "ok"
@@ -4289,7 +6183,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000020",
+            "span_id": "5ba000000000002b",
             "request_index": 1
           }
         ],
@@ -4344,7 +6238,7 @@
       "id": "r_output",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000021",
+      "trace_id": "7ace000000000000000000000000002c",
       "agent": "reviewer",
       "model": {
         "provider": "wefttest",
@@ -4636,8 +6530,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000021",
-          "span_id": "5ba0000000000022",
+          "trace_id": "7ace000000000000000000000000002c",
+          "span_id": "5ba000000000002d",
           "parent_span_id": "",
           "name": "invoke_agent reviewer",
           "kind": "internal",
@@ -4668,9 +6562,9 @@
           "run_id": "r_output"
         },
         {
-          "trace_id": "7ace0000000000000000000000000021",
-          "span_id": "5ba0000000000023",
-          "parent_span_id": "5ba0000000000022",
+          "trace_id": "7ace000000000000000000000000002c",
+          "span_id": "5ba000000000002e",
+          "parent_span_id": "5ba000000000002d",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -4697,9 +6591,9 @@
           "run_id": "r_output"
         },
         {
-          "trace_id": "7ace0000000000000000000000000021",
-          "span_id": "5ba0000000000024",
-          "parent_span_id": "5ba0000000000022",
+          "trace_id": "7ace000000000000000000000000002c",
+          "span_id": "5ba000000000002f",
+          "parent_span_id": "5ba000000000002d",
           "name": "execute_tool submit_output",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -4721,9 +6615,9 @@
           "run_id": "r_output"
         },
         {
-          "trace_id": "7ace0000000000000000000000000021",
-          "span_id": "5ba0000000000025",
-          "parent_span_id": "5ba0000000000022",
+          "trace_id": "7ace000000000000000000000000002c",
+          "span_id": "5ba0000000000030",
+          "parent_span_id": "5ba000000000002d",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -4750,9 +6644,9 @@
           "run_id": "r_output"
         },
         {
-          "trace_id": "7ace0000000000000000000000000021",
-          "span_id": "5ba0000000000026",
-          "parent_span_id": "5ba0000000000022",
+          "trace_id": "7ace000000000000000000000000002c",
+          "span_id": "5ba0000000000031",
+          "parent_span_id": "5ba000000000002d",
           "name": "execute_tool submit_output",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -5040,7 +6934,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000023",
+            "span_id": "5ba000000000002e",
             "request_index": 0
           }
         ],
@@ -5117,7 +7011,7 @@
               "bytes": 83
             },
             "span": {
-              "id": "5ba0000000000024",
+              "id": "5ba000000000002f",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "error"
@@ -5222,7 +7116,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000025",
+            "span_id": "5ba0000000000030",
             "request_index": 1
           }
         ],
@@ -5299,7 +7193,7 @@
               "bytes": 8
             },
             "span": {
-              "id": "5ba0000000000026",
+              "id": "5ba0000000000031",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "ok"
@@ -5325,7 +7219,7 @@
       "id": "r_nooutput",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000027",
+      "trace_id": "7ace0000000000000000000000000032",
       "agent": "reviewer",
       "model": {
         "provider": "wefttest",
@@ -5473,8 +7367,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000027",
-          "span_id": "5ba0000000000028",
+          "trace_id": "7ace0000000000000000000000000032",
+          "span_id": "5ba0000000000033",
           "parent_span_id": "",
           "name": "invoke_agent reviewer",
           "kind": "internal",
@@ -5505,9 +7399,9 @@
           "run_id": "r_nooutput"
         },
         {
-          "trace_id": "7ace0000000000000000000000000027",
-          "span_id": "5ba0000000000029",
-          "parent_span_id": "5ba0000000000028",
+          "trace_id": "7ace0000000000000000000000000032",
+          "span_id": "5ba0000000000034",
+          "parent_span_id": "5ba0000000000033",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -5734,7 +7628,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000029",
+            "span_id": "5ba0000000000034",
             "request_index": 0
           }
         ],
@@ -5789,7 +7683,7 @@
       "id": "r_lab",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace000000000000000000000000002a",
+      "trace_id": "7ace0000000000000000000000000035",
       "agent": "orders",
       "model": {
         "provider": "wefttest",
@@ -5937,8 +7831,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace000000000000000000000000002a",
-          "span_id": "5ba000000000002b",
+          "trace_id": "7ace0000000000000000000000000035",
+          "span_id": "5ba0000000000036",
           "parent_span_id": "",
           "name": "invoke_agent orders",
           "kind": "internal",
@@ -5975,9 +7869,9 @@
           "run_id": "r_lab"
         },
         {
-          "trace_id": "7ace000000000000000000000000002a",
-          "span_id": "5ba000000000002c",
-          "parent_span_id": "5ba000000000002b",
+          "trace_id": "7ace0000000000000000000000000035",
+          "span_id": "5ba0000000000037",
+          "parent_span_id": "5ba0000000000036",
           "name": "chat alt-model",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -6277,7 +8171,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000002c",
+            "span_id": "5ba0000000000037",
             "request_index": 0
           }
         ],
@@ -6327,12 +8221,1586 @@
       }
     ]
   },
+  "rw.mcp-mesh": {
+    "run": {
+      "id": "r_mesh",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "7ace0000000000000000000000000038",
+      "agent": "front-desk",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "(manifest)",
+      "weft_version": "(test)",
+      "service": "(test)",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {},
+      "started": "2026-10-01T09:00:00Z",
+      "finished": "2026-10-01T09:00:00Z",
+      "last_seen": "2026-10-01T09:00:00Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 2,
+      "pending": 0,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "events_emitted": 14,
+      "messages_emitted": 4,
+      "tool_errors": 2,
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "cost_usd": 0,
+      "cost_known": true,
+      "cost_badge": "scripted",
+      "cost_reason": "a scripted model: nothing bills it, an exact $0",
+      "cache": "exact",
+      "delegated_cost_usd": 0,
+      "delegated_cost_known": true,
+      "event_count": 14,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+      "request_count": 2,
+      "prompt_preview": "Customer 42 asks about invoice INV-9.",
+      "children": [],
+      "holes": [],
+      "compactions": []
+    },
+    "events": {
+      "events": [
+        {
+          "pos": 0,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "run_start",
+            "id": "r_mesh",
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "agent": "front-desk",
+            "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "pos": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_start",
+            "run_id": "r_mesh",
+            "index": 0
+          }
+        },
+        {
+          "pos": 2,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_mesh",
+            "seq": 1,
+            "call_id": "m1",
+            "name": "customer_profile",
+            "args": {
+              "order_id": "42"
+            }
+          }
+        },
+        {
+          "pos": 3,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_mesh",
+            "seq": 2,
+            "call_id": "m1",
+            "name": "customer_profile",
+            "content": "customer 42: Acme SARL",
+            "is_error": false
+          }
+        },
+        {
+          "pos": 4,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_mesh",
+            "seq": 3,
+            "call_id": "m2",
+            "name": "svc_get_invoice",
+            "args": {
+              "id": "INV-9"
+            }
+          }
+        },
+        {
+          "pos": 5,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_mesh",
+            "seq": 4,
+            "call_id": "m2",
+            "name": "svc_get_invoice",
+            "content": "INV-9: 120 EUR, unpaid",
+            "is_error": false
+          }
+        },
+        {
+          "pos": 6,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_mesh",
+            "seq": 5,
+            "call_id": "m3",
+            "name": "svc_legacy_ledger",
+            "args": {
+              "id": "42"
+            }
+          }
+        },
+        {
+          "pos": 7,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_mesh",
+            "seq": 6,
+            "call_id": "m3",
+            "name": "svc_legacy_ledger",
+            "content": "ledger offline: maintenance window",
+            "is_error": true
+          }
+        },
+        {
+          "pos": 8,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_mesh",
+            "seq": 7,
+            "call_id": "m4",
+            "name": "svc_export_statement",
+            "args": {
+              "id": "42"
+            }
+          }
+        },
+        {
+          "pos": 9,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_mesh",
+            "seq": 8,
+            "call_id": "m4",
+            "name": "svc_export_statement",
+            "content": "mcp: calling \"tools/call\": statement service unreachable",
+            "is_error": true
+          }
+        },
+        {
+          "pos": 10,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_finish",
+            "run_id": "r_mesh",
+            "index": 0,
+            "reason": "tool_calls",
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            },
+            "latency_ms": 1
+          }
+        },
+        {
+          "pos": 11,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_start",
+            "run_id": "r_mesh",
+            "index": 1
+          }
+        },
+        {
+          "pos": 12,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_finish",
+            "run_id": "r_mesh",
+            "index": 1,
+            "reason": "stop",
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            },
+            "latency_ms": 1,
+            "ttft_ms": 1
+          }
+        },
+        {
+          "pos": 13,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "run_finish",
+            "run_id": "r_mesh",
+            "usage": {
+              "input_tokens": 20,
+              "output_tokens": 10
+            },
+            "steps": 2,
+            "stopped_by": "final_answer"
+          }
+        }
+      ],
+      "next_after": null,
+      "done": true,
+      "gaps": []
+    },
+    "transcript": {
+      "batches": [
+        {
+          "index": 0,
+          "step": 0,
+          "input": true,
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Customer 42 asks about invoice INV-9."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "step": 0,
+          "input": false,
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_call",
+                  "id": "m1",
+                  "name": "customer_profile",
+                  "args": {
+                    "order_id": "42"
+                  }
+                },
+                {
+                  "type": "tool_call",
+                  "id": "m2",
+                  "name": "svc_get_invoice",
+                  "args": {
+                    "id": "INV-9"
+                  }
+                },
+                {
+                  "type": "tool_call",
+                  "id": "m3",
+                  "name": "svc_legacy_ledger",
+                  "args": {
+                    "id": "42"
+                  }
+                },
+                {
+                  "type": "tool_call",
+                  "id": "m4",
+                  "name": "svc_export_statement",
+                  "args": {
+                    "id": "42"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "step": 0,
+          "input": false,
+          "messages": [
+            {
+              "role": "tool",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "call_id": "m1",
+                  "name": "customer_profile",
+                  "content": "customer 42: Acme SARL",
+                  "is_error": false
+                },
+                {
+                  "type": "tool_result",
+                  "call_id": "m2",
+                  "name": "svc_get_invoice",
+                  "content": "INV-9: 120 EUR, unpaid",
+                  "is_error": false
+                },
+                {
+                  "type": "tool_result",
+                  "call_id": "m3",
+                  "name": "svc_legacy_ledger",
+                  "content": "ledger offline: maintenance window",
+                  "is_error": true
+                },
+                {
+                  "type": "tool_result",
+                  "call_id": "m4",
+                  "name": "svc_export_statement",
+                  "content": "mcp: calling \"tools/call\": statement service unreachable",
+                  "is_error": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "step": 1,
+          "input": false,
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "INV-9 is unpaid; the ledger and the export are down."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "spans": {
+      "spans": [
+        {
+          "trace_id": "7ace0000000000000000000000000038",
+          "span_id": "5ba0000000000039",
+          "parent_span_id": "",
+          "name": "invoke_agent front-desk",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.agent.name": "front-desk",
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.usage.input_tokens": 20,
+            "gen_ai.usage.output_tokens": 10,
+            "weft.instructions.hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "weft.manifest.hash": "(manifest)",
+            "weft.run.events": 14,
+            "weft.run.id": "r_mesh",
+            "weft.run.messages": 4,
+            "weft.run.steps": 2,
+            "weft.run.stop_reason": "stop",
+            "weft.run.stopped_by": "final_answer",
+            "weft.version": "(test)"
+          },
+          "events": [],
+          "run_id": "r_mesh"
+        },
+        {
+          "trace_id": "7ace0000000000000000000000000038",
+          "span_id": "5ba000000000003a",
+          "parent_span_id": "5ba0000000000039",
+          "name": "chat script",
+          "kind": "client",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.response.finish_reasons": [
+              "tool_calls"
+            ],
+            "gen_ai.response.model": "script",
+            "gen_ai.usage.input_tokens": 10,
+            "gen_ai.usage.output_tokens": 5,
+            "weft.model.tool_calls": 4,
+            "weft.run.id": "r_mesh",
+            "weft.step.index": 0,
+            "weft.stream": true
+          },
+          "events": [],
+          "run_id": "r_mesh"
+        },
+        {
+          "trace_id": "7ace0000000000000000000000000038",
+          "span_id": "5ba000000000003b",
+          "parent_span_id": "5ba0000000000039",
+          "name": "execute_tool customer_profile",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "m1",
+            "gen_ai.tool.name": "customer_profile",
+            "weft.run.id": "r_mesh",
+            "weft.step.index": 0,
+            "weft.tool.result_bytes": 22,
+            "weft.tool.seq": 1
+          },
+          "events": [],
+          "run_id": "r_mesh"
+        },
+        {
+          "trace_id": "7ace0000000000000000000000000038",
+          "span_id": "5ba000000000003c",
+          "parent_span_id": "5ba0000000000039",
+          "name": "execute_tool svc_get_invoice",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "m2",
+            "gen_ai.tool.name": "svc_get_invoice",
+            "weft.run.id": "r_mesh",
+            "weft.step.index": 0,
+            "weft.tool.origin": "mcp:billing",
+            "weft.tool.queue_ms": 1,
+            "weft.tool.result_bytes": 22,
+            "weft.tool.seq": 3
+          },
+          "events": [],
+          "run_id": "r_mesh"
+        },
+        {
+          "trace_id": "7ace0000000000000000000000000038",
+          "span_id": "5ba000000000003d",
+          "parent_span_id": "5ba0000000000039",
+          "name": "execute_tool svc_legacy_ledger",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "error",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "error.type": "mcp_tool_error",
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "m3",
+            "gen_ai.tool.name": "svc_legacy_ledger",
+            "weft.run.id": "r_mesh",
+            "weft.step.index": 0,
+            "weft.tool.origin": "mcp:billing",
+            "weft.tool.seq": 5
+          },
+          "events": [],
+          "run_id": "r_mesh"
+        },
+        {
+          "trace_id": "7ace0000000000000000000000000038",
+          "span_id": "5ba000000000003e",
+          "parent_span_id": "5ba0000000000039",
+          "name": "execute_tool svc_export_statement",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "error",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "error.type": "mcp_transport",
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "m4",
+            "gen_ai.tool.name": "svc_export_statement",
+            "weft.run.id": "r_mesh",
+            "weft.step.index": 0,
+            "weft.tool.origin": "mcp:billing",
+            "weft.tool.seq": 7
+          },
+          "events": [],
+          "run_id": "r_mesh"
+        },
+        {
+          "trace_id": "7ace0000000000000000000000000038",
+          "span_id": "5ba000000000003f",
+          "parent_span_id": "5ba0000000000039",
+          "name": "chat script",
+          "kind": "client",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "service": "(test)",
+          "attrs": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.response.finish_reasons": [
+              "stop"
+            ],
+            "gen_ai.response.model": "script",
+            "gen_ai.usage.input_tokens": 10,
+            "gen_ai.usage.output_tokens": 5,
+            "weft.model.tool_calls": 0,
+            "weft.run.id": "r_mesh",
+            "weft.step.index": 1,
+            "weft.stream": true,
+            "weft.ttft_ms": 1
+          },
+          "events": [],
+          "run_id": "r_mesh"
+        }
+      ]
+    },
+    "requests": {
+      "requests": [
+        {
+          "index": 0,
+          "step": 0,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+              "names": [
+                "customer_profile",
+                "svc_export_statement",
+                "svc_get_invoice",
+                "svc_legacy_ledger"
+              ]
+            },
+            "sequential_tools": true,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+            "tools": [
+              {
+                "name": "customer_profile",
+                "description": "Profile of a customer.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "order_id"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "svc_export_statement",
+                "description": "Export a statement.",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "export_statement"
+                }
+              },
+              {
+                "name": "svc_get_invoice",
+                "description": "Status of an invoice.",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "get_invoice"
+                }
+              },
+              {
+                "name": "svc_legacy_ledger",
+                "description": "Ledger balance (legacy).",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "legacy_ledger"
+                }
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0,
+            "skipped": [
+              {
+                "name": "odd_report",
+                "reason": "weft: ParseSchema: top-level type must be \"object\", got \"\"",
+                "source": "mcp:billing"
+              }
+            ]
+          },
+          "raw": null,
+          "raw_badge": "not_recorded",
+          "raw_reason": "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+          "raw_fix": "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+        },
+        {
+          "index": 1,
+          "step": 1,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 1,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 2,
+              "count": 3
+            },
+            "tools": {
+              "catalog_hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+              "names": [
+                "customer_profile",
+                "svc_export_statement",
+                "svc_get_invoice",
+                "svc_legacy_ledger"
+              ]
+            },
+            "sequential_tools": true,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+            "tools": [
+              {
+                "name": "customer_profile",
+                "description": "Profile of a customer.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "order_id"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "svc_export_statement",
+                "description": "Export a statement.",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "export_statement"
+                }
+              },
+              {
+                "name": "svc_get_invoice",
+                "description": "Status of an invoice.",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "get_invoice"
+                }
+              },
+              {
+                "name": "svc_legacy_ledger",
+                "description": "Ledger balance (legacy).",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "legacy_ledger"
+                }
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0,
+            "skipped": [
+              {
+                "name": "odd_report",
+                "reason": "weft: ParseSchema: top-level type must be \"object\", got \"\"",
+                "source": "mcp:billing"
+              }
+            ]
+          },
+          "raw": null,
+          "raw_badge": "not_recorded",
+          "raw_reason": "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+          "raw_fix": "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+        }
+      ]
+    },
+    "tools": {
+      "catalogs": [
+        {
+          "hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+          "tools": [
+            {
+              "name": "customer_profile",
+              "description": "Profile of a customer.",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "order_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "order_id"
+                ]
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": false,
+              "source": "local"
+            },
+            {
+              "name": "svc_export_statement",
+              "description": "Export a statement.",
+              "schema": {
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": true,
+              "source": "mcp:billing",
+              "source_detail": {
+                "server": "billing",
+                "transport": "memory",
+                "prefix": "svc_",
+                "remote_name": "export_statement"
+              }
+            },
+            {
+              "name": "svc_get_invoice",
+              "description": "Status of an invoice.",
+              "schema": {
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": true,
+              "source": "mcp:billing",
+              "source_detail": {
+                "server": "billing",
+                "transport": "memory",
+                "prefix": "svc_",
+                "remote_name": "get_invoice"
+              }
+            },
+            {
+              "name": "svc_legacy_ledger",
+              "description": "Ledger balance (legacy).",
+              "schema": {
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": true,
+              "source": "mcp:billing",
+              "source_detail": {
+                "server": "billing",
+                "transport": "memory",
+                "prefix": "svc_",
+                "remote_name": "legacy_ledger"
+              }
+            }
+          ],
+          "content": "",
+          "truncated_bytes": 0,
+          "skipped": [
+            {
+              "name": "odd_report",
+              "reason": "weft: ParseSchema: top-level type must be \"object\", got \"\"",
+              "source": "mcp:billing"
+            }
+          ]
+        }
+      ]
+    },
+    "steps": [
+      {
+        "run_id": "r_mesh",
+        "step": 0,
+        "status": "ok",
+        "reason": "tool_calls",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": "2026-10-01T09:00:00Z",
+        "latency_ms": 1,
+        "model": {
+          "provider": "wefttest",
+          "requested": "script",
+          "answered": "script"
+        },
+        "request": {
+          "index": 0,
+          "step": 0,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+              "names": [
+                "customer_profile",
+                "svc_export_statement",
+                "svc_get_invoice",
+                "svc_legacy_ledger"
+              ]
+            },
+            "sequential_tools": true,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+            "tools": [
+              {
+                "name": "customer_profile",
+                "description": "Profile of a customer.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "order_id"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "svc_export_statement",
+                "description": "Export a statement.",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "export_statement"
+                }
+              },
+              {
+                "name": "svc_get_invoice",
+                "description": "Status of an invoice.",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "get_invoice"
+                }
+              },
+              {
+                "name": "svc_legacy_ledger",
+                "description": "Ledger balance (legacy).",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "legacy_ledger"
+                }
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0,
+            "skipped": [
+              {
+                "name": "odd_report",
+                "reason": "weft: ParseSchema: top-level type must be \"object\", got \"\"",
+                "source": "mcp:billing"
+              }
+            ]
+          }
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "model": "script",
+            "provider": "wefttest",
+            "outcome": "ok",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z",
+            "span_id": "5ba000000000003a",
+            "request_index": 0
+          }
+        ],
+        "messages_in": {
+          "index": 0,
+          "count": 1
+        },
+        "events": [
+          {
+            "pos": 1,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_start",
+              "run_id": "r_mesh",
+              "index": 0
+            }
+          },
+          {
+            "pos": 2,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_mesh",
+              "seq": 1,
+              "call_id": "m1",
+              "name": "customer_profile",
+              "args": {
+                "order_id": "42"
+              }
+            }
+          },
+          {
+            "pos": 3,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_mesh",
+              "seq": 2,
+              "call_id": "m1",
+              "name": "customer_profile",
+              "content": "customer 42: Acme SARL",
+              "is_error": false
+            }
+          },
+          {
+            "pos": 4,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_mesh",
+              "seq": 3,
+              "call_id": "m2",
+              "name": "svc_get_invoice",
+              "args": {
+                "id": "INV-9"
+              }
+            }
+          },
+          {
+            "pos": 5,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_mesh",
+              "seq": 4,
+              "call_id": "m2",
+              "name": "svc_get_invoice",
+              "content": "INV-9: 120 EUR, unpaid",
+              "is_error": false
+            }
+          },
+          {
+            "pos": 6,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_mesh",
+              "seq": 5,
+              "call_id": "m3",
+              "name": "svc_legacy_ledger",
+              "args": {
+                "id": "42"
+              }
+            }
+          },
+          {
+            "pos": 7,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_mesh",
+              "seq": 6,
+              "call_id": "m3",
+              "name": "svc_legacy_ledger",
+              "content": "ledger offline: maintenance window",
+              "is_error": true
+            }
+          },
+          {
+            "pos": 8,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_mesh",
+              "seq": 7,
+              "call_id": "m4",
+              "name": "svc_export_statement",
+              "args": {
+                "id": "42"
+              }
+            }
+          },
+          {
+            "pos": 9,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_mesh",
+              "seq": 8,
+              "call_id": "m4",
+              "name": "svc_export_statement",
+              "content": "mcp: calling \"tools/call\": statement service unreachable",
+              "is_error": true
+            }
+          },
+          {
+            "pos": 10,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_finish",
+              "run_id": "r_mesh",
+              "index": 0,
+              "reason": "tool_calls",
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+              },
+              "latency_ms": 1
+            }
+          }
+        ],
+        "tool_calls": [
+          {
+            "call_id": "m1",
+            "name": "customer_profile",
+            "seq": 1,
+            "args": {
+              "order_id": "42"
+            },
+            "result": {
+              "content": "customer 42: Acme SARL",
+              "is_error": false,
+              "bytes": 22
+            },
+            "span": {
+              "id": "5ba000000000003b",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "ok"
+            }
+          },
+          {
+            "call_id": "m2",
+            "name": "svc_get_invoice",
+            "seq": 3,
+            "args": {
+              "id": "INV-9"
+            },
+            "result": {
+              "content": "INV-9: 120 EUR, unpaid",
+              "is_error": false,
+              "bytes": 22
+            },
+            "span": {
+              "id": "5ba000000000003c",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "ok"
+            }
+          },
+          {
+            "call_id": "m3",
+            "name": "svc_legacy_ledger",
+            "seq": 5,
+            "args": {
+              "id": "42"
+            },
+            "result": {
+              "content": "ledger offline: maintenance window",
+              "is_error": true,
+              "bytes": 34
+            },
+            "span": {
+              "id": "5ba000000000003d",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "error"
+            }
+          },
+          {
+            "call_id": "m4",
+            "name": "svc_export_statement",
+            "seq": 7,
+            "args": {
+              "id": "42"
+            },
+            "result": {
+              "content": "mcp: calling \"tools/call\": statement service unreachable",
+              "is_error": true,
+              "bytes": 56
+            },
+            "span": {
+              "id": "5ba000000000003e",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "error"
+            }
+          }
+        ],
+        "children": [],
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "cost_badge": "scripted",
+        "cost_reason": "a scripted model: nothing bills it, an exact $0",
+        "cache": "exact",
+        "holes": []
+      },
+      {
+        "run_id": "r_mesh",
+        "step": 1,
+        "status": "ok",
+        "reason": "stop",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": "2026-10-01T09:00:00Z",
+        "latency_ms": 1,
+        "ttft_ms": 1,
+        "model": {
+          "provider": "wefttest",
+          "requested": "script",
+          "answered": "script"
+        },
+        "request": {
+          "index": 1,
+          "step": 1,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 1,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 2,
+              "count": 3
+            },
+            "tools": {
+              "catalog_hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+              "names": [
+                "customer_profile",
+                "svc_export_statement",
+                "svc_get_invoice",
+                "svc_legacy_ledger"
+              ]
+            },
+            "sequential_tools": true,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "c8c449734f5dac58056f304533ee74da0b0fc5399172460b4c38ca0d2a2a7463",
+            "tools": [
+              {
+                "name": "customer_profile",
+                "description": "Profile of a customer.",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "order_id"
+                  ]
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "svc_export_statement",
+                "description": "Export a statement.",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "export_statement"
+                }
+              },
+              {
+                "name": "svc_get_invoice",
+                "description": "Status of an invoice.",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "get_invoice"
+                }
+              },
+              {
+                "name": "svc_legacy_ledger",
+                "description": "Ledger balance (legacy).",
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "mcp:billing",
+                "source_detail": {
+                  "server": "billing",
+                  "transport": "memory",
+                  "prefix": "svc_",
+                  "remote_name": "legacy_ledger"
+                }
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0,
+            "skipped": [
+              {
+                "name": "odd_report",
+                "reason": "weft: ParseSchema: top-level type must be \"object\", got \"\"",
+                "source": "mcp:billing"
+              }
+            ]
+          }
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "model": "script",
+            "provider": "wefttest",
+            "outcome": "ok",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z",
+            "span_id": "5ba000000000003f",
+            "request_index": 1
+          }
+        ],
+        "messages_in": {
+          "index": 2,
+          "count": 3
+        },
+        "events": [
+          {
+            "pos": 11,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_start",
+              "run_id": "r_mesh",
+              "index": 1
+            }
+          },
+          {
+            "pos": 12,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_finish",
+              "run_id": "r_mesh",
+              "index": 1,
+              "reason": "stop",
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+              },
+              "latency_ms": 1,
+              "ttft_ms": 1
+            }
+          }
+        ],
+        "tool_calls": [],
+        "children": [],
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "cost_badge": "scripted",
+        "cost_reason": "a scripted model: nothing bills it, an exact $0",
+        "cache": "exact",
+        "holes": []
+      }
+    ]
+  },
   "sub.failed": {
     "run": {
       "id": "r_subfail",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace000000000000000000000000002d",
+      "trace_id": "7ace0000000000000000000000000040",
       "agent": "lead",
       "model": {
         "provider": "wefttest",
@@ -6385,7 +9853,7 @@
           "id": "r_subfail/0/w1",
           "parent_run_id": "r_subfail",
           "parent_call_id": "w1",
-          "trace_id": "7ace000000000000000000000000002d",
+          "trace_id": "7ace0000000000000000000000000040",
           "agent": "worker",
           "model": {
             "provider": "wefttest",
@@ -6624,8 +10092,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace000000000000000000000000002d",
-          "span_id": "5ba000000000002e",
+          "trace_id": "7ace0000000000000000000000000040",
+          "span_id": "5ba0000000000041",
           "parent_span_id": "",
           "name": "invoke_agent lead",
           "kind": "internal",
@@ -6655,9 +10123,9 @@
           "run_id": "r_subfail"
         },
         {
-          "trace_id": "7ace000000000000000000000000002d",
-          "span_id": "5ba000000000002f",
-          "parent_span_id": "5ba000000000002e",
+          "trace_id": "7ace0000000000000000000000000040",
+          "span_id": "5ba0000000000042",
+          "parent_span_id": "5ba0000000000041",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -6684,9 +10152,9 @@
           "run_id": "r_subfail"
         },
         {
-          "trace_id": "7ace000000000000000000000000002d",
-          "span_id": "5ba0000000000030",
-          "parent_span_id": "5ba000000000002e",
+          "trace_id": "7ace0000000000000000000000000040",
+          "span_id": "5ba0000000000043",
+          "parent_span_id": "5ba0000000000041",
           "name": "execute_tool work",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -6701,6 +10169,7 @@
             "gen_ai.tool.name": "work",
             "weft.run.id": "r_subfail",
             "weft.step.index": 0,
+            "weft.tool.origin": "subagent",
             "weft.tool.seq": 1,
             "weft.tool.timeout_ms": 2000
           },
@@ -6708,9 +10177,9 @@
           "run_id": "r_subfail"
         },
         {
-          "trace_id": "7ace000000000000000000000000002d",
-          "span_id": "5ba0000000000031",
-          "parent_span_id": "5ba000000000002e",
+          "trace_id": "7ace0000000000000000000000000040",
+          "span_id": "5ba0000000000044",
+          "parent_span_id": "5ba0000000000041",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -6989,7 +10458,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000002f",
+            "span_id": "5ba0000000000042",
             "request_index": 0
           }
         ],
@@ -7064,7 +10533,7 @@
               "bytes": 80
             },
             "span": {
-              "id": "5ba0000000000030",
+              "id": "5ba0000000000043",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "error"
@@ -7185,7 +10654,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000031",
+            "span_id": "5ba0000000000044",
             "request_index": 1
           }
         ],
@@ -7239,7 +10708,7 @@
         "id": "r_subfail/0/w1",
         "parent_run_id": "r_subfail",
         "parent_call_id": "w1",
-        "trace_id": "7ace000000000000000000000000002d",
+        "trace_id": "7ace0000000000000000000000000040",
         "agent": "worker",
         "model": {
           "provider": "wefttest",
@@ -7295,7 +10764,7 @@
       "id": "r_timeout",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000032",
+      "trace_id": "7ace0000000000000000000000000045",
       "agent": "support",
       "model": {
         "provider": "wefttest",
@@ -7530,8 +10999,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000032",
-          "span_id": "5ba0000000000033",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba0000000000046",
           "parent_span_id": "",
           "name": "invoke_agent support",
           "kind": "internal",
@@ -7561,9 +11030,9 @@
           "run_id": "r_timeout"
         },
         {
-          "trace_id": "7ace0000000000000000000000000032",
-          "span_id": "5ba0000000000034",
-          "parent_span_id": "5ba0000000000033",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba0000000000047",
+          "parent_span_id": "5ba0000000000046",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -7590,9 +11059,9 @@
           "run_id": "r_timeout"
         },
         {
-          "trace_id": "7ace0000000000000000000000000032",
-          "span_id": "5ba0000000000035",
-          "parent_span_id": "5ba0000000000033",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba0000000000048",
+          "parent_span_id": "5ba0000000000046",
           "name": "execute_tool slow",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -7614,9 +11083,9 @@
           "run_id": "r_timeout"
         },
         {
-          "trace_id": "7ace0000000000000000000000000032",
-          "span_id": "5ba0000000000036",
-          "parent_span_id": "5ba0000000000033",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba0000000000049",
+          "parent_span_id": "5ba0000000000046",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -7859,7 +11328,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000034",
+            "span_id": "5ba0000000000047",
             "request_index": 0
           }
         ],
@@ -7930,7 +11399,7 @@
               "bytes": 32
             },
             "span": {
-              "id": "5ba0000000000035",
+              "id": "5ba0000000000048",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "error"
@@ -8023,7 +11492,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000036",
+            "span_id": "5ba0000000000049",
             "request_index": 1
           }
         ],

@@ -439,6 +439,8 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.layer.name":         {},
 	"weft.layer.kind":         {},
 	"weft.layer.index":        {},
+	// U23.2 (O8): the tool's Origin on execute_tool.
+	"weft.tool.origin": {},
 }
 
 // NonMetaKeys lists, sorted, the record/span contract keys MetaOf

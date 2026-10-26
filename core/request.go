@@ -506,7 +506,36 @@ func promptSegments(composed string, tools []*ToolDef) []promptSegment {
 type toolsBody struct {
 	Hash  string      `json:"hash"`
 	Tools []toolEntry `json:"tools"`
+	// Skipped are the tools an importer left out of the offered
+	// sources (SourceDetail.Skipped, O8): once per source and name,
+	// sorted, at most maxSkipped — SkippedMore counts the rest.
+	Skipped     []skippedEntry `json:"skipped,omitempty"`
+	SkippedMore int            `json:"skipped_more,omitempty"`
 }
+
+// sourceDetailBody is a tool entry's source_detail (SourceDetail).
+type sourceDetailBody struct {
+	Server     string `json:"server,omitempty"`
+	Transport  string `json:"transport,omitempty"`
+	Prefix     string `json:"prefix,omitempty"`
+	RemoteName string `json:"remote_name,omitempty"`
+}
+
+// skippedEntry is one tool an importer left out (SkippedImport), with
+// the source it would have come from.
+type skippedEntry struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+	Source string `json:"source,omitempty"`
+}
+
+// The skipped list's bounds: a hostile listing cannot grow the record
+// without limit, and an importer's error text is cut at a rune
+// boundary.
+const (
+	maxSkipped       = 64
+	maxSkippedReason = 256
+)
 
 type toolEntry struct {
 	Name           string          `json:"name"`
@@ -522,11 +551,14 @@ type toolEntry struct {
 	// run's typed answer, not a side effect (UX-S1-06). Absent on
 	// every other tool.
 	Output bool `json:"output,omitempty"`
+	// SourceDetail is the tool's origin in parts (OriginDetail, O8):
+	// absent when none was set. Never part of the catalog hash.
+	SourceDetail *sourceDetailBody `json:"source_detail,omitempty"`
 }
 
 // The tool sources a tools record names by default: local for an
 // ordinary tool, subagent for a Subagent; any other is the tool's
-// Origin (weft/mcp sets "mcp").
+// Origin (weft/mcp sets "mcp:<server>").
 const (
 	toolSourceLocal    = "local"
 	toolSourceSubagent = "subagent"
@@ -566,10 +598,64 @@ func (a *Agent) toolEntries(tools []*ToolDef, parkSet *parkRule) ([]toolEntry, e
 			Sequential:     t.sequential,
 			Source:         source,
 			Output:         a.hasOutput && t.Name == outputToolName,
+			SourceDetail:   detailBody(t.detail),
 		})
 	}
 	slices.SortStableFunc(out, func(x, y toolEntry) int { return strings.Compare(x.Name, y.Name) })
 	return out, nil
+}
+
+func detailBody(d *SourceDetail) *sourceDetailBody {
+	if d == nil {
+		return nil
+	}
+	b := sourceDetailBody{Server: d.Server, Transport: d.Transport, Prefix: d.Prefix, RemoteName: d.RemoteName}
+	if b == (sourceDetailBody{}) {
+		return nil
+	}
+	return &b
+}
+
+// skippedEntries collects the offered tools' sources' skipped imports:
+// once per (source, name, reason), sorted by source then name, at most
+// maxSkipped (the count past it returned as more), each reason cut at
+// maxSkippedReason bytes.
+func skippedEntries(tools []*ToolDef) (out []skippedEntry, more int) {
+	seen := map[skippedEntry]bool{}
+	for _, t := range tools {
+		if t == nil || t.detail == nil {
+			continue
+		}
+		src := t.origin
+		if src == "" {
+			src = toolSourceLocal
+		}
+		for _, s := range t.detail.Skipped {
+			e := skippedEntry{Name: s.Name, Reason: s.Reason, Source: src}
+			if c, cut := capUTF8([]byte(e.Reason), maxSkippedReason); cut > 0 {
+				e.Reason = c
+			}
+			if seen[e] {
+				continue
+			}
+			seen[e] = true
+			out = append(out, e)
+		}
+	}
+	slices.SortFunc(out, func(x, y skippedEntry) int {
+		if c := strings.Compare(x.Source, y.Source); c != 0 {
+			return c
+		}
+		if c := strings.Compare(x.Name, y.Name); c != 0 {
+			return c
+		}
+		return strings.Compare(x.Reason, y.Reason)
+	})
+	if len(out) > maxSkipped {
+		more = len(out) - maxSkipped
+		out = out[:maxSkipped]
+	}
+	return out, more
 }
 
 // thinkingLevelName renders a ThinkingLevel by name — the names
@@ -826,7 +912,8 @@ func (r *recorder) emitTools(ctx context.Context, a *Agent, step int, hash strin
 		r.debug(ctx, step, "tools", err)
 		return false
 	}
-	b, err := json.Marshal(toolsBody{Hash: hash, Tools: entries})
+	skipped, more := skippedEntries(tools)
+	b, err := json.Marshal(toolsBody{Hash: hash, Tools: entries, Skipped: skipped, SkippedMore: more})
 	if err != nil {
 		r.debug(ctx, step, "tools", err)
 		return false

@@ -475,6 +475,7 @@ describe("no panel-only badge strings", () => {
     "element.ts|depthWord", // a child nested past the indent (UX-D-13)
     "element.ts|, ex)", // the call's execution facts (lib/cards.ts execLine)
     "element.ts|childOutcome(", // a tool error result (data, rule 1), a Subagent call's typed outcome
+    'element.ts|weft-info", c)', // the onion's effect chips (lib/onion.ts effectChips, U23.2)
     "request.ts|data-weft-mark", // E1.2's change chips
     "request.ts|request could not be read",
     "request.ts|data-weft-attempts",

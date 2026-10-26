@@ -111,7 +111,10 @@ export function attemptNote(
   )
     return null
   const step = a.step >= 0 ? `step ${a.step + 1} ` : ""
-  const via = a.layer === "fallback" ? " (fallback)" : ""
+  // The layer that sent it, in the run page's words (attemptLabel):
+  // mw.Fallback's backup and mw.Retry's retried requests (U23.1).
+  const via =
+    a.layer === "fallback" || a.layer === "retry" ? ` (${a.layer})` : ""
   const kind = a.error_type ? ` (${a.error_type})` : ""
   if (a.status === "error") {
     const wait =

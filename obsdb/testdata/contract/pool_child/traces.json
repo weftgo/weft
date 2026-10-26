@@ -314,6 +314,12 @@
                   }
                 },
                 {
+                  "key": "weft.tool.origin",
+                  "value": {
+                    "stringValue": "subagent"
+                  }
+                },
+                {
                   "key": "weft.public_id",
                   "value": {
                     "stringValue": "pub_pool"

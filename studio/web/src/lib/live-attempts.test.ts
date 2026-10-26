@@ -88,6 +88,10 @@ describe("attempt frames", () => {
       attemptNote(att({ attempt: 2, status: "ok", layer: "fallback" }), true)!
         .text
     ).toBe("ok on attempt 2 (fallback)")
+    // The run page's words for mw.Retry's retried request too (U23.2).
+    expect(
+      attemptNote(att({ attempt: 2, status: "ok", layer: "retry" }), true)!.text
+    ).toBe("ok on attempt 2 (retry)")
     // A first try that answered says nothing.
     expect(attemptNote(att({ status: "ok" }), true)).toBeNull()
     // P8-fix-b #13: an earlier step's attempt says nothing on a later

@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
@@ -1300,6 +1301,100 @@ func ExampleOrigin() {
 		}
 	}
 	// Output: lookup plugin
+}
+
+// ExampleOriginDetail: a tool imported from a named server records the
+// server, transport, prefix and its remote name beside its Origin — the
+// tools record's source_detail — and the importer's skipped tools once,
+// in skipped[]. None of it is model-visible or in the catalog hash.
+func ExampleOriginDetail() {
+	lp := newRecLogProvider()
+	remote := core.RawTool("svc_get_invoice", "Status of an invoice.", nil,
+		func(context.Context, json.RawMessage) (string, error) { return "ok", nil },
+		core.Origin("mcp:billing"),
+		core.OriginDetail(core.SourceDetail{
+			Server: "billing", Transport: "stdio", Prefix: "svc_", RemoteName: "get_invoice",
+			Skipped: []core.SkippedImport{{Name: "odd", Reason: "schema too deep"}},
+		}))
+	agt := core.New(wefttest.Script(wefttest.Say("ok")), remote, core.LoggerProvider(lp))
+	if _, err := agt.Generate(context.Background(), core.Prompt("hi")); err != nil {
+		return
+	}
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	for _, r := range lp.records {
+		if r.attr("weft.record") == "tools" {
+			var body struct {
+				Tools []struct {
+					Source       string            `json:"source"`
+					SourceDetail map[string]string `json:"source_detail"`
+				} `json:"tools"`
+				Skipped []struct{ Name, Reason, Source string } `json:"skipped"`
+			}
+			_ = json.Unmarshal([]byte(r.body), &body)
+			d := body.Tools[0].SourceDetail
+			fmt.Println(body.Tools[0].Source, d["server"], d["transport"], d["prefix"], d["remote_name"])
+			fmt.Println("skipped:", body.Skipped[0].Name, "·", body.Skipped[0].Reason, "·", body.Skipped[0].Source)
+		}
+	}
+	// Output:
+	// mcp:billing billing stdio svc_ get_invoice
+	// skipped: odd · schema too deep · mcp:billing
+}
+
+// O8: source_detail and skipped[] are not part of the catalog hash —
+// the same tool with and without them hashes alike — skipped[] is
+// listed once per (source, name, reason) whichever tools carry it,
+// sorted, bounded at 64 with the rest counted, and a reason is cut at
+// 256 bytes on a rune boundary.
+func TestToolsRecordSkippedBoundedAndOutsideTheHash(t *testing.T) {
+	var many []core.SkippedImport
+	for i := range 70 {
+		many = append(many, core.SkippedImport{Name: fmt.Sprintf("t%02d", i), Reason: strings.Repeat("é", 200)})
+	}
+	mk := func(opts ...core.ToolOption) []*core.ToolDef {
+		h := func(context.Context, json.RawMessage) (string, error) { return "ok", nil }
+		return []*core.ToolDef{
+			core.RawTool("a", "A.", nil, h, opts...),
+			core.RawTool("b", "B.", nil, h, opts...),
+		}
+	}
+	body := func(tools []*core.ToolDef) (hash string, b map[string]any) {
+		lp := newRecLogProvider()
+		opts := []core.Option{core.LoggerProvider(lp)}
+		for _, td := range tools {
+			opts = append(opts, td)
+		}
+		if _, err := core.New(wefttest.Script(wefttest.Say("ok")), opts...).Generate(context.Background(), core.Prompt("x")); err != nil {
+			t.Fatal(err)
+		}
+		lp.mu.Lock()
+		defer lp.mu.Unlock()
+		for _, r := range lp.records {
+			if r.attr("weft.record") == "tools" {
+				_ = json.Unmarshal([]byte(r.body), &b)
+				return r.attr("weft.catalog.hash"), b
+			}
+		}
+		t.Fatal("no tools record")
+		return "", nil
+	}
+	plainHash, plain := body(mk())
+	detailHash, detail := body(mk(core.Origin("mcp:x"), core.OriginDetail(core.SourceDetail{Server: "x", Skipped: many})))
+	if plainHash != detailHash || plainHash == "" {
+		t.Errorf("catalog hash %q with detail, %q without: want equal", detailHash, plainHash)
+	}
+	if _, ok := plain["skipped"]; ok {
+		t.Errorf("a record with nothing skipped carries skipped: %v", plain)
+	}
+	sk, _ := detail["skipped"].([]any)
+	if len(sk) != 64 || detail["skipped_more"] != float64(6) {
+		t.Fatalf("skipped = %d entries, more %v; want 64 and 6 (once per name across both tools)", len(sk), detail["skipped_more"])
+	}
+	first := sk[0].(map[string]any)
+	if first["name"] != "t00" || first["source"] != "mcp:x" || len(first["reason"].(string)) != 256 || !utf8.ValidString(first["reason"].(string)) {
+		t.Errorf("first skipped = %v, want t00 from mcp:x, its reason cut at 256 bytes on a rune boundary", first)
+	}
 }
 
 // A resume cancelled while its approved tool runs still records its

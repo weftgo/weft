@@ -75,7 +75,11 @@ const (
 	attrToolPendingSource = attribute.Key("weft.tool.pending.source")
 	attrToolTimeoutMS     = attribute.Key("weft.tool.timeout_ms")
 	attrToolQueueMS       = attribute.Key("weft.tool.queue_ms")
-	attrSubagentPending   = attribute.Key("weft.subagent.pending")
+	// The tool's Origin when it is not local (O8): "subagent",
+	// "mcp:<server>", an app's own word — what a reader groups a
+	// call's server by without the tools record.
+	attrToolOrigin      = attribute.Key("weft.tool.origin")
+	attrSubagentPending = attribute.Key("weft.subagent.pending")
 	// An Output agent's run end (UX-S1-06).
 	attrOutputSubmitted = attribute.Key("weft.output.submitted")
 	attrToolResultBytes = attribute.Key("weft.tool.result_bytes")
@@ -602,6 +606,9 @@ type toolStartFacts struct {
 	// arguments before the loop saw them (Reporter.Repair):
 	// weft.tool.args_repaired.
 	argsRepaired bool
+	// origin is the tool's Origin, "" for a local tool (or a call
+	// naming no registered tool): weft.tool.origin.
+	origin string
 }
 
 func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, facts toolStartFacts) (context.Context, func(res ToolResultPart, park string, fail toolFailure, cut int, retry retryMark, end time.Time)) {
@@ -638,6 +645,9 @@ func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, f
 		}
 		if facts.argsRepaired {
 			attrs = append(attrs, attrToolArgsRepaired.Bool(true))
+		}
+		if facts.origin != "" && facts.origin != toolSourceLocal {
+			attrs = append(attrs, attrToolOrigin.String(facts.origin))
 		}
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)

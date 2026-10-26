@@ -572,6 +572,34 @@ export const FIRST_TOKEN: Term = {
   group: "machinery",
 }
 
+export const MIDDLEWARE: Term = {
+  term: "middleware",
+  short:
+    "middleware — a layer wrapped around every model or tool call: Retry, Allow, …",
+  long: [
+    "WrapModel and WrapTools wrap each call in layers, outer to inner: the onion.",
+    "The manifest lists the chain; each call's spans say what a layer did on it.",
+    "A greyed layer did nothing on that call, or records no decision (Log, Audit).",
+  ].join("\n"),
+  docs: `docs/life-of-a-call.md#a-tool-call`,
+  aliases: [],
+  group: "machinery",
+}
+
+export const MCP_SERVER: Term = {
+  term: "MCP server",
+  short:
+    "MCP server — where an imported tool runs; mcp.Server names it mcp:<name>",
+  long: [
+    "weft/mcp imports a server's tools as ordinary tools; mcp.Server(name) names it.",
+    "Each call then records its origin (mcp:billing), and the call graph draws the server.",
+    "MCP unreachable: the call never completed; MCP tool error: the server said isError.",
+  ].join("\n"),
+  docs: "docs/adr/0015-mcp-interop.md#amendment-2026-10-26--mcp-identity-in-the-record-u232-o8",
+  aliases: [],
+  group: "machinery",
+}
+
 /** TERMS is the whole table, by key: Studio's (tooltips, the Concepts
  * tab). The panel imports single terms, never this. */
 export const TERMS = {
@@ -615,6 +643,8 @@ export const TERMS = {
   span: SPAN,
   tokens: TOKENS,
   firstToken: FIRST_TOKEN,
+  middleware: MIDDLEWARE,
+  mcpServer: MCP_SERVER,
 } as const satisfies Record<string, Term>
 
 export type TermName = keyof typeof TERMS

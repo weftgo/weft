@@ -2382,6 +2382,9 @@ var contractKeys = []string{
 	// attributes (migration 0029's restatement of the traces view).
 	"weft.tool.denied_by", "weft.tool.error_masked", "weft.tool.args_repaired",
 	"weft.layer.name", "weft.layer.kind", "weft.layer.index",
+	// U23.2 (O8): the tool's Origin on execute_tool (migration 0030's
+	// restatement of the traces view).
+	"weft.tool.origin",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

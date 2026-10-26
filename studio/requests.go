@@ -138,6 +138,11 @@ type catalogDoc struct {
 	Tools          []obsdb.ToolEntry `json:"tools"`
 	Content        string            `json:"content"`
 	TruncatedBytes int64             `json:"truncated_bytes"`
+	// Skipped are the tools an importer left out (O8: the tools
+	// record's skipped[]), SkippedMore the count past its bound; each
+	// omitted when none.
+	Skipped     []obsdb.SkippedTool `json:"skipped,omitempty"`
+	SkippedMore int                 `json:"skipped_more,omitempty"`
 }
 
 // holeRef is a hash whose record the run does not hold, with the
@@ -160,7 +165,8 @@ func catalogOf(t obsdb.ToolsRecord) catalogDoc {
 	if tools == nil {
 		tools = []obsdb.ToolEntry{}
 	}
-	return catalogDoc{Hash: t.Hash, Tools: tools, Content: string(t.Content), TruncatedBytes: t.TruncatedBytes}
+	return catalogDoc{Hash: t.Hash, Tools: tools, Content: string(t.Content), TruncatedBytes: t.TruncatedBytes,
+		Skipped: t.Skipped, SkippedMore: t.SkippedMore}
 }
 
 // missingHole is the badge of a missing prompt or tools record: the

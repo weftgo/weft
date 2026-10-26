@@ -60,6 +60,8 @@ lookup := weft.Tool("lookup_order", "Look up an order by ID.",
 
 // 1d. MCP, both ways (package weft/mcp; alias the SDK as sdk):
 //     tools, _ := mcp.Tools(ctx, sess, mcp.Prefix("gh_"))   // a server's tools as weft tools (RawTool; schema verbatim)
+//     mcp.Tools(ctx, sess, mcp.Server("github"), mcp.Transport("stdio")) // name the server for the record: Origin
+//       "mcp:github" (the tools record's source, execute_tool's weft.tool.origin), source_detail, skipped[] (O8)
 //     mcp.Serve(srv, agt, "Support agent.")                 // an agent (and its tools) as an MCP server
 
 // 2. An agent is a value. Build once, run many times, concurrently.

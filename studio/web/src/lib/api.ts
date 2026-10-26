@@ -4,6 +4,7 @@
 // tests against testdata/api/*.golden.json, this side type-checks
 // against the same shapes.
 
+import type { LayerInfo, SkippedTool, SourceDetail } from "./onion"
 import { PREVIEW_PATH } from "./preview"
 import type { PreviewDoc } from "./preview"
 import { queryOptions } from "@tanstack/react-query"
@@ -935,6 +936,16 @@ export interface ManifestAgent {
     detect_loops?: number
   }
   tools: ManifestTool[]
+  /** The onion (U23.1, ADR 0012): the WrapModel and WrapTools chains
+   * outer to inner, and the hooks; each absent when empty. */
+  model_middleware?: LayerInfo[]
+  tool_middleware?: LayerInfo[]
+  hooks?: {
+    prepare_step?: LayerInfo[]
+    tap?: LayerInfo[]
+    on_run_end?: LayerInfo[]
+    tool_source?: LayerInfo
+  }
   /** The agent's proposed instructions (plan F6, studio/proposals.go):
    * held in Studio's memory beside the registered ones, forgotten on
    * restart; absent when none. */
@@ -962,6 +973,9 @@ export interface ManifestTool {
   prompt_snippet?: string
   source?: string
   subagent?: string
+  /** The tool's own WrapTools, outer to inner (U23.1): inside the
+   * agent's tool_middleware. */
+  middleware?: LayerInfo[]
 }
 
 // ── Fetching ───────────────────────────────────────────────────────
@@ -1599,6 +1613,9 @@ export interface ToolEntry {
   source: string
   /** The tool Output registered (submit_output): the typed answer. */
   output?: boolean
+  /** The tool's origin in parts (O8: weft/mcp's server, transport,
+   * prefix, name on the server); absent when none was recorded. */
+  source_detail?: SourceDetail
 }
 
 /** A resolved prompt record. content is "" or "truncated"
@@ -1619,6 +1636,10 @@ export interface CatalogDoc {
   tools: ToolEntry[]
   content: string
   truncated_bytes: number
+  /** The tools an importer left out (O8: the tools record's skipped[],
+   * at most 64; skipped_more the rest); absent when none. */
+  skipped?: SkippedTool[]
+  skipped_more?: number
 }
 
 /** A hash whose record the run does not hold, and why

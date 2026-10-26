@@ -1,0 +1,1402 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "contract-app"
+            }
+          },
+          {
+            "key": "weft.version",
+            "value": {
+              "stringValue": "v0.0.0-contract"
+            }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_start\",\"id\":\"a1100000000000000000000000000001\",\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"agent\":\"front-desk\",\"instructions_hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660000000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660000000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.input",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Customer 42 asks about invoice INV-9.\"}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660001000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660001000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":0}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660002000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660002000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "tools"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.tools.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"hash\":\"65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4\",\"tools\":[{\"name\":\"customer_profile\",\"description\":\"Profile of a customer.\",\"schema\":{\"type\":\"object\",\"properties\":{\"order_id\":{\"type\":\"string\",\"description\":\"the order to look up\"}},\"required\":[\"order_id\"]},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":false,\"source\":\"local\"},{\"name\":\"svc_export_statement\",\"description\":\"Export a statement.\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"}},\"type\":\"object\"},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":true,\"source\":\"mcp:billing\",\"source_detail\":{\"server\":\"billing\",\"transport\":\"memory\",\"prefix\":\"svc_\",\"remote_name\":\"export_statement\"}},{\"name\":\"svc_get_invoice\",\"description\":\"Status of an invoice.\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"}},\"type\":\"object\"},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":true,\"source\":\"mcp:billing\",\"source_detail\":{\"server\":\"billing\",\"transport\":\"memory\",\"prefix\":\"svc_\",\"remote_name\":\"get_invoice\"}},{\"name\":\"svc_legacy_ledger\",\"description\":\"Ledger balance (legacy).\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"}},\"type\":\"object\"},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":true,\"source\":\"mcp:billing\",\"source_detail\":{\"server\":\"billing\",\"transport\":\"memory\",\"prefix\":\"svc_\",\"remote_name\":\"legacy_ledger\"}}],\"skipped\":[{\"name\":\"odd_report\",\"reason\":\"weft: ParseSchema: top-level type must be \\\"object\\\", got \\\"\\\"\",\"source\":\"mcp:billing\"}]}"
+              },
+              "eventName": "weft.tools",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660003000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000002",
+              "timeUnixNano": "1790847660003000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.request.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4\",\"names\":[\"customer_profile\",\"svc_export_statement\",\"svc_get_invoice\",\"svc_legacy_ledger\"]},\"sequential_tools\":true,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+              },
+              "eventName": "weft.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660004000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000002",
+              "timeUnixNano": "1790847660004000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"customer_profile\",\"args\":{\"order_id\":\"42\"}},{\"type\":\"tool_call\",\"id\":\"call_2\",\"name\":\"svc_get_invoice\",\"args\":{\"id\":\"INV-9\"}},{\"type\":\"tool_call\",\"id\":\"call_3\",\"name\":\"svc_legacy_ledger\",\"args\":{\"id\":\"42\"}},{\"type\":\"tool_call\",\"id\":\"call_4\",\"name\":\"svc_export_statement\",\"args\":{\"id\":\"42\"}}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660005000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660005000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "customer_profile"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":1,\"call_id\":\"call_1\",\"name\":\"customer_profile\",\"args\":{\"order_id\":\"42\"}}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660006000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660006000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "customer_profile"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":2,\"call_id\":\"call_1\",\"name\":\"customer_profile\",\"content\":\"customer 42: Acme SARL\",\"is_error\":false}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660007000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660007000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "svc_get_invoice"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":3,\"call_id\":\"call_2\",\"name\":\"svc_get_invoice\",\"args\":{\"id\":\"INV-9\"}}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660008000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660008000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "svc_get_invoice"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":4,\"call_id\":\"call_2\",\"name\":\"svc_get_invoice\",\"content\":\"INV-9: 120 EUR, due 2026-10-01, unpaid\",\"is_error\":false}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660009000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660009000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "6"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_3"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "svc_legacy_ledger"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":5,\"call_id\":\"call_3\",\"name\":\"svc_legacy_ledger\",\"args\":{\"id\":\"42\"}}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660010000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660010000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "7"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "6"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_3"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "svc_legacy_ledger"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":6,\"call_id\":\"call_3\",\"name\":\"svc_legacy_ledger\",\"content\":\"ledger offline: maintenance window until 18:00\",\"is_error\":true}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660011000000",
+              "severityNumber": "SEVERITY_NUMBER_WARN",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660011000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "8"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "7"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_4"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "svc_export_statement"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":7,\"call_id\":\"call_4\",\"name\":\"svc_export_statement\",\"args\":{\"id\":\"42\"}}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660012000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660012000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "8"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_4"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "svc_export_statement"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":8,\"call_id\":\"call_4\",\"name\":\"svc_export_statement\",\"content\":\"mcp: calling \\\"tools/call\\\": statement service unreachable\",\"is_error\":true}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660013000000",
+              "severityNumber": "SEVERITY_NUMBER_WARN",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660013000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"call_id\":\"call_1\",\"name\":\"customer_profile\",\"content\":\"customer 42: Acme SARL\",\"is_error\":false},{\"type\":\"tool_result\",\"call_id\":\"call_2\",\"name\":\"svc_get_invoice\",\"content\":\"INV-9: 120 EUR, due 2026-10-01, unpaid\",\"is_error\":false},{\"type\":\"tool_result\",\"call_id\":\"call_3\",\"name\":\"svc_legacy_ledger\",\"content\":\"ledger offline: maintenance window until 18:00\",\"is_error\":true},{\"type\":\"tool_result\",\"call_id\":\"call_4\",\"name\":\"svc_export_statement\",\"content\":\"mcp: calling \\\"tools/call\\\": statement service unreachable\",\"is_error\":true}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660014000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660014000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.latency_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":0,\"reason\":\"tool_calls\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660015000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660015000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "11"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660016000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660016000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.request.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4\",\"names\":[\"customer_profile\",\"svc_export_statement\",\"svc_get_invoice\",\"svc_legacy_ledger\"]},\"sequential_tools\":true,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+              },
+              "eventName": "weft.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660017000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000007",
+              "timeUnixNano": "1790847660017000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "delta"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "text_delta"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.delta.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"text_delta\",\"run_id\":\"a1100000000000000000000000000001\",\"text\":\"INV-9 (120 EUR) is unpaid; the ledger and the statement export are down.\"}"
+              },
+              "eventName": "weft.delta",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660018000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660018000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"INV-9 (120 EUR) is unpaid; the ledger and the statement export are down.\"}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660019000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660019000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "12"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.latency_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.ttft_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":1,\"reason\":\"stop\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1,\"ttft_ms\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660020000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660020000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "13"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"usage\":{\"input_tokens\":20,\"output_tokens\":10},\"steps\":2,\"stopped_by\":\"final_answer\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660021000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660021000000",
+              "traceId": "7ace0000000000000000000000000001"
+            }
+          ],
+          "scope": {
+            "name": "github.com/weftgo/weft/core",
+            "version": "v0.0.0-contract"
+          }
+        }
+      ]
+    }
+  ]
+}

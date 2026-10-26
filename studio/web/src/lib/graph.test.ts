@@ -10,6 +10,7 @@ import {
   edgeLabel,
   graphUnsourced,
   loopLabel,
+  mcpFailLine,
   nodeLine,
   nodeOfRun,
   nodeStatus,
@@ -195,5 +196,75 @@ describe("callGraph", () => {
       ["b", "mcp"],
     ])
     expect(catalogSources(undefined).size).toBe(0)
+  })
+})
+
+describe("MCP identity in the graph (U23.2, O8)", () => {
+  const mcpCall = (
+    id: string,
+    run: string,
+    origin: string,
+    status: "ok" | "error",
+    type?: string
+  ) =>
+    span(
+      id,
+      "o_inv",
+      "execute_tool svc",
+      1,
+      48,
+      {
+        ...tool(run, 0, "svc", 10),
+        "weft.tool.origin": origin,
+        ...(type ? { "error.type": type } : {}),
+      },
+      status
+    )
+
+  it("a child run's MCP calls are drawn from the span's origin, no catalog read; failures told apart", () => {
+    const more = [
+      ...SPANS,
+      mcpCall("x1", OPS, "mcp:billing", "ok"),
+      mcpCall("x2", OPS, "mcp:billing", "error", "mcp_transport"),
+      mcpCall("x3", OPS, "mcp:billing", "error", "mcp_tool_error"),
+    ]
+    // The page read no catalog of the child (known: the root alone).
+    const g2 = callGraph(
+      more,
+      DIR,
+      () => undefined,
+      (r) => r === DIR
+    )
+    const m = g2.nodes.find((n) => n.id === "m:mcp:billing")!
+    expect(m.kind).toBe("mcp")
+    expect(m.label).toBe("mcp:billing")
+    expect([m.calls, m.fails, m.unreachable, m.toolErrors]).toEqual([
+      3, 2, 1, 1,
+    ])
+    expect(nodeLine(m)).toBe("3 calls · slowest 47.0ms · 2 failed")
+    expect(mcpFailLine(m)).toBe("1 MCP unreachable · 1 MCP tool error")
+    expect(g2.edges.find((e) => e.to === m.id)!.from).toBe("a:ops-manager")
+    // Its other calls (spans from before O8, no origin) still say
+    // their catalog was not read.
+    expect(g2.unsourced).toContain(OPS)
+  })
+
+  it("a caller-linked run (a pool child's turn) hangs under its caller", () => {
+    const child = "s_child-t1"
+    const more = [
+      ...SPANS,
+      span(
+        "p_inv",
+        "d_t",
+        "invoke_agent analyst",
+        3,
+        5,
+        inv(child, "analyst", { "weft.caller.run.id": DIR })
+      ),
+    ]
+    const g2 = callGraph(more, DIR)
+    expect(
+      g2.edges.some((e) => e.from === "a:director" && e.to === "a:analyst")
+    ).toBe(true)
   })
 })

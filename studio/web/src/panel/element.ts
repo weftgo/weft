@@ -368,6 +368,7 @@ import {
   repairedWords,
   tokenSplit,
 } from "../lib/cards"
+import { deniedWord, effectChips } from "../lib/onion"
 
 /** hasCapability reports whether meta lists the named capability (the
  * panel renders a control only when the server reports it, §8.5). */
@@ -7280,6 +7281,9 @@ function renderCall(
       : undefined
   const ex = execLine(f)
   if (ex) head.append(el("span", "weft-badge weft-info", ex))
+  // What the onion did to it (U23.2): lib/onion.ts, the run page's.
+  for (const c of effectChips(f?.fx, true))
+    head.append(el("span", "weft-badge weft-info", c))
   if (call.result) {
     const content = String(call.result.content)
     const cut = truncation(content)
@@ -7294,7 +7298,7 @@ function renderCall(
             f?.errorType ?? /^([A-Z_]+):/.exec(content)?.[1],
             f,
             !!call.childRunId
-          ) ?? "error"
+          ) ?? (f?.fx?.deniedBy ? deniedWord(f.fx.deniedBy) : "error")
         )
       )
     }

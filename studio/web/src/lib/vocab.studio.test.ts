@@ -71,7 +71,9 @@ describe("retired words (U21.2, U21.3)", () => {
       ).toEqual([inject[d].path])
       expect(r.stale, d).toEqual([])
     }
-  })
+    // Seven audits of the whole tree: seconds alone, past vitest's 5 s
+    // default under the full suite's parallel load.
+  }, 20_000)
 
   it("an allowlist entry no hit matches fails the audit", () => {
     const list = loadAllowlist()

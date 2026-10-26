@@ -20,6 +20,12 @@
 // record, a content-off destination, a token that may not read
 // prompts — never an empty section. The provider wire pair (plan A6)
 // is the pane's second tab, Wire (step-wire.tsx): the same rows' raw.
+import {
+  SKIPPED_HINT,
+  skippedLine,
+  skippedMore,
+  sourceDetailLine,
+} from "@/lib/onion"
 import { STATUS_TEXT } from "@/lib/status-class"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
@@ -428,6 +434,11 @@ function ToolChips({ t }: { t: ToolEntry }) {
         <Chip title="a barrier: runs alone">sequential</Chip>
       ) : null}
       <Chip title="where the tool came from">source {t.source || "?"}</Chip>
+      {sourceDetailLine(t.source_detail) ? (
+        <Chip title="the tool's origin in parts (the tools record's source_detail)">
+          {sourceDetailLine(t.source_detail)}
+        </Chip>
+      ) : null}
       {t.output ? (
         <Chip title="the tool Output registered: the run's typed answer, not a side effect (the tools record's output)">
           {OUTPUT.typed}
@@ -493,6 +504,22 @@ function CatalogView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
         {doc.tools.map((t) => (
           <ToolRow key={t.name} t={t} />
         ))}
+        {/* The tools an importer left out (O8): never offered, greyed. */}
+        {(doc.skipped ?? []).map((k, i) => (
+          <li
+            key={`skipped:${k.source ?? ""}:${k.name}:${i}`}
+            className="font-mono text-[11px] text-faint"
+            title={SKIPPED_HINT}
+            data-skipped-tool={k.name}
+          >
+            {skippedLine(k)}
+          </li>
+        ))}
+        {doc.skipped_more ? (
+          <li className="font-mono text-[11px] text-faint" title={SKIPPED_HINT}>
+            {skippedMore(doc.skipped_more)}
+          </li>
+        ) : null}
       </ul>
       <span className="flex flex-wrap items-center gap-2">
         <Hash h={doc.hash} />

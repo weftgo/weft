@@ -65,6 +65,7 @@ import {
 } from "@/components/studio/step-attempts"
 import { RequestSection } from "@/components/studio/step-request"
 import { useBusyEndCtx } from "@/components/studio/busy-end"
+import { CallOnion } from "@/components/studio/onion"
 import { endLine } from "@/lib/timeline"
 import type { RunRequests } from "@/components/studio/step-request"
 import {
@@ -827,6 +828,21 @@ export function SpanDetail({
               {row?.timed ? <Facts rows={toolFacts(row.timed.span)} /> : null}
             </>
           ) : null}
+          {/* What wrapped this call (U23.2): the onion, each layer's
+              decision from the call's spans. */}
+          <CallOnion
+            doc={doc}
+            timed={timed}
+            target={
+              (row?.timed ?? span.timed)
+                ? { span: (row?.timed ?? span.timed)!.span }
+                : kind === "step" && ownStep && answer
+                  ? { step: answer.index }
+                  : call
+                    ? { callId: call.callId, step: step?.index }
+                    : {}
+            }
+          />
         </div>
         <div
           className="flex items-center gap-1 border-y px-2 pt-1"
@@ -1174,6 +1190,8 @@ function toolFacts(sp: TimedSpan): [string, React.ReactNode][] {
     input_error: str(sp.attrs["weft.tool.input_error"]),
     retry: num(sp.attrs["weft.tool.retry"]),
     retry_budget: num(sp.attrs["weft.tool.retry_budget"]),
+    denied_by: str(sp.attrs["weft.tool.denied_by"]) || undefined,
+    error_masked: str(sp.attrs["weft.tool.error_masked"]) || undefined,
   })
   if (f)
     rows.push([

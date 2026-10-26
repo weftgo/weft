@@ -11,6 +11,8 @@ import { attemptLabel, msText } from "./attempts"
 import { decidedCall, outcomeOf } from "./decisions"
 import type { FoldedRun, TranscriptBatch } from "./events"
 import { plural, tokens } from "./format"
+import { effectsOf } from "./onion"
+import type { CallEffects } from "./onion"
 import { AWAITING, turnTag } from "./status"
 
 type Attrs = Record<string, unknown>
@@ -40,6 +42,9 @@ export interface CallFacts {
   park?: string
   childPending?: string
   errorType?: string
+  /** What the tool layers did to it (lib/onion.ts, U23.2): the tool
+   * row's effect chips. */
+  fx?: CallEffects
 }
 
 /** callFactsOf indexes the run's own execute_tool spans by
@@ -66,6 +71,7 @@ export function callFactsOf(
       park: str(a["weft.tool.pending.source"]),
       childPending: str(a["weft.subagent.pending"]),
       errorType: str(a["error.type"]),
+      fx: effectsOf(a),
     })
   }
   return out

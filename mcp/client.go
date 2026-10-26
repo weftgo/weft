@@ -32,6 +32,15 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 // data the model sees, never run errors; their execute_tool spans tell
 // them apart by error.type — mcp_tool_error and mcp_transport.
 //
+// Every imported tool names where it came from for the record (O8):
+// its Origin is "mcp:<server>" under Server ("mcp" otherwise) and its
+// core.OriginDetail the server, the Transport, the Prefix and its name
+// on the server, with the tools this listing skipped — so the tools
+// record carries source_detail per tool and skipped[] per server, and
+// each call's execute_tool span weft.tool.origin. A transport failure
+// (error.type mcp_transport) and a remote isError (mcp_tool_error) stay
+// told apart on the span.
+//
 // Imported tools are ordinary weft tools: register them with New or
 // serve them through ToolSource; Timeout, MaxResultBytes,
 // RequireApproval and WrapTools apply through Policy. A tool the
@@ -97,7 +106,12 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*cor
 			o.apply(&cfg)
 		}
 	}
-	out := []*core.ToolDef{} // non-nil: zero tools is a fact, not an error
+	type accepted struct {
+		t      *sdk.Tool
+		name   string
+		schema *core.Schema
+	}
+	var keep []accepted
 	var skipped []SkippedTool
 	seen := map[string]bool{}
 	index := -1
@@ -141,17 +155,40 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*cor
 			skipped = append(skipped, SkippedTool{Name: t.Name, Index: index, Err: err})
 			continue
 		}
+		keep = append(keep, accepted{t: t, name: name, schema: schema})
+		seen[name] = true
+	}
+	// The record's identity (O8): every imported tool names the server
+	// in its Origin ("mcp:<server>", "mcp" when unnamed) and its parts
+	// in OriginDetail, the skipped tools riding along so the tools
+	// record lists them (record contract §4).
+	origin := "mcp"
+	if cfg.server != "" {
+		origin += ":" + cfg.server
+	}
+	var gone []core.SkippedImport
+	for _, sk := range skipped {
+		reason := sk.Err.Error()
+		if sk.Name == "" {
+			reason = fmt.Sprintf("entry %d: %s", sk.Index, reason)
+		}
+		gone = append(gone, core.SkippedImport{Name: sk.Name, Reason: reason})
+	}
+	out := make([]*core.ToolDef, 0, len(keep)) // non-nil: zero tools is a fact, not an error
+	for _, k := range keep {
+		t := k.t
 		// Annotation default first, the caller's policy after: a
 		// missing readOnlyHint cannot be un-Sequentialised, and
-		// RequireApproval is added, never removed.
-		// Origin("mcp") names the tool's source in the tools record (ADR
-		// 0028 §5); first, so a caller's own Origin can still rename it.
-		toolOpts := []core.ToolOption{core.Origin("mcp")}
+		// RequireApproval is added, never removed. The Origin first,
+		// so a caller's own can still rename it.
+		toolOpts := []core.ToolOption{core.Origin(origin), core.OriginDetail(core.SourceDetail{
+			Server: cfg.server, Transport: cfg.transport, Prefix: cfg.prefix, RemoteName: t.Name, Skipped: gone,
+		})}
 		if t.Annotations == nil || !t.Annotations.ReadOnlyHint {
 			toolOpts = append(toolOpts, core.Sequential())
 		}
 		toolOpts = append(toolOpts, cfg.policy...)
-		tool := core.RawTool(name, t.Description, schema,
+		tool := core.RawTool(k.name, t.Description, k.schema,
 			callHandler(sess, t.Name), toolOpts...)
 		if t.OutputSchema != nil {
 			if raw, err := fromSDK(t.OutputSchema); err == nil {
@@ -161,7 +198,6 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*cor
 			}
 		}
 		out = append(out, tool)
-		seen[name] = true
 	}
 	if len(skipped) > 0 {
 		return out, &ImportError{Skipped: skipped}
@@ -214,9 +250,37 @@ func (e *ImportError) Unwrap() []error {
 type Option interface{ apply(*importConfig) }
 
 type importConfig struct {
-	prefix string
-	policy []core.ToolOption
+	prefix    string
+	server    string
+	transport string
+	policy    []core.ToolOption
 }
+
+type serverOption string
+
+func (o serverOption) apply(c *importConfig) { c.server = string(o) }
+
+// Server names the server the tools come from, for the observability
+// record only (record contract §3, §4; O8): every imported tool's
+// Origin reads "mcp:<name>" — the tools record's source, the
+// execute_tool span's weft.tool.origin, the node Studio's call graph
+// draws — and its source_detail names the server, the transport, the
+// Prefix and the tool's name on the server. Without it the Origin is
+// "mcp" and no server is named: the server's own initialize answer
+// is untrusted, so weft never names a node after it. The name changes
+// nothing the model sees.
+func Server(name string) Option { return serverOption(name) }
+
+type transportOption string
+
+func (o transportOption) apply(c *importConfig) { c.transport = string(o) }
+
+// Transport names how the session reaches the server — "stdio",
+// "http", "sse", "memory", the caller's word — for the tools record's
+// source_detail (O8). The SDK's session does not say which transport
+// it was connected over, so the caller who connected it does. Omitted,
+// the record names none.
+func Transport(kind string) Option { return transportOption(kind) }
 
 type prefixOption string
 
@@ -237,8 +301,9 @@ func (p policyOption) apply(c *importConfig) { c.policy = append(c.policy, p...)
 // Timeout, MaxResultBytes, RequireApproval and WrapTools apply as on
 // any tool; StrictInput has no effect (a RawTool receives the model's
 // raw arguments — validation belongs to the server). Every imported
-// tool carries core.Origin("mcp") (the tools record's source); a
-// core.Origin given here overrides it.
+// tool carries core.Origin("mcp:<server>") ("mcp" without Server; the
+// tools record's source and the execute_tool span's weft.tool.origin);
+// a core.Origin given here overrides it.
 func Policy(opts ...core.ToolOption) Option { return policyOption(opts) }
 
 // callHandler is the imported tool's handler: one tools/call round

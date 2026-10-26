@@ -27,6 +27,7 @@ import (
 	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -38,6 +39,7 @@ import (
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/mw"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/mcp"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/clickhouse"
 	"github.com/weftgo/weft/obsdb/obsdbtest"
@@ -222,8 +224,14 @@ type contractRun struct {
 	// Wire is the run's request records' wire facts (§4, UX-S2-09),
 	// "<server> keys=<k,…> headers=<h,…>" per distinct record body
 	// value, sorted; omitted when none carries one.
-	Wire    []string     `json:"wire,omitempty"`
-	Repairs []string     `json:"repairs,omitempty"`
+	Wire    []string `json:"wire,omitempty"`
+	Repairs []string `json:"repairs,omitempty"`
+	// Sources are the run's tools records' origins in parts (§4, U23.2:
+	// O8), as obsdb.ToolsRecordOf reads them: "<tool> <source>
+	// server=<s> transport=<t> prefix=<p> remote=<r>" per tool carrying
+	// a source_detail, then "skipped <name> from <source>: <reason>",
+	// distinct lines sorted; omitted when none.
+	Sources []string     `json:"sources,omitempty"`
 	Holes   []obsdb.Hole `json:"holes"`
 	// HoleCauses names the cause of each run-level hole the row's rules
 	// decide (§7: LostRecordsHole, TailLostHole), "<hole>:<cause>".
@@ -292,6 +300,8 @@ type contractRPC struct {
 	DeniedBy     string `json:"denied_by,omitempty"`
 	ErrorMasked  string `json:"error_masked,omitempty"`
 	ArgsRepaired bool   `json:"args_repaired,omitempty"`
+	// The tool's Origin when it is not local (§3, U23.2: O8).
+	Origin string `json:"origin,omitempty"`
 }
 
 func TestContract(t *testing.T) {
@@ -472,6 +482,7 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 		c.Chat, c.Tools = spanSteps(spans)
 		c.Layers, c.Repairs = onionOf(spans)
 		c.Wire = wireOf(t, db, r.ID)
+		c.Sources = sourcesOf(t, db, r.ID)
 		c.Tree = treeOf(t, db, r.ID, len(spans))
 		c.Logs = logsOf(t, db, r.ID, spans)
 		c.Holes, c.HoleCauses = runHoles(t, db, r, len(spans) > 0)
@@ -637,6 +648,7 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 				DeniedBy:     strAttr(s.Attrs, "weft.tool.denied_by"),
 				ErrorMasked:  strAttr(s.Attrs, "weft.tool.error_masked"),
 				ArgsRepaired: boolAttr(s.Attrs, "weft.tool.args_repaired"),
+				Origin:       strAttr(s.Attrs, "weft.tool.origin"),
 			})
 		}
 	}
@@ -673,6 +685,39 @@ func wireOf(t *testing.T, db obsdb.DB, id string) []string {
 		if !seen[line] {
 			seen[line] = true
 			out = append(out, line)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// sourcesOf reads a run's tools records' origins in parts
+// (contractRun.Sources).
+func sourcesOf(t *testing.T, db obsdb.DB, id string) []string {
+	t.Helper()
+	cats, err := db.Catalogs(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	var out []string
+	add := func(l string) {
+		if !seen[l] {
+			seen[l] = true
+			out = append(out, l)
+		}
+	}
+	for _, c := range cats {
+		for _, e := range c.Tools {
+			if d := e.SourceDetail; d != nil {
+				add(fmt.Sprintf("%s %s server=%s transport=%s prefix=%s remote=%s", e.Name, e.Source, d.Server, d.Transport, d.Prefix, d.RemoteName))
+			}
+		}
+		for _, k := range c.Skipped {
+			add(fmt.Sprintf("skipped %s from %s: %s", k.Name, k.Source, k.Reason))
+		}
+		if c.SkippedMore > 0 {
+			add(fmt.Sprintf("skipped %d more", c.SkippedMore))
 		}
 	}
 	slices.Sort(out)
@@ -2385,7 +2430,61 @@ func genCases() []genCase {
 			return []string{mustRun(t, ctx, agt, core.Prompt("Look up, delete and refund order 1234.")).ID}
 		},
 	}
-	return append(append(cases, threadGenCases()...), flowScope, onion)
+	// After onion, for the same reason.
+	mcpMesh := genCase{
+		name: "mcp_mesh",
+		dest: content,
+		desc: "rw.mcp-mesh's shape, MCP identity recorded (U23.2, O8): a front desk imports a billing server's tools with mcp.Server(\"billing\"), mcp.Transport(\"memory\") and mcp.Prefix(\"svc_\") beside a local tool, one step calling all four. The tools record names each imported tool's source mcp:billing with its source_detail (server, transport, prefix, remote_name) and the tool the listing skipped (a non-object schema root) once in skipped[] with its reason; each imported call's execute_tool span carries weft.tool.origin mcp:billing — the local call none. svc_get_invoice answers; svc_legacy_ledger's server answers isError (error.type mcp_tool_error); svc_export_statement's handler fails the JSON-RPC exchange (error.type mcp_transport): two tool errors told apart, problems tool_errors 2; weft.tool.origin stays out of meta",
+		run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+			ok := func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "INV-9: 120 EUR, due 2026-10-01, unpaid"}}}, nil
+			}
+			schema := json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}}}`)
+			srv := sdk.NewServer(&sdk.Implementation{Name: "billing-service", Version: "1"}, nil)
+			srv.AddTool(&sdk.Tool{Name: "get_invoice", Description: "Status of an invoice.", InputSchema: schema}, ok)
+			srv.AddTool(&sdk.Tool{Name: "legacy_ledger", Description: "Ledger balance (legacy).", InputSchema: schema},
+				func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+					return &sdk.CallToolResult{IsError: true, Content: []sdk.Content{&sdk.TextContent{Text: "ledger offline: maintenance window until 18:00"}}}, nil
+				})
+			srv.AddTool(&sdk.Tool{Name: "export_statement", Description: "Export a statement.", InputSchema: schema},
+				func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+					return nil, errors.New("statement service unreachable")
+				})
+			odd := &sdk.Tool{Name: "odd_report", Description: "A tool whose schema root is not an object.", InputSchema: json.RawMessage(`{"type":"object"}`)}
+			srv.AddTool(odd, ok)
+			odd.InputSchema = json.RawMessage(`{"type":["object","null"]}`)
+			st, ct := sdk.NewInMemoryTransports()
+			runCtx, stop := context.WithCancel(ctx)
+			defer stop()
+			go func() { _ = srv.Run(runCtx, st) }()
+			sess, err := sdk.NewClient(&sdk.Implementation{Name: "front-desk", Version: "1"}, nil).Connect(ctx, ct, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = sess.Close() }()
+			imported, err := mcp.Tools(ctx, sess, mcp.Server("billing"), mcp.Transport("memory"), mcp.Prefix("svc_"))
+			var ie *mcp.ImportError
+			if !errors.As(err, &ie) || len(imported) != 3 {
+				t.Fatalf("import: %d tools, %v; want three and odd_report skipped", len(imported), err)
+			}
+			profile := core.Tool("customer_profile", "Profile of a customer.", func(_ context.Context, in lookupIn) (string, error) {
+				return "customer " + in.OrderID + ": Acme SARL", nil
+			})
+			opts := []core.Option{core.Parallelism(1), profile}
+			for _, td := range imported {
+				opts = append(opts, td)
+			}
+			agt := pipelineAgent(p, "front-desk", wefttest.Script(
+				wefttest.ToolCalls(
+					wefttest.Call{Name: "customer_profile", Args: `{"order_id":"42"}`},
+					wefttest.Call{Name: "svc_get_invoice", Args: `{"id":"INV-9"}`},
+					wefttest.Call{Name: "svc_legacy_ledger", Args: `{"id":"42"}`},
+					wefttest.Call{Name: "svc_export_statement", Args: `{"id":"42"}`}),
+				wefttest.Say("INV-9 (120 EUR) is unpaid; the ledger and the statement export are down.")), opts...)
+			return []string{mustRun(t, ctx, agt, core.Prompt("Customer 42 asks about invoice INV-9.")).ID}
+		},
+	}
+	return append(append(cases, threadGenCases()...), flowScope, onion, mcpMesh)
 }
 
 // gatewayModel is the onion case's model declaring its wire facts (the

@@ -10,6 +10,7 @@ import type { ManifestAgent, ManifestTool } from "@/lib/api"
 import { agentPolicyChips, toolPolicyChips } from "@/lib/policy"
 import type { PolicyChip } from "@/lib/policy"
 import { ManifestCheckBadge } from "@/components/studio/manifest-badge"
+import { AgentOnion } from "@/components/studio/onion"
 import {
   Collapsible,
   CollapsibleContent,
@@ -141,6 +142,8 @@ export function AgentCard({
         <ManifestCheckBadge agent={agent.name} hash={agent.manifest_hash} />
       </div>
       <Chips chips={agentPolicyChips(agent.policy)} />
+      {/* The onion (U23.2): the WrapModel and WrapTools chains. */}
+      <AgentOnion agent={agent} />
       {agent.instructions ? (
         <Collapsible defaultOpen={!!open}>
           <CollapsibleTrigger className="group/instr flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">

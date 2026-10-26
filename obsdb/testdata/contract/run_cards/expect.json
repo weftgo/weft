@@ -395,7 +395,8 @@
           "seq": 1,
           "status": "error",
           "error_type": "SUBAGENT_PENDING",
-          "subagent_pending": "refund_order"
+          "subagent_pending": "refund_order",
+          "origin": "subagent"
         }
       ],
       "tree": [

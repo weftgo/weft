@@ -12,6 +12,7 @@
 
 /** A kind's words: the chip's text, its one-line hint, its tone. */
 import { ordinalOf, plural } from "./format"
+import { MCP_FAILURE, deniedWord } from "./onion"
 
 export interface KindWords {
   word: string
@@ -232,8 +233,9 @@ export function toolErrorKinds(
 
 /** A tool call's failure kind as a pill (UX-S2-05): the execute_tool
  * span's error.type and the attributes beside it. DENIED · policy vs ·
- * approval and INTERNAL · masked are U23.1's (weft.tool.denied_by,
- * weft.tool.error_masked). */
+ * approval and INTERNAL ← io.EOF are U23.1's (weft.tool.denied_by,
+ * weft.tool.error_masked), worded by lib/onion.ts (U23.2); an MCP
+ * call's two failures are its MCP_FAILURE. */
 export function toolFailure(
   errorType?: string,
   attrs: ToolFacts = {}
@@ -276,16 +278,27 @@ export function toolFailure(
         hint: "the run's deadline passed while the call ran",
       }
     case "mcp_transport":
-      return { word: "MCP transport", hint: "the tools/call did not complete" }
     case "mcp_tool_error":
-      return { word: "MCP tool error", hint: "the MCP server answered isError" }
+      return MCP_FAILURE[errorType]
     case "DENIED":
-      return {
-        word: "DENIED",
-        hint: "a policy or an approval refused the call",
-      }
+      return attrs.denied_by
+        ? {
+            word: deniedWord(attrs.denied_by),
+            hint: `weft.tool.denied_by ${attrs.denied_by}: the layer that refused the call`,
+          }
+        : {
+            word: "DENIED",
+            hint: "a policy or an approval refused the call",
+          }
     case "tool_error":
       return { word: "tool error", hint: "the handler returned an error" }
+  }
+  if (attrs.error_masked)
+    return {
+      word: `${errorType} ← ${attrs.error_masked}`,
+      hint: `a tool layer hid a ${attrs.error_masked} behind ${errorType} (weft.tool.error_masked: the kind, never its text)`,
+    }
+  switch (errorType) {
     case "SUBAGENT_PENDING":
       return {
         word: "pending child",
@@ -364,6 +377,10 @@ export interface ToolFacts {
    * result; weft.tool.retry_budget: the run's MaxModelRetries. */
   retry?: number
   retry_budget?: number
+  /** weft.tool.denied_by / weft.tool.error_masked (U23.1): the layer
+   * that refused the call, the error kind a layer hid. */
+  denied_by?: string
+  error_masked?: string
 }
 
 /** retryPill words a RETRY result's place in its budget (UX-S2-10):
@@ -420,6 +437,8 @@ export function toolFactsOf(
       input_error: factStr(a["weft.tool.input_error"]),
       retry: factNum(a["weft.tool.retry"]),
       retry_budget: factNum(a["weft.tool.retry_budget"]),
+      denied_by: factStr(a["weft.tool.denied_by"]),
+      error_masked: factStr(a["weft.tool.error_masked"]),
     })
   }
   return out

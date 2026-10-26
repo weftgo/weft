@@ -10,6 +10,8 @@ import (
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/mcp"
 	"github.com/weftgo/weft/wefttest"
+	"go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/log/embedded"
 )
 
 // AddTools registers weft tools on an MCP server: the listing and the
@@ -160,4 +162,73 @@ func ExampleTools_toolSource() {
 	mu.Unlock()
 	fmt.Println(res.Text(), "tools fetched:", n)
 	// Output: ready tools fetched: 1
+}
+
+// toolsRecord is ExampleServer's LoggerProvider: it keeps the tools
+// record's body (the catalog each run records, ADR 0028 §5).
+type toolsRecord struct {
+	embedded.LoggerProvider
+	mu   sync.Mutex
+	body string
+}
+
+type toolsLogger struct {
+	embedded.Logger
+	p *toolsRecord
+}
+
+func (p *toolsRecord) Logger(string, ...log.LoggerOption) log.Logger    { return toolsLogger{p: p} }
+func (toolsLogger) Enabled(context.Context, log.EnabledParameters) bool { return true }
+func (l toolsLogger) Emit(_ context.Context, r log.Record) {
+	if r.EventName() == "weft.tools" {
+		l.p.mu.Lock()
+		l.p.body = r.Body().AsString()
+		l.p.mu.Unlock()
+	}
+}
+
+// Server names the server an import comes from, for the record: each
+// imported tool's source is "mcp:<name>" — the node Studio's call
+// graph draws, each call's weft.tool.origin — and its source_detail
+// says the server, the transport, the prefix and its name on the
+// server. Nothing the model sees changes.
+func ExampleServer() {
+	srv := sdk.NewServer(&sdk.Implementation{Name: "billing-service", Version: "1"}, nil)
+	srv.AddTool(&sdk.Tool{
+		Name: "get_invoice", Description: "Status of an invoice.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}}}`),
+	}, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "unpaid"}}}, nil
+	})
+	serverTransport, clientTransport := sdk.NewInMemoryTransports()
+	go func() { _ = srv.Run(context.Background(), serverTransport) }()
+	client := sdk.NewClient(&sdk.Implementation{Name: "front-desk", Version: "1"}, nil)
+	sess, err := client.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		panic(err)
+	}
+	tools, err := mcp.Tools(context.Background(), sess,
+		mcp.Server("billing"), mcp.Transport("memory"), mcp.Prefix("svc_"))
+	if err != nil {
+		panic(err)
+	}
+
+	rec := &toolsRecord{}
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")), weft.LoggerProvider(rec), weft.Content(true), tools[0])
+	if _, err := agt.Generate(context.Background(), weft.Prompt("x")); err != nil {
+		panic(err)
+	}
+	var body struct {
+		Tools []struct {
+			Name         string            `json:"name"`
+			Source       string            `json:"source"`
+			SourceDetail map[string]string `json:"source_detail"`
+		} `json:"tools"`
+	}
+	rec.mu.Lock()
+	_ = json.Unmarshal([]byte(rec.body), &body)
+	rec.mu.Unlock()
+	t := body.Tools[0]
+	fmt.Println(t.Name, t.Source, t.SourceDetail["transport"], t.SourceDetail["remote_name"])
+	// Output: svc_get_invoice mcp:billing memory get_invoice
 }

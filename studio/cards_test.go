@@ -3,7 +3,8 @@ package studio
 // The run cards' fixture (U25): each named seeded run shape the item's
 // Done line lists — loop.max-tokens-tools, out.invalid-repaired,
 // mw.retry, tools.timeout, appr.park and two breakpoint parks,
-// runtimelab.option-lab, msg.parts, sub.failed, opt.prepare-step —
+// runtimelab.option-lab, msg.parts, sub.failed, opt.prepare-step, and
+// U23.2's mw.repairjson, mw.allow and rw.mcp-mesh —
 // recorded through the real pipeline (core → otel → OTLP ingest →
 // obsdb) and read back through the routes both renderers read: the
 // run document, events, transcript, spans, requests and every step.
@@ -23,9 +24,11 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/mw"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/mcp"
 )
 
 // cardStatusErr is a provider error carrying an HTTP status the way the
@@ -57,6 +60,10 @@ var cardShapes = []struct{ name, run string }{
 	{"msg.parts", "r_parts"},
 	{"sub.failed", "r_subfail"},
 	{"opt.prepare-step", "r_prepare"},
+	// U23.2: the onion shown and MCP identity.
+	{"mw.repairjson", "r_repair"},
+	{"mw.allow", "r_allow"},
+	{"rw.mcp-mesh", "r_mesh"},
 }
 
 func recordCardRuns(t *testing.T, url string) {
@@ -177,7 +184,93 @@ func recordCardRuns(t *testing.T, url string) {
 				}
 				return req, nil
 			})), "r_prepare", core.Prompt("x"))
+
+		// mw.repairjson (U23.2): the model's arguments arrive fenced and
+		// mw.RepairJSON strips the fence — the call's args_repaired, the
+		// chat span's weft.repair event.
+		run(agent("echoer", mw.RepairJSON()(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{ID: "f1", Name: "echo", Args: "```json\n{\"msg\":\"fenced\"}\n```"}),
+			wefttest.Say("ok"))), echo), "r_repair", core.Prompt("x"))
+
+		// mw.allow (U23.2): the ops shell may check disk usage but never
+		// delete — the denied call never runs (weft.tool.denied_by allow).
+		type pathIn struct {
+			Path string `json:"path"`
+		}
+		rm := core.Tool("delete_path", "rm -rf a path on the host.", func(_ context.Context, in pathIn) (string, error) {
+			return "deleted " + in.Path, nil
+		})
+		df := core.Tool("disk_usage", "df -h for a mount.", func(_ context.Context, in pathIn) (string, error) {
+			return in.Path + ": 91% used", nil
+		})
+		run(agent("ops-shell", wefttest.Script(
+			wefttest.ToolCalls(
+				wefttest.Call{ID: "a1", Name: "delete_path", Args: `{"path":"/var/lib/postgresql"}`},
+				wefttest.Call{ID: "a2", Name: "disk_usage", Args: `{"path":"/var"}`}),
+			wefttest.Say("I may not delete data; /var is 91% full.")),
+			core.WrapTools(mw.Allow(func(c core.Call) bool { return c.Name != "delete_path" })), rm, df,
+			core.Parallelism(1)), // one order in the golden
+			"r_allow", core.Prompt("/var is full, free some space."))
+
+		// rw.mcp-mesh (U23.2, O8): a front desk imports a billing
+		// server's tools under mcp.Server("billing") beside a local tool;
+		// the ledger answers isError, the statement export fails the
+		// exchange, and the listing's odd tool is skipped.
+		mesh := meshTools(t, ctx)
+		profile := core.Tool("customer_profile", "Profile of a customer.", func(_ context.Context, in orderIn) (string, error) {
+			return "customer " + in.OrderID + ": Acme SARL", nil
+		})
+		opts := []core.Option{profile, core.Parallelism(1)}
+		for _, td := range mesh {
+			opts = append(opts, td)
+		}
+		run(agent("front-desk", wefttest.Script(
+			wefttest.ToolCalls(
+				wefttest.Call{ID: "m1", Name: "customer_profile", Args: `{"order_id":"42"}`},
+				wefttest.Call{ID: "m2", Name: "svc_get_invoice", Args: `{"id":"INV-9"}`},
+				wefttest.Call{ID: "m3", Name: "svc_legacy_ledger", Args: `{"id":"42"}`},
+				wefttest.Call{ID: "m4", Name: "svc_export_statement", Args: `{"id":"42"}`}),
+			wefttest.Say("INV-9 is unpaid; the ledger and the export are down.")), opts...),
+			"r_mesh", core.Prompt("Customer 42 asks about invoice INV-9."))
 	})
+}
+
+// meshTools serves rw.mcp-mesh's billing server on an in-memory MCP
+// transport and imports its tools as mcp:billing.
+func meshTools(t *testing.T, ctx context.Context) []*core.ToolDef {
+	t.Helper()
+	schema := json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}}}`)
+	ok := func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "INV-9: 120 EUR, unpaid"}}}, nil
+	}
+	srv := sdk.NewServer(&sdk.Implementation{Name: "billing-service", Version: "1"}, nil)
+	srv.AddTool(&sdk.Tool{Name: "get_invoice", Description: "Status of an invoice.", InputSchema: schema}, ok)
+	srv.AddTool(&sdk.Tool{Name: "legacy_ledger", Description: "Ledger balance (legacy).", InputSchema: schema},
+		func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{IsError: true, Content: []sdk.Content{&sdk.TextContent{Text: "ledger offline: maintenance window"}}}, nil
+		})
+	srv.AddTool(&sdk.Tool{Name: "export_statement", Description: "Export a statement.", InputSchema: schema},
+		func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return nil, errors.New("statement service unreachable")
+		})
+	odd := &sdk.Tool{Name: "odd_report", Description: "Odd.", InputSchema: json.RawMessage(`{"type":"object"}`)}
+	srv.AddTool(odd, ok)
+	odd.InputSchema = json.RawMessage(`{"type":["object","null"]}`)
+	st, ct := sdk.NewInMemoryTransports()
+	runCtx, stop := context.WithCancel(ctx)
+	t.Cleanup(stop)
+	go func() { _ = srv.Run(runCtx, st) }()
+	sess, err := sdk.NewClient(&sdk.Implementation{Name: "front-desk", Version: "1"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	tools, err := mcp.Tools(ctx, sess, mcp.Server("billing"), mcp.Transport("memory"), mcp.Prefix("svc_"))
+	var ie *mcp.ImportError
+	if !errors.As(err, &ie) || len(tools) != 3 {
+		t.Fatalf("mesh import: %d tools, %v", len(tools), err)
+	}
+	return tools
 }
 
 // cardNorm makes the golden byte-stable: times, ids the pipeline mints,
@@ -316,6 +409,10 @@ func TestRunCardsGolden(t *testing.T) {
 		{"out.no-output", "invoke_agent", "weft.output.submitted", []string{"false"}},
 		{"sub.failed", "execute_tool", "error.type", []string{"SUBAGENT_FAILED"}},
 		{"runtimelab.option-lab", "invoke_agent", "weft.override.params", []string{`{"temperature":0.4,"top_p":0.9,"max_tokens":64,"stop":["END"],"seed":7}`}},
+		{"mw.repairjson", "execute_tool", "weft.tool.args_repaired", []string{"true"}},
+		{"mw.allow", "execute_tool", "weft.tool.denied_by", []string{"allow"}},
+		{"rw.mcp-mesh", "execute_tool", "weft.tool.origin", []string{"mcp:billing", "mcp:billing", "mcp:billing"}},
+		{"rw.mcp-mesh", "execute_tool", "error.type", []string{"mcp_tool_error", "mcp_transport"}},
 	} {
 		if got := attr(c.shape, c.span, c.key); strings.Join(got, "|") != strings.Join(c.want, "|") {
 			t.Errorf("%s %s %s = %q, want %q", c.shape, c.span, c.key, got, c.want)
@@ -327,6 +424,13 @@ func TestRunCardsGolden(t *testing.T) {
 	}
 	if !strings.Contains(string(out["opt.prepare-step"].Requests), `"wire":"reasoning_effort"`) {
 		t.Errorf("opt.prepare-step request carries no thinking.wire")
+	}
+	if !strings.Contains(string(out["mw.repairjson"].Spans), `"weft.repair"`) {
+		t.Errorf("mw.repairjson's chat span carries no weft.repair event")
+	}
+	if tools := string(out["rw.mcp-mesh"].Tools); !strings.Contains(tools, `"source_detail"`) ||
+		!strings.Contains(tools, `"skipped"`) || !strings.Contains(tools, `"odd_report"`) {
+		t.Errorf("rw.mcp-mesh's catalog lacks source_detail or skipped[]:\n%s", tools)
 	}
 	if !strings.Contains(string(out["mw.retry"].Steps[0]), `"http_status":503`) ||
 		!strings.Contains(string(out["mw.retry"].Steps[0]), `"wait_ms"`) ||

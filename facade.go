@@ -1836,11 +1836,32 @@ func PromptSnippet(text string) ToolOption { return core.PromptSnippet(text) }
 func RequireApproval() ToolOption { return core.RequireApproval() }
 
 // Origin names where a tool came from, for the observability record
-// only: it is the tools record's source (ADR 0028 §5), and changes
-// nothing the model sees or the loop does. A tool is "local" by
-// default; Subagent sets "subagent" and weft/mcp's Tools sets "mcp".
-// Any other string is recorded verbatim; the last Origin wins.
+// only: it is the tools record's source (ADR 0028 §5) and the
+// execute_tool span's weft.tool.origin, and changes nothing the model
+// sees or the loop does. A tool is "local" by default; Subagent sets
+// "subagent" and weft/mcp's Tools sets "mcp:<server>" ("mcp" when the
+// server is not named). Any other string is recorded verbatim; the
+// last Origin wins.
 func Origin(name string) ToolOption { return core.Origin(name) }
+
+// SourceDetail is a tool's origin in parts, for the observability
+// record only (record contract §4, O8): the tools record's
+// source_detail beside its source. weft/mcp's Tools sets it on every
+// tool it imports — the server's name, its transport, the Prefix the
+// import added and the tool's name on the server — and lists the
+// server's tools it could not import in Skipped. Names only: none of
+// it reaches the model, and none of it is part of the catalog hash.
+type SourceDetail = core.SourceDetail
+
+// SkippedImport is one tool an importer left out, and why: the tools
+// record's skipped[] entry.
+type SkippedImport = core.SkippedImport
+
+// OriginDetail sets the tool's origin in parts (SourceDetail), recorded
+// beside its Origin as the tools record's source_detail and skipped[]
+// (record contract §4). The value is copied; the last OriginDetail
+// wins. It changes nothing the model sees or the loop does.
+func OriginDetail(d SourceDetail) ToolOption { return core.OriginDetail(d) }
 
 // ReplayPolicy is a tool's side-effect class: what a re-run of a
 // recorded conversation (a playground experiment, a replay fixture) may

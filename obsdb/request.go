@@ -463,6 +463,30 @@ type ToolsRecord struct {
 	Tools          []ToolEntry
 	Content        Hole
 	TruncatedBytes int64
+	// Skipped are the tools an importer left out of the offered
+	// sources (record contract §4, O8: weft/mcp's ImportError), at most
+	// 64; SkippedMore counts the rest. Nil when none was skipped.
+	Skipped     []SkippedTool
+	SkippedMore int
+}
+
+// SkippedTool is one tool an importer left out, and why: the tools
+// record's skipped[] entry. Source is the source it would have come
+// from ("mcp:billing").
+type SkippedTool struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+	Source string `json:"source,omitempty"`
+}
+
+// SourceDetail is a tool's origin in parts (record contract §4, O8):
+// weft/mcp's server name, transport, import prefix and the tool's name
+// on the server.
+type SourceDetail struct {
+	Server     string `json:"server,omitempty"`
+	Transport  string `json:"transport,omitempty"`
+	Prefix     string `json:"prefix,omitempty"`
+	RemoteName string `json:"remote_name,omitempty"`
 }
 
 // ToolEntry is one tool of a catalog: the model-visible triple and the
@@ -480,6 +504,9 @@ type ToolEntry struct {
 	// Output marks the tool Output registered (submit_output): the
 	// run's typed answer (record contract §4, UX-S1-06).
 	Output bool `json:"output,omitempty"`
+	// SourceDetail is the tool's origin in parts (O8): nil when the
+	// producer set none.
+	SourceDetail *SourceDetail `json:"source_detail,omitempty"`
 }
 
 // HoleError is the ErrNotFound DB.Prompt and DB.Tools return when the
@@ -774,8 +801,10 @@ func PromptRecordOf(r StoredRecord) PromptRecord {
 // the hash of the record's weft.catalog.hash attribute.
 func ToolsRecordOf(r StoredRecord) ToolsRecord {
 	var b struct {
-		Hash  string      `json:"hash"`
-		Tools []ToolEntry `json:"tools"`
+		Hash        string        `json:"hash"`
+		Tools       []ToolEntry   `json:"tools"`
+		Skipped     []SkippedTool `json:"skipped"`
+		SkippedMore int           `json:"skipped_more"`
 	}
 	out := ToolsRecord{Index: r.Index, Time: r.Time, Content: contentHole("", r.TruncatedBytes), TruncatedBytes: r.TruncatedBytes}
 	if json.Unmarshal(r.Body, &b) != nil {
@@ -783,6 +812,7 @@ func ToolsRecordOf(r StoredRecord) ToolsRecord {
 		return out
 	}
 	out.Hash, out.Tools = firstSet(r.CatalogHash, b.Hash), b.Tools
+	out.Skipped, out.SkippedMore = b.Skipped, max(b.SkippedMore, 0)
 	return out
 }
 

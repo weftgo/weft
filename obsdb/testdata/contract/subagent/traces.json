@@ -254,6 +254,12 @@
                   }
                 },
                 {
+                  "key": "weft.tool.origin",
+                  "value": {
+                    "stringValue": "subagent"
+                  }
+                },
+                {
                   "key": "weft.tool.result_bytes",
                   "value": {
                     "intValue": "40"

@@ -302,6 +302,12 @@
                   }
                 },
                 {
+                  "key": "weft.tool.origin",
+                  "value": {
+                    "stringValue": "subagent"
+                  }
+                },
+                {
                   "key": "weft.session.id",
                   "value": {
                     "stringValue": "01K00000000000000000000001"

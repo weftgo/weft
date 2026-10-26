@@ -1180,8 +1180,8 @@ data-token (the dev token) or a panel token (POST /api/panel-tokens)
 itself signed in). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 288,995 B raw / 97,906 B gzip
-(95.6 KiB, the bundle of the ledger's row "U21.3-fix"; 8,590 B — 8.4 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 289,582 B raw / 98,142 B gzip
+(95.8 KiB, the bundle of the ledger's row "U23.2"; 8,354 B — 8.2 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -2004,9 +2004,12 @@ flight, else "not read on this page" (a panel token's hidden child, an
 agents-level grandchild under no expanded child). `?level=agents` is the call graph (`src/lib/graph.ts`) over
 the same spans: one node per agent (its runs, the slowest, failures,
 tokens when the spans carry them) in call-depth columns, one per MCP
-server (a tool whose request-catalog source starts `mcp`, the run's own
-calls; a child run's MCP calls are said not shown, its catalog not read
-here), each edge its call count and slowest call (the slowest, not a
+server (the `execute_tool` span's `weft.tool.origin` starting `mcp` —
+`mcp:<server>` under `mcp.Server`, O8 — a child run's calls included;
+a span from before O8 falls back on the request catalog's source, a
+child run's such calls said not shown, its catalog not read here; its
+third line the failures by kind, "1 MCP unreachable · 1 MCP tool
+error", U23.2), each edge its call count and slowest call (the slowest, not a
 percentile; an agent node's runs' own cost), a self-call a loop over
 its node; a run without spans that has subagent rows draws it from
 the run rows this page read (`rowsCallGraph`: agents, edges, statuses
@@ -2017,8 +2020,23 @@ when the spans read back empty once the 30 s late-spans poll after the
 end is over (or the run has no trace), the read's error in words when
 it failed, nothing while it reads or polls; a node
 selects its first run's row and the selected row lights its node —
-switching scales keeps the selection. Pool children are sessions, not
-runs of the trace: not drawn. The selected row opens the drawer beside
+switching scales keeps the selection. A caller-linked run (a pool
+child's turn, `weft.caller.run.id`) the spans hold hangs under its
+caller. The drawer's answer carries **what wrapped this call** (U23.2,
+audit §6.4): a model or tool call's middleware chain outer to inner
+from the run's stored manifest (`model_middleware`, `tool_middleware`,
+a tool's own `middleware`), each layer's decision on the call from its
+spans (`src/lib/onion.ts`: Retry's attempt, wait and HTTP status,
+Fallback's served model, RepairJSON's "repaired 1 arg", Allow's "✋
+denied by policy", MapErrors' "INTERNAL ← io.EOF"), an idle layer
+greyed — Log and Audit record no decision per call, so they are
+always drawn idle — and a click opening the layer's attributes;
+without a stored manifest only the layers that reported, "their order
+unknown". The story's step carries the same effects as chips (`↻ retry
+×2`, `⇄ fallback`, `✎ repaired 1 arg`) and each tool row its own (`✋
+allow`, `⇣ io.EOF`, `✎ repaired`, the panel's too); the Agents card
+draws each agent's two chains; the Request pane's catalog lists the
+tools an MCP listing skipped, greyed. The selected row opens the drawer beside
 the tree, answer first (U10.1, audit §6.3): its kind label (RUN, STEP,
 MODEL, ATTEMPT, TOOL, CHILD RUN, SPAN), the verbs drawn with their words
 — **replay from here ▸**, **edit…** (the prompt, or a tool row's result),

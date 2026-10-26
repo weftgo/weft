@@ -266,3 +266,35 @@ returned, filtering is plain Go as the decision says. Pinned by
 beside two good tools: both imported and callable, the odd one named
 at its index, a clean server reports nothing) and
 `TestToolsEmptyNameIsSkippedAndReported`.
+
+## Amendment (2026-10-26 — MCP identity in the record, U23.2, O8)
+
+An imported tool was `Origin("mcp")` and nothing more: the server's
+name, transport and prefix were recorded nowhere, the tools a listing
+skipped reached no record, and a reader could not tell which server a
+slow or failing call went to (UX-S2-08). Additive on the import, one
+breaking word in the record:
+
+- `mcp.Server(name)` names the server for the record: every imported
+  tool's `Origin` is `mcp:<name>` — the tools record's `source`, the
+  `execute_tool` span's new `weft.tool.origin` — and `mcp` without it.
+  The server's own `initialize` answer is untrusted, so the bridge
+  never names a node after it. `mcp.Transport(kind)` names how it is
+  reached (the SDK's session does not say). **Breaking** for a reader
+  matching the literal `mcp` (pre-1.0, no shim; decision 5 of the UX
+  plan).
+- `core.OriginDetail(core.SourceDetail{Server, Transport, Prefix,
+  RemoteName, Skipped})` carries the parts: the tools record's
+  `source_detail` per tool, and the import's skipped tools once per
+  source in `skipped[]` (name, reason, source; bounded). Core holds
+  names and types only — it imports nothing of MCP — and neither field
+  enters the catalog hash.
+- The two failures stay told apart on the span: `error.type`
+  `mcp_transport` (the `tools/call` exchange failed) vs
+  `mcp_tool_error` (the server answered `isError`), now contract table
+  rows.
+
+Not done: a `_meta` traceparent for `mcp.Serve`, which would link a
+served agent's run to its caller — the served run is still unlinked.
+Pinned by `TestToolsRecordNamesTheServer` and the `mcp_mesh`
+conformance fixture.

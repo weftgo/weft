@@ -60,6 +60,7 @@ import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut, VIEW_KEYS } from "@/lib/keys"
 import { overrideOf, overrideParallelism } from "@/lib/request-pane"
 import { callFactsOf } from "@/lib/cards"
+import { stepEffectsOf } from "@/lib/onion"
 import { toolFactsOf } from "@/lib/error-kind"
 import {
   canReplay,
@@ -655,6 +656,8 @@ function RunPage() {
   const override = useMemo(() => overrideOf(ownSpans, id), [ownSpans, id])
   const toolFacts = useMemo(() => toolFactsOf(ownSpans, id), [ownSpans, id])
   const callFacts = useMemo(() => callFactsOf(ownSpans, id), [ownSpans, id])
+  // Each step's model-call effects (U23.2): the story's step chips.
+  const stepFx = useMemo(() => stepEffectsOf(ownSpans, id), [ownSpans, id])
   // Who let each call run (U15.2-fix, UX-B-14): the span's approval.
   const approvals = useMemo(() => approvalFactsOf(ownSpans, id), [ownSpans, id])
   const requests = useMemo(
@@ -2204,6 +2207,7 @@ function RunPage() {
                       <RunCards
                         doc={doc}
                         pending={foldedNow.pending}
+                        stepFx={stepFx}
                         callFacts={spans.data ? callFacts : undefined}
                         toolFacts={toolFacts}
                         approvals={approvals}
@@ -2271,6 +2275,7 @@ function RunPage() {
                   stepInputRef={stepInput}
                   toolFacts={toolFacts}
                   callFacts={spans.data ? callFacts : undefined}
+                  stepFx={stepFx}
                   approvals={approvals}
                   replayFrom={replayOn ? replayFromHere : undefined}
                 />

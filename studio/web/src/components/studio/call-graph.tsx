@@ -25,6 +25,8 @@ import {
   edgeLabel,
   graphUnsourced,
   loopLabel,
+  mcpFailLine,
+  MCP_NODE_HINT,
   nodeLine,
   nodeStatus,
   nodeStatusLine,
@@ -244,8 +246,11 @@ export function CallGraphView({
             const paint =
               ROLE_SVG[st ? studioVar(st.status.role) : "muted-foreground"]
             const loud = st !== undefined && LOUD.has(st.status.key)
+            // An MCP server's failures by kind (U23.2): the third line.
+            const mcp = n.kind === "mcp" ? mcpFailLine(n) : null
+            const hint = n.kind === "mcp" ? MCP_NODE_HINT : cost?.title
             return (
-              <GraphTip key={n.id} hint={cost?.title}>
+              <GraphTip key={n.id} hint={hint}>
                 <g
                   transform={`translate(${p.x},${p.y})`}
                   ref={(el: SVGGElement | null) => {
@@ -257,10 +262,10 @@ export function CallGraphView({
                   aria-pressed={on}
                   // The name starts with the visible words, in their order
                   // (axe label-content-name-mismatch): the glyph is aria-hidden.
-                  aria-label={`${n.label} ${nodeLine(n)}${line ? ` ${line.word}${line.rest}` : ""}${cost ? ` ${cost.text}` : ""}`}
+                  aria-label={`${n.label} ${nodeLine(n)}${line ? ` ${line.word}${line.rest}` : ""}${mcp ? ` ${mcp}` : ""}${cost ? ` ${cost.text}` : ""}`}
                   // The cost's reason: no <title> inside the button (axe
                   // counts it as visible text) — GraphTip's wraps it.
-                  aria-description={cost?.title}
+                  aria-description={hint}
                   data-node={n.id}
                   data-node-status={st?.status.key}
                   className="group cursor-pointer outline-none"
@@ -270,7 +275,7 @@ export function CallGraphView({
                   }}
                   onFocus={() => {
                     setFocus(n.id)
-                    setTip(cost?.title)
+                    setTip(hint)
                   }}
                   onBlur={() => setTip(undefined)}
                   onKeyDown={onKey(n)}
@@ -330,6 +335,16 @@ export function CallGraphView({
                   >
                     {nodeLine(n)}{" "}
                   </text>
+                  {mcp ? (
+                    <text
+                      x={10}
+                      y={50}
+                      className={`text-[10px] ${TONE_SVG.error.fill}`}
+                      data-node-mcp-failures
+                    >
+                      {mcp}{" "}
+                    </text>
+                  ) : null}
                   {line ? (
                     <text x={10} y={50} className="text-[10px]" data-node-line>
                       <tspan className={paint.fill} data-node-word>

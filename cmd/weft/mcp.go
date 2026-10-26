@@ -481,9 +481,9 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 	addTool(srv, "experiments", `The playground's experiments (GET /api/experiments, or /api/experiments/{id} with id): `+
 		`each saved command (engine, overrides, edits), its runs and their outcomes. 404 when the playground is off (see meta).`,
 		m.experiments)
-	addTool(srv, "runtimes", `The runtimes Studio knows (GET /api/runtimes): each app process that linked to Studio — connected now, `+
-		`disconnected, or restored from the database after a Studio restart (restored, stale) — its agents, breakpoints and `+
-		`whether it is connected now — is a breakpoint why a run parked? 404 when the playground is off (see meta).`,
+	addTool(srv, "runtimes", `The runtimes Studio knows (GET /api/runtimes): each app process that linked to Studio — connected, `+
+		`restored (listed from the database after a Studio restart, waiting for its app) or gone (disconnected; forgettable) — `+
+		`its agents and breakpoints — is a breakpoint why a run parked? 404 when the playground is off (see meta).`,
 		m.runtimes)
 	addTool(srv, "meta", `What this Studio is and can do (GET /api/meta): versions, database kind, capabilities and capabilities_off `+
 		`(why one is off), debug_scope, retention, pricing source. Call when a tool answers 404/403 to see whether the route exists.`,

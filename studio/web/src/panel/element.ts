@@ -27,6 +27,7 @@ import {
   runPage,
   saveTestLink,
   sessionLink,
+  runtimesLink,
   settingsLink,
   tracePage,
 } from "../lib/links"
@@ -202,9 +203,9 @@ import {
   DRAWER_TITLES,
   SIDE_EFFECT_TOOL,
   SIDE_EFFECT_WORDS,
-  targetLine,
 } from "../lib/drawer-spec"
 import type { DrawerSection } from "../lib/drawer-spec"
+import { RUNS_IN, registering, runsInLine } from "../lib/runs-in"
 import {
   ENGINE_WORDS,
   engineHeld,
@@ -3544,7 +3545,48 @@ export class WeftDevtools extends HTMLElement {
     // why Run is held, the picker, the one escape.
     const tc = targetFor(d, s.runtimes, s.preview?.doc)
     const tg = sec("target")
-    tg.append(targetLine(d.agent || "?", agent && rt))
+    // Runs in (U20.1, lib/runs-in.ts): the runtime by service, pid and
+    // id, a select when two connected ones register the agent; else the
+    // refusal — what is connected, the fix, the Studio asked.
+    const live = s.runtimes.filter((r) => r.connected !== false)
+    const ok = agent && rt
+    tg.append(
+      el(
+        "div",
+        ok ? "" : "weft-warn",
+        [
+          `${RUNS_IN.head}: ${ok ? runsInLine(rt) : RUNS_IN.none(d.agent)} · `,
+          el("a", "", RUNS_IN.manage, {
+            href: href(
+              this.base,
+              runtimesLink(ok ? { runtime: rt.id } : { agent: d.agent })
+            ),
+            ...NEW_TAB,
+          }),
+        ],
+        { "data-runs-in": ok ? rt.id : "none" }
+      )
+    )
+    const regs = registering(live, d.agent)
+    if (!ok)
+      tg.append(
+        el(
+          "div",
+          "weft-note",
+          `${RUNS_IN.connected(live)} · ${RUNS_IN.fix(d.agent)} · ${RUNS_IN.asked(this.base)}`
+        )
+      )
+    else if (regs[1]) {
+      const rs = el("select", "weft-input", "", {
+        "aria-label": "runtime",
+      }) as HTMLSelectElement
+      for (const r of regs)
+        option(rs, runsInLine(r), { value: r.id }, r.id == rt.id)
+      on(rs, "change", (_, n) =>
+        this.model?.pickTarget((n as HTMLSelectElement).value, d.agent)
+      )
+      tg.append(rs)
+    }
     // One note: the build line, else why Run is held.
     const tn = tc.build ? `! ${tc.build}` : tc.held
     if (tn)
@@ -4017,7 +4059,7 @@ export class WeftDevtools extends HTMLElement {
     if (hasCapability(s, "breakpoints"))
       body.append(
         el("a", "weft-reason", BREAKPOINTS_MOVED, {
-          href: href(this.base, settingsLink()),
+          href: href(this.base, runtimesLink()),
           ...NEW_TAB,
           "data-breakpoints-moved": "",
         })

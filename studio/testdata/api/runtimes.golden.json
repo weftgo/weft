@@ -6,6 +6,7 @@
       "pid": 41237,
       "cwd": "/home/dev/acme-api",
       "studio_url": "http://127.0.0.1:7341",
+      "weft_version": "v0.18.3",
       "service": "acme-api",
       "env": "dev",
       "connected_since": "2026-10-09T10:00:00Z",
@@ -38,7 +39,9 @@
           "instructions": "You are Acme's support agent."
         }
       ],
-      "breakpoints": []
+      "breakpoints": ["refund"],
+      "breakpoints_set_at": "2026-10-09T10:00:04Z",
+      "breakpoints_by": "studio"
     }
   ]
 }

@@ -12,8 +12,8 @@ import {
 } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { Breakpoints } from "@/components/studio/breakpoints"
 import {
-  Breakpoints,
   buildRunBody,
   CompareTable,
   editFieldsOf,

@@ -13,6 +13,7 @@ import {
   within,
 } from "@testing-library/react"
 import axe from "axe-core"
+import { debugScopeWords } from "@/lib/runtimes"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -191,18 +192,22 @@ describe("the settings page renders every section from the goldens", () => {
     expect(
       section("capabilities").querySelectorAll("[data-caps-on] li")
     ).toHaveLength(playgroundMeta().capabilities.length)
-    // Runtimes: the golden's runtime, its agent, its breakpoints editor.
-    const rt = await waitFor(() =>
-      section("runtimes").querySelector<HTMLElement>("[data-runtime]")!
+    // Runtimes (U20.1): the states in one line, debug_scope explained,
+    // the link to /runtimes — the cards and the breakpoints live there.
+    await waitFor(() =>
+      expect(
+        section("runtimes").querySelector("[data-runtime-states]")!.textContent
+      ).toBe("1 connected")
     )
-    expect(rt.getAttribute("data-runtime")).toBe(
-      "rt_01K7Q2W3E4R5T6Y7U8I9O0PABC"
-    )
-    expect(rt.textContent).toContain("acme-support")
-    expect(rt.textContent).toContain("dev-laptop")
+    expect(section("runtimes").querySelector("[data-runtime]")).toBeNull()
     expect(
-      within(rt).getByRole("checkbox", { name: "lookup_order" })
-    ).toBeTruthy()
+      section("runtimes").querySelector("[data-debug-scope]")!.textContent
+    ).toBe(debugScopeWords(playgroundMeta().debug_scope as string | undefined))
+    expect(
+      section("runtimes")
+        .querySelector("[data-runtimes-link]")!
+        .getAttribute("href")
+    ).toMatch(/runtimes$/)
     expect(
       section("runtimes")
         .querySelector("[data-runtime-count]")!
@@ -662,7 +667,9 @@ describe("accessibility", () => {
     await openSettings()
     await within(section("pricing")).findByRole("table")
     await waitFor(() =>
-      expect(section("runtimes").querySelector("[data-runtime]")).toBeTruthy()
+      expect(
+        section("runtimes").querySelector("[data-runtime-states]")
+      ).toBeTruthy()
     )
     const main =
       document.querySelector<HTMLElement>("[data-section]")!.parentElement!

@@ -270,6 +270,29 @@ func commandsTable(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		if got, err := cs.Runtimes(ctx()); err != nil || len(got) != 2 {
 			t.Errorf("Runtimes after deletion = %d, %v; want 2", len(got), err)
 		}
+
+		// DeleteRuntime (U20.1's forget): the row and its breakpoint set
+		// go, the commands and routes naming it stay; an unknown id is
+		// no error, an empty one is refused.
+		if err := cs.DeleteRuntime(ctx(), "rt_1"); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := cs.Runtimes(ctx()); err != nil || len(got) != 1 || !sameRuntime(got[0], rt2) {
+			t.Errorf("Runtimes after DeleteRuntime(rt_1) = %+v, %v; want [%+v]", got, err, rt2)
+		}
+		if _, ok, err := cs.Breakpoints(ctx(), "rt_1"); err != nil || ok {
+			t.Errorf("Breakpoints(rt_1) after DeleteRuntime = %v, %v; want none stored", ok, err)
+		}
+		wantIDs(t, cs, obsdb.CommandQuery{}, "cmd_5", "cmd_4", "cmd_3", "cmd_2", "cmd_1")
+		if _, ok, err := cs.Route(ctx(), "run_1"); err != nil || !ok {
+			t.Errorf("Route(run_1) after DeleteRuntime = %v, %v; want kept", ok, err)
+		}
+		if err := cs.DeleteRuntime(ctx(), "rt_none"); err != nil {
+			t.Errorf("DeleteRuntime(rt_none) = %v, want nil", err)
+		}
+		if err := cs.DeleteRuntime(ctx(), ""); !errors.Is(err, obsdb.ErrInvalidCommand) {
+			t.Errorf("DeleteRuntime without an id = %v, want ErrInvalidCommand", err)
+		}
 	}
 }
 

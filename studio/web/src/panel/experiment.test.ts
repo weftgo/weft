@@ -5,6 +5,7 @@
 // (P2-16), the lifecycle poll ending, the diff over whole turns, the
 // Studio hand-off (P2-17), and every refusal surfacing as words.
 import { BREAKPOINTS_MOVED } from "../lib/drawer-spec"
+import { RUNS_IN, runsInLine } from "../lib/runs-in"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tokenScope } from "./config"
 import {
@@ -804,7 +805,7 @@ describe("the drawer", () => {
     expect(pickRuntime(rts, "acme-support")?.id).toBe("rt_new")
   })
 
-  it("runtime-wide breakpoints are not a per-replay knob: a pointer to Settings, no Break on (U17; UX-D-36)", async () => {
+  it("runtime-wide breakpoints are not a per-replay knob: a pointer to /runtimes, no Break on (U17; UX-D-36; U20.1)", async () => {
     const routes = baseRoutes()
     const { el, studio } = await openDrawer(routes, {
       ...META,
@@ -813,7 +814,7 @@ describe("the drawer", () => {
     expect(text(el, ".weft-drawer")).not.toContain("Break on")
     const ptr = $(el, ".weft-drawer [data-breakpoints-moved]")!
     expect(ptr.textContent).toBe(BREAKPOINTS_MOVED)
-    expect(ptr.getAttribute("href")).toBe("http://studio.test/studio/settings")
+    expect(ptr.getAttribute("href")).toBe("http://studio.test/studio/runtimes")
     expect(studio.calls.some((c) => c.method === "PUT")).toBe(false)
   })
 
@@ -836,12 +837,61 @@ describe("the drawer", () => {
     )
   })
 
-  it("says why when no runtime can run the experiment", async () => {
+  it("Runs in: two connected runtimes registering the agent are a select named apart by pid and id; a pick re-targets (U20.1, UX-C-11)", async () => {
+    const routes = baseRoutes()
+    const one = RUNTIMES.runtimes[0]
+    const older = {
+      ...one,
+      id: "rt_02",
+      pid: 43,
+      last_seen: "2020-01-01T00:00:00Z",
+    }
+    routes.runtimes = { runtimes: [older, one] }
+    const { el } = await openDrawer(routes)
+    // The newest seen runs it, whatever the list's order.
+    expect(
+      $(el, ".weft-drawer [data-runs-in]")!.getAttribute("data-runs-in")
+    ).toBe("rt_01")
+    const sel = $(
+      el,
+      '.weft-drawer select[aria-label="runtime"]'
+    ) as HTMLSelectElement
+    // Each option is the Runs in line (both drawers): id, service,
+    // pid, seen.
+    expect([...sel.options].map((o) => o.textContent)).toEqual([
+      runsInLine(one),
+      runsInLine(older),
+    ])
+    expect(sel.value).toBe("rt_01")
+    sel.value = "rt_02"
+    sel.dispatchEvent(new Event("change"))
+    await settle()
+    expect(
+      $(el, ".weft-drawer [data-runs-in]")!.getAttribute("data-runs-in")
+    ).toBe("rt_02")
+    expect(text(el, ".weft-drawer [data-runs-in]")).toContain(
+      runsInLine(older).split(" (")[0]
+    )
+  })
+
+  it("says why when no runtime can run the experiment: the drawer opens on its Runs in refusal, never a Result card (UX-D-02)", async () => {
     const routes = baseRoutes()
     routes.runtimes = { runtimes: [] }
     const { el } = await openDrawer(routes)
-    expect($(el, ".weft-drawer")).toBeNull()
-    expect(text(el, ".weft-xres")).toContain("no runtime registers an agent")
+    expect($(el, ".weft-xres")).toBeNull()
+    const line = $(el, '.weft-drawer [data-runs-in="none"]')!
+    expect(line.textContent).toBe(
+      `${RUNS_IN.head}: ${RUNS_IN.none("acme-support")} · ${RUNS_IN.manage}`
+    )
+    expect(line.querySelector("a")?.getAttribute("href")).toBe(
+      "http://studio.test/studio/runtimes?agent=acme-support"
+    )
+    const notes = text(el, ".weft-drawer [data-drawer-section=target]")
+    expect(notes).toContain(RUNS_IN.connected([]))
+    expect(notes).toContain(RUNS_IN.fix("acme-support"))
+    expect(notes).toContain(RUNS_IN.asked("http://studio.test/studio/"))
+    // Run is held: no runtime to post to.
+    expect((runBtn(el) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it.each([

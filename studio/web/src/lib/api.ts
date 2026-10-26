@@ -759,6 +759,10 @@ export interface Meta {
     stale: string[]
     /** Agents registered services hold in different versions. */
     differs?: string[]
+    /** U20.1: each checked agent's latest run's manifest hash. */
+    latest?: Record<string, string>
+    /** The check's first failure (counts cover what was checked). */
+    error?: string
   } | null
 }
 
@@ -1170,6 +1174,8 @@ async function request<T>(
     }
     throw new ApiError(res.status, code, message, doc ?? undefined)
   }
+  // 204 (DELETE /api/runtimes/{id}): no body to read.
+  if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
 
@@ -2537,6 +2543,12 @@ export interface RuntimeView {
    * absent for a set adopted from a registration or restored after a
    * Studio restart). */
   breakpoints_set_at?: string
+  /** U20.1: who set a non-empty set — studio (this Studio's PUT),
+   * runtime (its registration carried it), store (restored after a
+   * Studio restart). Absent for an empty set or an older Studio. */
+  breakpoints_by?: "studio" | "runtime" | "store"
+  /** U20.1: the weft the runtime was built with. */
+  weft_version?: string
 }
 
 export function runtimesQuery() {
@@ -2797,6 +2809,17 @@ export function postCancel(runID: string) {
  * §8.3): the tools the runtime parks on every run it starts from now
  * on (an empty set clears). Answers the set the runtime now holds; a
  * runtime that is not connected is a 503 and nothing is stored. */
+/** DELETE /api/runtimes/{id} (U20.1, capability runtime_forget): a
+ * runtime that is gone leaves the list and Studio's store — 409 while
+ * it is connected or a command addressed to it is still queued or
+ * accepted. */
+export function forgetRuntime(runtimeID: string) {
+  return request<undefined>(
+    "DELETE",
+    `runtimes/${encodeURIComponent(runtimeID)}`
+  )
+}
+
 export function putBreakpoints(runtimeID: string, tools: string[]) {
   return request<{ tools: string[] | null }>(
     "PUT",

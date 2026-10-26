@@ -24,10 +24,10 @@ import {
   studioToken,
   tabTokenActive,
 } from "@/lib/api"
-import type { Meta, PricingSettings, RuntimeView } from "@/lib/api"
+import type { Meta, PricingSettings } from "@/lib/api"
 import { copyText, download } from "@/lib/json"
-import { absoluteTime, relativeTime } from "@/lib/format"
-import { playgroundLink, runLink } from "@/lib/links"
+import { runLink, runtimesLink } from "@/lib/links"
+import { countLine, debugScopeWords } from "@/lib/runtimes"
 import { setDensity } from "@/lib/density"
 import type { Density } from "@/lib/density"
 import {
@@ -40,7 +40,6 @@ import {
   loadEdits,
   maskToken,
   mcpCommand,
-  BREAKPOINT_WORDS,
   INGEST_WORDS,
   LOGS_BRIDGE,
   MCP_RECIPE_PATH,
@@ -61,7 +60,6 @@ import type {
 } from "@/lib/settings"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
-import { Breakpoints } from "@/components/studio/experiment-form"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { KbdHelpBody } from "@/components/studio/kbd-help"
 import { setThemeChoice, useThemeChoice } from "@/components/studio/theme"
@@ -888,127 +886,46 @@ function RuntimesSection({ meta }: { meta: Meta }) {
         {meta.runtimes} connected (holding a command stream now)
       </p>
     )
+  const mc = meta.manifest_check
+  // The manifest check (UX-S4-01): what /agents badges, in numbers.
+  const check = mc ? (
+    <p className="text-xs" data-manifest-check>
+      manifest: checked {mc.checked} of {mc.agents} · stale {mc.stale.length}
+      {mc.stale.length ? ` (${mc.stale.join(", ")})` : ""} · differs{" "}
+      {mc.differs?.length ?? 0}
+      {mc.error ? ` · ${mc.error}` : ""}
+    </p>
+  ) : null
   if (!on)
     return (
       <div className="space-y-2">
         {count}
+        {check}
         <Off meta={meta} cap="runtimes" />
       </div>
     )
-  if (runtimes.isPending) return <Spinner />
-  if (runtimes.isError)
-    return (
-      <div className="space-y-2">
-        {count}
-        <Refused err={runtimes.error} what="the runtimes" />
-      </div>
-    )
-  const list = runtimes.data.runtimes
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {count}
-      {list.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          No runtime has registered: an app links with{" "}
-          <span className="font-mono">runtime.Install(...)</span> under{" "}
-          <span className="font-mono">WEFT_ENV=dev</span>.
+      {runtimes.data ? (
+        <p className="text-xs" data-runtime-states>
+          {countLine(runtimes.data.runtimes)}
         </p>
-      ) : (
-        list.map((rt) => (
-          <RuntimeCard
-            key={rt.id}
-            rt={rt}
-            breakpoints={caps.has("breakpoints")}
-          />
-        ))
-      )}
-      {caps.has("playground") && (
-        <Link
-          {...playgroundLink()}
-          className="inline-block font-mono text-xs text-thread-ink hover:underline"
-        >
-          open the playground
-        </Link>
-      )}
-    </div>
-  )
-}
-
-function RuntimeCard({
-  rt,
-  breakpoints,
-}: {
-  rt: RuntimeView
-  breakpoints: boolean
-}) {
-  const connected = rt.connected ?? true
-  const tools = [
-    ...new Set(rt.agents.flatMap((a) => a.tools.map((t) => t.name))),
-  ].sort()
-  return (
-    <div className="space-y-2 rounded-lg border p-3" data-runtime={rt.id}>
-      <Facts
-        rows={[
-          ["id", rt.id],
-          ["service", `${rt.service || "(unnamed)"} · ${rt.env || "(no env)"}`],
-          ["host", `${rt.host} · pid ${rt.pid}`],
-          [
-            "connected",
-            connected
-              ? `yes, since ${rt.connected_since}`
-              : `no — last seen ${rt.last_seen}`,
-          ],
-          [
-            "agents",
-            rt.agents
-              .map(
-                (a) =>
-                  `${a.name} (${a.models.join(", ") || "no model"}${a.resolver ? ", resolver" : ""})`
-              )
-              .join("; ") || "(none)",
-          ],
-        ]}
-      />
-      <div className="space-y-1 text-xs">
-        <span className="text-muted-foreground">
-          breakpoints (parked on every run this runtime starts)
-        </span>
-        {breakpoints && connected && tools.length > 0 ? (
-          <Breakpoints
-            runtimeID={rt.id}
-            tools={tools}
-            stored={rt.breakpoints}
-          />
-        ) : (
-          <p className="font-mono" data-breakpoints>
-            {rt.breakpoints === undefined
-              ? "(not reported: this Studio predates the field)"
-              : rt.breakpoints.length
-                ? rt.breakpoints.join(", ")
-                : "none"}
-            {!breakpoints
-              ? " · read-only: capability breakpoints is off"
-              : !connected
-                ? " · read-only: disconnected"
-                : ""}
-          </p>
-        )}
-        {rt.breakpoints?.length ? (
-          <p
-            className="font-mono text-[11px] text-faint"
-            data-breakpoints-set-at={rt.breakpoints_set_at ?? ""}
-            title={
-              rt.breakpoints_set_at
-                ? absoluteTime(rt.breakpoints_set_at)
-                : undefined
-            }
-          >
-            {rt.breakpoints_set_at
-              ? BREAKPOINT_WORDS.setAt(relativeTime(rt.breakpoints_set_at))
-              : BREAKPOINT_WORDS.setAtUnknown}
-          </p>
-        ) : null}
-      </div>
+      ) : runtimes.isError ? (
+        <Refused err={runtimes.error} what="the runtimes" />
+      ) : null}
+      {check}
+      <p className="text-xs text-muted-foreground" data-debug-scope>
+        {debugScopeWords(meta.debug_scope)}
+      </p>
+      <Link
+        {...runtimesLink()}
+        className="inline-block font-mono text-xs text-thread-ink hover:underline"
+        data-runtimes-link
+      >
+        open Runtimes — each runtime, its agents, what Studio may do, its
+        breakpoints
+      </Link>
     </div>
   )
 }

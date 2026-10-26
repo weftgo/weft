@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as CompareRouteImport } from './routes/compare'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as PlaygroundRouteImport } from './routes/playground'
+import { Route as RuntimesRouteImport } from './routes/runtimes'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
 import { Route as ConversationsIdRouteImport } from './routes/conversations.$id'
@@ -43,6 +44,11 @@ const LiveRoute = LiveRouteImport.update({
 const PlaygroundRoute = PlaygroundRouteImport.update({
   id: '/playground',
   path: '/playground',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RuntimesRoute = RuntimesRouteImport.update({
+  id: '/runtimes',
+  path: '/runtimes',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -106,6 +112,7 @@ export interface FileRoutesByFullPath {
   '/compare': typeof CompareRoute
   '/live': typeof LiveRoute
   '/playground': typeof PlaygroundRoute
+  '/runtimes': typeof RuntimesRoute
   '/settings': typeof SettingsRoute
   '/conversations/$id': typeof ConversationsIdRoute
   '/experiments/$id': typeof ExperimentsIdRoute
@@ -123,6 +130,7 @@ export interface FileRoutesByTo {
   '/compare': typeof CompareRoute
   '/live': typeof LiveRoute
   '/playground': typeof PlaygroundRoute
+  '/runtimes': typeof RuntimesRoute
   '/settings': typeof SettingsRoute
   '/conversations/$id': typeof ConversationsIdRoute
   '/experiments/$id': typeof ExperimentsIdRoute
@@ -141,6 +149,7 @@ export interface FileRoutesById {
   '/compare': typeof CompareRoute
   '/live': typeof LiveRoute
   '/playground': typeof PlaygroundRoute
+  '/runtimes': typeof RuntimesRoute
   '/settings': typeof SettingsRoute
   '/conversations/$id': typeof ConversationsIdRoute
   '/experiments/$id': typeof ExperimentsIdRoute
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
     | '/compare'
     | '/live'
     | '/playground'
+    | '/runtimes'
     | '/settings'
     | '/conversations/$id'
     | '/experiments/$id'
@@ -177,6 +187,7 @@ export interface FileRouteTypes {
     | '/compare'
     | '/live'
     | '/playground'
+    | '/runtimes'
     | '/settings'
     | '/conversations/$id'
     | '/experiments/$id'
@@ -194,6 +205,7 @@ export interface FileRouteTypes {
     | '/compare'
     | '/live'
     | '/playground'
+    | '/runtimes'
     | '/settings'
     | '/conversations/$id'
     | '/experiments/$id'
@@ -212,6 +224,7 @@ export interface RootRouteChildren {
   CompareRoute: typeof CompareRoute
   LiveRoute: typeof LiveRoute
   PlaygroundRoute: typeof PlaygroundRoute
+  RuntimesRoute: typeof RuntimesRoute
   SettingsRoute: typeof SettingsRoute
   ConversationsIdRoute: typeof ConversationsIdRoute
   ExperimentsIdRoute: typeof ExperimentsIdRoute
@@ -253,6 +266,13 @@ declare module '@tanstack/react-router' {
       path: '/playground'
       fullPath: '/playground'
       preLoaderRoute: typeof PlaygroundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/runtimes': {
+      id: '/runtimes'
+      path: '/runtimes'
+      fullPath: '/runtimes'
+      preLoaderRoute: typeof RuntimesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -340,6 +360,7 @@ const rootRouteChildren: RootRouteChildren = {
   CompareRoute: CompareRoute,
   LiveRoute: LiveRoute,
   PlaygroundRoute: PlaygroundRoute,
+  RuntimesRoute: RuntimesRoute,
   SettingsRoute: SettingsRoute,
   ConversationsIdRoute: ConversationsIdRoute,
   ExperimentsIdRoute: ExperimentsIdRoute,

@@ -76,3 +76,32 @@ func ExampleAgentRegistration_ManifestModelProvider() {
 	fmt.Println(a.ManifestModelProvider(), a.ManifestModelName())
 	// Output: wefttest script
 }
+
+// ExampleRuntimeServer_Forget removes a runtime that is gone — it
+// registered once and holds no command stream — from the list (and,
+// built WithStore, from the command store); a connected one is
+// refused with ErrConnected.
+func ExampleRuntimeServer_Forget() {
+	rs := runtime.New()
+	mux := http.NewServeMux()
+	rs.Mount(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	reg := `{"runtime_id":"rt_gone","host":"laptop","pid":1,"service":"acme-api",
+	         "agents":[{"name":"acme-support","manifest":"{}"}]}`
+	resp, err := http.Post(ts.URL+"/api/runtime/register", "application/json", strings.NewReader(reg))
+	if err != nil {
+		fmt.Println("register:", err)
+		return
+	}
+	_ = resp.Body.Close()
+
+	fmt.Println("listed:", len(rs.Snapshot()), "connected:", rs.Connected("rt_gone"))
+	fmt.Println("forget:", rs.Forget("rt_gone"))
+	fmt.Println("listed:", len(rs.Snapshot()))
+	// Output:
+	// listed: 1 connected: false
+	// forget: <nil>
+	// listed: 0
+}

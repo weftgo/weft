@@ -26,6 +26,7 @@ import type { ReplayDraft, ReplayVerb } from "../lib/replay"
 import { REPLAY_WORDS } from "../lib/replay"
 import type { HoleMark } from "../lib/honesty"
 import { recordedToolsOf, targetCheck } from "../lib/target"
+import { registering } from "../lib/runs-in"
 import type { CommandReason, TargetCheck } from "../lib/target"
 import type { DiffDoc } from "../lib/stepdiff"
 import type { CommandStatus, RuntimeView } from "./client"
@@ -385,17 +386,15 @@ export function targetFor(
 }
 
 /** pickRuntime names the runtime a drawer opens against: the one
- * exposing the source run's agent — the one seen last when several do
- * (a restarted app registers again under a new id, and the old
- * registration lingers) — else the first listed. */
+ * exposing the source run's agent — the connected one, then the one
+ * seen last, when several do (lib/runs-in.ts's registering: a restarted
+ * app registers again under a new id, and the old registration
+ * lingers) — else the first listed. */
 export function pickRuntime(
   runtimes: RuntimeView[],
   agent: string
 ): RuntimeView | null {
-  const live = runtimes.filter((r) => r.agents.some((a) => a.name === agent))
-  if (!live.length) return runtimes[0] ?? null
-  const seen = (r: RuntimeView) => Date.parse(r.last_seen) || 0
-  return live.reduce((best, r) => (seen(r) > seen(best) ? r : best))
+  return registering(runtimes, agent).at(0) ?? runtimes.at(0) ?? null
 }
 
 /** draftProblem names what the wire cannot carry, before anything is

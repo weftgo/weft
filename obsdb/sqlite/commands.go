@@ -265,6 +265,29 @@ func (d *DB) Runtimes(ctx context.Context) (_ []obsdb.StoredRuntime, err error) 
 	return out, rows.Err()
 }
 
+// DeleteRuntime removes one runtime's row and its breakpoint set, in
+// one transaction.
+func (d *DB) DeleteRuntime(ctx context.Context, runtimeID string) (err error) {
+	if err := d.checkOpen(); err != nil {
+		return err
+	}
+	defer d.closedErr(&err)
+	if runtimeID == "" {
+		return fmt.Errorf("%w: delete needs a runtime id", obsdb.ErrInvalidCommand)
+	}
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	for _, q := range []string{`DELETE FROM breakpoints WHERE runtime_id = ?`, `DELETE FROM runtimes WHERE id = ?`} {
+		if _, err := tx.ExecContext(ctx, q, runtimeID); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // liveStates is the SQL list of the states PruneCommands never deletes.
 const liveStates = `('` + obsdb.CommandQueued + `', '` + obsdb.CommandAccepted + `')`
 

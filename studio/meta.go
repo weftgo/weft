@@ -140,6 +140,12 @@ type metaManifest struct {
 	// versions (source runtime only): their runs are checked against
 	// every version, so no service's runs read stale for another's.
 	Differs []string `json:"differs,omitempty"`
+	// Latest is each checked agent's latest run's manifest hash, by
+	// agent name (U20.1): what a stale badge names — "the latest run
+	// ran d2151022, not this manifest" — and what the runtimes view
+	// compares each registered hash with. Absent when nothing was
+	// checked.
+	Latest map[string]string `json:"latest,omitempty"`
 	// Error is the first failure of the check (a manifest that does
 	// not parse, a run read that failed; logged too): the counts cover
 	// only what was checked before or around it.
@@ -351,6 +357,10 @@ func (s *Server) manifestCheck(ctx context.Context, reg []linkruntime.ManifestSo
 			continue
 		}
 		out.Checked++
+		if out.Latest == nil {
+			out.Latest = map[string]string{}
+		}
+		out.Latest[name] = page.Runs[0].ManifestHash
 		if !versions[name][page.Runs[0].ManifestHash] {
 			out.Stale = append(out.Stale, name)
 		}

@@ -65,6 +65,12 @@ type CommandStore interface {
 	// Runtimes answers every stored runtime, most recently seen first
 	// (ties by ID).
 	Runtimes(ctx context.Context) ([]StoredRuntime, error)
+	// DeleteRuntime removes runtimeID's row and its breakpoint set —
+	// Studio's "forget" of a runtime that is gone (U20.1). Its commands
+	// and routes stay: they are history, and PruneCommands bounds them.
+	// An id with nothing stored is no error. ErrInvalidCommand for an
+	// empty runtimeID.
+	DeleteRuntime(ctx context.Context, runtimeID string) error
 	// PruneCommands bounds the store, the in-memory runtime server's
 	// rule made durable, and answers how many commands it deleted:
 	//

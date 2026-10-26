@@ -2109,12 +2109,8 @@ export class PanelModel {
     this.state.runtimes = runtimes
     this.state.rtRead = true
     this.state.rtErr = ""
-    if (!runtimes.some((r) => r.agents.length)) {
-      // Nothing to replay it on: say why instead of a button that does
-      // nothing.
-      this.setExperimentError("no runtime registers an agent", under)
-      return
-    }
+    // No runtime at all opens the drawer too: its "Runs in" line says
+    // what is connected and the fix (UX-D-02), never a Result card.
     // A source that names no agent, or one no runtime registers, opens
     // the drawer on no agent: it asks (lib/target.ts), never a stand-in.
     const rt = agentName ? pickRuntime(runtimes, agentName) : null

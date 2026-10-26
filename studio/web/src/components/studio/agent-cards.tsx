@@ -9,6 +9,7 @@ import type { ReactNode } from "react"
 import type { ManifestAgent, ManifestTool } from "@/lib/api"
 import { agentPolicyChips, toolPolicyChips } from "@/lib/policy"
 import type { PolicyChip } from "@/lib/policy"
+import { ManifestCheckBadge } from "@/components/studio/manifest-badge"
 import {
   Collapsible,
   CollapsibleContent,
@@ -131,6 +132,7 @@ export function AgentCard({
         <span className="font-mono text-[11px] text-muted-foreground">
           {agent.model.provider}/{agent.model.name}
         </span>
+        <ManifestCheckBadge agent={agent.name} hash={agent.manifest_hash} />
       </div>
       <Chips chips={agentPolicyChips(agent.policy)} />
       {agent.instructions ? (

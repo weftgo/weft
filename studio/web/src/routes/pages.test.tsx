@@ -16,6 +16,7 @@ import { setStudioToken } from "@/lib/api"
 import { CAPS_UNREAD } from "@/lib/honesty"
 import { queryClient } from "@/lib/query"
 import { TARGET_WORDS } from "@/lib/target"
+import { BREAKPOINTS_MOVED } from "@/lib/drawer-spec"
 import type {
   RunDoc,
   RunRow,
@@ -936,14 +937,19 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       thread: "ephemeral",
       public_id: source.public_id,
     })
-    // The runtime's stored breakpoints are shown after a reload.
-    // Two "refund" boxes: the tool (turned off by tools=) and the
-    // breakpoint (the runtime's stored set, shown after a reload).
+    // The runtime's stored breakpoints are the runtime's, not this
+    // variant's (UX-C-18, U20.1): one "refund" box — the tool, turned
+    // off by tools= — and a pointer to /runtimes with the count.
     expect(
       screen
         .getAllByLabelText<HTMLInputElement>(/^refund/)
         .map((b) => b.checked)
-    ).toEqual([false, true])
+    ).toEqual([false])
+    const ptr = document.querySelector("[data-breakpoints-moved]")!
+    expect(ptr.textContent).toBe(
+      `${BREAKPOINTS_MOVED} · 1 tool break on every run`
+    )
+    expect(ptr.getAttribute("href")).toContain("runtimes?runtime=rt_1")
   })
 
   // The panel hands its drawer over in the URL fragment: prompts in a

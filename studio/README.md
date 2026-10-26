@@ -638,7 +638,7 @@ the tools, mode and breakpoints change (U17: the drawer reads in
 1 what changes, 2 will be sent, 3 tools during the replay, then side
 effects, thread mode and the option lab folded under "advanced", and Run;
 runtime-wide breakpoints are not a per-replay knob, the drawer points to
-Settings' runtimes card; the engine is chosen per command by
+the /runtimes page (U20.1); the engine is chosen per command by
 `lib/engine.ts`'s `engineChoice` — `scripted` when it can answer: a source
 run, no edit (one equal to the recording is none: "edit this result"
 opens on an empty field), no prompt, model, input, fork, tools, thinking
@@ -1093,8 +1093,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 281,281 B raw / 94,658 B gzip
-(92.4 KiB, the bundle of the ledger's row "P10a-pre-go-fix"; 11,838 B — 11.6 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 282,194 B raw / 94,986 B gzip
+(92.8 KiB, the bundle of the ledger's row "U20.1"; 11,510 B — 11.2 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -2509,6 +2509,40 @@ directory — a filesystem path, so under `db.path`'s rule: the server token,
 or setup A's loopback without a Token; never a panel token (read or
 playground scope). `/api/meta`'s `runtimes` still counts connected runtimes
 only.
+
+**The runtimes page (U20.1; capability `runtimes`, forget under
+`runtime_forget`).** `/runtimes` is every runtime that registered with
+this Studio, in three groups — connected, restored after a Studio restart
+(listed from the command store, waiting for the app to reconnect), stale
+(the stream gone; forgettable) — each told apart by `pid`, `cwd`, `host`
+and its id, and the links of one process (one `host` + `pid`) drawn as one
+process with the agents two links both register named. Per runtime: what
+Studio may do on the runs it starts and on the app's own turns
+(approve, steer, cancel, breakpoints — every "no" with why: not
+connected, a capability off, `runtime.Sessions` not installed, no agent
+built with `runtime.Breakpoints()`), `/api/meta`'s `debug_scope` in words;
+per agent its registered `manifest_hash` against its latest run's
+(`manifest_check.latest`: current / stale / another version ran / no run
+yet); the runtime-wide breakpoints, clearable, with who set them
+(`breakpoints_by`: `studio` — this Studio's PUT, with
+`breakpoints_set_at`; `runtime` — the registration carried a set an
+earlier Studio delivered; `store` — restored after a restart). Settings'
+Runtimes section is now a summary and a link here. `GET /api/runtimes`
+rows add `weft_version` and, for a non-empty set, `breakpoints_by`.
+`DELETE /api/runtimes/{id}` forgets a runtime that is gone: 204, its row
+and breakpoint set removed from memory and the command store
+(`obsdb.CommandStore.DeleteRuntime`), its commands and run routes kept as
+history; 409 while it is connected or a queued or accepted command is
+addressed to it; 404 for an unknown id; 403 for any panel token. Every
+"Runs in" line links here: the replay drawer's target section (both
+surfaces) names the runtime a command goes to — `Runs in: rt_0396…
+weft-arena-dev (pid 2902, seen just now)`, the connected registration
+first, then the newest seen — with a select when two connected runtimes
+register the agent, and, when none does, the refusal: what is connected,
+the fix (`runtime.Install(…, runtime.Agents(<agent>))`), the Studio
+asked. `/agents` badges each card with `manifest_check` (stale names the
+hash the latest run ran), and the run header's `manifest <hash>` reads
+`· current` or `· stale` when the check can tell.
 
 **The target facts (capability `target_check`).** The registration
 carries each agent's `manifest_hash` (sha256 of the manifest bytes it

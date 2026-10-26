@@ -1,6 +1,7 @@
 // Agent cards (H1) render the manifest: names, models, tools with
 // schema trees and policy chips.
-import { render, screen } from "@testing-library/react"
+import { render as rtlRender, screen } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
 
 import type { ManifestAgent } from "@/lib/api"
@@ -37,6 +38,19 @@ const agent: ManifestAgent = {
     },
   ],
 }
+
+// The card's manifest_check badge reads /api/meta through the query
+// cache (U20.1): a client with no meta in it draws none.
+const render = (ui: React.ReactNode) =>
+  rtlRender(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { enabled: false } } })
+      }
+    >
+      {ui}
+    </QueryClientProvider>
+  )
 
 describe("AgentCard", () => {
   it("renders the agent, its policy, tools with schema and chips", () => {

@@ -264,6 +264,20 @@ func (rs *RuntimeServer) saveRuntimeLocked(id string, c *connected) {
 	})
 }
 
+// deleteRuntimeLocked deletes the runtime's row and breakpoint set
+// (Forget). It goes under the runtime row's key, so it supersedes a
+// pending put of the row; a pending breakpoint write is dropped.
+// Caller holds mu.
+func (rs *RuntimeServer) deleteRuntimeLocked(id string) {
+	if !rs.storing() {
+		return
+	}
+	rs.forgetLocked("breakpoints", id)
+	rs.writer.put(writeKey{"runtime", id}, false, func(ctx context.Context, st obsdb.CommandStore) error {
+		return st.DeleteRuntime(ctx, id)
+	})
+}
+
 // saveManifestsLocked writes each registered agent's one-agent
 // manifest by its hash (U27): the bytes the runtime registered, whose
 // sha256 is the weft.manifest.hash the agent's runs carry, so a run
@@ -389,7 +403,7 @@ func (rs *RuntimeServer) load() {
 		reg.RuntimeID = sr.ID
 		c := &connected{reg: reg, connectedSince: sr.Registered, lastSeen: sr.LastSeen, stored: sr.LastSeen, restored: true}
 		if bp, ok, err := rs.store.Breakpoints(ctx, sr.ID); err == nil && ok {
-			c.breakpoints = bp
+			c.breakpoints, c.breakpointsBy = bp, BreakpointsByStore
 		}
 		rs.runtimes[sr.ID] = c
 	}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +24,8 @@ import (
 // is the GET /api/runtimes shape the web client builds the option lab
 // on (plan F3: each agent's resolver flag and run defaults; U18.1:
 // each agent's manifest hash and the Studio URL the link dialled;
-// U18.2: each agent's model_provider). This
+// U18.2: each agent's model_provider; U20.1: weft_version and who set
+// the breakpoints). This
 // connects a real weft/runtime — run defaults set, a ModelResolver
 // installed — to a real Studio and reads the route: every field the
 // golden pins must exist in the real answer with the same JSON type.
@@ -51,6 +53,25 @@ func TestRuntimesGoldenMatchesARealRuntime(t *testing.T) {
 		runtime.ModelResolver(func(context.Context, string) (core.Model, error) { return nil, errors.New("no") }),
 		runtime.AllowSideEffects("refund"))
 	t.Cleanup(stop)
+
+	// A breakpoint set through this Studio (U20.1): the golden pins
+	// breakpoints_by and breakpoints_set_at as a real PUT leaves them.
+	// The PUT needs the runtime registered and its stream open.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/runtimes/"+runtimeIDOf(t, ts.URL)+"/breakpoints",
+			strings.NewReader(`{"tools":["refund"]}`))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("PUT breakpoints: %d", resp.StatusCode)
+		}
+	}
 
 	var got any
 	deadline := time.Now().Add(5 * time.Second)
@@ -98,4 +119,25 @@ func TestRuntimesGoldenMatchesARealRuntime(t *testing.T) {
 		gotJSON, _ := json.Marshal(got)
 		t.Errorf("runtimes.golden.json pins fields a real runtime's /api/runtimes does not carry: %v\nreal: %s", missing, gotJSON)
 	}
+}
+
+// runtimeIDOf is the id of the first runtime GET /api/runtimes lists,
+// "" while none has registered.
+func runtimeIDOf(t *testing.T, base string) string {
+	t.Helper()
+	resp, err := http.Get(base + "/api/runtimes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var doc struct {
+		Runtimes []struct {
+			ID        string `json:"id"`
+			Connected bool   `json:"connected"`
+		} `json:"runtimes"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&doc) != nil || len(doc.Runtimes) == 0 || !doc.Runtimes[0].Connected {
+		return ""
+	}
+	return doc.Runtimes[0].ID
 }

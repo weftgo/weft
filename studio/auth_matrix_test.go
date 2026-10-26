@@ -982,6 +982,11 @@ func TestAuthMatrix(t *testing.T) {
 			body:      fixed(`{"id":"exp_2","name":"n","agent":"a","variants":[{"key":"A","overrides":{}}],"inputs":[{"key":"1","text":"x"}]}`),
 			resources: one, want: serverOnly(ok)},
 		{name: "PUT /api/runtimes/{id}/breakpoints", method: "PUT", path: fixed("/api/runtimes/rt_test/breakpoints"), body: fixed(`{"tools":["refund"]}`), resources: one, want: serverOnly(ok)},
+		// Forget (U20.1): runtime-wide like the breakpoints — the server
+		// token's alone; rt_test holds a stream, so the server token's
+		// answer is the 409 a connected runtime gets (204 is
+		// TestRuntimesToldApartRestoredAndForgotten's).
+		{name: "DELETE /api/runtimes/{id}", method: "DELETE", path: fixed("/api/runtimes/rt_test"), resources: one, want: serverOnly(http.StatusConflict)},
 		{name: "POST /api/runtime/register", method: "POST", path: fixed("/api/runtime/register"), body: fixed(regBody("rt_link")), resources: one, want: serverOnly(ok)},
 		{name: "GET /api/runtime/commands", method: "GET", path: fixed("/api/runtime/commands?runtime=rt_link"), resources: one, want: serverOnly(ok)},
 		{name: "POST /api/runtime/acks", method: "POST", path: fixed("/api/runtime/acks"), body: fixed(`{"command_id":"cmd_a","state":"accepted","run_id":"pg_a"}`), resources: one, want: serverOnly(ok)},

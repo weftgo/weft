@@ -548,7 +548,11 @@ type RuntimeView struct {
 	// registration's; absent in-process or from a runtime older than
 	// the field). An address of this machine's network, so Studio's
 	// route serves it under cwd's rule.
-	StudioURL      string    `json:"studio_url,omitempty"`
+	StudioURL string `json:"studio_url,omitempty"`
+	// WeftVersion is the weft the runtime was built with, as it
+	// registered ("" from a client that sends none): two links of one
+	// process read the same (UX-E-56).
+	WeftVersion    string    `json:"weft_version,omitempty"`
 	Service        string    `json:"service"`
 	Env            string    `json:"env"`
 	ConnectedSince time.Time `json:"connected_since"`
@@ -581,7 +585,21 @@ type RuntimeView struct {
 	// …/breakpoints, UX-A-33). In memory: absent for a set adopted from
 	// a registration or restored from the store after a restart.
 	BreakpointsSetAt *time.Time `json:"breakpoints_set_at,omitempty"`
+	// BreakpointsBy says where a non-empty set came from (U20.1, "who
+	// set them"): BreakpointsByStudio — PUT …/breakpoints through this
+	// Studio (BreakpointsSetAt says when); BreakpointsByRuntime — the
+	// runtime's own registration carried it (an earlier Studio set it,
+	// the runtime kept it); BreakpointsByStore — restored from the
+	// command store after a Studio restart. Absent for an empty set.
+	BreakpointsBy string `json:"breakpoints_by,omitempty"`
 }
+
+// Where a runtime's breakpoint set came from (RuntimeView.BreakpointsBy).
+const (
+	BreakpointsByStudio  = "studio"
+	BreakpointsByRuntime = "runtime"
+	BreakpointsByStore   = "store"
+)
 
 // AgentView is one agent of a connected runtime. Resolver and Defaults
 // are the registration's (AgentRegistration): whether a model name
@@ -626,6 +644,12 @@ var (
 	// ErrNotConnected: the runtime registered once but holds no live
 	// command stream now.
 	ErrNotConnected = fmt.Errorf("studio/runtime: runtime not connected")
+	// ErrConnected: Forget of a runtime that holds a live command
+	// stream — only a runtime that is gone is forgotten.
+	ErrConnected = fmt.Errorf("studio/runtime: runtime is connected")
+	// ErrRuntimeBusy: Forget of a runtime a queued or accepted command
+	// is still addressed to.
+	ErrRuntimeBusy = fmt.Errorf("studio/runtime: runtime has live commands")
 	// ErrDuplicateCommand: the command id was already used (409, the
 	// at-most-once rule's Studio side).
 	ErrDuplicateCommand = fmt.Errorf("studio/runtime: command id already used")
@@ -772,6 +796,8 @@ type connected struct {
 	// breakpointsSetAt is when SetBreakpoints last delivered them (zero
 	// for a set adopted or restored).
 	breakpointsSetAt time.Time
+	// breakpointsBy is where the set came from (RuntimeView.BreakpointsBy).
+	breakpointsBy string
 	// manifest keys the manifest its latest registration carried.
 	manifest manifestKey
 	// stored is the LastSeen last written to the store (the ping
@@ -925,7 +951,7 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 		// would report an empty set while the runtime keeps parking.
 		// For a runtime Studio already holds, Studio's set is the
 		// authority and every stream open sends it (serveCommands).
-		c = &connected{breakpoints: append([]string(nil), reg.Breakpoints...)}
+		c = &connected{breakpoints: append([]string(nil), reg.Breakpoints...), breakpointsBy: BreakpointsByRuntime}
 		rs.runtimes[reg.RuntimeID] = c
 		rs.saveBreakpointsLocked(reg.RuntimeID, c.breakpoints)
 	}
@@ -1747,6 +1773,7 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			Pid:            c.reg.Pid,
 			Cwd:            c.reg.Cwd,
 			StudioURL:      c.reg.StudioURL,
+			WeftVersion:    c.reg.WeftVersion,
 			Service:        c.reg.Service,
 			Env:            c.reg.Env,
 			ConnectedSince: c.connectedSince,
@@ -1760,6 +1787,9 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 		if !c.breakpointsSetAt.IsZero() {
 			at := c.breakpointsSetAt
 			v.BreakpointsSetAt = &at
+		}
+		if len(c.breakpoints) > 0 {
+			v.BreakpointsBy = c.breakpointsBy
 		}
 		for _, a := range c.reg.Agents {
 			av := AgentView{Name: a.Name, ManifestHash: a.Hash(), Models: a.Models, Resolver: a.Resolver,
@@ -1979,7 +2009,36 @@ func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string) error 
 	}
 	c.breakpoints = append([]string(nil), tools...)
 	c.breakpointsSetAt = time.Now().UTC()
+	c.breakpointsBy = BreakpointsByStudio
 	rs.saveBreakpointsLocked(runtimeID, c.breakpoints)
+	return nil
+}
+
+// Forget removes a runtime that is gone from the list and from the
+// command store — its row and its breakpoint set (U20.1's "forget" of
+// a stale or restored runtime). Its commands and run routes stay as
+// history. ErrUnknownRuntime for an id nothing registered;
+// ErrConnected while it holds a command stream; ErrRuntimeBusy while a
+// queued or accepted command is addressed to it (its fate is still
+// being decided). A runtime that registers again afterwards is listed
+// anew, as one this Studio never saw.
+func (rs *RuntimeServer) Forget(runtimeID string) error {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	c := rs.runtimes[runtimeID]
+	if c == nil {
+		return ErrUnknownRuntime
+	}
+	if c.feed != nil {
+		return ErrConnected
+	}
+	for _, row := range rs.commands {
+		if row.Runtime == runtimeID && (row.state == StateQueued || row.state == StateAccepted) {
+			return ErrRuntimeBusy
+		}
+	}
+	delete(rs.runtimes, runtimeID)
+	rs.deleteRuntimeLocked(runtimeID)
 	return nil
 }
 

@@ -19,7 +19,7 @@ import {
 import type { EngineFacts, StepCost } from "./engine"
 import { overridesOf, realEdits } from "./experiment-body"
 import type { VariantFields } from "./experiment-body"
-import { DRAWER_ORDER, DRAWER_TITLES, targetLine } from "./drawer-spec"
+import { DRAWER_ORDER, DRAWER_TITLES } from "./drawer-spec"
 
 const step = (input: number, output: number, usd: number): StepCost => ({
   usage: { input_tokens: input, output_tokens: output },
@@ -315,9 +315,5 @@ describe("the drawer's order and target (lib/drawer-spec.ts)", () => {
       "advanced: side effects · thread · options",
       "",
     ])
-    expect(targetLine("director", { id: "rt_1", service: "arena" })).toBe(
-      "director on arena (rt_1)"
-    )
-    expect(targetLine("director", undefined)).toBe("—")
   })
 })

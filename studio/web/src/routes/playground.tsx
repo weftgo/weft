@@ -150,7 +150,9 @@ import {
   playgroundSearch,
   playgroundShareLink,
   runLink,
+  runtimesLink,
 } from "@/lib/links"
+import { RUNS_IN, runsInLine, runtimeLabel } from "@/lib/runs-in"
 import {
   decodeFormOutcome,
   draftRefusedWords,
@@ -196,7 +198,6 @@ export {
   wireEdits,
 } from "@/lib/experiment-body"
 export type { EditDraft, EditField } from "@/lib/experiment-body"
-export { Breakpoints } from "@/components/studio/experiment-form"
 
 /** What the panel carries over (§2: run, step, current overrides —
  * every knob of the drawer, so nothing is retyped or reset). */
@@ -1388,9 +1389,19 @@ function Playground({ caps }: { caps: string[] }) {
               }}
               options={all.map((r) => ({
                 value: r.id,
-                label: `${r.service || r.id} · ${r.env || "?"} · ${r.host}`,
+                // UX-S4-05: two links of one process read apart.
+                label: runtimeLabel(r),
+                title: r.id,
               }))}
             />
+            <Link
+              {...runtimesLink({ runtime: runtime.id })}
+              className="text-thread-ink hover:underline"
+              title={runsInLine(runtime)}
+              data-runs-in-manage
+            >
+              {RUNS_IN.manage}
+            </Link>
           </>
         ) : (
           <span>
@@ -1398,7 +1409,14 @@ function Playground({ caps }: { caps: string[] }) {
               ? "connecting…"
               : runtimes.isError
                 ? `the runtimes could not be read: ${runtimes.error.message}`
-                : "no runtime connected — runtime.Install(...) in your app opens the link"}
+                : "no runtime connected — runtime.Install(...) in your app opens the link"}{" "}
+            <Link
+              {...runtimesLink()}
+              className="text-thread-ink hover:underline"
+              data-runs-in-manage
+            >
+              {RUNS_IN.manage}
+            </Link>
           </span>
         )}
         {meta.data?.debug_scope && (

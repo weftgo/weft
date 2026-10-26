@@ -124,7 +124,8 @@ import * as RK from "./replaykit"
 import { editResultAndReplay, replayFromStep, rerun } from "../lib/replay"
 import { choose } from "../test/select"
 import type { ReplayDraft } from "../lib/replay"
-import { DRAWER_ORDER, targetLine } from "../lib/drawer-spec"
+import { DRAWER_ORDER } from "../lib/drawer-spec"
+import { RUNS_IN } from "../lib/runs-in"
 import { playgroundLink } from "../lib/links"
 import {
   DERIVED,
@@ -5026,8 +5027,11 @@ describe("the engine per command on both drawers (U17)", () => {
     const r = await bothDrawers(() => replayFromStep(2))
     expect(r.engine).toBe("scripted")
     expect(r.run).toBe("Run on scripted · 0 tokens")
-    expect(r.target).toBe(
-      `target${targetLine("acme-support", { id: "rt_1", service: "app" })}`
+    // Runs in (U20.1, lib/runs-in.ts): the same line on both drawers.
+    expect(r.target).toMatch(
+      new RegExp(
+        `^target${RUNS_IN.head}: rt_1 app \\(pid \\d+, seen [^)]+\\) · ${RUNS_IN.manage}$`
+      )
     )
     expect(r.live).toBe(
       "live · calls wefttest/script · ~1.5k tok ≈ $0.0004 for steps 2–3"

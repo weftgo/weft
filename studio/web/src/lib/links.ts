@@ -413,7 +413,15 @@ export interface SettingsLink {
   search: { price?: string }
 }
 
+/** The runtimes page (U20.1): one runtime scrolled to, or the
+ * explainer for an agent no connected runtime registers. */
+export interface RuntimesLink {
+  to: "/runtimes"
+  search: { runtime?: string; agent?: string }
+}
+
 export type StudioLink =
+  | RuntimesLink
   | RunLink
   | SessionLink
   | ConversationLink
@@ -619,6 +627,15 @@ export function tracesLink(search: TracesSearch = {}): TracesLink {
  * model…"). */
 export function settingsLink(price?: string): SettingsLink {
   return { to: "/settings", search: price ? { price } : {} }
+}
+
+/** runtimesLink is the runtimes page (U20.1): every "Runs in" line
+ * and every "not registered" refusal links here — with runtime=, that
+ * runtime's card; with agent=, why no connected runtime registers it. */
+export function runtimesLink(
+  search: { runtime?: string; agent?: string } = {}
+): RuntimesLink {
+  return { to: "/runtimes", search }
 }
 
 /** playgroundLink is the playground with the hand-off carried over

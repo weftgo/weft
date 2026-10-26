@@ -32,6 +32,7 @@ import {
   MessagesSquare,
   Network,
   Search,
+  Server,
   Settings,
 } from "lucide-react"
 
@@ -83,6 +84,7 @@ import {
   playgroundLink,
   runLink,
   sessionLink,
+  runtimesLink,
   settingsLink,
   tracesLink,
 } from "@/lib/links"
@@ -201,6 +203,11 @@ function Nav() {
               "Experiments",
               <Grid3x3 data-slot="icon" />
             )}
+          {/* The runtimes (U20.1): under capability "runtimes" — every
+              "Runs in" line and refusal links here. */}
+          {walled && locked("Runtimes", <Server data-slot="icon" />)}
+          {meta.data?.capabilities.includes("runtimes") &&
+            item(runtimesLink().to, "Runtimes", <Server data-slot="icon" />)}
           {/* Settings (plan H4): every Studio has one. */}
           {item(settingsLink().to, "Settings", <Settings data-slot="icon" />)}
         </SidebarMenu>
@@ -281,6 +288,7 @@ function Place() {
     "agents",
     "playground",
     "experiments",
+    "runtimes",
     "settings",
   ]
   // min-w-0 + truncate (UX-C-33): at 360 px "playground" or

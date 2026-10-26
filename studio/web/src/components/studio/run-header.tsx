@@ -63,6 +63,7 @@ import {
 import { SaveAsTest } from "@/components/studio/saves"
 import { DeleteRun, ExportVerbs } from "@/components/studio/run-actions"
 import { HoleBadge } from "@/components/studio/hole-badge"
+import { RunManifestMark } from "@/components/studio/manifest-badge"
 import {
   StatusChip,
   TitleText,
@@ -902,6 +903,7 @@ export function RunHeader({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-faint">
         <span className="font-mono" title={doc.manifest_hash || undefined}>
           manifest {shortHash(doc.manifest_hash)}
+          <RunManifestMark agent={doc.agent} hash={doc.manifest_hash} />
         </span>
         {doc.weft_version ? (
           <span className="font-mono">weft {doc.weft_version}</span>

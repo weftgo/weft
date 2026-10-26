@@ -140,6 +140,12 @@ func TestMetaManifestCheck(t *testing.T) {
 		if got == nil || got.Agents != 2 || got.Checked != 1 || strings.Join(got.Stale, ",") != strings.Join(c.stale, ",") {
 			t.Errorf("manifest_check = %+v, want 2 agents, 1 checked, stale %v", got, c.stale)
 		}
+		// latest names the hash the stale badge quotes (U20.1): the
+		// run's own, the v1 build's, whichever manifest is configured;
+		// billing has no run, so no entry.
+		if got != nil && (len(got.Latest) != 1 || got.Latest["orders"] != hashes[0].hash) {
+			t.Errorf("manifest_check.latest = %v, want orders → %s", got.Latest, hashes[0].hash)
+		}
 		ts.Close()
 		_ = srv.Close()
 	}

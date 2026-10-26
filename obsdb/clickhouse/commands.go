@@ -285,6 +285,25 @@ func (d *DB) Runtimes(ctx context.Context) (_ []obsdb.StoredRuntime, err error) 
 	return out, rows.Err()
 }
 
+// DeleteRuntime removes every stored version of one runtime's row and
+// of its breakpoint set (a lightweight DELETE by key, synchronous).
+// The caller serialises it with its own writes of that runtime, as it
+// does PruneCommands.
+func (d *DB) DeleteRuntime(ctx context.Context, runtimeID string) (err error) {
+	if err := d.checkOpen(); err != nil {
+		return err
+	}
+	defer d.closedErr(&err)
+	if runtimeID == "" {
+		return fmt.Errorf("%w: delete needs a runtime id", obsdb.ErrInvalidCommand)
+	}
+	ctx = ch.Context(ctx, ch.WithSettings(ch.Settings{"mutations_sync": 2}))
+	if err := d.conn.Exec(ctx, `DELETE FROM breakpoints WHERE RuntimeId = ?`, runtimeID); err != nil {
+		return err
+	}
+	return d.conn.Exec(ctx, `DELETE FROM runtimes WHERE Id = ?`, runtimeID)
+}
+
 // PruneCommands applies the store's retention. Each rule selects its
 // keys over the FINAL rows and, in the same query, every stored version
 // of them (key, InsertTime); the DELETE then names exactly those

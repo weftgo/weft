@@ -110,6 +110,17 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 	// route of its own: the capability is what a client gates its
 	// target check on.
 	s.addGroup(routeGroup{name: "target_check", capability: "target_check"})
+	// Forget (U20.1): a runtime that is gone — disconnected, restored
+	// after a restart and never back — leaves the list and the command
+	// store; its own capability so the /runtimes page draws the verb
+	// only when meta reports it.
+	s.addGroup(routeGroup{
+		name:       "runtime_forget",
+		capability: "runtime_forget",
+		register: func(mux *http.ServeMux, s *Server) {
+			mux.HandleFunc("DELETE /api/runtimes/{id}", s.serveForgetRuntime(rs))
+		},
+	})
 	s.addGroup(routeGroup{
 		name:       "breakpoints",
 		capability: "breakpoints",

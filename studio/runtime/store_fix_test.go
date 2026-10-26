@@ -85,6 +85,10 @@ func (hangingStore) PutRuntime(ctx context.Context, _ obsdb.StoredRuntime) error
 	return ctx.Err()
 }
 func (hangingStore) Runtimes(context.Context) ([]obsdb.StoredRuntime, error) { return nil, nil }
+func (hangingStore) DeleteRuntime(ctx context.Context, _ string) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
 func (hangingStore) PruneCommands(ctx context.Context, _ time.Time, _ int) (int, error) {
 	<-ctx.Done()
 	return 0, ctx.Err()
@@ -223,6 +227,7 @@ func (failingStore) PutRuntime(context.Context, obsdb.StoredRuntime) error { ret
 func (failingStore) Runtimes(context.Context) ([]obsdb.StoredRuntime, error) {
 	return nil, errStoreDown
 }
+func (failingStore) DeleteRuntime(context.Context, string) error { return errStoreDown }
 func (failingStore) PruneCommands(context.Context, time.Time, int) (int, error) {
 	return 0, errStoreDown
 }

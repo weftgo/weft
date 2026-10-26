@@ -32,6 +32,7 @@ import {
   Network,
   PanelsLeftRight,
   Rows3,
+  Server,
   Settings,
   SunMoon,
 } from "lucide-react"
@@ -64,6 +65,7 @@ import {
   runLink,
   runsLink,
   sessionLink,
+  runtimesLink,
   settingsLink,
   traceLink,
   tracesLink,
@@ -421,6 +423,15 @@ export function CommandPalette({
               >
                 <FlaskConical data-slot="icon" />
                 Playground
+              </CommandItem>
+            ) : null}
+            {meta.data?.capabilities.includes("runtimes") ? (
+              <CommandItem
+                value="runtimes runtime link breakpoints"
+                onSelect={() => go(() => router.navigate(runtimesLink()))}
+              >
+                <Server data-slot="icon" />
+                Runtimes
               </CommandItem>
             ) : null}
             {/* Settings (plan H4). */}

@@ -40,6 +40,7 @@ export type TitlePlace =
         | "live"
         | "agents"
         | "settings"
+        | "runtimes"
         | "experiments"
     }
 

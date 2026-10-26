@@ -55,14 +55,7 @@ export const SIDE_EFFECT_TOOL =
 
 /** The pointer left where the runtime-wide breakpoints were. */
 export const BREAKPOINTS_MOVED =
-  "breakpoints for the whole runtime live on Settings › Runtimes"
-
-/** targetLine is the TARGET section's line, both drawers: the agent on
- * its runtime (service, else id) and the runtime's id; "—" with none. */
-export const targetLine = (
-  agent: string,
-  rt: { id: string; service?: string } | undefined
-): string => (rt ? `${agent} on ${rt.service || rt.id} (${rt.id})` : "—")
+  "breakpoints for the whole runtime live on Runtimes"
 
 /** The preview's heading (section 2, drawn once, inside the pane). */
 export const sendHead = (step: number): string =>

@@ -13,6 +13,7 @@ import type {
   ToolChoiceWire,
 } from "@/lib/api"
 import { placeBatches } from "@/lib/events"
+import { registering } from "@/lib/runs-in"
 import {
   endsInAnsweredCalls,
   maxFromStep,
@@ -81,6 +82,9 @@ export function toolsOffFor(
  * says so instead of silently experimenting on a different agent. An
  * agent asked for as "" — a source run that names none (UX-C-02) — is
  * no stand-in at all: `unnamed`, and the page asks (lib/target.ts).
+ * Of several runtimes registering the agent, the connected one, then
+ * the newest seen (lib/runs-in.ts's registering, U20.1) — never the
+ * first listed.
  */
 export function pickTarget(
   runtimes: RuntimeView[],
@@ -99,7 +103,7 @@ export function pickTarget(
   const runtime =
     named && (!want.agent || has(named))
       ? named
-      : ((want.agent ? runtimes.find(has) : undefined) ??
+      : ((want.agent ? registering(runtimes, want.agent)[0] : undefined) ??
         named ??
         runtimes.find((r) => r.agents.length > 0))
   if (!runtime) return {}

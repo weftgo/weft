@@ -404,6 +404,11 @@ func (s *recordingStore) Runtimes(context.Context) ([]obsdb.StoredRuntime, error
 	return nil, nil
 }
 
+func (s *recordingStore) DeleteRuntime(context.Context, string) error {
+	defer s.enter("DeleteRuntime")()
+	return nil
+}
+
 func (s *recordingStore) PruneCommands(context.Context, time.Time, int) (int, error) {
 	defer s.enter("PruneCommands")()
 	time.Sleep(time.Millisecond) // widen the window a racing Put would hit

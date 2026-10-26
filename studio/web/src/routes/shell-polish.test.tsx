@@ -73,6 +73,7 @@ describe("the token wall (UX-F-26)", () => {
       "Agents",
       "Playground",
       "Experiments",
+      "Runtimes",
     ])
     for (const n of locked) {
       expect(n.getAttribute("aria-disabled")).toBe("true")

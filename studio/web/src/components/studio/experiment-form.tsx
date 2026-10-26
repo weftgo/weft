@@ -9,13 +9,7 @@ import { useQueries, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import type { Dispatch, ReactNode, SetStateAction } from "react"
 
-import {
-  ApiError,
-  putBreakpoints,
-  runQuery,
-  stepQuery,
-  transcriptQuery,
-} from "@/lib/api"
+import { ApiError, runQuery, stepQuery, transcriptQuery } from "@/lib/api"
 import { turnPrompt } from "@/lib/events"
 import type { AgentView, ModelInfo, RuntimeView, StepDoc } from "@/lib/api"
 import { EDIT_FIELD, kindOf } from "@/lib/edits"
@@ -59,7 +53,7 @@ import type {
   SourceStep,
   VariantFields,
 } from "@/lib/experiment-body"
-import { BREAKPOINT_WORDS } from "@/lib/settings"
+import { BreakpointsPointer } from "@/components/studio/breakpoints"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
 import { SelectField } from "@/components/ui/select-field"
@@ -111,25 +105,11 @@ export function ExperimentForm(props: FormProps) {
       {agent ? (
         <OptionLab variant={variant} patch={patch} agent={agent} />
       ) : null}
-      {/* Rung 3 (§8.3): break on tools — PUT /api/runtimes/{id}/
-          breakpoints; the runtime parks them on every run it
-          starts. */}
-      {caps.includes("breakpoints") && runtime && agent?.tools.length ? (
-        <div className="space-y-1">
-          <span className="text-xs text-muted-foreground">
-            Break on (parks every run)
-          </span>
-          <Breakpoints
-            key={runtime.id}
-            runtimeID={runtime.id}
-            stored={runtime.breakpoints}
-            tools={[
-              ...new Set(
-                runtime.agents.flatMap((a) => a.tools.map((t) => t.name))
-              ),
-            ]}
-          />
-        </div>
+      {/* Runtime-wide breakpoints are the runtime's, not this
+          variant's (UX-C-18): a pointer to /runtimes with the count in
+          force. */}
+      {caps.includes("breakpoints") && runtime ? (
+        <BreakpointsPointer runtime={runtime} />
       ) : null}
       {props.fromStep === 0 && <InputField variant={variant} patch={patch} />}
     </>
@@ -1218,98 +1198,6 @@ export function StepPicker({
               ]),
         ]}
       />
-    </div>
-  )
-}
-
-/** Breakpoints is the rung-3 control (§8.3): one checkbox per tool,
- * applied on change — the runtime parks them on every run it starts
- * from then on, whatever the command asked for. The set is the
- * runtime's own: the boxes show what GET /api/runtimes reports
- * (`stored`, so a reload — or another tab's change — is reflected)
- * and, after a change, what the PUT answered; a refused change (a
- * disconnected runtime is a 503 and stores nothing) is undone and
- * says why. */
-export function Breakpoints({
-  runtimeID,
-  tools,
-  stored,
-}: {
-  runtimeID: string
-  tools: string[]
-  /** The runtime's stored set, as the runtimes view last read it. */
-  stored?: string[]
-}) {
-  const [set, setSet] = useState<Set<string>>(() => new Set(stored ?? []))
-  // Follow the server's set when it changes under us (the view is
-  // re-read every few seconds) — by value, not by array identity.
-  const storedKey = stored ? [...stored].sort().join("\u0000") : null
-  useEffect(() => {
-    if (storedKey !== null)
-      setSet(new Set(storedKey ? storedKey.split("\u0000") : []))
-  }, [storedKey])
-  const [err, setErr] = useState("")
-  const [saving, setSaving] = useState(false)
-  const put = async (next: Set<string>) => {
-    const prev = set
-    setSet(next)
-    setErr("")
-    setSaving(true)
-    try {
-      const out = await putBreakpoints(runtimeID, [...next].sort())
-      setSet(new Set(out.tools ?? []))
-    } catch (e) {
-      setSet(prev)
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSaving(false)
-    }
-  }
-  const toggle = (name: string, on: boolean) => {
-    const next = new Set(set)
-    if (on) next.add(name)
-    else next.delete(name)
-    return put(next)
-  }
-  // UX-A-33: every tool on parks every call — said, not left to a count.
-  const all = tools.length > 1 && tools.every((t) => set.has(t))
-  return (
-    <div className="space-y-1">
-      <div className="flex flex-wrap gap-2 text-xs">
-        {tools.map((t) => (
-          <label key={t} className="flex items-center gap-1">
-            <input
-              type="checkbox"
-              checked={set.has(t)}
-              disabled={saving}
-              onChange={(e) => void toggle(t, e.target.checked)}
-            />
-            {t}
-          </label>
-        ))}
-        {set.size > 0 ? (
-          <button
-            type="button"
-            className="font-mono text-thread-ink hover:underline disabled:opacity-50"
-            title={BREAKPOINT_WORDS.clearTitle}
-            disabled={saving}
-            onClick={() => void put(new Set())}
-            data-breakpoints-clear
-          >
-            {BREAKPOINT_WORDS.clear}
-          </button>
-        ) : null}
-      </div>
-      {all ? (
-        <p className="text-xs text-status-int" data-breakpoints-all>
-          {BREAKPOINT_WORDS.all}
-        </p>
-      ) : null}
-      {err && (
-        <p className="text-xs text-destructive" role="alert">
-          {err}
-        </p>
-      )}
     </div>
   )
 }

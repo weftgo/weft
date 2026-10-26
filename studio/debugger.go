@@ -78,6 +78,37 @@ func (s *Server) serveBreakpoints(rs *linkruntime.RuntimeServer) http.HandlerFun
 	}
 }
 
+// serveForgetRuntime is DELETE /api/runtimes/{id} (capability
+// runtime_forget, U20.1): 204 once the runtime is gone from the list
+// and the store; 409 while it is connected or a queued or accepted
+// command is addressed to it; 404 for an id nothing registered. Like
+// breakpoints it is runtime-wide, not public-id-shaped: a panel token
+// is refused outright.
+func (s *Server) serveForgetRuntime(rs *linkruntime.RuntimeServer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if idFrom(r).panel != nil {
+			writeError(w, r, http.StatusForbidden, "forbidden",
+				"forgetting a runtime changes Studio's list for everyone: the server token, not a panel token")
+			return
+		}
+		id := r.PathValue("id")
+		switch err := rs.Forget(id); {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, linkruntime.ErrUnknownRuntime):
+			notFound(w, r, "unknown runtime "+id)
+		case errors.Is(err, linkruntime.ErrConnected):
+			writeError(w, r, http.StatusConflict, "conflict",
+				"runtime "+id+" is connected: only a runtime that is gone is forgotten")
+		case errors.Is(err, linkruntime.ErrRuntimeBusy):
+			writeError(w, r, http.StatusConflict, "conflict",
+				"runtime "+id+" still has queued or accepted commands: forget it once they resolve")
+		default:
+			writeError(w, r, http.StatusInternalServerError, "internal", err.Error())
+		}
+	}
+}
+
 // steerRequest is POST /api/runs/{id}/steer: one user message.
 type steerRequest struct {
 	Message string `json:"message"`

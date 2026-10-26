@@ -46,12 +46,7 @@ import {
   realEdits,
   unmatchedDrafts,
 } from "@/lib/experiment-body"
-import {
-  BREAKPOINTS_MOVED,
-  DRAWER_TITLES,
-  sendHead,
-  targetLine,
-} from "@/lib/drawer-spec"
+import { BREAKPOINTS_MOVED, DRAWER_TITLES, sendHead } from "@/lib/drawer-spec"
 import {
   engineChoice,
   engineHeld,
@@ -61,7 +56,7 @@ import {
 } from "@/lib/engine"
 import type { Engine, EngineChoice } from "@/lib/engine"
 import type { EditDraft, VariantFields } from "@/lib/experiment-body"
-import { compareLink, playgroundLink, runLink } from "@/lib/links"
+import { compareLink, playgroundLink, runLink, runtimesLink } from "@/lib/links"
 import type { PlaygroundHandoff } from "@/lib/links"
 import { FORK_EDITS, impliedFromStep, putEdit } from "@/lib/edits"
 import {
@@ -110,6 +105,7 @@ import {
   useSourceEditFields,
   useSourceSteps,
 } from "@/components/studio/experiment-form"
+import { RunsIn } from "@/components/studio/runs-in"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { StepCompare } from "@/components/studio/step-diff"
 import {
@@ -868,9 +864,17 @@ function ReplayForm({
         </section>
         <section className="space-y-1" data-drawer-section="target">
           <div className="eyebrow">{DRAWER_TITLES.target}</div>
-          <p className="font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground">
-            {targetLine(wantAgent || "?", agent ? runtime : undefined)}
-          </p>
+          {/* Where it runs (U20.1, lib/runs-in.ts): the runtime by
+              service, pid and id; a select when two register the
+              agent; the refusal, linked to /runtimes, when none does. */}
+          <RunsIn
+            agent={wantAgent ?? ""}
+            runtime={agent ? runtime : undefined}
+            runtimes={all}
+            onPick={(id) =>
+              wantAgent && setPick({ runtime: id, agent: wantAgent })
+            }
+          />
           <TargetCheckBlock
             check={check}
             options={agentOptions(all, recordedTools)}
@@ -1031,7 +1035,7 @@ function ReplayForm({
             ) : null}
             {caps.includes("breakpoints") ? (
               <Link
-                to="/settings"
+                {...runtimesLink(runtime ? { runtime: runtime.id } : {})}
                 className="block text-[11px] text-faint hover:underline"
                 data-breakpoints-moved
               >

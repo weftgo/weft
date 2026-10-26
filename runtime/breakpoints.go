@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/internal/linkreg"
 )
 
 // Breakpoints makes the debugger's breakpoints (§8.3) park tools on the
@@ -92,25 +93,37 @@ const (
 )
 
 // liveLinks is the process's runtime links Breakpoints reads: a link
-// joins at Install (before it dials) and leaves at its stop.
+// joins at Install (before it dials) and leaves at its stop. The
+// process's embedded Studio reads the same set through linkreg (its
+// /api/meta runtime_link, U20.2): in-process to it, or the Studio the
+// link dialled instead.
 var liveLinks struct {
 	mu    sync.Mutex
-	links map[*link]struct{}
+	links map[*link]func() // the link → its linkreg removal
 }
 
 func addLiveLink(l *link) {
+	entry := &linkreg.Link{StudioURL: dialledURL(l.base)}
+	if l.cfg != nil && l.cfg.local != nil {
+		entry.Local = l.cfg.local
+	}
 	liveLinks.mu.Lock()
 	defer liveLinks.mu.Unlock()
 	if liveLinks.links == nil {
-		liveLinks.links = map[*link]struct{}{}
+		liveLinks.links = map[*link]func(){}
 	}
-	liveLinks.links[l] = struct{}{}
+	if _, ok := liveLinks.links[l]; !ok {
+		liveLinks.links[l] = linkreg.Add(entry)
+	}
 }
 
 func removeLiveLink(l *link) {
 	liveLinks.mu.Lock()
 	defer liveLinks.mu.Unlock()
-	delete(liveLinks.links, l)
+	if remove, ok := liveLinks.links[l]; ok {
+		remove()
+		delete(liveLinks.links, l)
+	}
 }
 
 // breakpointSource is the ParkSource behind Breakpoints: the union of

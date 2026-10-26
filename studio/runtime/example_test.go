@@ -105,3 +105,42 @@ func ExampleRuntimeServer_Forget() {
 	// forget: <nil>
 	// listed: 0
 }
+
+// ExampleRuntimeServer_CommandsOn lists the commands acting on one run
+// (GET /api/runs/{id}/commands): here a decision on a parked call of an
+// app turn, sent to the runtime that registered runtime.Sessions and
+// not acked yet. A row the runtime never acks turns lost after
+// AckDeadline, and stays listed on the run.
+func ExampleRuntimeServer_CommandsOn() {
+	rs := runtime.New()
+	mux := http.NewServeMux()
+	rs.Mount(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	reg := `{"runtime_id":"rt_app","host":"laptop","pid":1,"service":"acme-api","sessions":true,
+	         "agents":[{"name":"acme-support","manifest":"{}"}]}`
+	resp, err := http.Post(ts.URL+"/api/runtime/register", "application/json", strings.NewReader(reg))
+	if err != nil {
+		fmt.Println("register:", err)
+		return
+	}
+	_ = resp.Body.Close()
+	stream, err := http.Get(ts.URL + "/api/runtime/commands?runtime=rt_app")
+	if err != nil {
+		fmt.Println("commands:", err)
+		return
+	}
+	defer func() { _ = stream.Body.Close() }()
+
+	if _, err := rs.EnqueueSession("rt_app", runtime.SessionCommand{Verb: runtime.VerbDecide,
+		PublicID: "pub_1", SessionID: "s_1", RunID: "s_1-t1", CallID: "call_refund", Decision: "approve"}); err != nil {
+		fmt.Println("enqueue:", err)
+		return
+	}
+	for _, c := range rs.CommandsOn("s_1-t1") {
+		fmt.Println(c.Verb, c.CallID, c.Decision, c.State)
+	}
+	// Output:
+	// decide call_refund approve queued
+}

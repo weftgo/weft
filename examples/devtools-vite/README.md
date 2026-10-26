@@ -63,7 +63,11 @@ is `/studio/`, studio-local's embedded Studio, on the page's own
 origin: no token and no CORS. Ask a question in the chat; studio-local's
 offline echo model answers, `/run`'s `Weft-Scope` response header
 scopes the panel to the turn, and the dock shows it. Set
-`VITE_WEFT_STUDIO` to point the panel at another Studio. Without
+`VITE_WEFT_STUDIO` to point the panel at another Studio. Under `weft
+dev` the embedded Studio is studio-local's read-only view: its runtime
+registers with weft dev's Studio (U20.2), so this panel shows the turns
+and a parked call is decided from studio-local's own page
+(http://127.0.0.1:8080/), whose panel reads weft dev's Studio. Without
 `weft dev` installed, use
 `go run ./cmd/weft dev -- go run ./examples/studio-local`.
 

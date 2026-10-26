@@ -21,7 +21,7 @@
 // is not a Studio at /api/meta (this app mounts Studio under /studio/)
 // and moves to the next free port, saying so in one line (plan B2).
 //
-// The five lines (serve): Install the otel defaults (the local sink at
+// The five lines (build): Install the otel defaults (the local sink at
 // ./.weft/weft.db, content on, no network; otel.Slog() bridges
 // slog.Default, so the agent's mw.Log lines land under each step's
 // span), build the Studio server
@@ -38,28 +38,43 @@
 // replaces the model with its own and changes nothing else.
 //
 // Under `weft dev` (plan B1.2) the same binary is the app beside the
-// command's Studio:
+// command's Studio — §10.1's setup B for the page (U20.2):
 //
 //	weft dev -- go run ./examples/studio-local
+//	# open http://127.0.0.1:8080/ (the panel docks, reading weft dev's Studio)
 //
 // weft dev sets WEFT_STUDIO_URL, WEFT_STUDIO_TOKEN, WEFT_DB and
 // WEFT_ENV=dev; with WEFT_STUDIO_URL set the demo listens on
 // 127.0.0.1:8080 (that Studio holds 7331), the pipeline exports to that
 // Studio besides the local sink, and the runtime link registers there
-// instead of with the embedded server: serve reads
-// otel.StudioEndpoint() after Install. The app then writes the shared
-// WEFT_DB twice, through its local sink and through Studio's ingest:
-// harmless, the sqlite writer is INSERT OR IGNORE. Run bare beside a
-// `weft studio` (no WEFT_STUDIO_URL), the demo stays its own setup A:
-// otel.Local switches the discovery file off, so nothing joins that
-// Studio (README "When weft/otel reads the file") — only the port
+// instead of with the embedded server: build reads
+// otel.StudioEndpoint() after Install. The page's panel follows the
+// runtime: its script tag loads panel.js from that Studio, with
+// data-endpoint naming it and a panel token the app mints for the
+// page's public id (POST /api/panel-tokens with WEFT_STUDIO_TOKEN,
+// "playground": true — the server token never reaches the page, and no
+// token rides a URL). So the panel, the runtime and weft dev's Studio
+// UI are one Studio: a refund the page parks is approved from the
+// page's panel (runtime.Sessions hands the runtime the demo's live
+// Session), and Studio's /runtimes lists this app. The embedded
+// /studio/ stays mounted as the app's own view of its local sink,
+// without the playground — weft dev's Studio owns the command store in
+// the shared WEFT_DB (one Studio per command store) — and its meta's
+// runtime_link names the Studio the link dialled. The app writes the
+// shared WEFT_DB twice, through its local sink and through Studio's
+// ingest: harmless, the sqlite writer is INSERT OR IGNORE. Run bare
+// beside a `weft studio` (no WEFT_STUDIO_URL), the demo stays its own
+// setup A: otel.Local switches the discovery file off, so nothing joins
+// that Studio (README "When weft/otel reads the file") — only the port
 // moves to 8080, because 7331 is taken. -addr still overrides 8080.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"html"
 	"io"
 	"iter"
 	"log"
@@ -83,8 +98,9 @@ import (
 )
 
 // page is the host app's own landing page: a plain HTML document
-// whose only weft-ness is the panel's script tag (setup A, §5.3 —
-// same origin as Studio, no token). The tag names no scope: the
+// whose only weft-ness is the panel's script tag ({{PANEL}}: localTag
+// in setup A, §5.3 — same origin as Studio, no token; under weft dev
+// panelTag's setup B tag). Setup A's tag names no scope: the
 // page's own ask form POSTs /run with fetch, and the panel reads the
 // response's Weft-Scope header (detection rung 2, on by default on
 // loopback with no token) — so the first turn scopes it to pub_demo
@@ -149,8 +165,15 @@ document.addEventListener("DOMContentLoaded", () => {
   })
 })
 </script>
-<script type="module" src="/studio/panel.js" data-weft data-open="true"></script>
+{{PANEL}}
 </body></html>`
+
+// localTag is the page's panel tag in setup A: same origin as the
+// embedded Studio, no token, no scope (the /run header scopes it).
+const localTag = `<script type="module" src="/studio/panel.js" data-weft data-open="true"></script>`
+
+// pageWith is the page with its panel tag.
+func pageWith(tag string) string { return strings.Replace(page, "{{PANEL}}", tag, 1) }
 
 func main() {
 	// 7331 is Studio's one default port, and this listener is the
@@ -200,16 +223,46 @@ func trimGuidance(_ context.Context, step int, req weft.ModelRequest) (weft.Mode
 	return req, nil
 }
 
-// serve is setup A (§10.1) plus this demo's own /run endpoint.
-// Everything between the two comments is what an embedding app
-// writes; nothing else is configured.
+// serve is setup A (§10.1) plus this demo's own /run endpoint, on
+// the demo's listener; build is everything an embedding app writes.
 func serve(addr string, explicitAddr bool) error {
+	a, err := build("./.weft/threads")
+	if err != nil {
+		return err
+	}
+	defer a.close()
+	ln, addr, err := listen(addr, explicitAddr)
+	if err != nil {
+		return err
+	}
+	if a.studioURL != "" {
+		log.Printf("studio-local: under weft dev: the page's panel at http://%s/ reads %s (where the runtime registers); /studio/ is this app's read-only view", addr, a.studioURL)
+	} else {
+		log.Printf("studio-local: studio at http://%s/studio/ (live at /studio/live), panel at http://%s/", addr, addr)
+	}
+	log.Printf("studio-local: try: curl -s -XPOST %s/run -d 'where is order 42?'", addr)
+	return http.Serve(ln, a.mux)
+}
+
+// app is the demo wired: its handler, its one session, and the
+// shutdown that stops the runtime link, the embedded Studio and the
+// pipeline, in that order.
+type app struct {
+	mux       *http.ServeMux
+	demo      *demo
+	studioURL string // weft dev's Studio ("" in setup A)
+	close     func()
+}
+
+// build wires the demo. Everything between its first and last line is
+// what an embedding app writes; nothing else is configured.
+func build(threadsDir string) (*app, error) {
 	// The local sink ($WEFT_DB or ./.weft/weft.db), content on; named
 	// explicitly so it stays when the environment adds a destination
 	// (WEFT_STUDIO_URL under weft dev): the embedded Studio reads it.
 	// Slog bridges slog.Default, so the app's log lines (mw.Log's
 	// included) reach Studio under the span they were logged in.
-	defer otel.Install(otel.Local(""), otel.Slog())()
+	stopOtel := otel.Install(otel.Local(""), otel.Slog())
 
 	// Under weft dev the pipeline also exports to the Studio
 	// WEFT_STUDIO_URL names (the explicit Local keeps the discovery
@@ -223,24 +276,30 @@ func serve(addr string, explicitAddr bool) error {
 	// Handler mounted, and the runtime link dials it in-process.
 	// The demo's sessions live in one jsonl store; the runtime gets it
 	// too, so the playground's fork mode (thread=fork) can branch them.
-	store, err := jsonl.Open("./.weft/threads")
+	store, err := jsonl.Open(threadsDir)
 	if err != nil {
-		return err
+		stopOtel()
+		return nil, err
 	}
-	srv := studio.New(studio.DB(otel.LocalDB()), studio.Playground(true))
+	// Under weft dev that Studio owns the playground and the command
+	// store (the shared WEFT_DB): the embedded one is a read-only view.
+	srv := studio.New(studio.DB(otel.LocalDB()), studio.Playground(studioURL == ""))
+	demo := newDemo(store, agent)
 	// The runtime link dials the embedded server in-process — or, under
 	// weft dev, the Studio WEFT_STUDIO_URL names, so its playground
-	// drives this app.
+	// drives this app. runtime.Sessions hands it the demo's live
+	// Session: the page's panel approves a parked refund through it.
 	link := runtime.Local(srv)
 	if studioURL != "" {
 		link = runtime.Studio(studioURL, studioToken)
 	}
-	defer runtime.Install(
+	stopLink := runtime.Install(
 		link,
 		runtime.Agents(agent),
 		runtime.Threads(store),
+		runtime.Sessions(demo.resolve),
 		runtime.Enabled(true),
-	)()
+	)
 
 	mux := http.NewServeMux()
 	mux.Handle("/studio/", http.StripPrefix("/studio", srv.Handler()))
@@ -250,20 +309,87 @@ func serve(addr string, explicitAddr bool) error {
 	// responses carry the Weft-Scope header (the development rung):
 	// the conversation's public id on every answer, narrowed to the
 	// turn's run by the handler once the turn has started.
-	demo := newDemo(store, agent)
 	mux.Handle("POST /run", demo.handler())
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+	// The page's panel reads the Studio the runtime registered with:
+	// the embedded one (setup A), or weft dev's (setup B).
+	panel := panelTag{studioURL: studioURL, studioToken: studioToken}
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = fmt.Fprint(w, page)
+		_, _ = fmt.Fprint(w, pageWith(panel.tag(r.Context())))
 	})
+	return &app{mux: mux, demo: demo, studioURL: studioURL, close: func() {
+		stopLink()
+		demo.close()
+		_ = srv.Close()
+		stopOtel()
+	}}, nil
+}
 
-	ln, addr, err := listen(addr, explicitAddr)
-	if err != nil {
-		return err
+// panelTag builds the page's panel script tag. With no Studio URL it
+// is setup A's localTag. Under weft dev (setup B) the tag loads
+// panel.js from that Studio and names it as data-endpoint, scoped to
+// the demo's public id with a panel token minted per page for it —
+// "playground": true, so the panel may decide the page's parked calls,
+// and only inside pub_demo; the server token stays in this process.
+type panelTag struct {
+	studioURL, studioToken string
+	// client mints the token (http.DefaultClient when nil; a test's).
+	client *http.Client
+}
+
+func (p panelTag) tag(ctx context.Context) string {
+	if p.studioURL == "" {
+		return localTag
 	}
-	log.Printf("studio-local: studio at http://%s/studio/ (live at /studio/live), panel at http://%s/", addr, addr)
-	log.Printf("studio-local: try: curl -s -XPOST %s/run -d 'where is order 42?'", addr)
-	return http.Serve(ln, mux)
+	base := strings.TrimRight(p.studioURL, "/")
+	tok, err := p.mint(ctx, base)
+	if err != nil {
+		log.Printf("studio-local: could not mint a panel token from %s: %v", base, err)
+		return `<p id="panel-error">the devtools panel is off: could not mint a panel token from ` +
+			html.EscapeString(base) + `: ` + html.EscapeString(err.Error()) + `</p>`
+	}
+	tag := `<script type="module" src="` + html.EscapeString(base) + `/panel.js" data-weft data-endpoint="` +
+		html.EscapeString(base) + `/" data-scope="` + publicID + `"`
+	if tok != "" {
+		tag += ` data-token="` + html.EscapeString(tok) + `"`
+	}
+	return tag + ` data-open="true"></script>`
+}
+
+// mint asks the Studio for a panel token scoped to the demo's public
+// id; "" with no server token (a Studio without one takes none).
+func (p panelTag) mint(ctx context.Context, base string) (string, error) {
+	if p.studioToken == "" {
+		return "", nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	body := `{"public_id":"` + publicID + `","ttl":"12h","playground":true}`
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/panel-tokens", strings.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.studioToken)
+	client := p.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("POST /api/panel-tokens: %s", resp.Status)
+	}
+	var out struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Token, nil
 }
 
 // demoFallbackAddr is the app's listener beside a running Studio (a
@@ -313,10 +439,10 @@ var refundOrder = weft.Tool("refund_order", "Refund an order (needs an approval)
 
 // refundCallID is the id of the call the echo model makes on a refund
 // question: the id the approval names — the panel's on("parked") ackId.
-// The app approves its own turns through its Session,
-// s.Decide(ctx, thread.Approve(ackId)); Studio's POST
-// /api/runs/{id}/approvals is for playground runs only (it answers 403
-// for a run no runtime started, this one included).
+// The panel approves it through Studio's POST /api/runs/{id}/approvals:
+// the runtime link was installed with runtime.Sessions(demo.resolve),
+// so the decision reaches the demo's live Session, which resumes the
+// turn (plan F4). Undecided, the next question denies it.
 const refundCallID = "call_refund"
 
 // echoModel is the demo's deterministic model: it answers the last
@@ -433,6 +559,29 @@ func (d *demo) handler() http.Handler {
 	return scope.Header(http.HandlerFunc(d.run), func(*http.Request) scope.Scope {
 		return scope.Scope{PublicID: publicID}
 	})
+}
+
+// close closes the demo's Session (its writer lease) once serving ends.
+func (d *demo) close() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.s != nil {
+		_ = d.s.Close(context.Background())
+	}
+}
+
+// resolve is the runtime.Sessions resolver: the demo's live Session
+// behind its public id (nothing to release — the demo keeps it), so
+// Studio's approve, deny and steer on one of the page's turns reach it;
+// (nil, nil, nil) — not this app's — for another public id, or before
+// the first question created the session.
+func (d *demo) resolve(_ context.Context, id string) (*thread.Session, func(), error) {
+	if id != publicID {
+		return nil, nil, nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.s, nil, nil
 }
 
 // run answers one question: one turn of the session whose public id

@@ -17,6 +17,7 @@ import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
+  APP_ELSEWHERE_FIX,
   APP_LINK_FIX,
   APP_RUN,
   APP_RUN_FIX,
@@ -143,9 +144,13 @@ describe("the server's words", () => {
     const go = readFileSync(resolve(process.cwd(), "../appturn.go"), "utf8")
     for (const words of [
       `appOwned = "app-owned turn"`,
-      `appOwned+" · read-only: no runtime of service "+service+" is connected"`,
-      `appOwned+" · read-only: run "+row.ID+" is the app's own, and no connected runtime of its service "+service+" acts on the app's sessions"`,
-      `"set runtime.Sessions(resolver) at runtime.Install in the app (service "+service+"): its turns then take approvals and steer"`,
+      `appOwned + " · read-only: no runtime of service " + service + " is connected"`,
+      `appOwned + " · read-only: run " + row.ID + " is the app's own, and no connected runtime of its service " + service + " acts on the app's sessions"`,
+      `"set runtime.Sessions(resolver) at runtime.Install in the app (service " + service + "): its turns then take approvals and steer"`,
+      // U20.2: an opted-in app gone, and the app's link elsewhere.
+      `appOwned + " · read-only: the app's runtime " + v.ID + " of service " + v.Service +\n\t\t\t" disconnected — last seen " + v.LastSeen.UTC().Format(time.RFC3339),\n\t\t"restart the app: it re-registers under the same id"`,
+      `appOwned + " · read-only: no runtime of service " + service + " is connected here — the app's link dialled " + l.StudioURL`,
+      `"${APP_ELSEWHERE_FIX}"`,
       `"${APP_LINK_FIX}"`,
       `"${APP_RUN_FIX}"`,
     ])
@@ -329,6 +334,8 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
 describe("an app turn no Sessions runtime of its service acts on", () => {
   const SVC_WORDS = `app-owned turn · read-only: run ${PARKED} is the app's own, and no connected runtime of its service app acts on the app's sessions — fix: set runtime.Sessions(resolver) at runtime.Install in the app (service app): its turns then take approvals and steer`
   const LINK_WORDS = `app-owned turn · read-only: no runtime of service app is connected — fix: ${APP_LINK_FIX}`
+  // appturn.go's appGoneWords for runtimeRow's rt_01, last seen T0.
+  const GONE_WORDS = `app-owned turn · read-only: the app's runtime rt_01 of service app disconnected — last seen 2026-10-01T09:00:00Z — fix: restart the app: it re-registers under the same id`
 
   it("connected without Sessions: the verbs refused, appturn.go's words, nothing posted", async () => {
     const { el, fake } = await open({
@@ -353,8 +360,29 @@ describe("an app turn no Sessions runtime of its service acts on", () => {
   })
 
   it("no runtime of the service connected (the link closed): the fix opens the link", async () => {
-    const { el } = await open({ runtimes: [runtimeRow({ connected: false })] })
+    const { el } = await open({ runtimes: [] })
     expect(line(el)).toBe(LINK_WORDS)
+    // A runtime of the service that never registered Sessions, gone:
+    // still the closed link (nothing says the app opted in).
+    const other = await open({
+      runtimes: [runtimeRow({ connected: false, sessions: false })],
+    })
+    expect(line(other.el)).toBe(LINK_WORDS)
+  })
+
+  it("an opted-in app's runtime gone (U20.2, UX-H-14): disconnected, last seen, restart it — never the closed link", async () => {
+    const { el } = await open({ runtimes: [runtimeRow({ connected: false })] })
+    expect(line(el)).toBe(GONE_WORDS)
+  })
+
+  it("the app's own link dialled another Studio (meta.runtime_link, UX-D-01): named, with the fix", async () => {
+    const { el } = await open({
+      runtimes: [],
+      runtimeLink: { studio_url: "http://127.0.0.1:7342", in_process: false },
+    })
+    expect(line(el)).toBe(
+      `app-owned turn · read-only: no runtime of service app is connected here — the app's link dialled http://127.0.0.1:7342 — fix: ${APP_ELSEWHERE_FIX}`
+    )
   })
 
   it("a quiet parked turn reads the runtimes again on its own: the link opened, the verbs come", async () => {
@@ -367,7 +395,7 @@ describe("an app turn no Sessions runtime of its service acts on", () => {
     try {
       const o: AppTurnOptions = { runtimes: [runtimeRow({ connected: false })] }
       const { el, fake } = await open(o)
-      expect(line(el)).toBe(LINK_WORDS)
+      expect(line(el)).toBe(GONE_WORDS)
       const reads = fake.calls("GET runtimes").length
       o.runtimes = [runtimeRow()]
       vi.advanceTimersByTime(10_000)

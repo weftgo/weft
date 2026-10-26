@@ -5875,6 +5875,7 @@ export class WeftDevtools extends HTMLElement {
           ? {
               capabilities: s.meta.capabilities,
               capabilities_off: s.meta.capabilities_off,
+              link: s.meta.runtime_link,
             }
           : undefined
       )

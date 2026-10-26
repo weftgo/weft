@@ -751,6 +751,10 @@ export interface Meta {
   retention?: string | null
   /** Runtimes holding a command stream now. */
   runtimes?: number
+  /** U20.2: this process's runtime link (db.path's rule): in_process
+   * when it talks to this server, studio_url the Studio it dialled
+   * instead; absent with none open. */
+  runtime_link?: { studio_url?: string; in_process: boolean }
   manifest_check?: {
     /** file (weft.json) or runtime (registered; no weft.json). */
     source?: "file" | "runtime"
@@ -2639,6 +2643,26 @@ export interface CommandStatus {
   }
   created: string
   updated: string
+}
+
+/** One command acting on a run (GET /api/runs/{id}/commands, capability
+ * run_commands, U20.2): its lifecycle row, its verb and, for a decision,
+ * the call and the decision — a lost one stays on the run after a
+ * reload or a Studio restart (UX-H-15). */
+export interface RunCommand extends CommandStatus {
+  verb: "decide" | "steer" | "cancel"
+  call_id?: string
+  decision?: string
+}
+
+export function runCommandsQuery(runID: string) {
+  return queryOptions({
+    queryKey: ["run-commands", runID],
+    queryFn: () =>
+      get<{ commands: RunCommand[] }>(
+        `runs/${encodeURIComponent(runID)}/commands`
+      ),
+  })
 }
 
 export function fetchCommand(id: string): Promise<CommandStatus> {

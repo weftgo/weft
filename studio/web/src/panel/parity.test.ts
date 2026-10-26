@@ -1791,6 +1791,19 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       kind: "read-only",
     },
     {
+      name: "an opted-in app's runtime gone (U20.2): disconnected, the restart fix",
+      o: { runtimes: [appRuntime({ connected: false })] },
+      kind: "read-only",
+    },
+    {
+      name: "the app's own link dialled another Studio (U20.2): named, the fix",
+      o: {
+        runtimes: [],
+        runtimeLink: { studio_url: "http://127.0.0.1:7342", in_process: false },
+      },
+      kind: "read-only",
+    },
+    {
       name: "a turn already resumed: decided — resumed as the next run",
       o: { resumed: true },
       kind: "resumed",

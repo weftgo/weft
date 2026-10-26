@@ -357,7 +357,7 @@ func TestRunCarriesTheScopeHeader(t *testing.T) {
 // this pins the page that suite models.
 func TestPageScopesFromTheRunHeader(t *testing.T) {
 	var tag string
-	for _, line := range strings.Split(page, "\n") {
+	for _, line := range strings.Split(pageWith(localTag), "\n") {
 		if strings.Contains(line, `src="/studio/panel.js"`) {
 			tag = line
 		}

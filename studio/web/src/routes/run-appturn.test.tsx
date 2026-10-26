@@ -17,8 +17,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "@/lib/api"
 import { queryClient } from "@/lib/query"
 import {
+  APP_ELSEWHERE_FIX,
   APP_LINK_FIX,
   APP_OWNED,
+  lostWords,
   APP_RUN,
   APP_RUN_FIX,
   APP_CANCEL,
@@ -437,6 +439,45 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
     await open({ runtimes: [] })
     expect(line()).toBe(
       `app-owned turn · read-only: no runtime of service app is connected — fix: ${APP_LINK_FIX}`
+    )
+  })
+
+  it("an opted-in app's runtime gone (U20.2, UX-H-14): disconnected, last seen, restart it — the panel's words", async () => {
+    await open({ runtimes: [runtimeRow({ connected: false })] })
+    expect(line()).toBe(
+      `app-owned turn · read-only: the app's runtime rt_01 of service app disconnected — last seen 2026-10-01T09:00:00Z — fix: restart the app: it re-registers under the same id`
+    )
+  })
+
+  it("the app's own link dialled another Studio (meta.runtime_link, UX-D-01): named, with the fix", async () => {
+    await open({
+      runtimes: [],
+      runtimeLink: { studio_url: "http://127.0.0.1:7342", in_process: false },
+    })
+    expect(line()).toBe(
+      `app-owned turn · read-only: no runtime of service app is connected here — the app's link dialled http://127.0.0.1:7342 — fix: ${APP_ELSEWHERE_FIX}`
+    )
+  })
+
+  it("a decision lost before it landed is marked on its call after a reload (U20.2, UX-H-15)", async () => {
+    await open({ runtimes: [runtimeRow({ connected: false })], lost: true })
+    const row = golden<{
+      commands: {
+        command_id: string
+        verb: string
+        decision: string
+        created: string
+        error: string
+      }[]
+    }>("run-commands").commands[0]
+    await waitFor(() =>
+      expect(
+        parked().querySelector(`[data-command-lost="${row.command_id}"]`)
+          ?.textContent
+      ).toBe(lostWords(row))
+    )
+    expect(lostWords(row)).toMatch(
+      /^your approve at .+ was lost: no ack in time — decide again$/
     )
   })
 

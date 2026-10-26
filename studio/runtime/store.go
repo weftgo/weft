@@ -460,6 +460,25 @@ func (rs *RuntimeServer) load() {
 			rs.rearmAcceptedLocked(row, now)
 		}
 	}
+	// One line says what the restart kept (U20.2, UX-H-12): the
+	// runtimes listed restored, the commands still open, and the open
+	// ones the restart decided lost.
+	open, lostAtLoad := 0, 0
+	for _, sc := range stored {
+		if sc.State != StateQueued && sc.State != StateAccepted {
+			continue
+		}
+		if row := rs.commands[sc.ID]; row != nil && row.state == StateLost {
+			lostAtLoad++
+		} else {
+			open++
+		}
+	}
+	if len(runtimes) > 0 || open > 0 || lostAtLoad > 0 {
+		slog.Info("studio/runtime: restored from the store",
+			"runtimes", len(runtimes), "open_commands", open, "lost_commands", lostAtLoad,
+			"hint", "a restored runtime is listed disconnected until its app re-registers; GET /api/runtimes, /runtimes")
+	}
 
 	// The routes: every stored one names a stored command's run
 	// (PruneCommands drops the others), so the commands' runs find them.

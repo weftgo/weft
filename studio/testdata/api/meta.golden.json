@@ -40,6 +40,7 @@
     "handoff": "no Token: panel tokens do not exist here, so there is none to hand off from: turn it on with studio.Token(tok); weft studio always sets one",
     "playground": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
     "preview": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "run_commands": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
     "runtime_forget": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
     "runtimes": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
     "steer": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",

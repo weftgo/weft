@@ -1,0 +1,17 @@
+{
+  "commands": [
+    {
+      "command_id": "cmd_1",
+      "state": "lost",
+      "run_id": "",
+      "error": "no ack in time",
+      "created": "2026-10-26T14:23:05Z",
+      "updated": "2026-10-26T14:23:05Z",
+      "verb": "decide",
+      "call_id": "call_1",
+      "decision": "approve"
+    }
+  ]
+}
+
+

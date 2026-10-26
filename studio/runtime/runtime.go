@@ -1723,6 +1723,50 @@ func (rs *RuntimeServer) Command(id string) (CommandStatus, error) {
 	return row.view(), nil
 }
 
+// RunCommand is one command acting on a run — a decision on one of its
+// parked calls (an approve frame, or a session frame's decide), a steer
+// or a cancel of an app turn — as GET /api/runs/{id}/commands lists it
+// (U20.2, UX-H-15): so a command lost while the run waited (the runtime
+// went away, Studio restarted) stays marked on the run after a reload,
+// not only on the command's own id. CommandStatus's run_id is the run
+// the command's ack named (a decision's resumed turn).
+type RunCommand struct {
+	CommandStatus
+	// Verb is decide, steer or cancel; CallID and Decision a decide's.
+	Verb     string `json:"verb"`
+	CallID   string `json:"call_id,omitempty"`
+	Decision string `json:"decision,omitempty"`
+	// PublicID is the command's scope (a panel token lists its own).
+	PublicID string `json:"-"`
+}
+
+// CommandsOn lists the commands acting on runID (RunCommand), oldest
+// first; empty, never nil, when none is held.
+func (rs *RuntimeServer) CommandsOn(runID string) []RunCommand {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	out := []RunCommand{}
+	for _, row := range rs.commands {
+		rc := RunCommand{CommandStatus: row.view(), PublicID: row.PublicID}
+		switch {
+		case row.approval != nil && row.approval.RunID == runID:
+			rc.Verb, rc.CallID, rc.Decision = VerbDecide, row.approval.CallID, row.approval.Decision
+		case row.session != nil && row.session.RunID == runID:
+			rc.Verb, rc.CallID, rc.Decision = row.session.Verb, row.session.CallID, row.session.Decision
+		default:
+			continue
+		}
+		out = append(out, rc)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].Created.Equal(out[j].Created) {
+			return out[i].Created.Before(out[j].Created)
+		}
+		return out[i].CommandID < out[j].CommandID
+	})
+	return out
+}
+
 // CommandOf returns the command as enqueued (its public id names the
 // page a panel token is scoped to); ok is false for an unknown id.
 func (rs *RuntimeServer) CommandOf(id string) (Command, bool) {

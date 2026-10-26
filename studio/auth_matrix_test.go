@@ -921,6 +921,8 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "POST /api/playground/preview (B's child)", method: "POST", path: fixed("/api/playground/preview"),
 			body: fixed(`{"agent":"acme-support","source":{"run_id":"run_b/0/call_1","from_step":0}}`), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/playground/commands/{id}", method: "GET", path: func(res string) string { return "/api/playground/commands/" + cmd[res] }, resources: all, want: scoped(ok)},
+		// A run's commands (U20.2): a read inside the run's public id.
+		{name: "GET /api/runs/{id}/commands", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/commands" }, resources: all, want: scoped(ok)},
 		{name: "POST /api/runs/{id}/approvals", method: "POST", path: func(res string) string { return "/api/runs/" + rtRun[res] + "/approvals" },
 			body: fixed(`{"call_id":"call_1","decision":"deny","reason":"matrix"}`), resources: all, want: acting(accepted)},
 		{name: "POST /api/runs/{id}/steer", method: "POST", path: func(res string) string { return "/api/runs/" + rtRun[res] + "/steer" },

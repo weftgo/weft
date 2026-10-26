@@ -246,6 +246,12 @@ export interface AppTurnOptions {
   noPlayground?: boolean
   /** The parked turn parks two calls: CALL and CALL2. */
   twoCalls?: boolean
+  /** meta.runtime_link (U20.2): the app's own link dialled another
+   * Studio. */
+  runtimeLink?: { studio_url?: string; in_process: boolean }
+  /** The run's commands (capability run_commands, U20.2): CALL's
+   * approval was lost — testdata/api/run-commands.golden.json's row. */
+  lost?: boolean
 }
 
 /** The 500 a failed runtimes read answers in these tests. */
@@ -263,11 +269,19 @@ export function serveAppTurn(
   }>("meta")
   const caps = o.noPlayground
     ? g.capabilities
-    : [...g.capabilities, "playground", "steer", "breakpoints", "runtimes"]
+    : [
+        ...g.capabilities,
+        "playground",
+        "steer",
+        "breakpoints",
+        "runtimes",
+        ...(o.lost ? ["run_commands"] : []),
+      ]
   const meta = {
     ...(o.studioMeta ? golden<Record<string, unknown>>("meta") : META),
     capabilities: caps,
     ...(o.noPlayground ? { capabilities_off: g.capabilities_off } : {}),
+    ...(o.runtimeLink ? { runtime_link: o.runtimeLink } : {}),
     debug_scope:
       o.debugScope ??
       ((o.runtimes ?? [runtimeRow()]).some(
@@ -342,6 +356,14 @@ export function serveAppTurn(
           }
     )
     .on(`GET runs/${PARKED}`, () => doc(parked))
+    .on(`GET runs/${PARKED}/commands`, () => {
+      const c = golden<{ commands: Record<string, unknown>[] }>("run-commands")
+      return {
+        commands: o.lost
+          ? c.commands.map((r) => ({ ...r, call_id: CALL.id }))
+          : [],
+      }
+    })
     .on(
       `GET runs/${PARKED}/events`,
       pagedEvents(events(PARKED, !o.running, calls), { done: !o.running })

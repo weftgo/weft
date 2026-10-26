@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sync"
 
+	"github.com/weftgo/weft/internal/linkreg"
 	"github.com/weftgo/weft/obsdb"
 	linkruntime "github.com/weftgo/weft/studio/runtime"
 )
@@ -86,6 +87,44 @@ type metaDoc struct {
 	// (mayReadDBPath) — loopback with no Token, or the server token —
 	// and omitted for anyone else.
 	PID int `json:"pid,omitempty"`
+	// RuntimeLink is this process's runtime link as this server sees it
+	// (U20.2, UX-D-01): in_process when a link talks to this very server
+	// (runtime.Local(srv)), studio_url the Studio a link of this process
+	// dialled instead (runtime.Studio, weft dev's WEFT_STUDIO_URL) — so
+	// an embedded Studio whose app registered elsewhere says where,
+	// rather than reading as an app whose link is closed. Omitted when
+	// no link of this process is open (a standalone `weft studio`), and
+	// under db.path's rule (an address on the operator's network, as
+	// /api/runtimes' studio_url): absent to a panel token.
+	RuntimeLink *metaRuntimeLink `json:"runtime_link,omitempty"`
+}
+
+// metaRuntimeLink is api/meta's runtime_link.
+type metaRuntimeLink struct {
+	// StudioURL is the Studio another link of this process dialled
+	// (the first by URL when several did); omitted when none did.
+	StudioURL string `json:"studio_url,omitempty"`
+	// InProcess is whether a link of this process talks to this server
+	// in-process (runtime.Local(srv)).
+	InProcess bool `json:"in_process"`
+}
+
+// runtimeLink reads this process's open runtime links (internal/linkreg,
+// which weft/runtime keeps): nil when none is open.
+func (s *Server) runtimeLink() *metaRuntimeLink {
+	var out metaRuntimeLink
+	for _, l := range linkreg.All() {
+		switch {
+		case l.Local != nil && l.Local == any(s):
+			out.InProcess = true
+		case l.Local == nil && l.StudioURL != "" && out.StudioURL == "":
+			out.StudioURL = l.StudioURL
+		}
+	}
+	if !out.InProcess && out.StudioURL == "" {
+		return nil
+	}
+	return &out
 }
 
 // metaDB names the database. Kind is everyone's; Path and Size only
@@ -205,6 +244,7 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 	if mayReadDBPath(s, r) {
 		doc.DB.Path, doc.DB.Size = dbFile(s.db)
 		doc.PID = os.Getpid()
+		doc.RuntimeLink = s.runtimeLink()
 	}
 	if id.panel == nil {
 		doc.ManifestCheck = s.manifestCheck(r.Context(), reg)

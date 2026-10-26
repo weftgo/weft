@@ -8,7 +8,7 @@
 // (hole-badge.tsx) and the devtools panel both read this one module.
 
 import { DONE } from "./decisions"
-import { byteSize, plural } from "./format"
+import { absoluteTime, byteSize, plural } from "./format"
 
 export type Hole =
   | "truncated"
@@ -456,6 +456,42 @@ export const APP_OWNED = "app-owned turn · read-only"
 /** appturn.go's fix when no runtime of the service is connected. */
 export const APP_LINK_FIX =
   "open the runtime link in the app: WEFT_ENV=dev (or runtime.Enabled(true)) at runtime.Install, with runtime.Sessions(resolver)"
+/** An opted-in app whose runtime is gone (U20.2, UX-H-14): no runtime
+ * of the run's service is connected, but one that registered
+ * runtime.Sessions is listed disconnected (the first, /api/runtimes'
+ * newest seen) — the app stopped, or Studio restarted under it and it
+ * is not back yet (/runtimes says which). Never "add runtime.Sessions"
+ * or "open the link": appturn.go's appGoneWords, last seen to the
+ * second, in UTC. */
+export function appGone(
+  rts: readonly RuntimeLike[] | null | undefined,
+  service: string | undefined
+): { words: string; fix: string } | null {
+  const rt = rts?.find(
+    (r) => service && !r.connected && r.sessions && r.service === service
+  )
+  return rt
+    ? {
+        words: `${APP_OWNED}: the app's runtime ${rt.id} of service ${service} disconnected — last seen ${new Date(rt.last_seen ?? 0).toISOString().slice(0, 19)}Z`,
+        fix: "restart the app: it re-registers under the same id",
+      }
+    : null
+}
+/** A decision that never landed (U20.2, UX-H-15): the run's lost
+ * command (GET /api/runs/{id}/commands), said on the parked call after
+ * a reload or a Studio restart — what was sent, when, why it was lost,
+ * and what to do. Studio only. */
+export const lostWords = (c: {
+  decision?: string
+  verb: string
+  created: string
+  error: string | null
+}) =>
+  `your ${c.decision || c.verb} at ${absoluteTime(c.created)} was lost: ${c.error ?? "(no reason given)"} — decide again`
+/** appturn.go's fix when the app's own link dialled another Studio
+ * (meta.runtime_link.studio_url, UX-D-01). */
+export const APP_ELSEWHERE_FIX =
+  "open the panel there (data-endpoint), or link in-process: runtime.Local(srv)"
 /** A parked run outside a thread session (a plain Generate): the app
  * resumes it itself; the fix is the server's 403 fix word for word. */
 export const APP_RUN =
@@ -532,6 +568,7 @@ export interface RuntimeLike {
   service: string
   connected?: boolean
   sessions?: boolean
+  last_seen?: string
 }
 
 interface AppRow {
@@ -706,6 +743,8 @@ export function nextTurn(
  * runtimes: meta's capabilities (absent while unread: no verdict), its
  * capabilities_off, and a failed meta or session read. */
 export interface AppGateFacts {
+  /** meta.runtime_link: this process's runtime link (U20.2). */
+  link?: { studio_url?: string; in_process?: boolean }
   capabilities?: readonly string[]
   capabilities_off?: Record<string, string>
   metaError?: string
@@ -731,14 +770,15 @@ export const poolChildWords = (row: AppRow) =>
   `${POOL_CHILD} ${poolParent(row)}${linkedRun(row) ? ` ${POOL_CHILD_TURN} ${linkedRun(row)}` : ""}`
 
 /** refusalWords is the read-only line's message and fix in the
- * server's words: a 403 already answered (refused), a plain Generate,
+ * server's words (appturn.go's appRefusal): a 403 already answered (refused), a plain Generate,
  * a subagent's child run, a thread/pool child's turn, a session
  * without a public id (appturn.go),
  * a read-scoped token (auth.go), a failed meta read, a Studio without
  * the playground (meta.capabilities_off's reason), a failed session or
- * runtimes read — said as such, never a verdict — else appturn.go's two
- * cases: no runtime of the service connected (the link is closed), or
- * one connected without Sessions. */
+ * runtimes read — said as such, never a verdict — else appturn.go's four
+ * cases: one of the service connected without Sessions; none connected
+ * but an opted-in one gone (appGone: disconnected); none known and this app's own link dialled another
+ * Studio (facts.link, meta.runtime_link); else the link is closed. */
 export function refusalWords(
   kind: ParkedKind,
   row: AppRow,
@@ -776,11 +816,20 @@ export function refusalWords(
     return { words: `${SESSION_UNREAD}: ${facts.sessionError}`, fix: "" }
   if (rtErr) return { words: `${RUNTIMES_UNREAD}: ${rtErr}`, fix: "" }
   const svc = row.service || "(none recorded)"
-  if (!live(runtimes, row.service, false))
-    return {
-      words: `${APP_OWNED}: no runtime of service ${svc} is connected`,
-      fix: APP_LINK_FIX,
-    }
+  if (!live(runtimes, row.service, false)) {
+    const gone = appGone(runtimes, row.service)
+    if (gone) return gone
+    const url = facts?.link?.in_process ? "" : facts?.link?.studio_url
+    return url
+      ? {
+          words: `${APP_OWNED}: no runtime of service ${svc} is connected here — the app's link dialled ${url}`,
+          fix: APP_ELSEWHERE_FIX,
+        }
+      : {
+          words: `${APP_OWNED}: no runtime of service ${svc} is connected`,
+          fix: APP_LINK_FIX,
+        }
+  }
   return {
     words: `${APP_OWNED}: run ${row.id} is the app's own, and no connected runtime of its service ${svc} acts on the app's sessions`,
     fix: `set runtime.Sessions(resolver) at runtime.Install in the app (service ${svc}): its turns then take approvals and steer`,

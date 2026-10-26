@@ -121,6 +121,18 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 			mux.HandleFunc("DELETE /api/runtimes/{id}", s.serveForgetRuntime(rs))
 		},
 	})
+	// A run's commands (U20.2, UX-H-15): the decisions, steers and
+	// cancels sent to one run, lost and rejected ones included, so the
+	// run page marks a command that never landed after a reload or a
+	// Studio restart. Its own capability: the UIs ask only when meta
+	// reports it.
+	s.addGroup(routeGroup{
+		name:       "run_commands",
+		capability: "run_commands",
+		register: func(mux *http.ServeMux, s *Server) {
+			mux.HandleFunc("GET /api/runs/{id}/commands", s.serveRunCommands(rs))
+		},
+	})
 	s.addGroup(routeGroup{
 		name:       "breakpoints",
 		capability: "breakpoints",
@@ -980,6 +992,49 @@ func (s *Server) servePlaygroundCommand(rs *linkruntime.RuntimeServer) http.Hand
 	}
 }
 
+// ── GET /api/runs/{id}/commands ───────────────────────────────────
+
+// serveRunCommands lists the commands acting on one run, oldest first
+// ({"commands": [...]}, never null): each is GET
+// /api/playground/commands/{id}'s row plus its verb (decide, steer,
+// cancel) and, for a decision, the call and the decision. A panel
+// token reads a run inside its public id, and only the commands its
+// public id sent.
+func (s *Server) serveRunCommands(rs *linkruntime.RuntimeServer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		runID := r.PathValue("id")
+		if !s.scopeRunID(w, r, runID) {
+			return
+		}
+		cmds := rs.CommandsOn(runID)
+		if len(cmds) == 0 {
+			// No command, and no such run stored: the 404 every run
+			// route answers (a run a runtime started but whose row has not
+			// landed yet has its commands here).
+			if _, err := s.db.Run(r.Context(), runID); err != nil {
+				if errors.Is(err, obsdb.ErrNotFound) {
+					notFound(w, r, "unknown run "+runID)
+					return
+				}
+				dbError(w, r, "run", runID, err)
+				return
+			}
+		}
+		if pid := idFrom(r).panel; pid != nil {
+			kept := cmds[:0]
+			for _, c := range cmds {
+				if c.PublicID == pid.PublicID {
+					kept = append(kept, c)
+				}
+			}
+			cmds = kept
+		}
+		writeJSON(w, r, http.StatusOK, struct {
+			Commands []linkruntime.RunCommand `json:"commands"`
+		}{cmds})
+	}
+}
+
 // ── POST /api/runs/{id}/approvals ─────────────────────────────────
 
 // approvalRequest is the decision body: continue (approve — the
@@ -1053,7 +1108,7 @@ func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.Han
 			// installed with runtime.Sessions — the app's Session records
 			// the decision and resumes the turn — else 403 "app-owned
 			// turn" before the call is looked at.
-			target, ok := appTurnRuntime(w, r, rs, row.RunRow)
+			target, ok := s.appTurnRuntime(w, r, rs, row.RunRow)
 			if !ok {
 				return
 			}

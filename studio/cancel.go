@@ -91,7 +91,7 @@ func (s *Server) serveCancel(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 			// (plan F4, appturn.go). The runtime refuses it today, "cancel
 			// is not supported on an app turn" (thread has no per-turn
 			// cancel), on the command's row.
-			target, ok := appTurnRuntime(w, r, rs, row.RunRow)
+			target, ok := s.appTurnRuntime(w, r, rs, row.RunRow)
 			if !ok {
 				return
 			}

@@ -52,6 +52,7 @@ var optionalCapabilities = map[string]string{
 	"preview":        offPlayground,
 	"target_check":   offPlayground,
 	"runtime_forget": offPlayground,
+	"run_commands":   offPlayground,
 	"ingest":         offIngest,
 	"auth":           offAuth,
 	"handoff":        offHandoff,

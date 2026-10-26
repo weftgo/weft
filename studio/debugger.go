@@ -153,7 +153,7 @@ func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 				forbidden(w, r)
 				return
 			}
-			target, ok := appTurnRuntime(w, r, rs, row.RunRow)
+			target, ok := s.appTurnRuntime(w, r, rs, row.RunRow)
 			if !ok {
 				return
 			}

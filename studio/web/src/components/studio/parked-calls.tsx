@@ -48,6 +48,7 @@ import {
   metaQuery,
   postApproval,
   postSteer,
+  runCommandsQuery,
   runtimesQuery,
   sessionQuery,
   studioToken,
@@ -55,6 +56,7 @@ import {
   timelineQuery,
 } from "@/lib/api"
 import type {
+  RunCommand,
   CommandStatus,
   DecidedCall,
   DecisionDoc,
@@ -64,6 +66,7 @@ import type {
 import {
   appTurn,
   appVerbWords,
+  lostWords,
   nextTurn,
   parkedKind,
   POOL_CHILD,
@@ -427,6 +430,7 @@ function useAppTurn(doc: RunDoc) {
         capabilities: caps,
         capabilities_off: meta.data.capabilities_off,
         sessionError: sessErr,
+        link: meta.data.runtime_link,
       }
     : { metaError: metaErr, sessionError: sessErr }
   // A failed read (meta, the session, the runtimes) is no verdict: no
@@ -444,6 +448,25 @@ function useAppTurn(doc: RunDoc) {
     facts,
     steer: caps.includes("steer"),
   }
+}
+
+/** useLostDecisions reads the run's commands (capability run_commands,
+ * U20.2, UX-H-15) while its calls await a decision: per call, its
+ * latest decision when that one was lost — the runtime went away, or
+ * Studio restarted, before it landed — so the card says so after a
+ * reload instead of "awaiting a decision" alone. */
+function useLostDecisions(doc: RunDoc): Map<string, RunCommand> {
+  const { has } = useCapabilities()
+  const q = useQuery({
+    ...runCommandsQuery(doc.id),
+    enabled: has("run_commands") && !doc.decided,
+    refetchInterval: APP_GATE_POLL_MS,
+  })
+  const out = new Map<string, RunCommand>()
+  for (const c of q.data?.commands ?? [])
+    if (c.verb === "decide" && c.call_id) out.set(c.call_id, c)
+  for (const [k, c] of out) if (c.state !== "lost") out.delete(k)
+  return out
 }
 
 /** useRequestExpiries reads a session turn's request expiries (UX-B-41)
@@ -515,6 +538,7 @@ export function ParkedCalls({
   } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
   const expiry = useRequestExpiries(doc)
+  const lost = useLostDecisions(doc)
   // A 403 is live until a runtimes read started after it has applied
   // and the gate says decide — the panel's rule, strict: a failed or an
   // in-flight read keeps it.
@@ -638,6 +662,16 @@ export function ParkedCalls({
             )}
             {deciding && live(verbs[p.id]) ? (
               <VerbLine v={verbs[p.id]} runID={doc.id} verb="decide" />
+            ) : null}
+            {lost.get(p.id) &&
+            !(verbs[p.id] as Verb | undefined) &&
+            shown !== "resumed" ? (
+              <p
+                className="font-sans text-status-int"
+                data-command-lost={lost.get(p.id)!.command_id}
+              >
+                {lostWords(lost.get(p.id)!)}
+              </p>
             ) : null}
           </li>
         ))}

@@ -67,6 +67,15 @@ func TestRetryAndFallbackReportOneAttemptPerRequest(t *testing.T) {
 			},
 			want: []want{{"1", "429: boom", "1ms", ""}, {"2", "", "", "fallback"}},
 		},
+		{
+			// A Retry around the backup, under the Fallback (U23.1-fix):
+			// the backup's request reads fallback, not a first try.
+			name: "Fallback(primary, Retry(backup))",
+			build: func(backup core.Model) core.ModelMiddleware {
+				return mw.Fallback(mw.Retry(mw.BaseDelay(0), mw.MaxRetries(2))(backup))
+			},
+			want: []want{{"1", "429: boom", "1ms", ""}, {"2", "", "", "fallback"}},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -96,6 +105,33 @@ func TestRetryAndFallbackReportOneAttemptPerRequest(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A backup that reports its own attempts — a Retry around it, under
+// the Fallback (U23.1-fix) — marks every request it sends fallback,
+// its first and its retries alike: the run the backup answered counts
+// as a fallback, never as a primary's retry.
+func TestFallbackToRetriedBackupMarksFallback(t *testing.T) {
+	h := &attemptLines{}
+	primary := wefttest.Script(wefttest.Fail(status(503, nil)))
+	backup := wefttest.Script(wefttest.Fail(status(503, nil)), wefttest.Say("from backup"))
+	retried := mw.Retry(mw.BaseDelay(0), mw.MaxRetries(2))(backup)
+	agt := core.New(primary, core.Logger(slog.New(h)), core.WrapModel(mw.Fallback(retried)))
+	res, err := agt.Generate(context.Background(), core.Prompt("x"))
+	if err != nil || res.Text() != "from backup" {
+		t.Fatalf("run: text=%q err=%v", res.Text(), err)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	want := []struct{ attempt, err, layer string }{{"1", "503: boom", ""}, {"2", "503: boom", "fallback"}, {"3", "", "fallback"}}
+	if len(h.lines) != len(want) {
+		t.Fatalf("attempt lines = %v, want %d", h.lines, len(want))
+	}
+	for i, w := range want {
+		if got := h.lines[i]; got["attempt"] != w.attempt || got["err"] != w.err || got["layer"] != w.layer {
+			t.Errorf("line %d = %v, want attempt=%s err=%q layer=%q", i, got, w.attempt, w.err, w.layer)
+		}
 	}
 }
 

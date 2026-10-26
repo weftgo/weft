@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -113,7 +114,11 @@ func MapErrors(fn func(error) error) core.ToolMiddleware {
 			if mapped == nil {
 				mapped = err
 			}
-			if !sameError(mapped, err) {
+			// A mapping that only wraps the error — errors.Is still finds
+			// it and the model still reads its text — hid nothing: no
+			// report. A ToolError carrying it as the cause behind a text
+			// of its own hid it, as the default does.
+			if !sameError(mapped, err) && !wrapsVisibly(mapped, err) {
 				core.ToolReportFromContext(ctx).Masked(err)
 			}
 			return out, mapped
@@ -126,6 +131,12 @@ func MapErrors(fn func(error) error) core.ToolMiddleware {
 func sameError(a, b error) bool {
 	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
 	return ta == tb && ta != nil && ta.Comparable() && a == b
+}
+
+// wrapsVisibly reports a mapped error that only wraps the original:
+// errors.Is finds it, and its text carries the original's.
+func wrapsVisibly(mapped, original error) bool {
+	return errors.Is(mapped, original) && strings.Contains(mapped.Error(), original.Error())
 }
 
 // deniedByAllow is weft.tool.denied_by for a call Allow refused.

@@ -1888,7 +1888,8 @@ export interface StepAttempt {
   error_type?: string
   retry_after_ms?: number
   /** The attempt span's weft.attempt.layer: "fallback" for a request
-   * mw.Fallback sent to a backup; absent on a primary attempt. */
+   * mw.Fallback sent to a backup (its own retries included), "retry"
+   * for one mw.Retry sent again (U23.1); absent on a first try. */
   layer?: string
   /** U25 (O6): the attempt span's http.response.status_code, its
    * weft.attempt.wait_ms and, failed, its status description. */

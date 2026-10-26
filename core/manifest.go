@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -228,29 +230,92 @@ func toolSource(t *ToolDef) string {
 	if t.sourceFile == "" {
 		return ""
 	}
-	return moduleRel(t.sourceFile) + ":" + strconv.Itoa(t.sourceLine)
+	return sourceRel(t.sourceFile, t.sourceFunc) + ":" + strconv.Itoa(t.sourceLine)
 }
 
-// moduleRel renders file relative to the module root — the nearest
-// ancestor directory holding go.mod — so a committed manifest is
-// machine-independent. A path outside any module (the module cache, a
-// sibling checkout) keeps its absolute form; the manifest is then
-// machine-dependent for out-of-module tools, which is accepted and
-// recorded (ADR 0012). Separators are always "/", so the committed file
-// does not depend on the generating OS.
-func moduleRel(file string) string {
+// sourceRel renders a source file for the manifest, never as an
+// absolute path, so the document — and weft.manifest.hash — is the same
+// on every machine (ADR 0012's 2026-10-26 amendment, U23.1-fix):
+//
+//   - a file in the module cache (…/pkg/mod/<module>@<version>/<dir>/f.go)
+//     reads <module>/<dir>/f.go, the version dropped and the cache's
+//     case escapes (!x) undone;
+//   - a file under a go.mod reads relative to that module's root (the
+//     nearest ancestor directory holding go.mod);
+//   - anything else — a binary run where its sources are not, a build
+//     host's path — reads as the function's import path and the file's
+//     base name (github.com/x/y/f.go), or the base name alone when the
+//     function is unknown.
+//
+// function is the runtime name of a function defined in file ("" when
+// unknown). Separators are always "/".
+func sourceRel(file, function string) string {
+	slashed := filepath.ToSlash(file)
+	if i := strings.LastIndex(slashed, "/pkg/mod/"); i >= 0 {
+		rest := slashed[i+len("/pkg/mod/"):]
+		if at := strings.Index(rest, "@"); at >= 0 {
+			if slash := strings.Index(rest[at:], "/"); slash >= 0 {
+				rest = rest[:at] + rest[at+slash:]
+			} else {
+				rest = rest[:at]
+			}
+		}
+		return unescapeModPath(rest)
+	}
+	if rel, ok := moduleRel(file); ok {
+		return rel
+	}
+	if pkg := funcPackage(function); pkg != "" {
+		return pkg + "/" + path.Base(slashed)
+	}
+	return path.Base(slashed)
+}
+
+// moduleRel renders file relative to the nearest ancestor directory
+// holding go.mod; ok is false when no ancestor does.
+func moduleRel(file string) (string, bool) {
 	dir := filepath.Dir(file)
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			if rel, err := filepath.Rel(dir, file); err == nil {
-				return filepath.ToSlash(rel)
+				return filepath.ToSlash(rel), true
 			}
-			return filepath.ToSlash(file)
+			return "", false
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return filepath.ToSlash(file)
+			return "", false
 		}
 		dir = parent
 	}
+}
+
+// funcPackage is a runtime function name's import path:
+// "github.com/x/y.F.func1" reads "github.com/x/y", "main.main" "main".
+func funcPackage(function string) string {
+	if function == "" {
+		return ""
+	}
+	slash := strings.LastIndex(function, "/")
+	if dot := strings.Index(function[slash+1:], "."); dot >= 0 {
+		return function[:slash+1+dot]
+	}
+	return ""
+}
+
+// unescapeModPath undoes the module cache's case encoding: "!x" is "X".
+func unescapeModPath(p string) string {
+	if !strings.Contains(p, "!") {
+		return p
+	}
+	var b strings.Builder
+	for i := 0; i < len(p); i++ {
+		if p[i] == '!' && i+1 < len(p) && p[i+1] >= 'a' && p[i+1] <= 'z' {
+			b.WriteByte(p[i+1] - 'a' + 'A')
+			i++
+			continue
+		}
+		b.WriteByte(p[i])
+	}
+	return b.String()
 }

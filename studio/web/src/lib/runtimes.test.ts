@@ -17,7 +17,10 @@ import {
   overlapping,
   processGroups,
   processHead,
+  registeredWeft,
+  RUN_MANIFEST_TITLE,
   runManifestMark,
+  runManifestTitle,
   runtimeState,
   STATE_WORDS,
   steerOffLine,
@@ -208,6 +211,28 @@ describe("the runtimes page's reading (U20.1)", () => {
     // An older run of a stale agent: the check cannot tell.
     expect(runManifestMark("director", "old", check)).toBe("")
     expect(runManifestMark("analyst", "a", check)).toBe("")
+  })
+
+  it("a stale run's title names a weft version change (U23.1-fix)", () => {
+    const rts = [
+      { weft_version: "v0.20.0", agents: [{ name: "writer" }] },
+      { agents: [{ name: "analyst" }] },
+    ]
+    expect(registeredWeft("writer", rts)).toBe("v0.20.0")
+    expect(registeredWeft("analyst", rts)).toBe("")
+    expect(registeredWeft("nobody", rts)).toBe("")
+    expect(runManifestTitle("stale", "v0.19.0", "v0.20.0")).toBe(
+      "this run ran another manifest than the registered one: the weft version changed (weft v0.19.0 → v0.20.0), and the manifest with it"
+    )
+    expect(runManifestTitle("stale", "v0.20.0", "v0.20.0")).toBe(
+      RUN_MANIFEST_TITLE.stale
+    )
+    expect(runManifestTitle("stale", undefined, "v0.20.0")).toBe(
+      RUN_MANIFEST_TITLE.stale
+    )
+    expect(runManifestTitle("current", "v0.19.0", "v0.20.0")).toBe(
+      RUN_MANIFEST_TITLE.current
+    )
   })
 
   it("who set the breakpoints", () => {

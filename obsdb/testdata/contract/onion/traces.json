@@ -45,18 +45,6 @@
                   }
                 },
                 {
-                  "key": "gen_ai.provider.name",
-                  "value": {
-                    "stringValue": "wefttest"
-                  }
-                },
-                {
-                  "key": "gen_ai.request.model",
-                  "value": {
-                    "stringValue": "script"
-                  }
-                },
-                {
                   "key": "weft.instructions.hash",
                   "value": {
                     "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
@@ -155,18 +143,6 @@
                   }
                 },
                 {
-                  "key": "gen_ai.provider.name",
-                  "value": {
-                    "stringValue": "wefttest"
-                  }
-                },
-                {
-                  "key": "gen_ai.request.model",
-                  "value": {
-                    "stringValue": "script"
-                  }
-                },
-                {
                   "key": "gen_ai.usage.input_tokens",
                   "value": {
                     "intValue": "10"
@@ -194,12 +170,6 @@
                   "key": "weft.model.tool_calls",
                   "value": {
                     "intValue": "4"
-                  }
-                },
-                {
-                  "key": "gen_ai.response.model",
-                  "value": {
-                    "stringValue": "script"
                   }
                 }
               ],
@@ -244,7 +214,7 @@
               ],
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
-              "name": "chat script",
+              "name": "chat",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000002",
               "startTimeUnixNano": "1790847600001000000",
@@ -271,18 +241,6 @@
                   "key": "weft.attempt.index",
                   "value": {
                     "intValue": "1"
-                  }
-                },
-                {
-                  "key": "gen_ai.provider.name",
-                  "value": {
-                    "stringValue": "wefttest"
-                  }
-                },
-                {
-                  "key": "gen_ai.request.model",
-                  "value": {
-                    "stringValue": "script"
                   }
                 },
                 {
@@ -332,18 +290,6 @@
                   }
                 },
                 {
-                  "key": "gen_ai.provider.name",
-                  "value": {
-                    "stringValue": "wefttest"
-                  }
-                },
-                {
-                  "key": "gen_ai.request.model",
-                  "value": {
-                    "stringValue": "script"
-                  }
-                },
-                {
                   "key": "weft.attempt.layer",
                   "value": {
                     "stringValue": "retry"
@@ -353,12 +299,6 @@
                   "key": "weft.attempt.wait_ms",
                   "value": {
                     "intValue": "1"
-                  }
-                },
-                {
-                  "key": "gen_ai.response.model",
-                  "value": {
-                    "stringValue": "script"
                   }
                 }
               ],
@@ -1030,7 +970,7 @@
                 {
                   "key": "weft.tool.error_masked",
                   "value": {
-                    "stringValue": "*errors.errorString"
+                    "stringValue": "io.EOF"
                   }
                 }
               ],
@@ -1361,6 +1301,12 @@
                   "value": {
                     "intValue": "0"
                   }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "panic"
+                  }
                 }
               ],
               "endTimeUnixNano": "1790847600045000000",
@@ -1370,7 +1316,9 @@
               "parentSpanId": "5ba0000000000014",
               "spanId": "5ba0000000000015",
               "startTimeUnixNano": "1790847600040000000",
-              "status": {},
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -1416,6 +1364,12 @@
                   "value": {
                     "intValue": "0"
                   }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "panic"
+                  }
                 }
               ],
               "endTimeUnixNano": "1790847600044000000",
@@ -1425,7 +1379,9 @@
               "parentSpanId": "5ba0000000000015",
               "spanId": "5ba0000000000016",
               "startTimeUnixNano": "1790847600041000000",
-              "status": {},
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -1471,6 +1427,12 @@
                   "value": {
                     "intValue": "0"
                   }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "panic"
+                  }
                 }
               ],
               "endTimeUnixNano": "1790847600043000000",
@@ -1480,7 +1442,9 @@
               "parentSpanId": "5ba0000000000016",
               "spanId": "5ba0000000000017",
               "startTimeUnixNano": "1790847600042000000",
-              "status": {},
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -1507,18 +1471,6 @@
                   "key": "weft.stream",
                   "value": {
                     "boolValue": true
-                  }
-                },
-                {
-                  "key": "gen_ai.provider.name",
-                  "value": {
-                    "stringValue": "wefttest"
-                  }
-                },
-                {
-                  "key": "gen_ai.request.model",
-                  "value": {
-                    "stringValue": "script"
                   }
                 },
                 {
@@ -1552,12 +1504,6 @@
                   }
                 },
                 {
-                  "key": "gen_ai.response.model",
-                  "value": {
-                    "stringValue": "script"
-                  }
-                },
-                {
                   "key": "weft.ttft_ms",
                   "value": {
                     "intValue": "1"
@@ -1567,7 +1513,7 @@
               "endTimeUnixNano": "1790847600056000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
-              "name": "chat script",
+              "name": "chat",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000018",
               "startTimeUnixNano": "1790847600047000000",
@@ -1594,24 +1540,6 @@
                   "key": "weft.attempt.index",
                   "value": {
                     "intValue": "1"
-                  }
-                },
-                {
-                  "key": "gen_ai.provider.name",
-                  "value": {
-                    "stringValue": "wefttest"
-                  }
-                },
-                {
-                  "key": "gen_ai.request.model",
-                  "value": {
-                    "stringValue": "script"
-                  }
-                },
-                {
-                  "key": "gen_ai.response.model",
-                  "value": {
-                    "stringValue": "script"
                   }
                 }
               ],

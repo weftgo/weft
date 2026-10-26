@@ -157,7 +157,18 @@ layer's optional `Describe() core.MiddlewareInfo`, else its type; a
 function by `runtime.FuncForPC`, weft's own by name alone, any other with
 its `source` file:line (module-relative, as a tool's `source` is); a
 model layer without `Unwrap` ends the walk `opaque`. Configuration only,
-never a captured value. An agent whose chain or hooks change now hashes
+never a captured value. A `source` is never an absolute path (U23.1-fix;
+a tool's `source` neither, the same helper): module-relative under a
+go.mod, the module path without its `@version` for a file in the module
+cache, else the defining function's import path and the file's base
+name (a binary run where its sources are not, a build host's path) —
+so the document, and `weft.manifest.hash`, are the same on every
+machine. The price is churn: a hook's or a non-weft middleware's
+`source` is a file:line, as a tool's is, so moving the function — an
+edit above it — changes the agent's hash, and the runs after it read
+as another version until weft.json is regenerated. weft's own
+middleware are named without a source, so a weft upgrade that moves
+them does not. An agent whose chain or hooks change now hashes
 differently (`weft.manifest.hash`), which is the point: which onion ran
 is part of which version of the agent ran. The record contract's "The
 onion in the manifest" paragraph is the reader's spec.

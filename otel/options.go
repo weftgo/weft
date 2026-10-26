@@ -185,7 +185,13 @@ func RawBodies(on bool) Option {
 // spans and without the original arguments. The gate is the pipeline's
 // LoggerProvider marker (LoggerProvider.DevDetail), which the core asks:
 // pass Pipeline.LoggerProvider() to weft.LoggerProvider, or rely on
-// Install's global registration.
+// Install's global registration. With the option the agent knows the
+// level at New and builds the layer boundaries into its one model
+// chain. Through the global provider it cannot (the pipeline may
+// register after New): the first run builds a second chain, so the
+// WrapModel constructors run twice — a stateful middleware holds two
+// states — and a caller streaming Agent.Model() itself (weft/thread's
+// compaction summary) gets the plain chain, without layer spans.
 func DevDetail() Option {
 	return optionFunc(func(c *config) { c.devDetail = true })
 }

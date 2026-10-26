@@ -3,14 +3,16 @@
 // run of the agent ran this manifest ("stale · the latest run ran
 // d2151022, not this manifest"), and in the run header, whether the run
 // ran the registered manifest. Words and roles: lib/runtimes.ts.
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { metaQuery } from "@/lib/api"
+import type { RuntimeView } from "@/lib/api"
+import { metaQuery, runtimesQuery } from "@/lib/api"
 import {
   MANIFEST_WORDS,
-  RUN_MANIFEST_TITLE,
   manifestMark,
+  registeredWeft,
   runManifestMark,
+  runManifestTitle,
 } from "@/lib/runtimes"
 import { statusClass } from "@/lib/status-class"
 
@@ -51,18 +53,55 @@ export function ManifestCheckBadge({
 export function RunManifestMark({
   agent,
   hash,
+  weftVersion,
 }: {
   agent?: string
   hash?: string
+  /** The run's weft version: a stale mark's title names a weft
+   * version change against the registered build's (U23.1-fix). */
+  weftVersion?: string
 }) {
   const meta = useQuery(metaQuery())
   const mark = runManifestMark(agent, hash, meta.data?.manifest_check)
   if (!mark) return null
+  if (mark === "stale")
+    return <StaleRunMark agent={agent} weftVersion={weftVersion} />
+  return <RunMark mark={mark} title={runManifestTitle(mark)} />
+}
+
+/** StaleRunMark names a weft version change when the registered
+ * builds (/api/runtimes) are already in the cache — read, never
+ * subscribed: the shell's hook is the page's one reader of the key. */
+function StaleRunMark({
+  agent,
+  weftVersion,
+}: {
+  agent?: string
+  weftVersion?: string
+}) {
+  const cached = useQueryClient().getQueryData<{ runtimes: RuntimeView[] }>(
+    runtimesQuery().queryKey
+  )
+  const title = runManifestTitle(
+    "stale",
+    weftVersion,
+    registeredWeft(agent, cached?.runtimes)
+  )
+  return <RunMark mark="stale" title={title} />
+}
+
+function RunMark({
+  mark,
+  title,
+}: {
+  mark: "current" | "stale"
+  title: string
+}) {
   const w = MANIFEST_WORDS[mark]
   return (
     <span
       className={statusClass(w.role).text}
-      title={RUN_MANIFEST_TITLE[mark]}
+      title={title}
       data-run-manifest-mark={mark}
     >
       {" "}

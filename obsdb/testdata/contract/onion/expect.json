@@ -1,14 +1,12 @@
 {
   "case": "onion",
-  "description": "the middleware onion recorded (U23.1), with a handler panic's stack: mw.Log › mw.Retry › mw.RepairJSON around the model and mw.Audit › mw.Allow › mw.MapErrors around the tools, under the development detail level (otel.DevDetail, a Studio destination with content on). The first model request fails with HTTP 503 and mw.Retry sends it again (attempt 2 carries weft.attempt.layer retry); the answer asks for a lookup with fenced arguments mw.RepairJSON repairs (a weft.repair event on the chat span with the original; the call's weft.tool.args_repaired), a delete mw.Allow refuses (weft.tool.denied_by allow) a flaky call whose io.EOF mw.MapErrors hides (error.type INTERNAL, weft.tool.error_masked *errors.errorString) and a charge whose handler panics (error.type panic, weft.panic.layer handler; its stack a weft.panic event, the text fixed by the generator); one layer span per layer per call (weft.layer.*), nested outer to inner. Problems attempts_retried 1, tool_errors 2, denied 1, repaired 1; the six new span keys stay out of meta",
+  "description": "the middleware onion recorded (U23.1), with a handler panic's stack and the model's wire facts (the request records' wire: gateway.example:8443, ExtraBody keys, ExtraHeaders names — no credential, no value): mw.Log › mw.Retry › mw.RepairJSON around the model and mw.Audit › mw.Allow › mw.MapErrors around the tools, under the development detail level (otel.DevDetail, a Studio destination with content on). The first model request fails with HTTP 503 and mw.Retry sends it again (attempt 2 carries weft.attempt.layer retry); the answer asks for a lookup with fenced arguments mw.RepairJSON repairs (a weft.repair event on the chat span with the original; the call's weft.tool.args_repaired), a delete mw.Allow refuses (weft.tool.denied_by allow) a flaky call whose io.EOF mw.MapErrors hides (error.type INTERNAL, weft.tool.error_masked *errors.errorString) and a charge whose handler panics (error.type panic, weft.panic.layer handler; its stack a weft.panic event, the text fixed by the generator); one layer span per layer per call (weft.layer.*), nested outer to inner. Problems attempts_retried 1, tool_errors 2, denied 1, repaired 1; the six new span keys stay out of meta",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",
       "trace_id": "7ace0000000000000000000000000001",
       "service": "contract-app",
       "agent": "support",
-      "provider": "wefttest",
-      "model": "script",
       "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
       "weft_version": "v0.0.0-contract",
       "started": "2026-10-01T09:40:00Z",
@@ -39,8 +37,6 @@
       "chat": [
         {
           "step": 0,
-          "model": "script",
-          "response_model": "script",
           "finish_reason": "tool_calls",
           "input_tokens": 10,
           "output_tokens": 5,
@@ -48,8 +44,6 @@
         },
         {
           "step": 1,
-          "model": "script",
-          "response_model": "script",
           "finish_reason": "stop",
           "input_tokens": 10,
           "output_tokens": 5,
@@ -81,7 +75,7 @@
           "seq": 5,
           "status": "error",
           "error_type": "INTERNAL",
-          "error_masked": "*errors.errorString"
+          "error_masked": "io.EOF"
         },
         {
           "name": "charge_card",
@@ -94,24 +88,27 @@
         }
       ],
       "layers": [
-        "model 0 mw.Log under chat script unset",
-        "model 0 mw.Log under chat script unset",
+        "model 0 mw.Log under chat unset",
+        "model 0 mw.Log under chat unset",
         "model 1 mw.Retry under layer mw.Log unset",
         "model 1 mw.Retry under layer mw.Log unset",
         "model 2 mw.RepairJSON under layer mw.Retry error model_error",
         "model 2 mw.RepairJSON under layer mw.Retry unset",
         "model 2 mw.RepairJSON under layer mw.Retry unset",
-        "tool 0 mw.Audit under execute_tool charge_card unset",
+        "tool 0 mw.Audit under execute_tool charge_card error panic",
         "tool 0 mw.Audit under execute_tool delete_order error DENIED",
         "tool 0 mw.Audit under execute_tool lookup_order unset",
         "tool 0 mw.Audit under execute_tool refund_order error INTERNAL",
         "tool 1 mw.Allow under layer mw.Audit error DENIED",
         "tool 1 mw.Allow under layer mw.Audit error INTERNAL",
-        "tool 1 mw.Allow under layer mw.Audit unset",
+        "tool 1 mw.Allow under layer mw.Audit error panic",
         "tool 1 mw.Allow under layer mw.Audit unset",
         "tool 2 mw.MapErrors under layer mw.Allow error INTERNAL",
-        "tool 2 mw.MapErrors under layer mw.Allow unset",
+        "tool 2 mw.MapErrors under layer mw.Allow error panic",
         "tool 2 mw.MapErrors under layer mw.Allow unset"
+      ],
+      "wire": [
+        "gateway.example:8443 keys=metadata,provider headers=authorization,x-gateway-route"
       ],
       "repairs": [
         "call_1 fence 31→19 original \"```json\\n{\\\"order_id\\\":\\\"1234\\\"}\\n```\"",

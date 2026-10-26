@@ -104,8 +104,12 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 		for i, model := range m.chain {
 			// The wait an enclosing Retry slept before this try, and its
 			// retry mark, belong to the chain's first request alone; a
-			// backup is sent at once, as a fallback.
-			actx, t := withTry(ctx, try{}), try{layer: core.AttemptLayerFallback}
+			// backup is sent at once, as a fallback — and a backup that
+			// reports its own attempts (a Retry around it) reads the
+			// fallback mark from the context, its retries keeping it, so
+			// the fallbacks counter counts the run the backup answered.
+			t := try{layer: core.AttemptLayerFallback}
+			actx := withTry(ctx, t)
 			if i == 0 {
 				actx, t = ctx, tryOf(ctx)
 			}

@@ -350,10 +350,11 @@ numbered per model call),
 `weft.attempt.retry_after_ms` (when the provider asked to wait),
 `weft.attempt.layer` (`core.AttemptInfo.Layer`: `fallback` on a request
 `mw.Fallback` sent to a backup — the one marker §6's `fallbacks` keys
-on; `retry` on a request `mw.Retry` sent again after a failed try
-(U23.1, `core.AttemptLayerRetry`; a `Fallback` beneath the `Retry`
-marks its primary's request so); absent on a first try and on a
-backup that reports its own attempts, such as a `Retry` around it),
+on; a backup that reports its own attempts, a `Retry` around it, marks
+every request it sends `fallback`, its retries included (U23.1-fix);
+`retry` on a request `mw.Retry` sent again after a failed try of the
+model asked (U23.1, `core.AttemptLayerRetry`; a `Fallback` beneath the
+`Retry` marks its primary's request so); absent on a first try),
 `weft.attempt.wait_ms` (`AttemptInfo.Wait`: the backoff the reporting
 layer slept before sending this attempt — `mw.Retry`'s delay, the
 provider's retry-after it honoured — rounded up, never 0; absent on an
@@ -396,7 +397,7 @@ Name `execute_tool <tool>`, kind Internal, child of `invoke_agent`.
 | `weft.tool.input_error` | string | `error.type` `INVALID_INPUT` from the loop's own decode: `strict` (an argument field the schema does not declare, under `StrictInput`), `schema` (a value of the wrong type or shape), `syntax` (not one JSON value: malformed, truncated, or trailing data) |
 | `weft.tool.args_repaired` | bool `true` | at start: a model middleware repaired the call's arguments before the loop saw them (`core.Reporter.Repair`; `mw.RepairJSON`) — the `chat` span's `weft.repair` event says how; §6's `repaired` counts it (U23.1, UX-E-10) |
 | `weft.tool.denied_by` | string | an error result a tool layer reported refusing (`core.ToolReporter.Denied`): `allow` (`mw.Allow`; a middleware's own word otherwise). On a resume's denied span (`weft.tool.denied`) always: `approval` (`Deny`, or no decision), or `grant` — with `weft.grant.id` the deny grant that matched (`core.DenyBy`, what `weft/thread` passes) — an id or enum, never the reason (U23.1, UX-E-08) |
-| `weft.tool.error_masked` | string | an error result a tool layer replaced (`core.ToolReporter.Masked`; `mw.MapErrors`, by default as `INTERNAL`): the hidden error's kind — its `ErrorType()`, a context error's name, a `ToolError`'s code, else its Go type past the standard wrappers (`*errors.errorString`, `*net.OpError`) — never its text (U23.1, UX-E-08) |
+| `weft.tool.error_masked` | string | an error result a tool layer replaced (`core.ToolReporter.Masked`; `mw.MapErrors`, by default as `INTERNAL`): the hidden error's kind, never its text, the first of: its optional `ErrorKind() string` (an app names its own sentinels), a context error's name, its `ErrorType()`, a `ToolError`'s code, a standard library sentinel it matches through `errors.Is` — `io.EOF`, `io.ErrUnexpectedEOF`, `io.ErrClosedPipe`, `io.ErrShortWrite`, `io.ErrNoProgress`, `fs.ErrNotExist` (= `os.ErrNotExist`), `fs.ErrExist`, `fs.ErrPermission`, `fs.ErrInvalid`, `fs.ErrClosed`, `os.ErrDeadlineExceeded`, `os.ErrProcessDone`, `errors.ErrUnsupported` — else its Go type past the standard wrappers (`*net.OpError`; `*errors.errorString` for an `errors.New` value of the app's). `mw.MapErrors` reports nothing for a mapping that only wraps the error (`errors.Is` finds it and the mapped text carries its text) (U23.1, U23.1-fix, UX-E-08) |
 
 Status: `Ok` for a result; `Error` with an empty description for an
 error result (the result text is content); **unset** for a call parked
@@ -577,6 +578,23 @@ rewritten), `request`. A request that was never sent is never recorded.
   the order `system`, `messages`, `tools`, `tool_choice`, `params`,
   `thinking`, `sequential_tools` — names only, so it survives content
   off; absent when no `PrepareStep` ran or it changed nothing.
+  `wire? {server_address?, extra_body_keys?, extra_headers?, dropped?}`
+  (UX-S2-09, U23.1-fix) is how the adapter's escape hatches shape the
+  request — names only, never a value, so it survives content off:
+  `server_address` the endpoint's `host[:port]` (the adapter's
+  `BaseURL`, else the SDK's `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL`,
+  else `api.openai.com` / `api.anthropic.com`; `google` a `BaseURL`
+  alone, the SDK choosing Gemini or Vertex AI from the environment;
+  none for an injected `Client`) — the core drops a URL's scheme,
+  userinfo, path and query whatever it is handed; `extra_body_keys`
+  `ExtraBody`'s top-level keys, `extra_headers` `ExtraHeaders`' names
+  lowercased (an `Authorization` header is named, its value never
+  read); each list sorted, deduped, at most 32 names of at most 128
+  bytes, the rest counted in `dropped`. Bounded and content-free: a key
+  or header name is configuration the app wrote, not what a user said.
+  A model declares it with the optional method `WireFacts() (string,
+  []string, []string)`, found along the `Unwrap` chain like
+  `ThinkingWire`; absent when none does (a `wefttest` model).
 - `prompt`: attributes `weft.prompt.index`, `weft.system.hash`. Body
   `{"hash", "text"}`: the composed system text (instructions after
   `PrepareStep`, with the tools' prompt snippets appended). `segments?: [{source, text}]` attributes the text to its sources
@@ -1337,7 +1355,10 @@ declares no `Unwrap` ends the walk marked `opaque` — never an onion
 that silently reads shorter; `tool_middleware` — the agent's
 `WrapTools` list, outer to inner, each function named by
 `runtime.FuncForPC` (weft's own as `mw.Allow`, any other with its
-`source` file:line); a tool's own `WrapTools` as that tool's
+`source` file:line — never an absolute path, a tool's `source` neither:
+module-relative under a go.mod, `<module>/<dir>/f.go` from the module
+cache (version dropped), else the function's import path and the
+file's base name, U23.1-fix); a tool's own `WrapTools` as that tool's
 `middleware`; `hooks` — `prepare_step`, `tap`, `on_run_end` (lists) and
 `tool_source`, each named the same way. Entries are `{name, params?,
 source?, opaque?}`: configuration only, never a secret or a closure's
@@ -1712,7 +1733,7 @@ makes it a turn; its session has a page of its own and, delegated by
 | `stopped_by` | `StopWhen(HasToolCall("submit_ticket"))` ends the run after its tool call: `stop_reason` `tool_calls`, while `weft.run.stopped_by` and `run_finish.stopped_by` read `has_tool_call:submit_ticket`, the run row's `stopped_by` (every generated case carries its own value: `final_answer`, `parked`, `max_steps` in `failed`) |
 | `canceled` | a run canceled mid-tool with `core.CancelCause("studio.cancel")`: status `failed`, `error.type` `context.Canceled` (the row's `error_type` `cancelled`; the cancelled call's `context.Canceled` is no tool error), `weft.run.stopped_by` `canceled`, `weft.cancel.cause` `studio.cancel`; no `run_finish` — the row's `stopped_by` and `cancel_cause` from the span alone |
 | `tool_problems` | four failing tool calls, one per step: a handler panic (`error.type` `panic`, `weft.panic.layer` `handler`), a `StrictInput` refusal (`INVALID_INPUT`, `weft.tool.input_error` `strict`), a result the cap cut (status `ok`, `weft.tool.truncated_bytes` 90), an `mw.Allow` refusal (`DENIED`); the run succeeds with `problems` `tool_errors` 2, `truncated` 1, `denied` 1 |
-| `retry_fallback` | `mw.Retry` over a model failing twice (`attempts_retried` 2); `mw.Fallback` to a backup that answers (`attempts_retried` 1, `fallbacks` 1: the backup's `attempt` carries `weft.attempt.layer` `fallback`); `mw.Retry` exhausted at three failing attempts (`error_type` `stream_idle`, `attempts_retried` 2 — U4's rule read 3); `mw.Fallback` to a backup of the primary's model name on another provider (`fallbacks` 1 — U4's name comparison read 0) |
+| `retry_fallback` | `mw.Retry` over a model failing twice (`attempts_retried` 2); `mw.Fallback` to a backup that answers (`attempts_retried` 1, `fallbacks` 1: the backup's `attempt` carries `weft.attempt.layer` `fallback`); `mw.Retry` exhausted at three failing attempts (`error_type` `stream_idle`, `attempts_retried` 2 — U4's rule read 3); `mw.Fallback` to a backup of the primary's model name on another provider (`fallbacks` 1 — U4's name comparison read 0); `mw.Fallback` to a backup under its own `mw.Retry` that fails once (U23.1-fix: both backup requests carry `weft.attempt.layer` `fallback`, the backup's own retry included — `fallbacks` 1, `attempts_retried` 2) |
 | `approval_denied` | two `RequireApproval` calls parked (`pending` 2), then the resume (`core.ResumeOf` the parked run) denies one (`Deny`) and leaves the other undecided: each gets a zero-length `execute_tool` span marked `weft.tool.denied` (`denied_kind` `denied`, `no_decision`; `error.type` `DENIED`, status `Error`), the root's `weft.resume.calls` names both and its `weft.run.denied` 2 — `problems.denied` 2, the spans not counted again; `resumed_from` on the resume, `resumed_by` on the parked run |
 | `retries_taps` | a tool answering `core.ModelRetry` under `MaxModelRetries(1)` twice: `execute_tool` spans with `weft.tool.retry` 1 and 2 (none on the `tool_finish` records), `weft.tool.retry_budget` 1, the run failing `model_retries_exceeded` (`tool "flaky" retried 2 times, past MaxModelRetries(1)`) — `RETRY` is no `tool_errors`; a panicking `Tap` (`weft.tap.panics` on the root, `problems.tap_panics`); 65 metadata pairs (`weft.metadata.dropped` 1: `metadata_dropped` 1, the `truncated` hole cause `metadata_cap`); a tool's `PromptSnippet` (the prompt record's `segments`) |
 | `resumed` | rw.support-desk's shape: a `RequireApproval` refund and a note parked (`pending` 2), then a `GenerateAs` resumes them with `Approve`, `Resolve`, `core.ResumeOf` the parked run and `weft.approval.actor` metadata: the approved call's span carries `weft.tool.approved`, the resolved one has none; the root's `weft.resume.calls` `…=approved,…=resolved`; the actor in the resume's `meta`; `resumed_from` on the resume, `resumed_by` on the parked run |
@@ -1737,7 +1758,7 @@ makes it a turn; its session has a page of its own and, delegated by
 | `thread_pool` | a sync `thread/pool` delegation from a turn: `pool.delegate` and `pool.retire` (`done`, the child's usage) under the delegating run; the child session's own run, its `weft.session.parent` in `meta` |
 | `thread_content_off` | `thread_approvals` through a content-off destination: every thread record's `content` gone (`weft.content` `none` — no destination asked for content, so `thread` captured none), the ids, enums, the label's `name` and the session title kept |
 | `messages_lost` | the `tool_calls` run with its middle transcript batch dropped (the growth `messages` record at index 1, the assistant's tool call), every event and span kept: `message_count` 3 below `messages_emitted` 4 — `gap` (cause `messages_lost`, "1 of 4 transcript batches were lost"); every event stored, so no `events_lost` |
-| `onion` | the middleware onion recorded (U23.1), captured through a Studio destination with content on under the development detail level (`otel.DevMode`, `otel.DevDetail`): `mw.Log` › `mw.Retry` › `mw.RepairJSON` around the model, `mw.Audit` › `mw.Allow` › `mw.MapErrors` around the tools. The first request fails with HTTP 503 and `mw.Retry` sends it again (attempt 2 `weft.attempt.layer` `retry`); the answer's lookup arrives fenced (`repairs`: the `weft.repair` event with its `original`; the call `args_repaired`), its delete is refused (`denied_by` `allow`), its refund's `io.EOF` hidden (`error_type` `INTERNAL`, `error_masked` `*errors.errorString`), its charge's handler panics (`error_type` `panic`, `panic_layer` `handler`; the `weft.panic` event's stack under `repairs`, its text fixed by the generator — a real stack names addresses and this machine's paths); `layers` lists each layer span with its parent; problems `attempts_retried` 1, `tool_errors` 2, `denied` 1, `repaired` 1; none of the six new span keys in `meta`. (`tool_problems`, `retry_fallback`, `approval_denied` and the thread approval cases carry `denied_by` and `weft.attempt.layer` `retry` too.) |
+| `onion` | the middleware onion recorded (U23.1), the model declaring its wire facts (`wire`: `gateway.example:8443 keys=metadata,provider headers=authorization,x-gateway-route` from a URL carrying credentials and a query — none of them stored), captured through a Studio destination with content on under the development detail level (`otel.DevMode`, `otel.DevDetail`): `mw.Log` › `mw.Retry` › `mw.RepairJSON` around the model, `mw.Audit` › `mw.Allow` › `mw.MapErrors` around the tools. The first request fails with HTTP 503 and `mw.Retry` sends it again (attempt 2 `weft.attempt.layer` `retry`); the answer's lookup arrives fenced (`repairs`: the `weft.repair` event with its `original`; the call `args_repaired`), its delete is refused (`denied_by` `allow`), its refund's `io.EOF` hidden (`error_type` `INTERNAL`, `error_masked` `io.EOF`), its charge's handler panics (`error_type` `panic`, `panic_layer` `handler`; the `weft.panic` event's stack under `repairs`, its text fixed by the generator — a real stack names addresses and this machine's paths); `layers` lists each layer span with its parent; problems `attempts_retried` 1, `tool_errors` 2, `denied` 1, `repaired` 1; none of the six new span keys in `meta`. (`tool_problems`, `retry_fallback`, `approval_denied` and the thread approval cases carry `denied_by` and `weft.attempt.layer` `retry` too.) |
 | `flow_scope` | a run started under `scope.WithFlow` (what `scope.Header` does for a scope with `flow=`) with `arena.batch` through `core.Metadata`: `weft.flow` and `arena.batch` in `meta`, the pairs `flow=` and `tag.arena.batch=` filter on (§2) |
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...],
@@ -1751,7 +1772,7 @@ backend's store, per session through `obsdb.SessionEventReader`
 the input again; each session lists `summarizer_usage` when it has
 one (and `Session` must agree with the list);
 each run lists every row field of §6 and `derived` (§9's mark, omitted
-when false — every weft run), its `chat` and `tools` lists, its `tree` (§6's run tree: each descendant run with its parent and span count, omitted for a run with none), its `layers` and `repairs` (§3's `layer` spans and `weft.repair` and `weft.panic` events, omitted when none), and
+when false — every weft run), its `chat` and `tools` lists, its `tree` (§6's run tree: each descendant run with its parent and span count, omitted for a run with none), its `layers` and `repairs` (§3's `layer` spans and `weft.repair` and `weft.panic` events, omitted when none), its `wire` (§4's request records' wire facts, one line per distinct value, omitted when none), and
 its `holes` — the run-level badge set as the test reads it from the row,
 the events and the compactions (§7's rules; `derived` from the row's mark).
 A case whose `expect.json` carries `pending` (the item that implements it)

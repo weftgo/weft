@@ -192,6 +192,7 @@ func Model(name string, opts ...Option) core.Model {
 		m.injected = true
 	} else {
 		m.baseURL = cfg.baseURL
+		m.server = cfg.baseURL
 		m.apiKey = cfg.apiKey
 		m.maxRetries = cfg.maxRetries
 	}
@@ -227,6 +228,10 @@ type model struct {
 	extraBody    map[string]any
 	extraHeaders http.Header
 	idle         time.Duration
+	// server is the endpoint for the request record's wire facts: the
+	// BaseURL alone — the SDK picks Gemini or Vertex AI from the
+	// environment, so a default would guess.
+	server string
 }
 
 // initClient builds the SDK client on the first Stream call.
@@ -270,4 +275,11 @@ var sensitiveHeaders = []string{"x-goog-api-key", "authorization", "x-goog-user-
 // Info identifies the model for RunStart and the manifest.
 func (m *model) Info() core.ModelInfo {
 	return core.ModelInfo{Provider: provider, Name: m.name}
+}
+
+// WireFacts reports the endpoint (a BaseURL alone) and the escape
+// hatches' names for the request record's wire (UX-S2-09; core's
+// optional WireFacts convention), never a value.
+func (m *model) WireFacts() (string, []string, []string) {
+	return adapterkit.WireFacts(m.server, m.extraBody, m.extraHeaders)
 }

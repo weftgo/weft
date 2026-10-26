@@ -700,10 +700,24 @@ transcript and event stream).
    never as the context's span, so a handler's own spans and the
    `attempt` spans keep their parents and a destination that drops the
    layer spans orphans nothing — and `weft.repair` carries the original
-   arguments (content on, 4 KiB). The model chain with its boundaries is
-   built once per agent, the first time a run under the level asks (its
-   middleware constructors run a second time, the precedent of
-   `UseModel`'s rebuild); the tool chain is built per call already. Only
+   arguments (content on, 4 KiB). Where the model chain's boundaries
+   live (U23.1-fix): when the marker is known at `New` — a
+   `LoggerProvider` option carrying it — they are built into the
+   agent's one chain (`Agent.Model()` included; the manifest walk skips
+   them), and nothing is built twice. With the global provider the
+   marker is not known at `New` (the pipeline may register later), so
+   the first run under the level builds a second chain over the same
+   base: its middleware constructors run a second time — a stateful
+   middleware (a circuit breaker, a rate limiter) then holds two
+   states, the plain chain's and the detailed one's — and a caller that
+   streams `Agent.Model()` itself, `weft/thread`'s compaction summary,
+   uses the plain chain, with no layer spans; each run reads the marker
+   at its start, so a provider that flipped it would switch chains
+   between runs (weft/otel's never does). The precedent is `UseModel`'s
+   rebuild; pass `weft.LoggerProvider(p.LoggerProvider())` for one
+   chain. The tool chain is built per call already. A panic through a
+   layer ends its span `Error`, `error.type` `panic`, then goes on
+   unwinding unchanged (U23.1-fix). Only
    the Local and Studio destinations with content on receive the detail
    (`otel/devdetail.go`); never by default — a default run's span count
    is unchanged (`TestOnionGovernancePatterns` pins it on the arena's

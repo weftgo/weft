@@ -1388,6 +1388,376 @@
                 "code": "STATUS_CODE_OK"
               },
               "traceId": "7ace0000000000000000000000000004"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000005"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000002"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.run.steps",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.run.events",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "weft.run.messages",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.run.stop_reason",
+                  "value": {
+                    "stringValue": "stop"
+                  }
+                },
+                {
+                  "key": "weft.run.stopped_by",
+                  "value": {
+                    "stringValue": "final_answer"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846280047000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "invoke_agent support",
+              "spanId": "5ba0000000000013",
+              "startTimeUnixNano": "1790846280038000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000005"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000005"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.stream",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.finish_reasons",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "stop"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "weft.model.tool_calls",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "backup"
+                  }
+                },
+                {
+                  "key": "weft.ttft_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846280046000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "chat script",
+              "parentSpanId": "5ba0000000000013",
+              "spanId": "5ba0000000000014",
+              "startTimeUnixNano": "1790846280039000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000005"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000005"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "stream_idle"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846280041000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "attempt",
+              "parentSpanId": "5ba0000000000014",
+              "spanId": "5ba0000000000015",
+              "startTimeUnixNano": "1790846280040000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR",
+                "message": "weft: model stream idle timeout"
+              },
+              "traceId": "7ace0000000000000000000000000005"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000005"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "backup"
+                  }
+                },
+                {
+                  "key": "weft.attempt.layer",
+                  "value": {
+                    "stringValue": "fallback"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "stream_idle"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846280043000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "attempt",
+              "parentSpanId": "5ba0000000000014",
+              "spanId": "5ba0000000000016",
+              "startTimeUnixNano": "1790846280042000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR",
+                "message": "weft: model stream idle timeout"
+              },
+              "traceId": "7ace0000000000000000000000000005"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000005"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "backup"
+                  }
+                },
+                {
+                  "key": "weft.attempt.layer",
+                  "value": {
+                    "stringValue": "fallback"
+                  }
+                },
+                {
+                  "key": "weft.attempt.wait_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "backup"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846280045000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "attempt",
+              "parentSpanId": "5ba0000000000014",
+              "spanId": "5ba0000000000017",
+              "startTimeUnixNano": "1790846280044000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000005"
             }
           ]
         }

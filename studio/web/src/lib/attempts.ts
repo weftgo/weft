@@ -20,8 +20,9 @@ export interface AttemptFacts {
 }
 
 /** attemptLabel is an attempt's name in the attempts lists (U4-fix):
- * "attempt 2", "attempt 2 · fallback" when its attempt span's
- * weft.attempt.layer names a layer (mw.Fallback's "fallback"). */
+ * "attempt 2", "attempt 2 · fallback" / "attempt 2 · retry" when its
+ * attempt span's weft.attempt.layer names a layer (mw.Fallback's
+ * "fallback", mw.Retry's "retry", U23.1). */
 export function attemptLabel(
   n: number,
   layer?: string,

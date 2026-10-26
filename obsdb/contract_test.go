@@ -218,7 +218,11 @@ type contractRun struct {
 	// weft.repair events, "<call id> <kind> <bytes before>→<bytes
 	// after>[ original <text>]", and its weft.panic events, "panic on
 	// <span name>: stack <text>". Each omitted when none.
-	Layers  []string     `json:"layers,omitempty"`
+	Layers []string `json:"layers,omitempty"`
+	// Wire is the run's request records' wire facts (§4, UX-S2-09),
+	// "<server> keys=<k,…> headers=<h,…>" per distinct record body
+	// value, sorted; omitted when none carries one.
+	Wire    []string     `json:"wire,omitempty"`
 	Repairs []string     `json:"repairs,omitempty"`
 	Holes   []obsdb.Hole `json:"holes"`
 	// HoleCauses names the cause of each run-level hole the row's rules
@@ -467,6 +471,7 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 		}
 		c.Chat, c.Tools = spanSteps(spans)
 		c.Layers, c.Repairs = onionOf(spans)
+		c.Wire = wireOf(t, db, r.ID)
 		c.Tree = treeOf(t, db, r.ID, len(spans))
 		c.Logs = logsOf(t, db, r.ID, spans)
 		c.Holes, c.HoleCauses = runHoles(t, db, r, len(spans) > 0)
@@ -645,6 +650,33 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 		return tools[i].CallID < tools[j].CallID
 	})
 	return chat, tools
+}
+
+// wireOf reads a run's request records' wire facts (contractRun.Wire).
+func wireOf(t *testing.T, db obsdb.DB, id string) []string {
+	t.Helper()
+	reqs, err := db.Requests(context.Background(), id, obsdb.RequestQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range reqs {
+		w := r.Body.Wire
+		if w == nil {
+			continue
+		}
+		line := fmt.Sprintf("%s keys=%s headers=%s", w.ServerAddress, strings.Join(w.ExtraBodyKeys, ","), strings.Join(w.ExtraHeaders, ","))
+		if w.Dropped > 0 {
+			line += fmt.Sprintf(" dropped=%d", w.Dropped)
+		}
+		if !seen[line] {
+			seen[line] = true
+			out = append(out, line)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // onionOf reads a run's layer spans and repair events (contractRun's
@@ -2006,7 +2038,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "retry_fallback",
-			desc: "four runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2); mw.Fallback over a model that fails once, the backup answering (the backup's attempt carries weft.attempt.layer fallback — problems attempts_retried 1, fallbacks 1); mw.Retry exhausted, three attempts all failing (the run fails stream_idle — attempts_retried 2: the last attempt was not retried); and mw.Fallback to a backup of the primary's model name on another provider (fallbacks 1: the layer marks it, no name comparison — attempts_retried 1)",
+			desc: "four runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2); mw.Fallback over a model that fails once, the backup answering (the backup's attempt carries weft.attempt.layer fallback — problems attempts_retried 1, fallbacks 1); mw.Retry exhausted, three attempts all failing (the run fails stream_idle — attempts_retried 2: the last attempt was not retried); mw.Fallback to a backup of the primary's model name on another provider (fallbacks 1: the layer marks it, no name comparison — attempts_retried 1); and mw.Fallback to a backup under its own mw.Retry that fails once (U23.1-fix: both backup requests carry weft.attempt.layer fallback — fallbacks 1, attempts_retried 2)",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				flaky := wefttest.Script(wefttest.Fail(core.ErrStreamIdle), wefttest.Fail(core.ErrStreamIdle),
@@ -2032,7 +2064,15 @@ func genCases() []genCase {
 				twin := namedModel{wefttest.Script(wefttest.Say("Hello from the twin.")), core.ModelInfo{Provider: "other", Name: "script"}}
 				sameName := pipelineAgent(p, "support", wefttest.Script(wefttest.Fail(core.ErrStreamIdle)),
 					core.Instructions("You are a support agent."), core.WrapModel(mw.Fallback(twin)))
-				return append(ids, re.Result.ID, mustRun(t, ctx, sameName, core.Prompt("hi")).ID)
+				ids = append(ids, re.Result.ID, mustRun(t, ctx, sameName, core.Prompt("hi")).ID)
+				// U23.1-fix: a backup under its own Retry, failing once —
+				// both its requests read fallback, and the answer counts.
+				shaky := namedModel{wefttest.Script(wefttest.Fail(core.ErrStreamIdle), wefttest.Say("Hello from the retried backup.")),
+					core.ModelInfo{Provider: "wefttest", Name: "backup"}}
+				retriedBackup := pipelineAgent(p, "support", wefttest.Script(wefttest.Fail(core.ErrStreamIdle)),
+					core.Instructions("You are a support agent."),
+					core.WrapModel(mw.Fallback(mw.Retry(mw.MaxRetries(2), mw.BaseDelay(time.Millisecond))(shaky))))
+				return append(ids, mustRun(t, ctx, retriedBackup, core.Prompt("hi")).ID)
 			},
 		},
 		{
@@ -2292,7 +2332,7 @@ func genCases() []genCase {
 	// After flow_scope, for the same reason.
 	onion := genCase{
 		name:   "onion",
-		desc:   "the middleware onion recorded (U23.1), with a handler panic's stack: mw.Log › mw.Retry › mw.RepairJSON around the model and mw.Audit › mw.Allow › mw.MapErrors around the tools, under the development detail level (otel.DevDetail, a Studio destination with content on). The first model request fails with HTTP 503 and mw.Retry sends it again (attempt 2 carries weft.attempt.layer retry); the answer asks for a lookup with fenced arguments mw.RepairJSON repairs (a weft.repair event on the chat span with the original; the call's weft.tool.args_repaired), a delete mw.Allow refuses (weft.tool.denied_by allow) a flaky call whose io.EOF mw.MapErrors hides (error.type INTERNAL, weft.tool.error_masked *errors.errorString) and a charge whose handler panics (error.type panic, weft.panic.layer handler; its stack a weft.panic event, the text fixed by the generator); one layer span per layer per call (weft.layer.*), nested outer to inner. Problems attempts_retried 1, tool_errors 2, denied 1, repaired 1; the six new span keys stay out of meta",
+		desc:   "the middleware onion recorded (U23.1), with a handler panic's stack and the model's wire facts (the request records' wire: gateway.example:8443, ExtraBody keys, ExtraHeaders names — no credential, no value): mw.Log › mw.Retry › mw.RepairJSON around the model and mw.Audit › mw.Allow › mw.MapErrors around the tools, under the development detail level (otel.DevDetail, a Studio destination with content on). The first model request fails with HTTP 503 and mw.Retry sends it again (attempt 2 carries weft.attempt.layer retry); the answer asks for a lookup with fenced arguments mw.RepairJSON repairs (a weft.repair event on the chat span with the original; the call's weft.tool.args_repaired), a delete mw.Allow refuses (weft.tool.denied_by allow) a flaky call whose io.EOF mw.MapErrors hides (error.type INTERNAL, weft.tool.error_masked *errors.errorString) and a charge whose handler panics (error.type panic, weft.panic.layer handler; its stack a weft.panic event, the text fixed by the generator); one layer span per layer per call (weft.layer.*), nested outer to inner. Problems attempts_retried 1, tool_errors 2, denied 1, repaired 1; the six new span keys stay out of meta",
 		dest:   content,
 		studio: true,
 		start:  []otel.Option{otel.DevMode(), otel.DevDetail()},
@@ -2331,14 +2371,14 @@ func genCases() []genCase {
 			boom := core.Tool("charge_card", "Charge a card.", func(context.Context, lookupIn) (string, error) {
 				panic("card service exploded")
 			})
-			agt := pipelineAgent(p, "support", wefttest.Script(
+			agt := pipelineAgent(p, "support", gatewayModel{wefttest.Script(
 				wefttest.Fail(statusErr{StatusCode: 503}),
 				wefttest.ToolCalls(
 					wefttest.Call{Name: "lookup_order", Args: "```json\n{\"order_id\":\"1234\"}\n```"},
 					wefttest.Call{Name: "delete_order", Args: `{"order_id":"1234"}`},
 					wefttest.Call{Name: "refund_order", Args: `{"order_id":"1234"}`},
 					wefttest.Call{Name: "charge_card", Args: `{"order_id":"1234"}`}),
-				wefttest.Say("Order 1234 is shipped; I could not delete, refund or charge it.")),
+				wefttest.Say("Order 1234 is shipped; I could not delete, refund or charge it."))},
 				core.Instructions("You are a support agent."), core.Parallelism(1), lookup, del, flaky, boom,
 				core.WrapModel(mw.Log(quiet), mw.Retry(mw.MaxRetries(2), mw.BaseDelay(time.Millisecond)), mw.RepairJSON()),
 				core.WrapTools(mw.Audit(quiet), mw.Allow(func(c core.Call) bool { return c.Name != "delete_order" }), mw.MapErrors(nil)))
@@ -2346,6 +2386,18 @@ func genCases() []genCase {
 		},
 	}
 	return append(append(cases, threadGenCases()...), flowScope, onion)
+}
+
+// gatewayModel is the onion case's model declaring its wire facts (the
+// WireFacts convention the first-party adapters implement): a gateway
+// endpoint with credentials in its URL, ExtraBody keys and
+// ExtraHeaders names — the record keeps the host and the names alone.
+type gatewayModel struct{ core.Model }
+
+func (m gatewayModel) Unwrap() core.Model { return m.Model }
+func (gatewayModel) WireFacts() (string, []string, []string) {
+	return "https://key:secret@gateway.example:8443/v1?token=x", []string{"provider", "metadata"},
+		[]string{"X-Gateway-Route", "Authorization"}
 }
 
 // redactCards is bridge_overrides' Redact: a bridged line's "4111…"

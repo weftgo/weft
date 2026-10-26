@@ -78,7 +78,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"run_start\",\"id\":\"a1100000000000000000000000000001\",\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"agent\":\"support\",\"instructions_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\"}"
+                "stringValue": "{\"type\":\"run_start\",\"id\":\"a1100000000000000000000000000001\",\"model\":{\"provider\":\"\",\"name\":\"\"},\"agent\":\"support\",\"instructions_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\"}"
               },
               "eventName": "weft.event",
               "flags": 1,
@@ -364,7 +364,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"3561d47c6c71c9d08ab0ecb7c3e0748f0073b6150f156359f497bc06b1655f02\",\"names\":[\"lookup_order\",\"delete_order\",\"refund_order\",\"charge_card\"]},\"sequential_tools\":true,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"3561d47c6c71c9d08ab0ecb7c3e0748f0073b6150f156359f497bc06b1655f02\",\"names\":[\"lookup_order\",\"delete_order\",\"refund_order\",\"charge_card\"]},\"sequential_tools\":true,\"params\":{},\"model\":{},\"stream\":true,\"wire\":{\"server_address\":\"gateway.example:8443\",\"extra_body_keys\":[\"metadata\",\"provider\"],\"extra_headers\":[\"authorization\",\"x-gateway-route\"]}}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -432,7 +432,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":2,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"3561d47c6c71c9d08ab0ecb7c3e0748f0073b6150f156359f497bc06b1655f02\",\"names\":[\"lookup_order\",\"delete_order\",\"refund_order\",\"charge_card\"]},\"sequential_tools\":true,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":2,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"3561d47c6c71c9d08ab0ecb7c3e0748f0073b6150f156359f497bc06b1655f02\",\"names\":[\"lookup_order\",\"delete_order\",\"refund_order\",\"charge_card\"]},\"sequential_tools\":true,\"params\":{},\"model\":{},\"stream\":true,\"wire\":{\"server_address\":\"gateway.example:8443\",\"extra_body_keys\":[\"metadata\",\"provider\"],\"extra_headers\":[\"authorization\",\"x-gateway-route\"]}}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1147,12 +1147,6 @@
                   "value": {
                     "intValue": "1"
                   }
-                },
-                {
-                  "key": "gen_ai.response.model",
-                  "value": {
-                    "stringValue": "script"
-                  }
                 }
               ],
               "body": {
@@ -1280,7 +1274,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"3561d47c6c71c9d08ab0ecb7c3e0748f0073b6150f156359f497bc06b1655f02\",\"names\":[\"lookup_order\",\"delete_order\",\"refund_order\",\"charge_card\"]},\"sequential_tools\":true,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"3561d47c6c71c9d08ab0ecb7c3e0748f0073b6150f156359f497bc06b1655f02\",\"names\":[\"lookup_order\",\"delete_order\",\"refund_order\",\"charge_card\"]},\"sequential_tools\":true,\"params\":{},\"model\":{},\"stream\":true,\"wire\":{\"server_address\":\"gateway.example:8443\",\"extra_body_keys\":[\"metadata\",\"provider\"],\"extra_headers\":[\"authorization\",\"x-gateway-route\"]}}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1450,12 +1444,6 @@
                   "key": "weft.ttft_ms",
                   "value": {
                     "intValue": "1"
-                  }
-                },
-                {
-                  "key": "gen_ai.response.model",
-                  "value": {
-                    "stringValue": "script"
                   }
                 }
               ],

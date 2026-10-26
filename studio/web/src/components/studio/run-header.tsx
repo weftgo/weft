@@ -923,7 +923,11 @@ export function RunHeader({
           >
             manifest {shortHash(doc.manifest_hash)}
           </Term>
-          <RunManifestMark agent={doc.agent} hash={doc.manifest_hash} />
+          <RunManifestMark
+            agent={doc.agent}
+            hash={doc.manifest_hash}
+            weftVersion={doc.weft_version}
+          />
         </span>
         {doc.weft_version ? (
           <span className="font-mono">weft {doc.weft_version}</span>

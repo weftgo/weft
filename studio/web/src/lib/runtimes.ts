@@ -249,7 +249,36 @@ export const RUN_MANIFEST_TITLE = {
   current: "this run ran the registered manifest (meta.manifest_check)",
   stale:
     "this run ran another manifest than the registered one: the agent changed since, or the app runs another build",
-} as const
+  /** U23.1-fix: the stale run's weft version is not the registered
+   * build's — a weft upgrade alone changes the manifest (0.20.0 added
+   * the middleware onion to it). */
+  staleWeft: (ran: string, registered: string) =>
+    `this run ran another manifest than the registered one: the weft version changed (weft ${ran} → ${registered}), and the manifest with it`,
+}
+
+/** runManifestTitle is the run header mark's title: the stale word
+ * names a weft version change when the run's weft version and the
+ * registered build's differ (both known), else the mark's own title. */
+export function runManifestTitle(
+  mark: "current" | "stale",
+  ranWeft?: string,
+  registered?: string
+): string {
+  if (mark === "stale" && ranWeft && registered && ranWeft !== registered)
+    return RUN_MANIFEST_TITLE.staleWeft(ranWeft, registered)
+  return RUN_MANIFEST_TITLE[mark]
+}
+
+/** registeredWeft is the weft version of a registered build holding
+ * the agent (the first runtime listing it), "" when none says. */
+export function registeredWeft(
+  agent: string | undefined,
+  runtimes: { weft_version?: string; agents: { name: string }[] }[] | undefined
+): string {
+  if (!agent || !runtimes) return ""
+  const rt = runtimes.find((r) => r.agents.some((a) => a.name === agent))
+  return rt?.weft_version ?? ""
+}
 
 /** Who set a runtime's breakpoints (breakpoints_by). */
 const BREAKPOINTS_BY = {

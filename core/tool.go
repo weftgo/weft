@@ -34,6 +34,9 @@ type ToolDef struct {
 	// configuration.
 	sourceFile string
 	sourceLine int
+	// sourceFunc is the runtime name of the function that called Tool:
+	// its import path places a file no go.mod roots (sourceRel).
+	sourceFunc string
 
 	// subagent names the child agent when this tool came from Subagent,
 	// for the manifest's delegation edge. Empty for ordinary tools.
@@ -140,7 +143,7 @@ func Tool[In, Out any](name, description string, fn func(ctx context.Context, in
 	}
 	// The defining call site, for the manifest (TODO §2.9): the caller
 	// of Tool, past the framework facade's wrapper.
-	file, line := callerSource()
+	file, line, caller := callerSource()
 	// A string Out is sent verbatim (below), so it has no output
 	// schema; everything else carries its reflected schema, which also
 	// serves MCP exposition later (§7.3).
@@ -155,6 +158,7 @@ func Tool[In, Out any](name, description string, fn func(ctx context.Context, in
 		OutputSchema: outSchema,
 		sourceFile:   file,
 		sourceLine:   line,
+		sourceFunc:   caller,
 		invoke: func(ctx context.Context, args json.RawMessage, strict bool) (string, error) {
 			in, err := decodeInput[In](name, args, strict)
 			if err != nil {
@@ -704,17 +708,17 @@ func withCall(ctx context.Context, c Call) context.Context {
 // function that called it, skipping the framework facade
 // (github.com/weftgo/weft): its one-line wrappers forward here, and a
 // manifest that named facade.go for every tool would say nothing.
-func callerSource() (file string, line int) {
+func callerSource() (file string, line int, function string) {
 	var pcs [16]uintptr
 	n := runtime.Callers(3, pcs[:]) // Callers, callerSource, its caller
 	frames := runtime.CallersFrames(pcs[:n])
 	for {
 		f, more := frames.Next()
 		if !strings.HasPrefix(f.Function, "github.com/weftgo/weft.") {
-			return f.File, f.Line
+			return f.File, f.Line, f.Function
 		}
 		if !more {
-			return "", 0
+			return "", 0, ""
 		}
 	}
 }

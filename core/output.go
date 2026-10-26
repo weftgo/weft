@@ -45,8 +45,8 @@ func Output[Out any]() Option {
 		func(_ context.Context, _ Out) (string, error) { return "recorded", nil })
 	// Tool recorded this frame as the source; the manifest should name
 	// Output's caller, where the schema type is chosen.
-	if file, line := callerSource(); file != "" {
-		tool.sourceFile, tool.sourceLine = file, line
+	if file, line, fn := callerSource(); file != "" {
+		tool.sourceFile, tool.sourceLine, tool.sourceFunc = file, line, fn
 	}
 	return outputOption{tool: tool}
 }

@@ -720,11 +720,23 @@ func New(m Model, opts ...Option) *Agent {
 	a.instructionsHash = hashText(a.system)
 	// The model chain is built once, here: first registered = outermost.
 	a.base = a.model
+	// The development detail level known now (a LoggerProvider option
+	// carrying the marker, ADR 0016's 2026-10-26 amendment): the layer
+	// boundaries are built into the one chain, so no second chain is
+	// ever made (detailModel). With the global provider it is not known
+	// yet — it may be registered later — and a run builds it.
+	detailAtNew := len(a.modelMW) > 0 && a.loggerProvider != nil && a.obs.devDetailMarked()
 	for i := len(a.modelMW) - 1; i >= 0; i-- {
 		a.model = a.modelMW[i](a.model)
 		if isNilModel(a.model) {
 			panic("weft: model middleware returned a nil Model")
 		}
+		if detailAtNew {
+			a.model = &layerModel{next: a.model, name: describeModel(a.model).Name, index: i}
+		}
+	}
+	if detailAtNew {
+		a.detailOnce.Do(func() { a.detailed = a.model })
 	}
 	// The manifest hash is computed once, here, for the named agent,
 	// after the model chain is built: Manifest(a) reads the model's Info

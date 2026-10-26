@@ -194,7 +194,14 @@ func (m *retryModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq
 				yield(nil, ctx.Err())
 				return
 			}
-			t = try{wait: delay, layer: core.AttemptLayerRetry}
+			// A retry is marked retry — unless this Retry serves a
+			// Fallback's backup: its every request is the backup's, and
+			// keeps the fallback mark the fallbacks counter keys on.
+			layer := core.AttemptLayerRetry
+			if tryOf(ctx).layer == core.AttemptLayerFallback {
+				layer = core.AttemptLayerFallback
+			}
+			t = try{wait: delay, layer: layer}
 		}
 	}
 }

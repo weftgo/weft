@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"iter"
 	"log/slog"
+	"os"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -74,9 +77,13 @@ const maxLayers = 64
 func modelLayers(top, base Model, n int) []MiddlewareInfo {
 	var out []MiddlewareInfo
 	m := top
-	for range min(n, maxLayers) {
+	for hops := 0; len(out) < min(n, maxLayers) && hops < 2*maxLayers; hops++ {
 		if m == nil || sameModel(m, base) {
 			break
+		}
+		if b, ok := m.(*layerModel); ok { // a detail boundary, not a layer
+			m = b.next
+			continue
 		}
 		info := describeModel(m)
 		next := Unwrap(m)
@@ -174,7 +181,7 @@ func funcInfo(fn any) MiddlewareInfo {
 	}
 	info := MiddlewareInfo{Name: short}
 	if file, line := f.FileLine(f.Entry()); file != "" {
-		info.Source = moduleRel(file) + ":" + strconv.Itoa(line)
+		info.Source = sourceRel(file, full) + ":" + strconv.Itoa(line)
 	}
 	return info
 }
@@ -266,9 +273,12 @@ func (r ToolReporter) Denied(by string) {
 
 // Masked reports that a layer replaced the call's error with another
 // (mw.MapErrors' INTERNAL): original is the error it hid. The span
-// carries the original's kind as weft.tool.error_masked — its declared
-// ErrorType(), a context error's name, a ToolError's code, else its Go
-// type past the standard wrappers ("*net.OpError") — never its text.
+// carries the original's kind as weft.tool.error_masked — never its
+// text: the first of its optional ErrorKind() string (a convention for
+// an app's own sentinels), a context error's name, its ErrorType(), a
+// ToolError's code, a standard library sentinel it matches with
+// errors.Is ("io.EOF", "fs.ErrNotExist", …), else its Go type past the
+// standard wrappers ("*net.OpError").
 func (r ToolReporter) Masked(original error) {
 	if r.n == nil || original == nil {
 		return
@@ -286,6 +296,11 @@ func maskedKind(err error) (kind string) {
 			kind = "unknown"
 		}
 	}()
+	if k, ok := errors.AsType[errorKinder](err); ok {
+		if kind := k.ErrorKind(); kind != "" {
+			return kind
+		}
+	}
 	if name, ok := ctxErrorType(err); ok {
 		return name
 	}
@@ -296,6 +311,11 @@ func maskedKind(err error) (kind string) {
 	}
 	if te, ok := errors.AsType[*ToolError](err); ok && te.Code != "" {
 		return te.Code
+	}
+	for _, s := range stdSentinels {
+		if errors.Is(err, s.err) {
+			return s.name
+		}
 	}
 	for range maxLayers {
 		switch fmt.Sprintf("%T", err) {
@@ -308,6 +328,37 @@ func maskedKind(err error) (kind string) {
 		break
 	}
 	return fmt.Sprintf("%T", err)
+}
+
+// errorKinder is the optional ErrorKind convention: an error naming its
+// own kind for weft.tool.error_masked (an app's sentinel), never its
+// text.
+type errorKinder interface {
+	error
+	ErrorKind() string
+}
+
+// stdSentinels are the standard library's sentinel errors a hidden
+// error is named by (weft.tool.error_masked): every errors.New sentinel
+// is a *errors.errorString, so its type says nothing. Checked in order;
+// os.ErrNotExist and the others are the fs values themselves.
+var stdSentinels = []struct {
+	err  error
+	name string
+}{
+	{io.EOF, "io.EOF"},
+	{io.ErrUnexpectedEOF, "io.ErrUnexpectedEOF"},
+	{io.ErrClosedPipe, "io.ErrClosedPipe"},
+	{io.ErrShortWrite, "io.ErrShortWrite"},
+	{io.ErrNoProgress, "io.ErrNoProgress"},
+	{fs.ErrNotExist, "fs.ErrNotExist"},
+	{fs.ErrExist, "fs.ErrExist"},
+	{fs.ErrPermission, "fs.ErrPermission"},
+	{fs.ErrInvalid, "fs.ErrInvalid"},
+	{fs.ErrClosed, "fs.ErrClosed"},
+	{os.ErrDeadlineExceeded, "os.ErrDeadlineExceeded"},
+	{os.ErrProcessDone, "os.ErrProcessDone"},
+	{errors.ErrUnsupported, "errors.ErrUnsupported"},
 }
 
 // --- the repair report (model side) ---
@@ -542,7 +593,15 @@ func (m *layerModel) Stream(ctx context.Context, req ModelRequest) iter.Seq2[Mod
 	return func(yield func(ModelEvent, error) bool) {
 		inner, span := s.startLayer(ctx, m.name, m.index)
 		var failed error
-		defer func() { s.endLayer(span, failed) }()
+		defer func() {
+			// A panic through the layer ends its span as one: Error,
+			// error.type panic — then goes on unwinding unchanged.
+			if p := recover(); p != nil {
+				s.endLayerPanic(span)
+				panic(p)
+			}
+			s.endLayer(span, failed)
+		}()
 		for ev, err := range m.next.Stream(inner, req) {
 			if err != nil {
 				failed = err
@@ -567,6 +626,20 @@ func (s *stepReport) startLayer(ctx context.Context, name string, index int) (co
 	}
 	return context.WithValue(ctx, layerSpanKey{}, span), span
 }
+
+// endLayerPanic ends a layer span a panic went through.
+func (s *stepReport) endLayerPanic(span trace.Span) {
+	if span == nil {
+		return
+	}
+	defer s.containTraces()
+	span.SetAttributes(semconv.ErrorTypeKey.String(layerPanic))
+	span.SetStatus(codes.Error, "")
+	span.End()
+}
+
+// layerPanic is a layer span's error.type when a panic went through it.
+const layerPanic = "panic"
 
 func (s *stepReport) endLayer(span trace.Span, err error) {
 	if span == nil {
@@ -599,10 +672,16 @@ func (a *Agent) detailedChain(base Model) Model {
 	return m
 }
 
-// detailModel is the agent's model chain under the detail level: built
-// once, the first time a run asks (the middleware constructors run a
-// second time, beside New's chain — the precedent of UseModel's
-// rebuild), and the agent's plain chain if that build fails.
+// detailModel is the agent's model chain under the detail level. When
+// the marker was known at New (a LoggerProvider option carrying it) New
+// built the boundaries into the agent's one chain and this is it.
+// Otherwise (the global provider, registered after New) it is a second
+// chain built once, the first time a run asks: the middleware
+// constructors run a second time, beside New's chain — the precedent of
+// UseModel's rebuild — so a stateful middleware holds two states, and
+// a caller that streams Agent.Model() itself (weft/thread's compaction
+// summary) uses the plain chain. The agent's plain chain if that build
+// fails.
 func (a *Agent) detailModel() Model {
 	a.detailOnce.Do(func() {
 		if len(a.modelMW) > 0 {
@@ -643,6 +722,18 @@ func (t *toolLayerSpans) wrap(next ToolCaller, name string, index int) ToolCalle
 			return next(ctx, call)
 		}
 		defer func() {
+			if p := recover(); p != nil {
+				// A panic through the layer ends its span as one, then
+				// goes on unwinding unchanged (the containment outside
+				// the chain reads the same value).
+				func() {
+					defer t.rec.containTraces(ctx)
+					span.SetAttributes(semconv.ErrorTypeKey.String(layerPanic))
+					span.SetStatus(codes.Error, "")
+					span.End()
+				}()
+				panic(p)
+			}
 			kind := ""
 			if err != nil && !errors.Is(err, ErrApprovalRequired) {
 				kind = layerErrorType(err)

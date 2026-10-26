@@ -218,6 +218,7 @@ func Model(name string, opts ...Option) core.Model {
 		m.injected = true
 		return m
 	}
+	m.server = adapterkit.Endpoint(cfg.baseURL, os.Getenv("ANTHROPIC_BASE_URL"), "api.anthropic.com")
 	var sdkOpts []option.RequestOption
 	if cfg.baseURL != "" {
 		sdkOpts = append(sdkOpts, option.WithBaseURL(cfg.baseURL))
@@ -246,9 +247,12 @@ type model struct {
 	stop         []string
 	extraBody    map[string]any
 	extraHeaders http.Header
-	thinking     bool
-	promptCache  bool
-	idle         time.Duration
+	// server is the endpoint the request goes to, for the request
+	// record's wire facts (WireFacts); "" for an injected client.
+	server      string
+	thinking    bool
+	promptCache bool
+	idle        time.Duration
 }
 
 // requestOptions builds the per-request options: the wire capture (raw
@@ -305,4 +309,11 @@ var sensitiveHeaders = []string{"authorization", "api-key", "x-api-key", "cookie
 // Info identifies the model for RunStart and the manifest.
 func (m *model) Info() core.ModelInfo {
 	return core.ModelInfo{Provider: provider, Name: m.name}
+}
+
+// WireFacts reports the endpoint and the escape hatches' names for the
+// request record's wire (UX-S2-09; core's optional WireFacts
+// convention): ExtraBody's keys and ExtraHeaders' names, never a value.
+func (m *model) WireFacts() (string, []string, []string) {
+	return adapterkit.WireFacts(m.server, m.extraBody, m.extraHeaders)
 }

@@ -360,6 +360,21 @@ type RequestBody struct {
 	// (O9, record contract §4): system, messages, tools, tool_choice,
 	// params, thinking, sequential_tools. Absent when none did.
 	Prepared []string `json:"prepared,omitempty"`
+	// Wire is how the adapter's escape hatches shape the request
+	// (UX-S2-09, record contract §4): names only. Nil when the model
+	// declares none.
+	Wire *RequestWire `json:"wire,omitempty"`
+}
+
+// RequestWire is a request's wire facts: the endpoint's host[:port],
+// ExtraBody's top-level keys and ExtraHeaders' names (lowercase), each
+// list sorted and bounded (32 names), Dropped counting the names left
+// out.
+type RequestWire struct {
+	ServerAddress string   `json:"server_address,omitempty"`
+	ExtraBodyKeys []string `json:"extra_body_keys,omitempty"`
+	ExtraHeaders  []string `json:"extra_headers,omitempty"`
+	Dropped       int      `json:"dropped,omitempty"`
 }
 
 // RequestMessagesRef says which messages the request carried: the

@@ -129,7 +129,8 @@ type stepAttempt struct {
 	ErrorType    string `json:"error_type,omitempty"`
 	RetryAfterMS int64  `json:"retry_after_ms,omitempty"`
 	// Layer is the attempt span's weft.attempt.layer: "fallback" for a
-	// request mw.Fallback sent to a backup; absent on a primary attempt.
+	// request mw.Fallback sent to a backup (its own retries included),
+	// "retry" for one mw.Retry sent again (U23.1); absent on a first try.
 	Layer string `json:"layer,omitempty"`
 	// The attempt's cause and wait (U25, O6): the span's
 	// http.response.status_code, its weft.attempt.wait_ms (the backoff

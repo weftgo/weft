@@ -200,6 +200,7 @@ func Model(name string, opts ...Option) core.Model {
 		m.injected = true
 		return m
 	}
+	m.server = adapterkit.Endpoint(cfg.baseURL, os.Getenv("OPENAI_BASE_URL"), "api.openai.com")
 	var sdkOpts []option.RequestOption
 	if cfg.baseURL != "" {
 		sdkOpts = append(sdkOpts, option.WithBaseURL(cfg.baseURL))
@@ -230,8 +231,11 @@ type model struct {
 	seedSet      bool
 	extraBody    map[string]any
 	extraHeaders http.Header
-	idle         time.Duration
-	dialect      ThinkingDialect
+	// server is the endpoint the request goes to, for the request
+	// record's wire facts (WireFacts); "" for an injected client.
+	server  string
+	idle    time.Duration
+	dialect ThinkingDialect
 }
 
 // requestOptions builds the per-request options: the wire capture (raw
@@ -291,4 +295,11 @@ var sensitiveHeaders = []string{"authorization", "api-key", "openai-organization
 // is "openai" even when BaseURL points elsewhere.
 func (m *model) Info() core.ModelInfo {
 	return core.ModelInfo{Provider: provider, Name: m.name}
+}
+
+// WireFacts reports the endpoint and the escape hatches' names for the
+// request record's wire (UX-S2-09; core's optional WireFacts
+// convention): ExtraBody's keys and ExtraHeaders' names, never a value.
+func (m *model) WireFacts() (string, []string, []string) {
+	return adapterkit.WireFacts(m.server, m.extraBody, m.extraHeaders)
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -120,6 +121,129 @@ type requestBody struct {
 	// only — content-free, so it survives content-off. Absent when no
 	// PrepareStep ran or it changed nothing.
 	Prepared []string `json:"prepared,omitempty"`
+	// Wire is how the adapter's escape hatches shape the request
+	// (UX-S2-09, U23.1-fix): names only, never a value — absent when the
+	// model declares none (the optional WireFacts method, wireFacts).
+	Wire *wireBody `json:"wire,omitempty"`
+}
+
+// wireBody is the request's wire facts: the endpoint's host[:port]
+// (no scheme, userinfo, path or query), the top-level keys ExtraBody
+// merges into the JSON body and the names of the ExtraHeaders it adds
+// (lowercase), each list sorted and capped at maxWireNames names of at
+// most maxWireName bytes, the names left out counted in Dropped.
+type wireBody struct {
+	ServerAddress string   `json:"server_address,omitempty"`
+	ExtraBodyKeys []string `json:"extra_body_keys,omitempty"`
+	ExtraHeaders  []string `json:"extra_headers,omitempty"`
+	Dropped       int      `json:"dropped,omitempty"`
+}
+
+// The wire facts' bounds: a gateway's handful of keys and headers fits;
+// a map grown without bound is cut and counted, never carried whole.
+const (
+	maxWireNames = 32
+	maxWireName  = 128
+)
+
+// wireFacts asks the model chain how its escape hatches shape the
+// request: the first model along the Unwrap chain with the optional
+// method
+//
+//	WireFacts() (serverAddress string, extraBodyKeys, extraHeaderNames []string)
+//
+// answers (a convention like ThinkingWire — the first-party adapters
+// implement it). Names only; the core sanitises what it is handed
+// whatever the method returns. Nil when none answers, or the answer is
+// empty. Bounded, never calls the provider; a panic reads nil.
+func wireFacts(m Model) (w *wireBody) {
+	defer func() {
+		if recover() != nil {
+			w = nil
+		}
+	}()
+	for range maxWireUnwrap {
+		if m == nil {
+			return nil
+		}
+		if f, ok := m.(interface {
+			WireFacts() (string, []string, []string)
+		}); ok {
+			server, keys, headers := f.WireFacts()
+			b := &wireBody{ServerAddress: serverAddress(server)}
+			b.ExtraBodyKeys, b.Dropped = wireNames(keys, false, b.Dropped)
+			b.ExtraHeaders, b.Dropped = wireNames(headers, true, b.Dropped)
+			if b.ServerAddress == "" && b.ExtraBodyKeys == nil && b.ExtraHeaders == nil && b.Dropped == 0 {
+				return nil
+			}
+			return b
+		}
+		next := Unwrap(m)
+		if next == m {
+			return nil
+		}
+		m = next
+	}
+	return nil
+}
+
+// serverAddress reduces an endpoint to host[:port]: a URL's scheme,
+// userinfo, path and query are dropped, a bare host keeps its port.
+func serverAddress(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.Contains(s, "://") {
+		u, err := url.Parse(s)
+		if err != nil {
+			return ""
+		}
+		s = u.Host
+	} else {
+		if i := strings.IndexAny(s, "/?#"); i >= 0 {
+			s = s[:i]
+		}
+		if i := strings.LastIndex(s, "@"); i >= 0 {
+			s = s[i+1:]
+		}
+	}
+	if len(s) > maxWireName {
+		return ""
+	}
+	return s
+}
+
+// wireNames sorts, dedupes and bounds a list of names (lowercased for
+// headers); names past the bounds, empty or too long, are counted.
+func wireNames(names []string, lower bool, dropped int) ([]string, int) {
+	if len(names) == 0 {
+		return nil, dropped
+	}
+	out := make([]string, 0, min(len(names), maxWireNames))
+	seen := map[string]bool{}
+	for _, n := range names {
+		if lower {
+			n = strings.ToLower(n)
+		}
+		if n == "" || len(n) > maxWireName || seen[n] {
+			if n != "" && !seen[n] {
+				dropped++
+			}
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	slices.Sort(out)
+	if len(out) > maxWireNames {
+		dropped += len(out) - maxWireNames
+		out = out[:maxWireNames]
+	}
+	if len(out) == 0 {
+		return nil, dropped
+	}
+	return out, dropped
 }
 
 // messagesRef names the request's messages: the run's view as of
@@ -619,6 +743,7 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 	if req.Thinking != (ThinkingConfig{}) {
 		body.Thinking = &thinkingBody{Level: thinkingLevelName(req.Thinking.Level), Budget: req.Thinking.Budget, Wire: thinkingWire(in.model, req.Thinking)}
 	}
+	body.Wire = wireFacts(in.model)
 	rr = &requestRecord{r: r, body: body}
 	rr.emit(mctx, body)
 	return rr

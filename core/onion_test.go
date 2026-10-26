@@ -11,12 +11,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"iter"
 	"log/slog"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"go.opentelemetry.io/otel/codes"
@@ -370,8 +376,8 @@ func TestOnionAttributesOnSpans(t *testing.T) {
 		t.Errorf("delete span = %v, want denied_by allow", del)
 	}
 	flaky := tp.find(t, "execute_tool flaky").attrsMap()
-	if flaky["weft.tool.error_masked"] != "*errors.errorString" || flaky["error.type"] != "INTERNAL" || flaky["weft.tool.denied_by"] != "" {
-		t.Errorf("flaky span = %v, want INTERNAL masking *errors.errorString", flaky)
+	if flaky["weft.tool.error_masked"] != "io.EOF" || flaky["error.type"] != "INTERNAL" || flaky["weft.tool.denied_by"] != "" {
+		t.Errorf("flaky span = %v, want INTERNAL masking io.EOF", flaky)
 	}
 	for _, s := range tp.all() {
 		if strings.HasPrefix(s.name, "layer ") {
@@ -631,6 +637,217 @@ func TestPanicStackUnderDevDetail(t *testing.T) {
 		tp, _ := run(c.opts...)
 		if got := stacks(tp, "execute_tool boom"); len(got) != 0 {
 			t.Errorf("%s: a panic stack was recorded: %q", c.name, got)
+		}
+	}
+}
+
+// kindErr names its own kind for weft.tool.error_masked (ErrorKind).
+type kindErr struct{}
+
+func (kindErr) Error() string     { return "quota row missing" }
+func (kindErr) ErrorKind() string { return "billing.ErrNoQuota" }
+
+// weft.tool.error_masked names the hidden error's kind: an ErrorKind()
+// first, a standard sentinel through its wrapping, else the Go type; a
+// MapErrors mapping that only wraps the error hid nothing and reports
+// nothing (U23.1-fix).
+func TestErrorMaskedKinds(t *testing.T) {
+	tp := newRecProvider()
+	fail := func(name string, err error) *core.ToolDef {
+		return core.Tool(name, "", func(context.Context, struct{}) (string, error) { return "", err })
+	}
+	wrapOnly := mw.MapErrors(func(err error) error {
+		if errors.Is(err, fs.ErrPermission) {
+			return fmt.Errorf("denied by the store: %w", err)
+		}
+		return &core.ToolError{Code: "MAPPED", Message: "failed", Err: err}
+	})
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{ID: "a", Name: "missing"}, wefttest.Call{ID: "b", Name: "kind"},
+			wefttest.Call{ID: "c", Name: "plain"}, wefttest.Call{ID: "d", Name: "perm"}),
+		wefttest.Say("done")), core.TracerProvider(tp), core.WrapTools(wrapOnly),
+		fail("missing", fmt.Errorf("open cfg: %w", os.ErrNotExist)), fail("kind", kindErr{}),
+		fail("plain", errors.New("boom")), fail("perm", fs.ErrPermission))
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"missing": "fs.ErrNotExist", "kind": "billing.ErrNoQuota", "plain": "*errors.errorString", "perm": ""} {
+		if got := tp.find(t, "execute_tool "+name).attrsMap()["weft.tool.error_masked"]; got != want {
+			t.Errorf("%s: weft.tool.error_masked = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// The manifest's source paths are the same on every machine: a module
+// cache file reads as its module path without the version, a file no
+// go.mod roots as its function's import path and base name — never an
+// absolute path (U23.1-fix).
+func TestSourceRelMachineIndependent(t *testing.T) {
+	for _, c := range []struct{ file, fn, want string }{
+		{"/home/u/go/pkg/mod/github.com/acme/tools@v1.2.3/mw/audit.go", "github.com/acme/tools/mw.Audit.func1", "github.com/acme/tools/mw/audit.go"},
+		{"/home/u/go/pkg/mod/github.com/!acme/!tools@v0.0.0-2026/x.go", "", "github.com/Acme/Tools/x.go"},
+		{"/build/host/src/app/main.go", "main.main.func3", "main/main.go"},
+		{"/nowhere/svc/handlers.go", "github.com/x/svc.(*S).hook", "github.com/x/svc/handlers.go"},
+		{"/nowhere/svc/handlers.go", "", "handlers.go"},
+	} {
+		got := core.SourceRel(c.file, c.fn)
+		if got != c.want || strings.HasPrefix(got, "/") {
+			t.Errorf("SourceRel(%q, %q) = %q, want %q", c.file, c.fn, got, c.want)
+		}
+	}
+	// Under a go.mod: module-relative.
+	if got := core.SourceRel(filepath.Join(mustWd(t), "onion_test.go"), ""); got != "onion_test.go" {
+		t.Errorf("in-module source = %q, want onion_test.go", got)
+	}
+}
+
+func mustWd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
+}
+
+// countingMW counts how many times its constructor ran.
+func countingMW(n *atomic.Int64) core.ModelMiddleware {
+	return func(next core.Model) core.Model {
+		n.Add(1)
+		return mwShim{next}
+	}
+}
+
+type mwShim struct{ next core.Model }
+
+func (m mwShim) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return m.next.Stream(ctx, req)
+}
+func (m mwShim) Unwrap() core.Model { return m.next }
+
+// With the detail marker known at New (a LoggerProvider option) the
+// layer boundaries are built into the agent's one chain: the
+// constructors run once, the manifest and its hash are the plain
+// agent's, and the runs still record their layer spans (U23.1-fix).
+func TestDevDetailAtNewOneChain(t *testing.T) {
+	var n atomic.Int64
+	tp := newRecProvider()
+	build := func(opts ...core.Option) *core.Agent {
+		return core.New(wefttest.Script(wefttest.Say("a"), wefttest.Say("b")),
+			append([]core.Option{core.Name("one"), core.WrapModel(countingMW(&n), mw.RepairJSON())}, opts...)...)
+	}
+	plain := build()
+	n.Store(0)
+	agt := build(core.TracerProvider(tp), core.LoggerProvider(detailLP{newRecLogProvider()}))
+	for range 2 {
+		if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := n.Load(); got != 1 {
+		t.Errorf("middleware constructor ran %d times, want 1 (one chain)", got)
+	}
+	a, b := manifestOf(t, plain).Agents[0].ModelMiddleware, manifestOf(t, agt).Agents[0].ModelMiddleware
+	if !slices.Equal(layerNames(a), layerNames(b)) || len(b) != 2 {
+		t.Errorf("manifest onion = %v, want the plain agent's %v", layerNames(b), layerNames(a))
+	}
+	pb, _ := core.Manifest(plain)
+	ab, _ := core.Manifest(agt)
+	if !bytes.Equal(pb, ab) {
+		t.Error("the detail boundaries changed the manifest")
+	}
+	if got := len(tp.spansNamed("layer mw.RepairJSON")); got != 2 {
+		t.Errorf("layer spans = %d, want one per call (2)", got)
+	}
+}
+
+// A panic through a layer ends its span as one — Error, error.type
+// panic — and the call's result is the contained panic, unchanged
+// (U23.1-fix).
+func TestLayerSpanEndsOnPanic(t *testing.T) {
+	tp := newRecProvider()
+	explode := func(next core.ToolCaller) core.ToolCaller {
+		return func(context.Context, core.ToolCallPart) (string, error) { panic("layer exploded") }
+	}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	agt := core.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"msg":"x"}`}), wefttest.Say("done")),
+		core.TracerProvider(tp), core.LoggerProvider(detailLP{newRecLogProvider()}),
+		core.WrapTools(mw.Audit(quiet), explode), spanEcho)
+	res, err := agt.Generate(context.Background(), core.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Steps[0].Results[0].Content; r != `tool "echo" panicked: layer exploded` {
+		t.Errorf("result = %q", r)
+	}
+	for _, s := range tp.all() {
+		if !strings.HasPrefix(s.name, "layer ") {
+			continue
+		}
+		ended, st, _, _ := s.state()
+		if !ended || st != codes.Error || s.attrsMap()["error.type"] != "panic" {
+			t.Errorf("%s: ended %v, status %v, error.type %q; want ended, Error, panic", s.name, ended, st, s.attrsMap()["error.type"])
+		}
+	}
+}
+
+// wiredFacts is a model declaring its wire facts (the WireFacts
+// convention the first-party adapters implement).
+type wiredFacts struct {
+	core.Model
+	server        string
+	keys, headers []string
+}
+
+func (m wiredFacts) Unwrap() core.Model { return m.Model }
+func (m wiredFacts) WireFacts() (string, []string, []string) {
+	return m.server, m.keys, m.headers
+}
+
+// The request record names how the adapter's escape hatches shape the
+// request (UX-S2-09, U23.1-fix): the endpoint's host[:port] — never its
+// scheme, userinfo, path or query — and ExtraBody's keys and
+// ExtraHeaders' names, sorted, lowercased, deduped and bounded; never
+// a value. Found through the middleware chain; absent for a model that
+// declares none.
+func TestRequestRecordWireFacts(t *testing.T) {
+	many := make([]string, 40)
+	for i := range many {
+		many[i] = fmt.Sprintf("k%02d", i)
+	}
+	for _, c := range []struct {
+		name string
+		m    core.Model
+		want string
+	}{
+		{"declared", wiredFacts{wefttest.Script(wefttest.Say("ok")), "https://key:secret@gw.example:8443/v1?token=x",
+			[]string{"provider", "metadata"}, []string{"X-Route", "Authorization", "x-route"}},
+			`{"server_address":"gw.example:8443","extra_body_keys":["metadata","provider"],"extra_headers":["authorization","x-route"]}`},
+		{"bounded", wiredFacts{wefttest.Script(wefttest.Say("ok")), "api.example.com", many, nil},
+			`{"server_address":"api.example.com","extra_body_keys":["k00","k01","k02","k03","k04","k05","k06","k07","k08","k09","k10","k11","k12","k13","k14","k15","k16","k17","k18","k19","k20","k21","k22","k23","k24","k25","k26","k27","k28","k29","k30","k31"],"dropped":8}`},
+		{"none", wefttest.Script(wefttest.Say("ok")), ""},
+	} {
+		lp := newRecLogProvider()
+		agt := core.New(c.m, core.LoggerProvider(lp), core.WrapModel(mw.Retry()))
+		if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
+			t.Fatal(err)
+		}
+		reqs := lp.ofKind(t, "request")
+		if len(reqs) != 1 {
+			t.Fatalf("%s: %d request records", c.name, len(reqs))
+		}
+		var body struct {
+			Wire json.RawMessage `json:"wire"`
+		}
+		if err := json.Unmarshal([]byte(reqs[0].body), &body); err != nil {
+			t.Fatal(err)
+		}
+		if string(body.Wire) != c.want {
+			t.Errorf("%s: wire = %s, want %s", c.name, body.Wire, c.want)
+		}
+		if strings.Contains(reqs[0].body, "secret") || strings.Contains(reqs[0].body, "token=") {
+			t.Errorf("%s: a credential reached the record: %s", c.name, reqs[0].body)
 		}
 	}
 }

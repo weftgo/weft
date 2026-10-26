@@ -8,3 +8,6 @@ var (
 	SensitiveHeader = sensitiveHeader
 	SensitiveValue  = sensitiveValue
 )
+
+// SourceRel is the manifest's machine-independent source path (U23.1-fix).
+var SourceRel = sourceRel

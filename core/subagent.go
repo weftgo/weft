@@ -333,8 +333,8 @@ func Subagent(name, description string, child *Agent, opts ...ToolOption) *ToolD
 	// Tool recorded this frame as the source; the manifest should name
 	// Subagent's caller, where the child is chosen (Output does the
 	// same for its schema type).
-	if file, line := callerSource(); file != "" {
-		t.sourceFile, t.sourceLine = file, line
+	if file, line, fn := callerSource(); file != "" {
+		t.sourceFile, t.sourceLine, t.sourceFunc = file, line, fn
 	}
 	t.subagent = child.name
 	if t.origin == "" {

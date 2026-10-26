@@ -54,6 +54,24 @@
   panel ledger (the phase 9 floor: headroom ≥ 6,820 B with the last row P9-pre-web-fix6,
   UX-B-41's accepted exception) and k1–k7. One PASS / FAIL / RECORDED line per clause in
   `$RUN/gate9.txt` (screenshots in `$RUN/shots`); exit 1 when a clause FAILs.
+- `gate10a.sh` + `gate10a.js` — the phase 10a gate (experiments you can trust, runtimes you can
+  see). Run it with
+  `ARENA=<weft-arena checkout> RUN=<scratch dir> PLAYWRIGHT_DIR=<playwright install> scripts/ux-gate/gate10a.sh`
+  (`REPO` defaults to this script's own tree): a fresh `weft studio` on `$RUN/studio.db`
+  (127.0.0.1:7341, token `gate10atok`); the arena built against `$REPO` through `$RUN/arena.work`,
+  seeded `--offline` (the failures in `KNOWN_STALE` are RECORDED with their arena notes), then
+  `weft-arena serve --offline` (127.0.0.1:7789) with an rw.budget-guards batch and an offline thread
+  session — three runtime links of one process; then gate10a.js — (a) the §4.4 experiment journey on
+  rw.budget-guards in Studio and the panel (scripted by default, the tool-mismatch hold, the recorded
+  build, a scripted Run and its compare, "edit this result" empty; only a Run reading
+  `data-run-engine="scripted"` is ever pressed), (b) `/runtimes` told apart, gone, restored after a
+  Studio restart over the same db, and the drawer's Runs in refusal, (c) `/agents`' stale marks and
+  stats strips, (d) the error-class facet → the matrix form's estimate (never run) — (e) `weft dev --
+  studio-local` (7397 / 8093) driven from the page's panel, its app killed, (f) `make mcp-check`,
+  (g) `make studio-check` + the ledger (headroom ≥ 4,096 B under 106,496 B, dist ≤ 800 KiB), and
+  h1–h7. Every process it starts runs under `strace -e connect` (h4). One line per clause in
+  `$RUN/gate10a.txt` (screenshots in `$RUN/shots`), ending `GATE 10a: PASSED` or
+  `GATE 10a: FAILED (<clauses>)`; exit 1 when a clause FAILs.
 - `h9.js` — item H9's done line in a real browser: the runs list (toolbar folded, "with
   subagents" nested), `/compare` (its picker, two picks) and a subagent parent's run page fit
   1440 and 360 px with no sideways page scroll, and `/live` during an offline run draws the

@@ -217,7 +217,7 @@ func delegatedHuge(t *testing.T, n int, maxReads int64) {
 	for i := range ids {
 		ids[i] = fmt.Sprintf("s_h%03d", i)
 	}
-	out := srv.sessionCosts(context.Background(), ids, "")
+	out := srv.sessionCosts(context.Background(), ids, readScope{})
 	if got := reads.Load(); got > maxReads {
 		t.Errorf("%d sessions past the bound: %d Runs reads, want at most %d (the call's budget)", n, got, maxReads)
 	}
@@ -291,12 +291,12 @@ func TestSessionCostSurvivesADeleteBetweenPages(t *testing.T) {
 	var reads atomic.Int64
 	srv := New(DB(shrinkingRuns{DB: db, n: &reads}))
 	t.Cleanup(func() { _ = srv.Close() })
-	_, _, runs := srv.sessionCost(context.Background(), "s_shrink", "")
+	_, _, runs := srv.sessionCost(context.Background(), "s_shrink", readScope{})
 	if len(runs) != 1500 || reads.Load() != 4 {
 		t.Errorf("sessionCost read %d runs in %d reads; want 1,500 in 4 (three pages, then the empty one)", len(runs), reads.Load())
 	}
 	reads.Store(0)
-	out := srv.sessionCosts(context.Background(), []string{"s_shrink"}, "")
+	out := srv.sessionCosts(context.Background(), []string{"s_shrink"}, readScope{})
 	if _, ok := out["s_shrink"]; !ok || reads.Load() != 4 {
 		t.Errorf("sessionCosts: %v in %d reads; want an answer after 4 reads", out, reads.Load())
 	}
@@ -630,7 +630,7 @@ func TestHiddenDelegatedBounded(t *testing.T) {
 		srv := New(DB(countHiddenReads{DB: db, n: &reads}))
 		t.Cleanup(func() { _ = srv.Close() })
 		var doc sessionDoc
-		srv.delegatedSessions(context.Background(), "s_p", "pub_a", &doc)
+		srv.delegatedSessions(context.Background(), "s_p", readScope{PublicID: "pub_a"}, &doc)
 		return reads.Load(), doc
 	}
 	got, doc := read(10_000, false)
@@ -668,14 +668,14 @@ func TestHiddenDelegatedEarlyStopFloor(t *testing.T) {
 	srv := New(DB(failDeepSessions{DB: db, root: "s_p"}))
 	t.Cleanup(func() { _ = srv.Close() })
 	var doc sessionDoc
-	srv.delegatedSessions(context.Background(), "s_p", "pub_a", &doc)
+	srv.delegatedSessions(context.Background(), "s_p", readScope{PublicID: "pub_a"}, &doc)
 	if len(doc.DelegatedHoles) != 1 || doc.DelegatedHoles[0].Count != 1 || !doc.DelegatedHoles[0].CountFloor ||
 		!strings.Contains(doc.DelegatedHoles[0].Reason, "at least 1") {
 		t.Errorf("an early stop: holes %+v, want one hidden hole, at least 1, a floor", doc.DelegatedHoles)
 	}
 	// The server token's walk stops the same way, with no hole.
 	var all sessionDoc
-	srv.delegatedSessions(context.Background(), "s_p", "", &all)
+	srv.delegatedSessions(context.Background(), "s_p", readScope{}, &all)
 	if len(all.DelegatedHoles) != 0 {
 		t.Errorf("an early stop, unscoped: holes %+v, want none", all.DelegatedHoles)
 	}
@@ -726,7 +726,7 @@ func TestHiddenDelegatedCycle(t *testing.T) {
 	srv := New(DB(cycleSessions{DB: db, reads: &reads}))
 	t.Cleanup(func() { _ = srv.Close() })
 	var doc sessionDoc
-	srv.delegatedSessions(context.Background(), "s_p", "pub_a", &doc)
+	srv.delegatedSessions(context.Background(), "s_p", readScope{PublicID: "pub_a"}, &doc)
 	if len(doc.DelegatedHoles) != 1 || doc.DelegatedHoles[0].Count != 2 || doc.DelegatedHoles[0].CountFloor {
 		t.Errorf("a hidden cycle: holes %+v, want one hidden hole counting 2, exact", doc.DelegatedHoles)
 	}

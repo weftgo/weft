@@ -1053,12 +1053,19 @@ and absent otherwise, so a list titles an untitled content-off session
 (`obsdb.SessionRow.Title`/`FirstPrompt`/`ContentOff`; the fixtures'
 `sessions`). `SessionQuery.Q` matches a term against the title, the
 first turn's whole prompt, the session id, the public id and the agent.
-`SessionQuery.Meta` (Studio's `/api/sessions?tag.<k>=<v>`, U12.2, D6)
-keeps the sessions one of whose own turns carries every pair in its
-`meta` (`thread.WithRunMetadata`'s tags, `core.Metadata`'s pairs; on
-ClickHouse the collapsed row's `meta`, `RunQuery.Meta`'s rule): it
-selects sessions, never turns — a listed session is grouped over all
-its turns, tagged or not.
+`SessionQuery.Meta` (Studio's `/api/sessions?tag.<k>=<v>`, U12.2, D6;
+a tag-scoped panel token's tags, I4) scopes the turns a session is
+grouped over as `SessionQuery.PublicID` does: a session is listed when
+one of its own turns carries every pair in its `meta`
+(`thread.WithRunMetadata`'s tags, `core.Metadata`'s pairs; on
+ClickHouse the collapsed row's `meta`, `RunQuery.Meta`'s rule), and its
+turns, usage, first/last seen, status, title, first prompt and turn
+facts are those turns' alone — a turn without the tags is in none of
+them. `SessionQuery.Compacted` still reads the session's compaction
+markers (which carry no `meta`). `TreeQuery.Meta` scopes a run tree
+by the same pairs (a descendant's row and each of its spans carry
+them, `TreeQuery.PublicID`'s rule), and `TraceQuery.ScopeMeta` keeps
+the traces every span of which carries them.
 
 A session row's **turn facts** (U16, `obsdb.SessionTurnFacts`, read
 time over the same turns as the rest of the row, scoped alike) say its

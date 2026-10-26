@@ -167,8 +167,8 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 		sessionReadError(w, r, id, err)
 		return
 	}
-	if pub := panelPublicID(r); pub != "" {
-		s.scopeSessionDetail(ctx, &det, pub)
+	if sc := panelScope(r); !sc.none() {
+		s.scopeSessionDetail(ctx, &det, sc)
 	}
 	// The state log's scope before the first byte: its count is the
 	// head's, and a failure here is still an error status.
@@ -256,8 +256,8 @@ func (s *Server) serveSessionExport(w http.ResponseWriter, r *http.Request, id s
 		read, stopped := 0, false
 	pages:
 		for read < timelineMarkCap && read < visible {
-			page, err := er.SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: id, PublicID: mb.pub, Offset: read,
-				Limit: min(obsdb.MaxSessionEventLimit, timelineMarkCap-read)})
+			page, err := er.SessionEvents(ctx, mb.query(obsdb.SessionEventQuery{SessionID: id, Offset: read,
+				Limit: min(obsdb.MaxSessionEventLimit, timelineMarkCap-read)}))
 			if err != nil {
 				holes = append(holes, readFailedHole("session events", err))
 				stopped = true

@@ -118,9 +118,35 @@ names another. The recipe, with worked examples and troubleshooting:
 [docs/mcp-recipe.md](../docs/mcp-recipe.md).
 
 **C · hosted** — the same handler behind `studio.Token`: the panel's
-scoped tokens are HMAC-signed `{public_id, scope, exp}` minted by your
-backend through `POST /api/panel-tokens`; every data route refuses
-anything outside the token's public id. A run the token may read can
+scoped tokens are HMAC-signed `{public_id, tags, scope, exp}` minted by
+your backend through `POST /api/panel-tokens`; every data route refuses
+anything outside the token's public id.
+
+A token can instead (or as well) be scoped to a **batch of runs** by
+their metadata (I4, capability `panel_token_tags`): `POST
+/api/panel-tokens {"tags": {"arena.batch": "20261014-1606"}, "ttl":
+"1h"}` — `public_id`, `tags`, or both; every pair non-empty — signs the
+tags into the token like the public id, and every read it makes is held
+to them the way a public id token's is held to its public id: the runs
+list, search, stats and traces carry the tags as a filter (traces:
+every span carries them), a single run without them is 403 (the rule
+another public id's run gets; an unknown id stays 404) with its steps,
+spans, logs, export and tree, a session lists only its tagged turns
+(`SessionQuery.Meta` scopes turns before the grouping), and the live
+stream and its grant deliver only tagged runs — the panel's
+`data-scope="tag.arena.batch=…"` lane included, across every public id
+of the batch. A request narrows (more tags, `flow=`, `agent=`,
+`public_id=`) but never widens: another value of a token's tag key is
+403. A child run is read by its own row: a Subagent child inherits its
+parent's metadata (`core.WithMetadata`) and is in the batch; a pool or
+thread child session's turn carries only the tags its app gave it, and
+is otherwise a counted `hidden` hole. A token with tags is read-only
+(`"playground": true` beside `tags` is a 400), and a tag-only token
+resolves no public id (`/api/public/{id}` is 403). Metadata is
+caller-written — unlike the public id, which the app hands out — so a
+tag scope is only as tight as the app's own tagging: minting stays the
+server token's, and a tag your app lets a user set is a tag that user
+can join. A run the token may read can
 have child runs that carry another public id, or none (a nested
 `Generate` or thread turn inside a tool handler, a pool child session,
 a child whose `Metadata` cleared `weft.public_id`): every route that
@@ -755,9 +781,12 @@ read as one). The panel then lists that page's runs —
 `/api/live?tag.<k>=<v>` — and the header reads `batch
 cli-20261012-115753 · 196 runs`: the first tag's key by its last dotted
 segment, the match's whole count; the rows say "run" and name their
-agent. Under a panel token a tag scope reads what the token already
-allows (its public id's runs); a tag scope is only as tight as the
-app's own tagging. The flow is caller-written metadata the same way:
+agent. Under a public id's panel token a tag scope reads what the token
+already allows (its public id's runs); under a tag-scoped panel token
+(setup C above: `"tags"` in the mint) it reads the whole batch across
+public ids, live lane included — and without a `data-scope` the
+token's own claims seed it (rung 4b). A tag scope is only as tight as
+the app's own tagging. The flow is caller-written metadata the same way:
 `scope.Header` stamps `weft.flow` from the scope your handler returns,
 else from the request's own `Weft-Scope` header — which the client
 controls, as it controls any tag — so a flow narrows a view, never
@@ -800,7 +829,7 @@ off by default here).
 | 2 | response headers: the `Weft-Scope` header of the page's own same-origin `fetch` responses (the scope header below) | by default only with the page and the endpoint on loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) and no token or a dev/server token, and only once Studio has answered; anywhere with `data-detect="headers"` (or `mount({detect: "headers"})`); never under a panel token (`weft_pt.`) unless asked | `data-scope` |
 | 3 | the DOM marker: `data-weft-scope="pub_…;session=…;flow=…;run=…"` on any element of the page — the framework helpers (`useWeftDevtools` for React and Vue, the Svelte `weftDevtools` action) set it on the element they are given | by default everywhere except a page off loopback under a read-scoped panel token (a playground-scoped panel token, the dev token, no token, or any token on loopback keep it on); anywhere with `data-detect="markers"` (or `"headers,markers"`, `mount({detect: "markers"})`) | `data-scope` |
 | 4 | the page URL — the zero-code rung: `?weft_scope=…` (read first), else `#weft_scope=…` — the same string form, URL-decoded (`#weft_scope=pub_x%3Bflow%3Df_1`, `?weft_scope=tag.arena.batch%3Db1`); a value naming neither a public id nor a tag, agent or flow is ignored | always, every setup and token, `data-detect="off"` included; below rung 1, above rungs 2 and 3; re-read on `hashchange` and `popstate` | `data-scope` |
-| 4b | a panel token's public id (UX-D-09): a `weft_pt.` token's `public_id` claim, read as a hint (Studio still enforces the token) — the one conversation it can read anyway | when 1–4 name nothing and the token is a panel token | `data-scope` |
+| 4b | a panel token's claims (UX-D-09, I4): a `weft_pt.` token's `public_id` claim and its `tags` (each a `tag.<k>=<v>`), read as a hint (Studio still enforces the token) — the conversation or the batch it can read anyway | when 1–4 name nothing and the token is a panel token | `data-scope` |
 | 5 | the fallback: no rung names a scope — the header reads "no conversation detected on this page · how to scope" and lists the newest runs, each with its agent, none selected and no summed cost | when 1–4 name nothing | any line under "how to scope": `add ?weft_scope=pub_… to this page's URL (no code)`, `data-scope="pub_…" on the panel's <script> tag (or <weft-devtools>)`, `scope("pub_…") from @weftgo/devtools`, `data-weft-scope="pub_…" on the chat's element`, `scope.Header(h, …) on the app's handler (Go, package weft/scope)` — and an "all rungs ⤢" link to this table; a batch of runs is named by its tags (above) |
 
 Rung 3 trusts the page's DOM: a `data-weft-scope` attribute anywhere
@@ -1151,8 +1180,8 @@ data-token (the dev token) or a panel token (POST /api/panel-tokens)
 itself signed in). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 287,837 B raw / 97,215 B gzip
-(94.9 KiB, the bundle of the ledger's row "U22-fix"; 9,281 B — 9.1 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 288,025 B raw / 97,275 B gzip
+(95.0 KiB, the bundle of the ledger's row "I4"; 9,221 B — 9.0 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

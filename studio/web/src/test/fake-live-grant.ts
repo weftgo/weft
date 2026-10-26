@@ -112,6 +112,7 @@ function streamOf(
 
 interface PanelClaims {
   public_id?: string
+  tags?: Record<string, string>
   scope?: string
   exp?: string
 }
@@ -198,8 +199,17 @@ export function answerLiveGrant(
         "forbidden",
         "a panel token does not read every run's stream"
       )
-    if (s.sel === "public_id" && s.value !== claims.public_id)
+    // A tag-only token (I4) is granted a public id's stream (its tags
+    // narrow it), never another value of one of its tag keys.
+    if (
+      s.sel === "public_id" &&
+      (claims.public_id || !claims.tags) &&
+      s.value !== claims.public_id
+    )
       return refuse(403, "forbidden", "outside the panel token's public id")
+    for (const [k, v] of Object.entries(claims.tags ?? {}))
+      if (q.has(`tag.${k}`) && q.get(`tag.${k}`) !== v)
+        return refuse(403, "forbidden", "outside the panel token's tags")
     // The token's expiry caps the grant, as the server's does.
     exp = Math.min(exp, tokExp)
   }

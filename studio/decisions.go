@@ -132,7 +132,7 @@ const deniedPrefix = "DENIED: "
 // runDecisions fills the run page's decided / resumes blocks.
 func (s *Server) runDecisions(r *http.Request, rec obsdb.RunRow, page *runPage) {
 	ctx := r.Context()
-	pub := panelPublicID(r)
+	pub := panelScope(r)
 	if rec.ResumedBy != "" && rec.Pending > 0 {
 		if det, err := s.db.Run(ctx, rec.ResumedBy); err != nil {
 			page.Decided = &decisionDoc{Run: rec.ResumedBy, Calls: []decidedCall{}, Error: "the resume: " + err.Error()}

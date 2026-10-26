@@ -428,14 +428,27 @@ export function readConfig(
   }
   scope ??= weftScope()
   const token = pick("token") ?? ""
-  // Rung 1b (UX-D-09): no scope named, a panel token's public id is the
-  // scope — the one conversation it can read anyway (a hint; Studio
-  // enforces the token).
+  // Rung 1b (UX-D-09, I4): no scope named, a panel token's claims are
+  // the scope — its public id, its tags (a batch): what it can read
+  // anyway (a hint; Studio enforces the token).
   // Below every detected rung: the element follows a detected scope
   // first (scopeNow), so it is not explicit.
   const scopeExplicit = !!serializeScope(scope)
-  const claim = tokenClaimsOf(token)?.public_id
-  if (!scopeExplicit && typeof claim == "string") scope = { publicId: claim }
+  const c = tokenClaimsOf(token)
+  if (!scopeExplicit && c) {
+    const tags = c.tags && typeof c.tags == "object" ? c.tags : {}
+    const claim = parseScope(
+      ";" +
+        Object.entries(tags)
+          .map(
+            ([k, v]) =>
+              `tag.${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`
+          )
+          .join(";")
+    )
+    claim.publicId = typeof c.public_id == "string" ? c.public_id : ""
+    if (serializeScope(claim)) scope = claim
+  }
   const detect = pick("detect")
   const mode = pick("mode") ?? ""
   const z = (pick("z-index") ?? "").trim()

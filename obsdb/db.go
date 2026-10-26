@@ -279,10 +279,16 @@ type TraceQuery struct {
 	// attributes carry it — run metadata rides every weft span verbatim
 	// (core.Metadata, core.WithMetadata: tag.<k>=<v> and flow= on
 	// /api/traces, U22). Empty: no filter.
-	Meta   map[string]string
-	Since  time.Time // Start at or after; zero = no bound
-	Until  time.Time // Start before; zero = no bound
-	Before time.Time // cursor on Start; zero = newest
+	Meta map[string]string
+	// ScopeMeta keeps the traces every span of which carries each pair
+	// — PublicID's rule for a tag-scoped panel token (I4), so a scoped
+	// list offers no trace its /api/traces/{id} read would refuse (a
+	// span without the pair, a non-weft span included, excludes it).
+	// Empty: no filter.
+	ScopeMeta map[string]string
+	Since     time.Time // Start at or after; zero = no bound
+	Until     time.Time // Start before; zero = no bound
+	Before    time.Time // cursor on Start; zero = newest
 	// BeforeID, with Before, makes the cursor the pair (Start, TraceID),
 	// as RunQuery.BeforeID: pass TracePage.NextBeforeID. A late earlier
 	// span can re-list a trace on a later page (TracePage).
@@ -666,11 +672,15 @@ const MaxGaps = 1000
 // (SessionRow's ParentSession: thread/pool child sessions, ADR 0022),
 // empty any: one read lists a whole level of a delegation tree.
 //
-// Meta keeps the sessions one of whose own turns carries every pair in
-// its metadata (RunQuery.Meta's subset match, U12.2 — the API's
-// tag.<k>=<v>: thread.WithRunMetadata's tags, core.Metadata's pairs).
-// It selects sessions, never turns: a listed session's turns, usage,
-// order, Total and cursor are all of its turns', tagged or not.
+// Meta scopes the runs a session is grouped over as PublicID does
+// (RunQuery.Meta's subset match, U12.2 — the API's tag.<k>=<v>:
+// thread.WithRunMetadata's tags, core.Metadata's pairs): a session is
+// listed when one of its own turns carries every pair, and its turns,
+// usage, first/last seen, agent, status, title, first prompt, turn
+// facts, the page's order, Total and the cursor are those turns' alone
+// (I4: a tag-scoped panel token's session lists its tagged turns, never
+// the rest). Compacted still reads the session's compaction markers,
+// which carry no metadata.
 //
 // IDs keeps the sessions whose id is one of them, empty any: one read
 // gives a known set of sessions their rows (Studio's timeline reads the

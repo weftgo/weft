@@ -72,8 +72,8 @@ func traceFixture() []obsdb.Span {
 // retried batch repeated; the runs a trace holds (a subagent child
 // beside its parent); a missing root is nil with the earliest span's
 // service; error from any span; the since/until/service/public-id
-// filters, the run metadata filter (Meta) and the (Before, BeforeID)
-// cursor.
+// filters, the run metadata filter (Meta), the tag scope (ScopeMeta:
+// every span carries each pair) and the (Before, BeforeID) cursor.
 func traces(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -151,6 +151,12 @@ func traces(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"a tag and a public id", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b1"}, PublicID: "pub_other"}, []string{trD}, 1},
 			{"a tag and since", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b1"}, Since: at(15 * s)}, []string{trD}, 1},
 			{"a tag's value is exact", obsdb.TraceQuery{Meta: map[string]string{"arena.batch": "b"}}, []string{}, 0},
+			// ScopeMeta (I4, a tag-scoped panel token): every span carries
+			// each pair — trD's one span does; trB's non-weft root does not.
+			{"a scope tag", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b1"}}, []string{trD}, 1},
+			{"a scope tag and a public id", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b1"}, PublicID: "pub_conf"}, []string{}, 0},
+			{"two scope pairs", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b1", "weft.flow": "f_checkout"}}, []string{trD}, 1},
+			{"a scope tag no span carries", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b2"}}, []string{}, 0},
 		} {
 			got, err := db.Traces(ctx(), c.q)
 			if err != nil {

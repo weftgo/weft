@@ -268,8 +268,15 @@ func (s *Server) sessionScopeFor(w http.ResponseWriter, r *http.Request, er obsd
 	det, err := s.db.Session(r.Context(), id)
 	switch {
 	case errors.Is(err, obsdb.ErrNotFound):
-		pub := panelPublicID(r)
-		page, perr := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, PublicID: pub, Limit: 1})
+		sc := panelScope(r)
+		if len(sc.Tags) > 0 {
+			// No stored turn carries the tags: a session of
+			// session-level records alone is no tag token's (its marks
+			// carry no metadata) — the 403 another scope's gets.
+			sessionReadError(w, r, id, err)
+			return obsdb.SessionDetail{}, false
+		}
+		page, perr := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, PublicID: sc.PublicID, Limit: 1})
 		if perr != nil {
 			dbError(w, r, "session events", id, perr)
 			return obsdb.SessionDetail{}, false
@@ -278,13 +285,13 @@ func (s *Server) sessionScopeFor(w http.ResponseWriter, r *http.Request, er obsd
 			sessionReadError(w, r, id, err)
 			return obsdb.SessionDetail{}, false
 		}
-		det = obsdb.SessionDetail{SessionRow: obsdb.SessionRow{ID: id, PublicID: pub}}
+		det = obsdb.SessionDetail{SessionRow: obsdb.SessionRow{ID: id, PublicID: sc.PublicID}}
 	case err != nil:
 		sessionReadError(w, r, id, err)
 		return obsdb.SessionDetail{}, false
 	}
-	if pub := panelPublicID(r); pub != "" && len(det.Runs) > 0 {
-		s.scopeSessionDetail(r.Context(), &det, pub)
+	if sc := panelScope(r); !sc.none() && len(det.Runs) > 0 {
+		s.scopeSessionDetail(r.Context(), &det, sc)
 	}
 	return det, true
 }
@@ -297,9 +304,11 @@ type markBuilder struct {
 	turns        map[string]int
 	actors       map[string]string // run id → its weft.approval.actor, else its resumer's
 	pub          string            // a panel token's public id, "" for any other identity
+	tagged       bool              // a panel token's tags (I4): the marks of its turns alone
+	turnIDs      []string          // under tagged, the scoped turns' ids — the runs whose marks it reads
 	runIDs       []string          // /entries?run=: scope, counts and holes over these runs' marks alone
 	readsContent bool
-	hidden       int // marks of another public id, left out (counted by the backend)
+	hidden       int // marks outside the scope (another public id, an untagged run's), left out (counted by the backend)
 	contentHid   int // marks read whose content the identity may not read
 	stripped     int // marks read that a content-off destination stripped
 }
@@ -310,12 +319,12 @@ type markBuilder struct {
 // backend, so a page's paging and both routes' totals agree. Under
 // runIDs (/entries?run=) every count is those runs' marks alone.
 func (mb *markBuilder) scope(r *http.Request, er obsdb.SessionEventReader) (visible, all int, err error) {
-	page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: mb.sessionID, PublicID: mb.pub, RunIDs: mb.runIDs, Limit: 1})
+	page, err := er.SessionEvents(r.Context(), mb.query(obsdb.SessionEventQuery{SessionID: mb.sessionID, Limit: 1}))
 	if err != nil {
 		return 0, 0, err
 	}
 	visible, all = page.Total, page.Total
-	if mb.pub != "" {
+	if mb.pub != "" || mb.tagged {
 		whole, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: mb.sessionID, RunIDs: mb.runIDs, Limit: 1})
 		if err != nil {
 			return 0, 0, err
@@ -326,8 +335,38 @@ func (mb *markBuilder) scope(r *http.Request, er obsdb.SessionEventReader) (visi
 	return visible, all, nil
 }
 
+// noRun is a run id no run has (a NUL leads it): the RunIDs of a tag
+// scope with no turn, so the read finds no mark rather than every one.
+const noRun = "\x00none"
+
+// query is q in the builder's scope: the token's public id, and the
+// runs whose marks it reads — /entries?run='s, and under a tag scope
+// only the scoped turns among them (none: noRun, never every run).
+func (mb *markBuilder) query(q obsdb.SessionEventQuery) obsdb.SessionEventQuery {
+	q.PublicID, q.RunIDs = mb.pub, mb.runIDs
+	if mb.tagged {
+		ids := mb.turnIDs
+		if len(mb.runIDs) > 0 {
+			ids = slices.DeleteFunc(slices.Clone(mb.runIDs), func(id string) bool { return !slices.Contains(mb.turnIDs, id) })
+		}
+		if len(ids) == 0 {
+			ids = []string{noRun}
+		}
+		q.RunIDs = ids
+	}
+	return q
+}
+
 func (s *Server) newMarkBuilder(r *http.Request, det obsdb.SessionDetail) *markBuilder {
-	mb := &markBuilder{sessionID: det.ID, turns: map[string]int{}, actors: map[string]string{}, pub: panelPublicID(r), readsContent: readsThreadContent(r)}
+	sc := panelScope(r)
+	mb := &markBuilder{sessionID: det.ID, turns: map[string]int{}, actors: map[string]string{}, pub: sc.PublicID, readsContent: readsThreadContent(r)}
+	if len(sc.Tags) > 0 {
+		// det's turns are the scope's already (sessionScopeFor).
+		mb.tagged = true
+		for _, rr := range det.Runs {
+			mb.turnIDs = append(mb.turnIDs, rr.ID)
+		}
+	}
 	// thread files approval.decision under the parked run, and the
 	// decider is its resume's actor: a run's own weft.approval.actor
 	// names who decided the run before it (a chained park: t4 resumes
@@ -348,9 +387,9 @@ func (s *Server) newMarkBuilder(r *http.Request, det obsdb.SessionDetail) *markB
 
 // mark is one event as a mark, ok false when the scope leaves it out.
 func (mb *markBuilder) mark(e obsdb.SessionEvent) (sessionEntry, bool) {
-	if mb.pub != "" && e.PublicID != mb.pub {
-		// A backend that ignored the PublicID filter: still never shown
-		// (scope's count already holds it).
+	if (mb.pub != "" && e.PublicID != mb.pub) || (mb.tagged && !slices.Contains(mb.turnIDs, e.RunID)) {
+		// A backend that ignored the PublicID or RunIDs filter: still
+		// never shown (scope's count already holds it).
 		return sessionEntry{}, false
 	}
 	kind := obsdb.SessionEventKind(e)
@@ -497,7 +536,10 @@ func (mb *markBuilder) holes(runs []obsdb.RunRow, all, truncatedAt int, page boo
 	}
 	if n := mb.hidden + mb.contentHid; n > 0 {
 		var why []string
-		if mb.hidden > 0 {
+		switch {
+		case mb.hidden > 0 && mb.tagged:
+			why = append(why, fmt.Sprintf("%d of %s marks lie outside your token's scope (another public id, a run without its tags, or no run)", mb.hidden, whose))
+		case mb.hidden > 0:
 			why = append(why, fmt.Sprintf("%d of %s marks carry another public id than your token's", mb.hidden, whose))
 		}
 		if mb.contentHid > 0 {
@@ -535,8 +577,8 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 	lanes := map[string]int{}
 	read, truncatedAt := 0, 0
 	for read < timelineMarkCap && read < visible {
-		page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: id, PublicID: mb.pub, Offset: read,
-			Limit: min(obsdb.MaxSessionEventLimit, timelineMarkCap-read)})
+		page, err := er.SessionEvents(r.Context(), mb.query(obsdb.SessionEventQuery{SessionID: id, Offset: read,
+			Limit: min(obsdb.MaxSessionEventLimit, timelineMarkCap-read)}))
 		if err != nil {
 			dbError(w, r, "session events", id, err)
 			return
@@ -595,7 +637,7 @@ func (s *Server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, id
 // token gets them hidden — the ids are its session's record, the
 // forked sessions' state is not.
 func (s *Server) lookUpForks(r *http.Request, doc *timelineDoc) {
-	pub := panelPublicID(r)
+	pub := !panelScope(r).none()
 	var ids []string
 	seen := map[string]bool{}
 	for _, m := range doc.Marks {
@@ -607,7 +649,7 @@ func (s *Server) lookUpForks(r *http.Request, doc *timelineDoc) {
 			continue
 		}
 		doc.Forks = append(doc.Forks, timelineFork{SessionID: id, Entry: m.Entry, RunID: m.RunID})
-		if pub == "" && !seen[id] && len(ids) < timelineForkCap {
+		if !pub && !seen[id] && len(ids) < timelineForkCap {
 			seen[id] = true
 			ids = append(ids, id)
 		}
@@ -631,7 +673,7 @@ func (s *Server) lookUpForks(r *http.Request, doc *timelineDoc) {
 	for i := range doc.Forks {
 		f := &doc.Forks[i]
 		switch {
-		case pub != "":
+		case pub:
 			f.Hidden = true
 		case !seen[f.SessionID] || failed:
 			// Past the cap, or the read failed: not looked up.
@@ -680,7 +722,7 @@ func (s *Server) serveSessionEntries(w http.ResponseWriter, r *http.Request, id 
 		dbError(w, r, "session events", id, err)
 		return
 	}
-	eq := obsdb.SessionEventQuery{SessionID: id, PublicID: mb.pub, RunIDs: mb.runIDs, Offset: offset, Limit: limit}
+	eq := mb.query(obsdb.SessionEventQuery{SessionID: id, Offset: offset, Limit: limit})
 	page, err := er.SessionEvents(r.Context(), eq)
 	if err != nil {
 		dbError(w, r, "session events", id, err)

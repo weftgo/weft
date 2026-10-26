@@ -3,6 +3,7 @@ package obsdb_test
 import (
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -114,7 +115,7 @@ func TestCutRunTree(t *testing.T) {
 	}
 	got := obsdb.CapTree(read[:2], false, q, capParents, rows)
 	if want := []obsdb.TreeRun{{ID: "root/0/a", ParentRunID: "root", PublicID: "pub", Status: obsdb.StatusSucceeded}}; got.Truncated ||
-		len(got.Spans) != 2 || !slices.Equal(got.Missing, want) || got.MissingCount != 1 {
+		len(got.Spans) != 2 || !reflect.DeepEqual(got.Missing, want) || got.MissingCount != 1 {
 		t.Errorf("CapTree(2) = truncated %v, %d spans, missing %+v (%d); want 2 spans, missing %+v", got.Truncated, len(got.Spans), got.Missing, got.MissingCount, want)
 	}
 

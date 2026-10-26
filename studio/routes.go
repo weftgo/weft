@@ -266,6 +266,11 @@ func (s *Server) registerGroups() {
 				mux.HandleFunc("POST /api/panel-tokens", s.servePanelTokens)
 			},
 		})
+		// Tag-scoped panel tokens (I4): POST /api/panel-tokens takes
+		// "tags", and every read route holds such a token to them (a
+		// batch of runs across public ids). With the mint: there is no
+		// token to scope without a server token.
+		s.addGroup(routeGroup{name: "panel_token_tags", capability: "panel_token_tags"})
 		// The setup C hand-off (plan G3): a playground-scoped panel
 		// token's page opens the hosted Studio on a 5-minute read token
 		// (handoff.go). Under the same condition: no panel tokens

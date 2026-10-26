@@ -177,7 +177,7 @@ func TestSessionListUsesTheSessionIndex(t *testing.T) {
 			where += ` AND public_id = ? AND public_id <> ''`
 			wargs = []any{pub}
 		}
-		q, args := sessionRowsSQL(0, pub, where, wargs, nil, nil, ` ORDER BY MAX(last_seen_ns) DESC, session_id DESC LIMIT ?`)
+		q, args := sessionRowsSQL(0, turnScope{pub: pub}, where, wargs, nil, nil, ` ORDER BY MAX(last_seen_ns) DESC, session_id DESC LIMIT ?`)
 		p := queryPlan(t, d, q, append(args, 50)...)
 		for _, alias := range []string{"r2", "r3", "r4", "r5"} {
 			if !strings.Contains(p, "SEARCH "+alias+" USING INDEX runs_session") {

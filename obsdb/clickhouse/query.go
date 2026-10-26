@@ -1042,7 +1042,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 // pins their indexes). A run's merged columns are read grouped by
 // RunId, in RunRow order, held to the retention cut (treeRowOrder).
 const (
-	treeRowColumns = "SELECT RunId, max(ParentRunID), max(PublicID), min(Started) AS started, " +
+	treeRowColumns = "SELECT RunId, max(ParentRunID), max(PublicID), max(Meta), min(Started) AS started, " +
 		"max(Failed), max(FinishedOK), max(RootEnded), max(LastSeen) FROM weft_runs WHERE "
 	// treeRowLimit bounds each row read: obsdb.TreeRowCap and one more.
 	treeRowLimit = " LIMIT ?"
@@ -1121,6 +1121,19 @@ func anys(ids []string) []any {
 	return out
 }
 
+// treeMeta decodes a tree row's Meta column as a run row's (MetaOf
+// over the stored attributes): TreeQuery.Meta's scope reads it.
+func treeMeta(stored string) (map[string]string, error) {
+	if stored == "" {
+		return nil, nil
+	}
+	var attrs map[string]any
+	if err := unmarshalAttrs([]byte(stored), &attrs); err != nil {
+		return nil, fmt.Errorf("clickhouse: tree run meta column: %w", err)
+	}
+	return obsdb.MetaOf(attrs), nil
+}
+
 // treeRunRows reads one of the tree's row statements: the runs, and
 // beside each its newest LastSeen (the cut's column).
 func (d *DB) treeRunRows(ctx context.Context, q string, args ...any) ([]obsdb.TreeRun, []time.Time, error) {
@@ -1136,7 +1149,11 @@ func (d *DB) treeRunRows(ctx context.Context, q string, args ...any) ([]obsdb.Tr
 		var r obsdb.TreeRun
 		var failed, finished, rootEnded bool
 		var seen time.Time
-		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &r.Started, &failed, &finished, &rootEnded, &seen); err != nil {
+		var meta string
+		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &meta, &r.Started, &failed, &finished, &rootEnded, &seen); err != nil {
+			return nil, nil, err
+		}
+		if r.Meta, err = treeMeta(meta); err != nil {
 			return nil, nil, err
 		}
 		r.Started = timeOf(r.Started)
@@ -1161,7 +1178,7 @@ func (d *DB) treeSpans(ctx context.Context, q obsdb.TreeQuery, parents map[strin
 	for _, id := range ids {
 		read[id] = true
 	}
-	useRule := q.PublicID == ""
+	useRule := !q.Scoped()
 	byRule := map[string]bool{}
 	if useRule {
 		byRule[q.RunID] = true
@@ -1364,6 +1381,9 @@ func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage,
 	if q.PublicID != "" {
 		conds = append(conds, "Foreign = 0")
 	}
+	if len(q.ScopeMeta) > 0 {
+		conds = append(conds, "ForeignMeta = 0")
+	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "StartNs >= ?")
 		args = append(args, q.Since.UnixNano())
@@ -1465,6 +1485,16 @@ func traceInner(q obsdb.TraceQuery) (string, []any) {
 		args = append(args, q.PublicID)
 		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE t.PublicId = ?)")
 		narrowArgs = append(narrowArgs, q.PublicID)
+	}
+	if len(q.ScopeMeta) > 0 {
+		// Every span carries each pair: the group's count of spans
+		// lacking one is 0 (Foreign's rule for the tags, ForeignMeta).
+		var lack []string
+		for _, k := range slices.Sorted(maps.Keys(q.ScopeMeta)) {
+			lack = append(lack, "NOT (mapContains(SpanAttributes, ?) AND SpanAttributes[?] = ?)")
+			args = append(args, k, k, q.ScopeMeta[k])
+		}
+		cols = append(cols, "countIf("+strings.Join(lack, " OR ")+") AS ForeignMeta")
 	}
 	if !q.Since.IsZero() {
 		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE t.Timestamp >= fromUnixTimestamp64Nano(toInt64(?)))")
@@ -1624,15 +1654,19 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	var narrows []string
 	var narrowArgs, condArgs []any
 	cond := ""
-	if q.PublicID != "" {
+	ts := turnScope{pub: q.PublicID, meta: q.Meta}
+	if ts.set() {
 		// The scope is on the runs, before the GROUP BY (the SQLite
-		// backend's rule, RunQuery.PublicID's): every aggregate, the
-		// order, Total and the cursor are the public id's runs alone.
-		// The narrow prunes the collapse by primary key, the cond keeps
-		// the collapsed rows whose public id is it.
-		narrows = append(narrows, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.PublicID = ?)")
-		cond += " AND PublicID = ?"
-		narrowArgs, condArgs = append(narrowArgs, q.PublicID), append(condArgs, q.PublicID)
+		// backend's rule, RunQuery.PublicID's and Meta's): every
+		// aggregate, the order, Total and the cursor are the scope's
+		// runs alone — a session some of whose turns carry the tags
+		// lists those turns (I4). The narrow prunes the collapse by
+		// primary key, the cond keeps the collapsed rows in scope.
+		n, na := ts.narrow()
+		c, ca := ts.cond()
+		narrows = append(narrows, n...)
+		cond += c
+		narrowArgs, condArgs = append(narrowArgs, na...), append(condArgs, ca...)
 	}
 	if len(q.Parents) > 0 {
 		// A delegated session's every turn carries its lineage (thread's
@@ -1658,46 +1692,6 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 			narrowArgs, condArgs = append(narrowArgs, id), append(condArgs, id)
 		}
 	}
-	if len(q.Meta) > 0 {
-		// The tag filter (U12.2) selects sessions, never turns: the
-		// sessions one of whose own turns carries every pair (RunQuery.Meta's
-		// subset match over the collapsed rows), every turn of each then
-		// grouped. The narrow reads those sessions' runs by
-		// idx_weft_session_id before the collapse; the cond holds the
-		// collapsed rows to them.
-		// The collapse reads only the runs one of whose rows carries
-		// every pair (the inner WHERE): the collapsed Meta is one row's
-		// (max), so that set holds every run the outer match keeps.
-		keys := slices.Sorted(maps.Keys(q.Meta))
-		var targs []any
-		inner, likeArgs := metaNarrow("t.Meta", q.Meta)
-		for _, a := range likeArgs {
-			targs = append(targs, a)
-		}
-		for _, k := range keys {
-			if inner != "" {
-				inner += " AND "
-			}
-			inner += "JSONHas(t.Meta, ?) AND JSONExtractString(t.Meta, ?) = ?"
-			targs = append(targs, k, k, q.Meta[k])
-		}
-		tagged := "SELECT SessionID FROM (SELECT RunId, max(SessionID) AS SessionID, max(Meta) AS Meta, max(PublicID) AS PublicID," +
-			" max(ParentRunID) AS ParentRunID, max(CallerRunID) AS CallerRunID, max(Turn) AS Turn, max(Playground) AS Playground," +
-			" max(LastSeen) AS LastSeen" +
-			" FROM weft_runs WHERE RunId IN (SELECT t.RunId FROM weft_runs AS t WHERE " + inner + ")" +
-			" GROUP BY RunId) WHERE SessionID != '' AND Playground = 0 AND " + ownTurnCH + cut.where()
-		if q.PublicID != "" {
-			tagged += " AND PublicID = ?"
-			targs = append(targs, q.PublicID)
-		}
-		for _, k := range keys {
-			tagged += " AND JSONHas(Meta, ?) AND JSONExtractString(Meta, ?) = ?"
-			targs = append(targs, k, k, q.Meta[k])
-		}
-		narrows = append(narrows, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID IN ("+tagged+"))")
-		cond += " AND SessionID IN (" + tagged + ")"
-		narrowArgs, condArgs = append(narrowArgs, targs...), append(condArgs, targs...)
-	}
 	narrow := ""
 	if len(narrows) > 0 {
 		narrow = " WHERE " + strings.Join(narrows, " AND ")
@@ -1705,7 +1699,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	runArgs = append(narrowArgs, condArgs...)
 	// Cut at the table's TTL (retention.go): Total and the page agree
 	// whether a merge has dropped an expired run yet or not.
-	runs := sessionRuns(narrow, cond, cut)
+	runs := sessionRuns(narrow, cond, cut, len(q.Meta) > 0)
 	hargs = append(hargs, runArgs...)
 	if q.Agent != "" {
 		having = append(having, "max(Agent) = ?")
@@ -1851,10 +1845,10 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		end := page.Sessions[len(page.Sessions)-1]
 		page.NextBefore, page.NextBeforeID = &end.LastSeen, end.ID
 	}
-	if err := d.fillSummarizerUsage(ctx, page.Sessions, q.PublicID, cut); err != nil {
+	if err := d.fillSummarizerUsage(ctx, page.Sessions, ts, cut); err != nil {
 		return obsdb.SessionPage{}, err
 	}
-	if err := d.fillTurnFacts(ctx, page.Sessions, q.PublicID, now, cut); err != nil {
+	if err := d.fillTurnFacts(ctx, page.Sessions, ts, now, cut); err != nil {
 		return obsdb.SessionPage{}, err
 	}
 	return page, nil
@@ -1868,13 +1862,13 @@ const failedTurnCH = "Failed = 1 AND CancelCause != ? AND ErrorType != ?"
 
 // fillTurnFacts sets each session row's turn facts
 // (obsdb.SessionTurnFacts) from its own turns — sessionRuns' scope,
-// pub's turns when set, the collapse narrowed by primary key through
+// ts's turns when set, the collapse narrowed by primary key through
 // idx_weft_session_id — in two narrow reads for the page: the counts in
 // SQL (countIf per session), and the newest obsdb.MaxOutcomes turns of
 // each (LIMIT n BY SessionID) with only the columns an outcome reads,
 // statuses on the page's clock (now), then their resumers
 // (fillResumedByOf). The SQLite backend's rule.
-func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub string, now time.Time, cut runsCut) error {
+func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, ts turnScope, now time.Time, cut runsCut) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1885,11 +1879,10 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 	in := " IN (" + placeholders(len(ids)) + ")"
 	args := append(append([]any{}, ids...), ids...)
 	cond := " AND SessionID" + in
-	if pub != "" {
-		cond += " AND PublicID = ?"
-		args = append(args, pub)
-	}
-	runs := sessionRuns(" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID"+in+")", cond, cut)
+	c, ca := ts.cond()
+	cond += c
+	args = append(args, ca...)
+	runs := sessionRuns(" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID"+in+")", cond, cut, len(ts.meta) > 0)
 	type counts struct {
 		failed, ended, cancelled, resumes uint64
 		fork                              string
@@ -1970,11 +1963,11 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 // fillSummarizerUsage sets each session row's SummarizerUsage: the
 // summed usage of the summarizer chat spans (weft.chat.role summarizer)
 // under the session's runs — RunId narrowed through weft_runs by
-// session (and pub's runs when set, the rows' own scope) and held to
+// session (and ts's runs when set, the rows' own scope) and held to
 // the runs the retention cut keeps (runsCut, over each run's newest
 // row), the spans read once each (spanDedup's key) — the SQLite
 // backend's rule. One read for the page.
-func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, pub string, cut runsCut) error {
+func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, ts turnScope, cut runsCut) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1983,9 +1976,16 @@ func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, p
 		args = append(args, r.ID)
 	}
 	scope := ""
-	if pub != "" {
+	if ts.pub != "" {
 		scope = " AND r.PublicID = ? AND r.PublicID != ''"
-		args = append(args, pub)
+		args = append(args, ts.pub)
+	}
+	for _, k := range slices.Sorted(maps.Keys(ts.meta)) {
+		// A raw row carrying the pair: a run's rows share its metadata
+		// (written once at its start), so the row read keeps the run the
+		// collapsed rule keeps.
+		scope += " AND JSONHas(r.Meta, ?) AND JSONExtractString(r.Meta, ?) = ?"
+		args = append(args, k, k, ts.meta[k])
 	}
 	tok := func(k string) string { return "sum(toInt64OrZero(SpanAttributes['" + k + "']))" }
 	rs, err := d.conn.Query(ctx, `SELECT SpanAttributes['weft.session.id'] AS sid,
@@ -2096,6 +2096,53 @@ func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firs
 	return nil
 }
 
+// turnScope is the turns a session row is grouped over beyond the own
+// turns: SessionQuery.PublicID's and Meta's, on the runs before the
+// GROUP BY (the SQLite backend's turnScope).
+type turnScope struct {
+	pub  string
+	meta map[string]string
+}
+
+func (t turnScope) set() bool { return t.pub != "" || len(t.meta) > 0 }
+
+// narrow is the scope's prune of the collapse by primary key: the runs
+// one of whose rows carries the public id, and the runs one of whose
+// rows carries every pair's JSON text (metaNarrow, a superset the cond
+// decides) — each a RunId IN over weft_runs — and their arguments.
+func (t turnScope) narrow() ([]string, []any) {
+	var out []string
+	var args []any
+	if t.pub != "" {
+		out = append(out, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.PublicID = ?)")
+		args = append(args, t.pub)
+	}
+	if like, largs := metaNarrow("t.Meta", t.meta); like != "" {
+		out = append(out, "RunId IN (SELECT t.RunId FROM weft_runs AS t WHERE "+like+")")
+		for _, a := range largs {
+			args = append(args, a)
+		}
+	}
+	return out, args
+}
+
+// cond is the scope's condition on sessionRuns' collapsed rows (its
+// RunMeta read when meta is set), led by " AND ", and its arguments:
+// RunQuery.Meta's exact subset match.
+func (t turnScope) cond() (string, []any) {
+	c := ""
+	var args []any
+	if t.pub != "" {
+		c += " AND PublicID = ?"
+		args = append(args, t.pub)
+	}
+	for _, k := range slices.Sorted(maps.Keys(t.meta)) {
+		c += " AND JSONHas(RunMeta, ?) AND JSONExtractString(RunMeta, ?) = ?"
+		args = append(args, k, k, t.meta[k])
+	}
+	return c, args
+}
+
 // sessionRuns builds the per-run subquery both Sessions and Session
 // group over: each run collapsed to its aggregates first, then scoped
 // to the non-playground own turns of a session (D3, U14; ownTurnCH). The scope
@@ -2107,8 +2154,15 @@ func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firs
 // scan to the one session's runs), cond onto the collapsed rows, and
 // cut — the retention cut (DB.runsCut), a parameter so no session read
 // can leave it out — after it.
-func sessionRuns(narrow, cond string, cut runsCut) string {
-	return `(SELECT * FROM (SELECT RunId, max(SessionID) AS SessionID, max(PublicID) AS PublicID,
+func sessionRuns(narrow, cond string, cut runsCut, meta bool) string {
+	runMeta := ""
+	if meta {
+		// The run's metadata for turnScope's cond, under its own alias:
+		// Meta itself would shadow the column the Title and fork
+		// aggregates read (ClickHouse aliases are query-global).
+		runMeta = "max(Meta) AS RunMeta, "
+	}
+	return `(SELECT * FROM (SELECT RunId, ` + runMeta + `max(SessionID) AS SessionID, max(PublicID) AS PublicID,
 				max(Agent) AS Agent, max(ParentRunID) AS ParentRunID, max(CallerRunID) AS CallerRunID,
 				max(Playground) AS Playground,
 				max(Turn) AS Turn, min(Started) AS Started, max(LastSeen) AS LastSeen,
@@ -2148,7 +2202,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	rs, err := d.conn.Query(ctx, `SELECT SessionID, `+sessionAggs+`
 		FROM `+sessionRuns(
 		" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID = ?)",
-		" AND SessionID = ?", cut)+` GROUP BY SessionID`, id, id)
+		" AND SessionID = ?", cut, false)+` GROUP BY SessionID`, id, id)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
 	}
@@ -2186,7 +2240,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	now := time.Now()
 	row.Status = obsdb.DeriveStatus(failed, ok, newestSeen, now)
 	one := []obsdb.SessionRow{row}
-	if err := d.fillSummarizerUsage(ctx, one, "", cut); err != nil {
+	if err := d.fillSummarizerUsage(ctx, one, turnScope{}, cut); err != nil {
 		return obsdb.SessionDetail{}, err
 	}
 	row = one[0]

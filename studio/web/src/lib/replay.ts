@@ -415,12 +415,12 @@ export function tokenScopeOf(token: string): "" | "read" | "playground" {
   return !c ? "" : c.scope === "playground" ? "playground" : "read"
 }
 
-/** tokenClaimsOf reads a panel token's claims (scope, public_id) — a
- * hint, never a check; null for any other bearer, {} for a panel token
- * that does not parse. */
+/** tokenClaimsOf reads a panel token's claims (scope, public_id, tags)
+ * — a hint, never a check; null for any other bearer, {} for a panel
+ * token that does not parse. */
 export function tokenClaimsOf(
   token: string
-): { scope?: unknown; public_id?: unknown } | null {
+): { scope?: unknown; public_id?: unknown; tags?: unknown } | null {
   if (!token.startsWith("weft_pt.")) return null
   try {
     const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")

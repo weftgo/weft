@@ -21,6 +21,7 @@ import {
   text,
 } from "./testkit"
 import type { Route } from "./testkit"
+import { grantLedger } from "../test/fake-live-grant"
 
 const REMOTE = "https://studio.example/studio/"
 
@@ -362,5 +363,82 @@ describe("U22-fix", () => {
       "add ?weft_scope=pub_… to this page's URL (no code)"
     )
     expect(text(el, ".weft-api-note")).toBe("copied")
+  })
+})
+
+describe("a tag-scoped panel token (I4)", () => {
+  const BATCH = "cli-20261012-115753"
+  /** A read panel token minted with {"tags": {"arena.batch": BATCH}}
+   * and no public id (POST /api/panel-tokens, server token). */
+  const TAG_TOKEN = `weft_pt.${btoa(
+    JSON.stringify({
+      tags: { "arena.batch": BATCH },
+      scope: "read",
+      exp: new Date(Date.now() + 3600_000).toISOString(),
+    })
+  ).replace(/=+$/, "")}.sig`
+
+  async function expectTheBatch(
+    el: WeftDevtools,
+    studio: ReturnType<typeof fakeStudio>
+  ) {
+    expect(text(el, ".weft-title")).toBe(`batch ${BATCH}`)
+    // The panel's one read: the batch by its tag, under the token.
+    expect(studio.gets(`runs?tag.arena.batch=${BATCH}&limit=50`)).toHaveLength(
+      1
+    )
+    expect(studio.gets("sessions")).toEqual([])
+    // Rows of every public id of the batch (one of none at all).
+    expect(
+      all(el, "[data-weft-run]").map((r) => r.getAttribute("data-weft-run"))
+    ).toEqual(["r_2", "r_1"])
+    // The live lane: granted to the tag token on the batch's stream.
+    expect(
+      grantLedger.some(
+        (g) =>
+          g.bearer === TAG_TOKEN &&
+          g.stream.includes(`"tag.arena.batch","${BATCH}"`)
+      )
+    ).toBe(true)
+    const lane = FakeEventSource.last(`tag.arena.batch=${BATCH}`)
+    expect(lane).toBeTruthy()
+    expect(lane!.readyState).not.toBe(2)
+    // A run of the batch under yet another public id arrives live and
+    // is listed (Studio's filter let it through: it carries the tag).
+    lane!.opened()
+    lane!.emit("run", {
+      run: runRow({
+        id: "r_3",
+        agent: "director",
+        public_id: "arena:cli:rw.other",
+        started: "2026-10-01T09:06:00Z",
+      }),
+    })
+    await settle()
+    expect(
+      all(el, "[data-weft-run]").map((r) => r.getAttribute("data-weft-run"))
+    ).toContain("r_3")
+  }
+
+  it('data-scope="tag.arena.batch=<id>" with a tag token lists exactly that batch, live lane included', async () => {
+    const studio = fakeStudio(batchRoutes())
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": `tag.arena.batch=${BATCH}`,
+      "data-token": TAG_TOKEN,
+      "data-open": "true",
+    })
+    await expectTheBatch(el, studio)
+  })
+
+  it("a tag token alone seeds the scope from its claims (rung 4b): the same batch", async () => {
+    const studio = fakeStudio(batchRoutes())
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-token": TAG_TOKEN,
+      "data-open": "true",
+    })
+    expect(text(el, ".weft-head")).not.toContain("how to scope")
+    await expectTheBatch(el, studio)
   })
 })

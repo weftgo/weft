@@ -103,9 +103,9 @@ func rootRunOf(ids []string) string {
 // traceRuns reads a trace row's root run and failed count: the root by
 // its id (a trace of more than a page of runs still names it), the
 // failures by a failed-only read of the root's id prefix (its core
-// children with it), each scoped to the list's public id. Past one
+// children with it), each in the list's scope (public id, tags). Past one
 // page of failures the count is a floor (FailedRunsCapped).
-func (s *Server) traceRuns(ctx context.Context, row *traceRow, publicID string) error {
+func (s *Server) traceRuns(ctx context.Context, row *traceRow, sc readScope) error {
 	root := rootRunOf(row.RunIDs)
 	if root == "" {
 		return nil
@@ -115,10 +115,10 @@ func (s *Server) traceRuns(ctx context.Context, row *traceRow, publicID string) 
 	case errors.Is(err, obsdb.ErrNotFound):
 	case err != nil:
 		return err
-	case publicID == "" || det.PublicID == publicID:
+	case sc.admits(det.RunRow):
 		row.RootRun = &traceRun{ID: det.ID, Agent: det.Agent, PromptPreview: det.PromptPreview, Status: string(det.Status)}
 	}
-	page, err := s.db.Runs(ctx, obsdb.RunQuery{IDPrefix: root, ParentRunID: "*", PublicID: publicID,
+	page, err := s.db.Runs(ctx, obsdb.RunQuery{IDPrefix: root, ParentRunID: "*", PublicID: sc.PublicID, Meta: sc.Tags,
 		Status: obsdb.StatusFailed, Limit: traceFailedCap})
 	if err != nil {
 		return err
@@ -159,12 +159,17 @@ var rootMissing = badgeFields{
 func (s *Server) serveTraces(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.TraceQuery{Service: q.Get("service"), PublicID: q.Get("public_id"), Meta: tagParams(q)}
-	// The scope first: a foreign public id's 403 wins over any 400.
-	scope := obsdb.RunQuery{PublicID: query.PublicID}
+	// The scope first: a foreign public id's 403 wins over any 400 —
+	// another value of a token's tag key's too (scopeRunsQuery).
+	scope := obsdb.RunQuery{PublicID: query.PublicID, Meta: query.Meta}
 	if !scopeRunsQuery(w, r, &scope, q.Get("public_id")) {
 		return
 	}
 	query.PublicID = scope.PublicID
+	// A tag token's tags hold on every span (TraceQuery.ScopeMeta, I4):
+	// the list offers no trace its /api/traces/{id} read refuses.
+	tokenScope := panelScope(r)
+	query.ScopeMeta = tokenScope.Tags
 	for _, p := range []struct {
 		name string
 		dst  *time.Time
@@ -208,7 +213,7 @@ func (s *Server) serveTraces(w http.ResponseWriter, r *http.Request) {
 		} else {
 			row.badgeFields = rootMissing
 		}
-		if err := s.traceRuns(r.Context(), &row, query.PublicID); err != nil {
+		if err := s.traceRuns(r.Context(), &row, readScope{PublicID: query.PublicID, Tags: tokenScope.Tags}); err != nil {
 			dbError(w, r, "traces", "", err)
 			return
 		}

@@ -21,8 +21,8 @@ import (
 // id its key). SessionEvents reads them in record-time order with the
 // runless one among them, pages by offset, dedups a retried batch and
 // answers an unknown session empty; the tag filter (SessionQuery.Meta)
-// selects the session by a tag one of its turns carries and lists every
-// turn of it; DeleteRun removes a run's events, DeleteSession every
+// selects the session by a tag one of its turns carries and lists those
+// turns alone (I4); DeleteRun removes a run's events, DeleteSession every
 // one, the runless one included.
 func sessionEvents(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
@@ -187,14 +187,27 @@ func sessionEvents(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("Sessions(Compacted, another public id) = %+v, %v; want none", c.Sessions, err)
 		}
 
-		// The tag filter selects sessions, never turns: t6 carries no tag,
-		// the session still lists its six turns.
+		// The tag filter scopes turns as the public id does (I4): t6
+		// carries no tag, so the session lists its five tagged turns —
+		// their count, their last seen (t5's, not t6's) — never t6.
 		tagged, err := db.Sessions(ctx(), obsdb.SessionQuery{Meta: map[string]string{"arena.batch": "b_u122"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(tagged.Sessions) != 1 || tagged.Sessions[0].ID != sid || tagged.Sessions[0].Turns != 6 || tagged.Total != 1 {
-			t.Errorf("Sessions(tag arena.batch=b_u122) = %+v (total %d), want s_acme with its 6 turns", tagged.Sessions, tagged.Total)
+		whole, err := db.Sessions(ctx(), obsdb.SessionQuery{IDs: []string{sid}})
+		if err != nil || len(whole.Sessions) != 1 || whole.Sessions[0].Turns != 6 {
+			t.Fatalf("Sessions(IDs s_acme) = %+v, %v; want its 6 turns", whole.Sessions, err)
+		}
+		if len(tagged.Sessions) != 1 || tagged.Sessions[0].ID != sid || tagged.Sessions[0].Turns != 5 || tagged.Total != 1 ||
+			!tagged.Sessions[0].LastSeen.Before(whole.Sessions[0].LastSeen) {
+			t.Errorf("Sessions(tag arena.batch=b_u122) = %+v (total %d), want s_acme with its 5 tagged turns, last seen before the untagged t6 (%v)",
+				tagged.Sessions, tagged.Total, whole.Sessions[0].LastSeen)
+		}
+		// Every per-session read keeps the scope: the turn facts and the
+		// status filter read the tagged turns alone (t5, the newest
+		// tagged, succeeded like t6, so the scoped page still keeps it).
+		if p, err := db.Sessions(ctx(), obsdb.SessionQuery{Meta: map[string]string{"arena.batch": "b_u122"}, Status: obsdb.StatusSucceeded}); err != nil || len(p.Sessions) != 1 {
+			t.Errorf("Sessions(tag, status succeeded) = %+v, %v; want s_acme", p.Sessions, err)
 		}
 		for _, q := range []obsdb.SessionQuery{
 			{Meta: map[string]string{"arena.batch": "b_other"}},

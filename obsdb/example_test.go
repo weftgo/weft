@@ -471,3 +471,41 @@ func ExampleErrorClass() {
 	// weft: run failed at step N: weft: run exceeded its usage limit (input N/N, output N/N)
 	// tool "lookup_42" retried N times, past MaxModelRetries(N)
 }
+
+// SessionQuery.Meta scopes the turns a session is grouped over (I4): a
+// session whose turns carry a tag only partly — a batch that started
+// mid-conversation — lists its tagged turns alone, as PublicID scopes
+// a session to one public id's turns.
+func ExampleSessionQuery_meta() {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	at := time.Now().UTC().Add(-time.Minute)
+	var recs []obsdb.Record
+	for turn, batch := range []string{"", "b1", "b1"} { // turn 1 untagged
+		id := fmt.Sprintf("s_mix-t%d", turn+1)
+		attrs := map[string]any{"weft.record": "event", "weft.event.type": "run_start", "weft.event.pos": int64(0),
+			"weft.run.id": id, "weft.session.id": "s_mix", "weft.turn": int64(turn + 1)}
+		if batch != "" {
+			attrs["arena.batch"] = batch
+		}
+		recs = append(recs, obsdb.Record{Time: at.Add(time.Duration(turn) * time.Second), EventName: "weft.event",
+			Body: `{"type":"run_start","id":"` + id + `"}`, Attrs: attrs, Service: "ex", Severity: 9})
+	}
+	if err := db.Write(ctx, obsdb.Batch{Records: recs}); err != nil {
+		log.Fatal(err)
+	}
+	for _, q := range []obsdb.SessionQuery{{}, {Meta: map[string]string{"arena.batch": "b1"}}} {
+		page, err := db.Sessions(ctx, q)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(page.Sessions[0].ID, page.Sessions[0].Turns)
+	}
+	// Output:
+	// s_mix 3
+	// s_mix 2
+}

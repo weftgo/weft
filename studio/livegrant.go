@@ -60,7 +60,7 @@ const (
 	liveGrantDomain = "weft-live-grant/1"
 
 	grantServer = "server" // the server token
-	grantPanel  = "panel"  // a panel token: public_id and scope
+	grantPanel  = "panel"  // a panel token: public_id, tags and scope
 	grantOpen   = "open"   // setup A: no Token configured
 )
 
@@ -68,9 +68,10 @@ const (
 // when. The stream it opens (selector and kinds) is not in the payload
 // — the request names it — but the MAC covers it (liveGrantMAC).
 type liveGrantClaims struct {
-	ID       string `json:"id"` // grantServer | grantPanel | grantOpen
-	PublicID string `json:"public_id,omitempty"`
-	Scope    string `json:"scope,omitempty"`
+	ID       string            `json:"id"` // grantServer | grantPanel | grantOpen
+	PublicID string            `json:"public_id,omitempty"`
+	Tags     map[string]string `json:"tags,omitempty"` // a panel token's tags (I4)
+	Scope    string            `json:"scope,omitempty"`
 	// TokenExp is a panel token's own expiry: the grant bounds opening
 	// the stream (Exp), the token bounds the stream itself (serveLive
 	// ends it at TokenExp).
@@ -191,7 +192,7 @@ func parseLiveGrant(key []byte, sig string, stream []byte, now time.Time) (liveG
 	switch claims.ID {
 	case grantServer, grantOpen:
 	case grantPanel:
-		if claims.PublicID == "" || (claims.Scope != scopeRead && claims.Scope != scopePlayground) ||
+		if (claims.PublicID == "" && len(claims.Tags) == 0) || (claims.Scope != scopeRead && claims.Scope != scopePlayground) ||
 			!claims.TokenExp.After(now) {
 			return claims, errBadGrant
 		}
@@ -209,7 +210,7 @@ func (c liveGrantClaims) identity() identity {
 	case grantServer:
 		return identity{server: true}
 	case grantPanel:
-		return identity{panel: &panelClaims{PublicID: c.PublicID, Scope: c.Scope, Exp: c.TokenExp}}
+		return identity{panel: &panelClaims{PublicID: c.PublicID, Tags: c.Tags, Scope: c.Scope, Exp: c.TokenExp}}
 	}
 	return identity{}
 }
@@ -269,7 +270,9 @@ func badGrant(w http.ResponseWriter, r *http.Request) {
 // "event,run"}) or the query string — one or the other. The caller's
 // identity is the bearer's (or setup A's open API), and the scope
 // rules are /api/live's own, checked now: a panel token is granted
-// only a stream inside its public id, never an agent or all selector.
+// only a stream inside its public id (a tag token: a stream its tags
+// then filter, never one naming another value of a token key), never
+// an agent or all selector.
 func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 	q := map[string][]string(r.URL.Query())
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
@@ -336,7 +339,7 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, r, err.Error())
 		return
 	}
-	if !s.scopeLiveFiltered(w, r, resolveLive(r, sel), sel == (obsdb.Selector{})) {
+	if !s.scopeLiveFiltered(w, r, resolveLive(r, sel), sel == (obsdb.Selector{}), liveMeta(q)) {
 		return
 	}
 	id := idFrom(r)
@@ -346,7 +349,7 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 	case id.server:
 		claims.ID = grantServer
 	case id.panel != nil:
-		claims = liveGrantClaims{ID: grantPanel, PublicID: id.panel.PublicID, Scope: id.panel.Scope, TokenExp: id.panel.Exp.UTC()}
+		claims = liveGrantClaims{ID: grantPanel, PublicID: id.panel.PublicID, Tags: id.panel.Tags, Scope: id.panel.Scope, TokenExp: id.panel.Exp.UTC()}
 		if id.panel.Exp.Before(exp) {
 			exp = id.panel.Exp.UTC() // never outlives the token it came from
 		}

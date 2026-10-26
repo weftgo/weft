@@ -438,12 +438,13 @@ func TestSessionTimelineScope(t *testing.T) {
 }
 
 // TestSessionsTagFilter: /api/sessions?tag.<k>=<v> (D6) lists the
-// sessions one of whose own turns carries the pair, every turn of each.
+// sessions one of whose own turns carries the pair, those turns alone
+// (I4: the tags scope turns as a public id does — t6 carries none).
 func TestSessionsTagFilter(t *testing.T) {
 	h := Handler(DB(timelineDB(t)))
 	_, _, body := get(t, h, "/studio/api/sessions?tag.arena.batch=b_u122")
-	if !strings.Contains(body, `"total":1`) || !strings.Contains(body, `"id":"s_acme"`) || !strings.Contains(body, `"turns":6`) {
-		t.Errorf("sessions?tag.arena.batch=b_u122 = %s, want s_acme alone with its 6 turns", body)
+	if !strings.Contains(body, `"total":1`) || !strings.Contains(body, `"id":"s_acme"`) || !strings.Contains(body, `"turns":5`) {
+		t.Errorf("sessions?tag.arena.batch=b_u122 = %s, want s_acme alone with its 5 tagged turns", body)
 	}
 	_, _, body = get(t, h, "/studio/api/sessions?tag.arena.batch=nope")
 	if !strings.Contains(body, `"total":0`) {

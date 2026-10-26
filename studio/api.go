@@ -1087,7 +1087,7 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	// The marks only on a page the request itself narrowed: a panel
 	// token's scope sets PublicID on every page (scopeRunsQuery).
 	if q.Get("public_id") != "" || q.Get("session") != "" {
-		out.TurnMarksCapped = s.turnMarks(r.Context(), out.Runs, panelPublicID(r))
+		out.TurnMarksCapped = s.turnMarks(r.Context(), out.Runs, panelScope(r))
 	}
 	// The cursor is the database's own: it knows whether the page was
 	// cut at its limit. Counting rows here cannot — a page may exceed
@@ -1124,13 +1124,13 @@ var turnMarkKinds = []string{obsdb.RecordCompaction, "interrupt"}
 // turnMarksSessions), its compaction markers and interrupt records
 // under the page's turns — one SessionEvents read with those kinds,
 // paged by offset while Total says more — and the sessions it
-// delegated, paged by cursor. pub, a panel token's public id, scopes
-// every read. What it could not read is the returned hole (nil when
+// delegated, paged by cursor. sc, a panel token's scope, scopes
+// every read (the marks by the page's own turns, which it scoped). What it could not read is the returned hole (nil when
 // none): a turn left unmarked is said, never a chip drawn wrong — past
 // a bound, or when a read fails (its turns' marks absent and counted in
 // the hole, the failure logged at Debug), on its first page or a later
 // one.
-func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) *treeHole {
+func (s *Server) turnMarks(ctx context.Context, rows []runRow, sc readScope) *treeHole {
 	bySession := map[string][]int{}
 	var order []string
 	skipped := 0
@@ -1165,7 +1165,7 @@ func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) *tree
 			}
 			read, total, failed := 0, 0, false
 			for range turnMarksPages {
-				page, err := er.SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: sid, PublicID: pub, RunIDs: ids,
+				page, err := er.SessionEvents(ctx, obsdb.SessionEventQuery{SessionID: sid, PublicID: sc.PublicID, RunIDs: ids,
 					Kinds: turnMarkKinds, Offset: read, Limit: obsdb.MaxSessionEventLimit})
 				if err != nil {
 					slog.DebugContext(ctx, "studio: a page's turn marks could not be read", "session", sid, "err", err)
@@ -1188,7 +1188,7 @@ func (s *Server) turnMarks(ctx context.Context, rows []runRow, pub string) *tree
 			}
 		}
 	}
-	q := obsdb.SessionQuery{Parents: order, PublicID: pub, Limit: 500}
+	q := obsdb.SessionQuery{Parents: order, PublicID: sc.PublicID, Meta: sc.Tags, Limit: 500}
 	for p := 0; ; p++ {
 		if p == turnMarksPages {
 			// The delegated counts are floors: every listed turn's.
@@ -1413,7 +1413,7 @@ func (s *Server) runSummarizer(r *http.Request, rr obsdb.RunRow) *summarizerCost
 	if !ok || rr.SessionID == "" {
 		return nil
 	}
-	pub := panelPublicID(r)
+	pub := panelScope(r).PublicID // the run's own marks: RunIDs is the tag scope's (the run is in it)
 	page, err := er.SessionEvents(r.Context(), obsdb.SessionEventQuery{SessionID: rr.SessionID, PublicID: pub,
 		RunIDs: []string{rr.ID}, Limit: obsdb.MaxSessionEventLimit})
 	if err != nil {
@@ -1447,11 +1447,11 @@ func (s *Server) runSummarizer(r *http.Request, rr obsdb.RunRow) *summarizerCost
 // before they are priced: one children read per tree level, not one
 // per row.
 func (s *Server) callerLinked(ctx context.Context, c *coster, id string, out *runPage) {
-	pub := scopeOf(ctx)
-	q := obsdb.RunQuery{CallerRunID: id, ParentRunID: "*", PublicID: pub, Oldest: true, Limit: callerLinkedCap}
+	sc := scopeOf(ctx)
+	q := obsdb.RunQuery{CallerRunID: id, ParentRunID: "*", PublicID: sc.PublicID, Meta: sc.Tags, Oldest: true, Limit: callerLinkedCap}
 	page, err := s.db.Runs(ctx, q)
-	if err == nil && pub != "" {
-		q.PublicID, q.Limit = "", 1
+	if err == nil && !sc.none() {
+		q.PublicID, q.Meta, q.Limit = "", nil, 1
 		var all obsdb.RunPage
 		if all, err = s.db.Runs(ctx, q); err == nil {
 			out.CallerLinkedHidden = max(all.Total-page.Total, 0)
@@ -1470,7 +1470,7 @@ func (s *Server) callerLinked(ctx context.Context, c *coster, id string, out *ru
 	out.CallerLinkedMore = page.Total > len(recs)
 	c.primeTrees(recs)
 	for _, rec := range recs {
-		if !inScope(pub, rec) { // the query's scope already; kept as the wall
+		if !inScope(sc, rec) { // the query's scope already; kept as the wall
 			out.CallerLinkedHidden++
 			continue
 		}
@@ -1938,10 +1938,8 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 		writeJSON(w, r, http.StatusOK, doc)
 		return
 	}
-	q := obsdb.TreeQuery{RunID: id}
-	if p := idFrom(r).panel; p != nil {
-		q.PublicID = p.PublicID
-	}
+	sc := panelScope(r)
+	q := obsdb.TreeQuery{RunID: id, PublicID: sc.PublicID, Meta: sc.Tags}
 	rt, err := tr.RunTreeSpans(r.Context(), q)
 	if err != nil {
 		dbError(w, r, "span tree of run", id, err)
@@ -2063,19 +2061,16 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 // filters, awaiting / failed / compacted / status / lineage / since
 // (obsdb.SessionQuery's turn-state filters, U16), q (obsdb.SessionQuery.Q: every term in the title, the first
 // turn's prompt, the id, the public id or the agent), tag.<k>=<v>
-// (obsdb.SessionQuery.Meta: the sessions one of whose own turns carries
-// every pair — thread.WithRunMetadata's tags; U12.2, D6), before (RFC
+// (obsdb.SessionQuery.Meta: the turns carrying every pair, grouped —
+// thread.WithRunMetadata's tags; U12.2, D6, I4), before (RFC
 // 3339, on last-seen) with before_id (the cursor's session id) and
 // limit.
 func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.SessionQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id"), Q: strings.TrimSpace(q.Get("q")), Meta: tagParams(q)}
-	if id := idFrom(r); id.panel != nil {
-		if asked := q.Get("public_id"); asked != "" && asked != id.panel.PublicID {
-			forbidden(w, r)
-			return
-		}
-		query.PublicID = id.panel.PublicID
+	var ok bool
+	if query.PublicID, query.Meta, ok = scopeQuery(w, r, query.PublicID, query.Meta, q.Get("public_id")); !ok {
+		return
 	}
 	if v := q.Get("before"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
@@ -2144,9 +2139,9 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	// token's ?public_id= — so a row is one scope throughout: turns,
 	// usage and cost.
 	out := sessionsPage{Total: page.Total, Sessions: make([]sessionRow, 0, len(page.Sessions))}
-	pub := query.PublicID
+	scope := readScope{PublicID: query.PublicID, Tags: query.Meta}
 	for _, sr := range page.Sessions {
-		sc, _, _ := s.sessionCost(r.Context(), sr.ID, pub)
+		sc, _, _ := s.sessionCost(r.Context(), sr.ID, scope)
 		srow := sessRow(sr)
 		srow.costFields = sc.fields()
 		out.Sessions = append(out.Sessions, srow)
@@ -2199,7 +2194,7 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		notFound(w, r, "no such api route "+r.URL.Path)
 		return
 	}
-	pub := panelPublicID(r)
+	pub := panelScope(r)
 	var det obsdb.SessionDetail
 	if er, ok := s.db.(obsdb.SessionEventReader); ok {
 		// The timeline's read (sessionScopeFor): a session no turn of
@@ -2218,8 +2213,8 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 			sessionReadError(w, r, id, err)
 			return
 		}
-		if pub != "" {
-			// A panel token's session is its public id's turns (the
+		if !pub.none() {
+			// A panel token's session is its scope's turns (the
 			// runs list's rule): a run of another app sharing the
 			// session id — a derived run whose gen_ai.conversation.id
 			// collides — is neither listed nor summed
@@ -2253,7 +2248,7 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 // same reason). The direct level is paged whole, so a session
 // delegating more than delegatedCap still has every one of them in its
 // figures.
-func (s *Server) delegatedSessions(ctx context.Context, id, pub string, doc *sessionDoc) {
+func (s *Server) delegatedSessions(ctx context.Context, id string, pub readScope, doc *sessionDoc) {
 	doc.Delegated = []sessionRow{}
 	seen := map[string]bool{id: true}
 	level := []string{id}
@@ -2292,7 +2287,7 @@ walk:
 	for depth := 0; len(level) > 0; depth++ {
 		var next []string
 		var rows []obsdb.SessionRow
-		q := obsdb.SessionQuery{Parents: level, PublicID: pub, Limit: 500}
+		q := obsdb.SessionQuery{Parents: level, PublicID: pub.PublicID, Meta: pub.Tags, Limit: 500}
 		scopedTotal := -1 // this level's total in the request's scope, once read
 		for {
 			page, err := s.db.Sessions(ctx, q)
@@ -2345,7 +2340,7 @@ walk:
 	// early (a failed read, the cap) leaves level set: its reason says
 	// so, and the hidden sessions below it are not counted — a panel
 	// token's hidden count is then a floor (P9-pre-go-fix6).
-	if len(level) > 0 && pub != "" {
+	if len(level) > 0 && !pub.none() {
 		hiddenFloor = true
 	}
 	for len(level) == 0 && len(hiddenFront) > 0 {
@@ -2403,9 +2398,9 @@ walk:
 // ingested) is not counted again, and every new one joins it. 0 for an
 // unscoped read, or when the unscoped read failed (logged; the walk's
 // own error says a failed scoped read).
-func (s *Server) hiddenDelegated(ctx context.Context, id string, level, hiddenFront []string, pub string, scopedTotal int, budget *int, seen map[string]bool) (n int, front []string, floor bool) {
+func (s *Server) hiddenDelegated(ctx context.Context, id string, level, hiddenFront []string, pub readScope, scopedTotal int, budget *int, seen map[string]bool) (n int, front []string, floor bool) {
 	parents := append(slices.Clone(level), hiddenFront...)
-	if pub == "" || scopedTotal < 0 || len(parents) == 0 {
+	if pub.none() || scopedTotal < 0 || len(parents) == 0 {
 		return 0, nil, false
 	}
 	q := obsdb.SessionQuery{Parents: parents, Limit: 1}
@@ -2417,6 +2412,18 @@ func (s *Server) hiddenDelegated(ctx context.Context, id string, level, hiddenFr
 	total := max(all.Total-scopedTotal, 0)
 	if total == 0 {
 		return 0, nil, false
+	}
+	// A session in the scope: its row's public id — or, under a tag
+	// scope (I4), its id among the scoped read's, an unscoped row
+	// carrying no turn's tags.
+	inScope := func(sr obsdb.SessionRow) bool { return sr.PublicID == pub.PublicID }
+	if len(pub.Tags) > 0 {
+		ids, err := s.scopedSessionIDs(ctx, parents, pub)
+		if err != nil {
+			slog.DebugContext(ctx, "studio: a session's scoped delegated sessions could not be read", "session", id, "err", err)
+			return 0, nil, false
+		}
+		inScope = func(sr obsdb.SessionRow) bool { return ids[sr.ID] }
 	}
 	underHidden := make(map[string]bool, len(hiddenFront))
 	for _, h := range hiddenFront {
@@ -2434,7 +2441,7 @@ func (s *Server) hiddenDelegated(ctx context.Context, id string, level, hiddenFr
 			return total - dup, front, true
 		}
 		for _, sr := range page.Sessions {
-			if sr.PublicID == pub && !underHidden[sr.ParentSession] {
+			if inScope(sr) && !underHidden[sr.ParentSession] {
 				continue
 			}
 			if seen[sr.ID] {
@@ -2458,6 +2465,28 @@ func (s *Server) hiddenDelegated(ctx context.Context, id string, level, hiddenFr
 	}
 }
 
+// scopedSessionIDs is the ids of the sessions parents delegated in
+// sc's scope, read in pages of 500 — at most hiddenDelegatedPages, as
+// the hidden walk's own reads.
+func (s *Server) scopedSessionIDs(ctx context.Context, parents []string, sc readScope) (map[string]bool, error) {
+	ids := map[string]bool{}
+	q := obsdb.SessionQuery{Parents: parents, PublicID: sc.PublicID, Meta: sc.Tags, Limit: 500}
+	for range hiddenDelegatedPages {
+		page, err := s.db.Sessions(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		for _, sr := range page.Sessions {
+			ids[sr.ID] = true
+		}
+		if page.NextBefore == nil || len(page.Sessions) == 0 {
+			break
+		}
+		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
+	}
+	return ids, nil
+}
+
 // hiddenDelegatedHole is the hidden hole of a session document whose
 // n delegated sessions a panel token's scope left out: counted, never
 // named — at least n (count_floor) when the hidden subtrees were more
@@ -2473,17 +2502,17 @@ func hiddenDelegatedHole(n int, floor bool) stepHole {
 	return stepHole{Hole: string(obsdb.HoleHidden), Reason: r, Fix: "open the session with the server (dev) token", Count: n, CountFloor: floor}
 }
 
-// panelPublicID is the request's panel token's public id, "" for any
-// other identity.
-func panelPublicID(r *http.Request) string {
+// panelScope is the request's panel token's read scope, the zero
+// scope for any other identity.
+func panelScope(r *http.Request) readScope {
 	return scopeOf(r.Context())
 }
 
-// withPublicID keeps the runs carrying pub.
-func withPublicID(runs []obsdb.RunRow, pub string) []obsdb.RunRow {
+// withScope keeps the runs in sc (readScope.admits).
+func withScope(runs []obsdb.RunRow, sc readScope) []obsdb.RunRow {
 	out := make([]obsdb.RunRow, 0, len(runs))
 	for _, rr := range runs {
-		if rr.PublicID == pub {
+		if sc.admits(rr) {
 			out = append(out, rr)
 		}
 	}
@@ -2491,22 +2520,22 @@ func withPublicID(runs []obsdb.RunRow, pub string) []obsdb.RunRow {
 }
 
 // scopeSessionDetail narrows a session's detail to a panel token's
-// public id: its turns (withPublicID) and its row (scopedSessionRow).
+// scope: its turns (withScope) and its row (scopedSessionRow).
 // The row's summarizer_usage is obsdb's over every run of the session
 // id; when a turn of another public id shares it (a colliding derived
 // run), the figure and its per-model split are re-read in pub's scope —
 // the session list's own query by id (SessionQuery.IDs, PublicID) — and
 // are absent when that read fails or finds nothing, never another
 // scope's.
-func (s *Server) scopeSessionDetail(ctx context.Context, det *obsdb.SessionDetail, pub string) {
+func (s *Server) scopeSessionDetail(ctx context.Context, det *obsdb.SessionDetail, pub readScope) {
 	all := len(det.Runs)
-	det.Runs = withPublicID(det.Runs, pub)
+	det.Runs = withScope(det.Runs, pub)
 	det.SessionRow = scopedSessionRow(det.SessionRow, det.Runs, pub)
 	if len(det.Runs) == all {
 		return
 	}
 	det.SummarizerUsage, det.SummarizerModels = core.Usage{}, nil
-	page, err := s.db.Sessions(ctx, obsdb.SessionQuery{IDs: []string{det.ID}, PublicID: pub, Limit: 1})
+	page, err := s.db.Sessions(ctx, obsdb.SessionQuery{IDs: []string{det.ID}, PublicID: pub.PublicID, Meta: pub.Tags, Limit: 1})
 	if err != nil {
 		return
 	}
@@ -2519,7 +2548,7 @@ func (s *Server) scopeSessionDetail(ctx context.Context, det *obsdb.SessionDetai
 }
 
 // scopedSessionRow recomputes a session row over the turns a panel
-// token sees (turns, those with pub only): obsdb's SessionRow is a
+// token sees (turns, those in pub's scope only): obsdb's SessionRow is a
 // GROUP BY over every run of the session id, which a run of another
 // app can share. The same aggregates as the database's: the turn
 // count, first/last seen, summed usage, MAX(agent), and the newest
@@ -2528,18 +2557,21 @@ func (s *Server) scopeSessionDetail(ctx context.Context, det *obsdb.SessionDetai
 // summarizer usage and its per-model split are row's, carried as is:
 // not turn aggregates (scopeSessionDetail re-reads them when row's
 // scope is wider than pub's).
-func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) obsdb.SessionRow {
-	out := obsdb.SessionRow{ID: row.ID, PublicID: pub, SummarizerUsage: row.SummarizerUsage, SummarizerModels: row.SummarizerModels}
+func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub readScope) obsdb.SessionRow {
+	out := obsdb.SessionRow{ID: row.ID, PublicID: pub.PublicID, SummarizerUsage: row.SummarizerUsage, SummarizerModels: row.SummarizerModels}
 	var newest, first, titled *obsdb.RunRow
 	later := func(a, b *obsdb.RunRow) bool { // a after b, by turn then start
 		return a.Turn > b.Turn || (a.Turn == b.Turn && a.Started.After(b.Started))
 	}
 	for i := range turns {
 		t := &turns[i]
-		if t.PublicID != pub {
+		if !pub.admits(*t) {
 			continue
 		}
 		out.Turns++
+		if t.PublicID > out.PublicID && pub.PublicID == "" {
+			out.PublicID = t.PublicID // MAX(public_id), the database's
+		}
 		out.Usage = out.Usage.Add(t.Usage)
 		if t.Agent > out.Agent {
 			out.Agent = t.Agent
@@ -2575,7 +2607,7 @@ func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) ob
 	// The turn facts (U16) over the same turns: the database's rule.
 	scoped := make([]obsdb.RunRow, 0, out.Turns)
 	for _, t := range turns {
-		if t.PublicID == pub {
+		if pub.admits(t) {
 			scoped = append(scoped, t)
 		}
 	}

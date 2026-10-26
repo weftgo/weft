@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/weftgo/weft/studio"
@@ -104,4 +105,51 @@ func ExampleRetain() {
 	}
 	fmt.Println(*meta.Retention)
 	// Output: 720h0m0s
+}
+
+// ExampleToken_tagScope mints a panel token scoped to a batch of runs
+// by their metadata (I4) — server token only — and reads with it: its
+// own batch answers, another value of its tag key is refused. A tag
+// scope is only as tight as the app's own tagging (metadata is
+// caller-written).
+func ExampleToken_tagScope() {
+	dir, err := os.MkdirTemp("", "weft-studio-tags-")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	srv := studio.New(studio.Open(dir+"/weft.db"), studio.Token("server-secret"))
+	defer func() { _ = srv.Close() }()
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	do := func(method, path, bearer, body string) *http.Response {
+		req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		return resp
+	}
+	resp := do(http.MethodPost, "/api/panel-tokens", "server-secret", `{"tags":{"arena.batch":"b1"},"ttl":"1h"}`)
+	var minted struct {
+		Token string            `json:"token"`
+		Tags  map[string]string `json:"tags"`
+		Scope string            `json:"scope"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&minted)
+	_ = resp.Body.Close()
+	fmt.Println(minted.Tags["arena.batch"], minted.Scope)
+
+	for _, path := range []string{"/api/runs?tag.arena.batch=b1", "/api/runs?tag.arena.batch=b2"} {
+		resp := do(http.MethodGet, path, minted.Token, "")
+		_ = resp.Body.Close()
+		fmt.Println(path, resp.StatusCode)
+	}
+	// Output:
+	// b1 read
+	// /api/runs?tag.arena.batch=b1 200
+	// /api/runs?tag.arena.batch=b2 403
 }

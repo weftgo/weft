@@ -350,7 +350,7 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 func (s *Server) siblingSource(r *http.Request, id string, prompts bool) []*diffSide {
 	if p := idFrom(r).panel; p != nil {
 		det, err := s.db.Run(r.Context(), id)
-		if err != nil || det.PublicID != p.PublicID {
+		if err != nil || !scopeOfClaims(p).admits(det.RunRow) {
 			return nil
 		}
 	}

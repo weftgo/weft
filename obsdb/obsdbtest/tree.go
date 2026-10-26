@@ -151,16 +151,24 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			bare      = "tree_deep/1/call_b"
 			live      = "tree_deep/1/call_live"
 		)
+		// pub_t's runs carry the tag tree.batch=tb too (run metadata on
+		// every span and record): TreeQuery.Meta scopes as PublicID does.
 		inTrace := func(sp obsdb.Span, trace, pub string) obsdb.Span {
 			sp.TraceID = trace
 			if pub != "" {
 				sp.Attrs["weft.public_id"] = pub
 			}
+			if pub == "pub_t" {
+				sp.Attrs["tree.batch"] = "tb"
+			}
 			return sp
 		}
 		deepStart := func(id, parent, pub string, pos int64) obsdb.Record {
-			r := record(id, "event", "run_start", pos, `{"type":"run_start","id":"`+id+`"}`,
-				map[string]any{"weft.session.id": "", "weft.public_id": pub})
+			attrs := map[string]any{"weft.session.id": "", "weft.public_id": pub}
+			if pub == "pub_t" {
+				attrs["tree.batch"] = "tb"
+			}
+			r := record(id, "event", "run_start", pos, `{"type":"run_start","id":"`+id+`"}`, attrs)
 			r.TraceID = deepTrace
 			if parent != "" {
 				r.Attrs["weft.parent.run.id"] = parent
@@ -216,6 +224,26 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if sc.HiddenCount != 2 || got.HiddenCount != 0 {
 			t.Errorf("RunTreeSpans(deep, pub_t).HiddenCount = %d (unscoped %d), want 2 (the nested turn and its child), 0", sc.HiddenCount, got.HiddenCount)
+		}
+		// Scoped to the tag tree.batch=tb (I4, a tag-scoped panel token):
+		// the same cut — the nested turn carries no tag — with PublicID
+		// or without; a tag no run carries leaves the root alone.
+		for _, q := range []obsdb.TreeQuery{
+			{RunID: deep, Meta: map[string]string{"tree.batch": "tb"}},
+			{RunID: deep, PublicID: "pub_t", Meta: map[string]string{"tree.batch": "tb"}},
+		} {
+			mt, err := tr.RunTreeSpans(ctx(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(keys(mt.Spans), wantDeep[:2]) || !mt.Hidden || mt.HiddenCount != 2 || mt.MissingCount != 1 || mt.Missing[0].ID != bare {
+				t.Errorf("RunTreeSpans(%+v) = %v, hidden %v (%d), missing %+v; want %v, 2 hidden, %s missing",
+					q, keys(mt.Spans), mt.Hidden, mt.HiddenCount, mt.Missing, wantDeep[:2], bare)
+			}
+		}
+		if mt, err := tr.RunTreeSpans(ctx(), obsdb.TreeQuery{RunID: deep, Meta: map[string]string{"tree.batch": "nope"}}); err != nil ||
+			!slices.Equal(keys(mt.Spans), wantDeep[:1]) || mt.HiddenCount != 5 {
+			t.Errorf("RunTreeSpans(deep, tree.batch=nope) = %v, hidden %d, %v; want the root's span alone, its 5 descendants hidden", keys(mt.Spans), mt.HiddenCount, err)
 		}
 
 		// The id rule is core's shape alone (U9.1-fix2): an app's own

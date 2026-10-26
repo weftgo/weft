@@ -755,7 +755,7 @@ const (
 				AND (substr(rest, 1, instr(rest, '/') - 1) = 'resume' OR substr(rest, 1, instr(rest, '/') - 1) NOT GLOB '*[^0-9]*'))
 		UNION SELECT r.run_id FROM runs AS r JOIN tree AS t ON r.parent_run_id = t.id
 	)
-	SELECT r.run_id, r.parent_run_id, r.public_id, r.started_ns, r.failed, r.finished_ok, r.root_ended, r.last_seen_ns
+	SELECT r.run_id, r.parent_run_id, r.public_id, r.meta, r.started_ns, r.failed, r.finished_ok, r.root_ended, r.last_seen_ns
 	FROM tree AS t CROSS JOIN runs AS r ON r.run_id = t.id
 	ORDER BY r.started_ns, r.run_id LIMIT ?4`
 	treeSpansSQL = `SELECT ` + spanColumns + ` FROM spans
@@ -837,8 +837,14 @@ func (d *DB) treeRows(ctx context.Context, runID string) ([]obsdb.TreeRun, error
 		var r obsdb.TreeRun
 		var started, seen int64
 		var failed, finished, rootEnded bool
-		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &started, &failed, &finished, &rootEnded, &seen); err != nil {
+		var meta string
+		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &meta, &started, &failed, &finished, &rootEnded, &seen); err != nil {
 			return nil, err
+		}
+		if meta != "" && meta != "{}" {
+			if err := json.Unmarshal([]byte(meta), &r.Meta); err != nil {
+				return nil, fmt.Errorf("sqlite: tree run %s meta: %w", r.ID, err)
+			}
 		}
 		// The id range is a superset: a row it found that names no
 		// parent is kept only in core's child shape (obsdb.TreeChildID),
@@ -997,6 +1003,12 @@ func traceGroup(q obsdb.TraceQuery) (group, having string, args []any) {
 	if q.PublicID != "" {
 		conds = append(conds, `SUM(COALESCE(json_extract(attrs, '$."weft.public_id"'), '') <> ?) = 0`)
 		args = append(args, q.PublicID)
+	}
+	for _, k := range slices.Sorted(maps.Keys(q.ScopeMeta)) {
+		// Every span carries the pair: none of the group lacks it (key
+		// and value bound, json_each's rule).
+		conds = append(conds, `SUM(NOT EXISTS (SELECT 1 FROM json_each(spans.attrs) AS sj WHERE sj.key = ? AND sj.value = ?)) = 0`)
+		args = append(args, k, q.ScopeMeta[k])
 	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "MIN(start_ns) >= ?")
@@ -1217,6 +1229,35 @@ func (d *DB) runExists(ctx context.Context, runID string) error {
 // turns, non-playground (ownTurn), on the partial index runs_session.
 var sessionScope = `playground = 0 AND session_id <> '' AND ` + ownTurn("runs")
 
+// turnScope is the turns a session row is grouped over beyond
+// sessionScope: SessionQuery.PublicID's and Meta's, a WHERE before the
+// GROUP BY — every aggregate, every per-session subquery (the newest
+// turn's status, the title, the first turn) and the turn facts read
+// those turns alone (0.15.1's rule for the public id, I4's for the
+// tags).
+type turnScope struct {
+	pub  string
+	meta map[string]string
+}
+
+// sql is the scope's condition on the runs aliased alias, led by
+// " AND " ("" when unset), and its bind arguments in text order: the
+// public id, then each pair in key order (key and value bound, as
+// RunQuery.Meta's json_each rule).
+func (t turnScope) sql(alias string) (string, []any) {
+	var b strings.Builder
+	var args []any
+	if t.pub != "" {
+		b.WriteString(` AND ` + alias + `.public_id = ? AND ` + alias + `.public_id <> ''`)
+		args = append(args, t.pub)
+	}
+	for _, k := range slices.Sorted(maps.Keys(t.meta)) {
+		b.WriteString(` AND EXISTS (SELECT 1 FROM json_each(` + alias + `.meta) AS tsj WHERE tsj.key = ? AND tsj.value = ?)`)
+		args = append(args, k, t.meta[k])
+	}
+	return b.String(), args
+}
+
 // ownTurn is a run that is a turn of its own session (D3, obsdb's
 // SessionRow): its id is <session_id>-t<turn> — thread's id rule, so a
 // turn a tool handler started (a thread/pool child session's turn, a
@@ -1238,15 +1279,16 @@ func sessionParentExpr(alias string) string {
 
 // Sessions is a GROUP BY session_id over top-level, non-playground
 // runs (S3.4): turns, first/last seen, summed usage, and the newest
-// turn's derived status. A PublicID scopes the runs before the GROUP BY
-// (RunQuery.PublicID's WHERE): every aggregate, the order, Total and the
-// cursor are that public id's runs alone.
+// turn's derived status. A PublicID and Meta scope the runs before the
+// GROUP BY (RunQuery.PublicID's and Meta's WHERE; turnScope): every
+// aggregate, the order, Total and the cursor are those runs alone.
 func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.SessionPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.SessionPage{}, err
 	}
 	defer d.closedErr(&err)
 	cutoff := time.Now().Add(-obsdb.InterruptedAfter).UnixNano()
+	ts := turnScope{pub: q.PublicID, meta: q.Meta}
 	var having []string
 	var hargs []any
 	if q.Agent != "" {
@@ -1254,8 +1296,8 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		hargs = append(hargs, q.Agent)
 	}
 	if q.Q != "" {
-		title, targs := sessionTitleExpr(q.PublicID)
-		prompt, pargs := sessionPromptExpr(q.PublicID)
+		title, targs := sessionTitleExpr(ts)
+		prompt, pargs := sessionPromptExpr(ts)
 		for _, t := range strings.Fields(q.Q) {
 			having = append(having, `(instr(lower(`+title+`), lower(?)) > 0
 				OR instr(lower(`+prompt+`), lower(?)) > 0
@@ -1276,12 +1318,9 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		// (obsdb.OutcomeOf over sessionRowsSQL's read, r2): a cancelled or
 		// busy-ended turn is not failed, an open or decided park not
 		// succeeded.
-		pubScope := ""
 		hargs = append(hargs, obsdb.BusyCancelCause, obsdb.ErrorTypeCancelled, cutoff)
-		if q.PublicID != "" {
-			pubScope = ` AND r8.public_id = ? AND r8.public_id <> ''`
-			hargs = append(hargs, q.PublicID)
-		}
+		pubScope, pa := ts.sql("r8")
+		hargs = append(hargs, pa...)
 		having = append(having, `(SELECT `+sessionStatusExpr+` FROM runs r8 WHERE r8.session_id = runs.session_id AND r8.session_id <> ''
 			AND `+ownTurn("r8")+` AND r8.playground = 0`+pubScope+`
 			ORDER BY r8.turn DESC, r8.started_ns DESC, r8.run_id DESC LIMIT 1) = ?`)
@@ -1300,17 +1339,12 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	if q.Awaiting {
 		// The newest turn (sessionRowsSQL's status read) an open park:
 		// succeeded, pending calls, no resumer (resumedByColumn's rule).
-		pubScope := ""
-		if q.PublicID != "" {
-			pubScope = ` AND r7.public_id = ? AND r7.public_id <> ''`
-		}
+		pubScope, pa := ts.sql("r7")
 		having = append(having, `COALESCE((SELECT r7.failed = 0 AND (r7.finished_ok = 1 OR r7.root_ended = 1) AND r7.pending > 0
 			AND NOT EXISTS (SELECT 1 FROM runs AS rb WHERE rb.resumed_from = r7.run_id AND rb.resumed_from <> '')
 			FROM runs r7 WHERE r7.session_id = runs.session_id AND r7.session_id <> '' AND `+ownTurn("r7")+` AND r7.playground = 0`+pubScope+`
 			ORDER BY r7.turn DESC, r7.started_ns DESC, r7.run_id DESC LIMIT 1), 0) = 1`)
-		if q.PublicID != "" {
-			hargs = append(hargs, q.PublicID)
-		}
+		hargs = append(hargs, pa...)
 	}
 	switch q.Lineage {
 	case "":
@@ -1325,11 +1359,11 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		having = append(having, "MAX(last_seen_ns) >= ?")
 		hargs = append(hargs, q.Since.UnixNano())
 	}
-	scope, sargs := sessionScope, []any(nil)
-	if q.PublicID != "" {
-		scope += ` AND public_id = ? AND public_id <> ''`
-		sargs = []any{q.PublicID}
-	}
+	// The scope's turns alone are grouped: a session some of whose
+	// turns carry the public id or the tags lists those turns (I4: the
+	// tags scope turns as the public id does since 0.15.1).
+	scope, sargs := ts.sql("runs")
+	scope = sessionScope + scope
 	if len(q.Parents) > 0 {
 		// Every turn of a delegated session carries its lineage
 		// (thread's identityMetadata), so the scope is the turns'; one
@@ -1346,21 +1380,6 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		for _, id := range q.IDs {
 			sargs = append(sargs, id)
 		}
-	}
-	if len(q.Meta) > 0 {
-		// The tag filter (U12.2) selects sessions, never turns: a session
-		// one of whose own turns carries every pair (bound parameters, as
-		// RunQuery.Meta's), its grouping then over all its turns.
-		sub := `SELECT rt.session_id FROM runs rt WHERE rt.session_id <> '' AND rt.playground = 0 AND ` + ownTurn("rt")
-		if q.PublicID != "" {
-			sub += ` AND rt.public_id = ?`
-			sargs = append(sargs, q.PublicID)
-		}
-		for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
-			sub += ` AND EXISTS (SELECT 1 FROM json_each(rt.meta) WHERE json_each.key = ? AND json_each.value = ?)`
-			sargs = append(sargs, k, q.Meta[k])
-		}
-		scope += ` AND session_id IN (` + sub + `)`
 	}
 	// Total is the whole match, as Runs' is: the cursor pages through
 	// it and never narrows it.
@@ -1382,7 +1401,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 			pargs = append(append([]any{}, hargs...), ns)
 		}
 	}
-	rows, err := d.sessionRows(ctx, cutoff, q.PublicID, scope, sargs, paged,
+	rows, err := d.sessionRows(ctx, cutoff, ts, scope, sargs, paged,
 		append(append([]any{}, pargs...), limit), ` ORDER BY MAX(last_seen_ns) DESC, session_id DESC LIMIT ?`)
 	if err != nil {
 		return obsdb.SessionPage{}, err
@@ -1393,7 +1412,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		// along (at most MaxTies) instead of being skipped by a next
 		// page that reads strictly older.
 		last := rows[len(rows)-1]
-		ties, err := d.sessionRows(ctx, cutoff, q.PublicID, scope, sargs,
+		ties, err := d.sessionRows(ctx, cutoff, ts, scope, sargs,
 			append(append([]string{}, having...), "MAX(last_seen_ns) = ?", "session_id < ?"),
 			append(append([]any{}, hargs...), last.LastSeen.UnixNano(), last.ID, obsdb.MaxTies),
 			` ORDER BY session_id DESC LIMIT ?`)
@@ -1404,7 +1423,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		end := page.Sessions[len(page.Sessions)-1]
 		page.NextBefore, page.NextBeforeID = &end.LastSeen, end.ID
 	}
-	if err := d.fillTurnFacts(ctx, page.Sessions, q.PublicID, time.Unix(0, cutoff).Add(obsdb.InterruptedAfter)); err != nil {
+	if err := d.fillTurnFacts(ctx, page.Sessions, ts, time.Unix(0, cutoff).Add(obsdb.InterruptedAfter)); err != nil {
 		return obsdb.SessionPage{}, err
 	}
 	return page, nil
@@ -1417,7 +1436,7 @@ const failedTurnSQL = `CASE WHEN failed = 1 AND cancel_cause <> ? AND error_type
 
 // fillTurnFacts sets each session row's turn facts
 // (obsdb.SessionTurnFacts) from its own turns — the grouping's scope,
-// pub's turns when set — in two narrow reads for the page: the counts
+// ts's turns when set — in two narrow reads for the page: the counts
 // in SQL (one GROUP BY over runs_session), and the newest
 // obsdb.MaxOutcomes turns of each session (one LIMIT per session over
 // runs_session) with only the columns an outcome reads — status inputs on the
@@ -1426,7 +1445,7 @@ const failedTurnSQL = `CASE WHEN failed = 1 AND cancel_cause <> ? AND error_type
 // preview or count is read: a page of 500 sessions of 1,000 turns
 // reads 500 × 40 narrow rows (BenchmarkSessionsTurnFacts: a page of
 // 50 sessions of 1,000 turns reads its facts in ~45 ms).
-func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub string, now time.Time) error {
+func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, ts turnScope, now time.Time) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1434,11 +1453,9 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 	for _, r := range rows {
 		args = append(args, r.ID)
 	}
-	where := `session_id IN (?` + strings.Repeat(",?", len(rows)-1) + `) AND ` + sessionScope
-	if pub != "" {
-		where += ` AND public_id = ? AND public_id <> ''`
-		args = append(args, pub)
-	}
+	scope, sargs := ts.sql("runs")
+	where := `session_id IN (?` + strings.Repeat(",?", len(rows)-1) + `) AND ` + sessionScope + scope
+	args = append(args, sargs...)
 	type counts struct{ failed, ended, cancelled, resumes int }
 	by := map[string]counts{}
 	forked := map[string]string{}
@@ -1472,21 +1489,15 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 	one := `SELECT * FROM (SELECT session_id, run_id, turn, started_ns, ` + statusExpr + `,
 		pending, cancel_cause, error_type,
 		EXISTS (SELECT 1 FROM runs AS rb WHERE rb.resumed_from = runs.run_id AND rb.resumed_from <> '')
-		FROM runs WHERE session_id = ? AND ` + sessionScope
-	if pub != "" {
-		one += ` AND public_id = ? AND public_id <> ''`
-	}
-	one += ` ORDER BY turn DESC, started_ns DESC, run_id DESC LIMIT ?)`
+		FROM runs WHERE session_id = ? AND ` + sessionScope + scope + `
+		ORDER BY turn DESC, started_ns DESC, run_id DESC LIMIT ?)`
 	newest := map[string][]obsdb.RunRow{}
 	for chunk := range slices.Chunk(rows, 100) {
 		parts := make([]string, 0, len(chunk))
 		var cargs []any
 		for _, r := range chunk {
 			parts = append(parts, one)
-			cargs = append(cargs, cutoff, r.ID)
-			if pub != "" {
-				cargs = append(cargs, pub)
-			}
+			cargs = append(append(cargs, cutoff, r.ID), sargs...)
 			cargs = append(cargs, obsdb.MaxOutcomes)
 		}
 		rs, err = d.reads.QueryContext(ctx, strings.Join(parts, " UNION ALL "), cargs...)
@@ -1523,13 +1534,10 @@ func (d *DB) fillTurnFacts(ctx context.Context, rows []obsdb.SessionRow, pub str
 
 // sessionTitleExpr is a grouped session's title (SessionRow.Title):
 // the newest turn's (by turn, then start) non-empty
-// weft.session.title, from the run's meta. pub, when set, scopes the
+// weft.session.title, from the run's meta. ts, when set, scopes the
 // turns read as the grouping's WHERE does; the args are its parameters.
-func sessionTitleExpr(pub string) (string, []any) {
-	scope, args := "", []any(nil)
-	if pub != "" {
-		scope, args = ` AND r3.public_id = ? AND r3.public_id <> ''`, []any{pub}
-	}
+func sessionTitleExpr(ts turnScope) (string, []any) {
+	scope, args := ts.sql("r3")
 	const title = `json_extract(r3.meta, '$."` + obsdb.SessionTitleKey + `"')`
 	return `COALESCE((SELECT ` + title + ` FROM runs r3
 		WHERE r3.session_id = runs.session_id AND r3.session_id <> '' AND ` + ownTurn("r3") + ` AND r3.playground = 0` + scope + `
@@ -1540,12 +1548,9 @@ func sessionTitleExpr(pub string) (string, []any) {
 // sessionPromptExpr is a grouped session's first turn's prompt, whole
 // (SessionRow.FirstPrompt is its first PromptPreviewRunes): the
 // lowest turn's (then the earliest), "" when that turn has none —
-// never a later turn's. pub scopes as in sessionTitleExpr.
-func sessionPromptExpr(pub string) (string, []any) {
-	scope, args := "", []any(nil)
-	if pub != "" {
-		scope, args = ` AND r4.public_id = ? AND r4.public_id <> ''`, []any{pub}
-	}
+// never a later turn's. ts scopes as in sessionTitleExpr.
+func sessionPromptExpr(ts turnScope) (string, []any) {
+	scope, args := ts.sql("r4")
 	return `COALESCE((SELECT rs.prompt FROM run_search rs WHERE rs.run_id = (SELECT r4.run_id FROM runs r4
 		WHERE r4.session_id = runs.session_id AND r4.session_id <> '' AND ` + ownTurn("r4") + ` AND r4.playground = 0` + scope + `
 		ORDER BY r4.turn, r4.started_ns, r4.run_id LIMIT 1)), '')`, args
@@ -1555,13 +1560,10 @@ func sessionPromptExpr(pub string) (string, []any) {
 // sessionPromptExpr reads) as a JSON object of what
 // SessionRow.ContentOff reads: its counts, Derived and the status
 // inputs firstTurn derives Status and Settling from, as the run
-// scanner does; ” when the session has none. pub scopes as in
+// scanner does; ” when the session has none. ts scopes as in
 // sessionTitleExpr.
-func sessionFirstTurnExpr(pub string) (string, []any) {
-	scope, args := "", []any(nil)
-	if pub != "" {
-		scope, args = ` AND r5.public_id = ? AND r5.public_id <> ''`, []any{pub}
-	}
+func sessionFirstTurnExpr(ts turnScope) (string, []any) {
+	scope, args := ts.sql("r5")
 	return `COALESCE((SELECT json_object('derived', r5.derived, 'messages', r5.message_count, 'events', r5.event_count,
 			'failed', r5.failed, 'finished_ok', r5.finished_ok, 'root_ended', r5.root_ended, 'last_seen', r5.last_seen_ns)
 		FROM runs r5
@@ -1610,11 +1612,11 @@ func havingSQL(having []string) string {
 // sessionRows selects grouped session rows: where (with wargs) scopes
 // the runs, having (with hargs, which also carry tail's parameters)
 // filters the groups, tail orders and limits. cutoff is statusExpr's
-// parameter, the first in text order; pub, when set, scopes the newest
+// parameter, the first in text order; ts, when set, scopes the newest
 // turn the status is read from as where scopes the rest.
-func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, wargs []any,
+func (d *DB) sessionRows(ctx context.Context, cutoff int64, ts turnScope, where string, wargs []any,
 	having []string, hargs []any, tail string) ([]obsdb.SessionRow, error) {
-	query, args := sessionRowsSQL(cutoff, pub, where, wargs, having, hargs, tail)
+	query, args := sessionRowsSQL(cutoff, ts, where, wargs, having, hargs, tail)
 	rs, err := d.reads.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -1654,7 +1656,7 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 		return nil, err
 	}
 	_ = rs.Close() // one read handle for :memory:: free it for the next query
-	if err := d.fillSummarizerUsage(ctx, out, pub); err != nil {
+	if err := d.fillSummarizerUsage(ctx, out, ts); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -1663,9 +1665,9 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 // fillSummarizerUsage sets each session row's SummarizerUsage: the
 // summed usage of the summarizer chat spans (weft.chat.role summarizer)
 // under the session's runs — the runs' own index (runs_session), then
-// each run's spans (spans_run) — scoped to pub's runs when set, the
+// each run's spans (spans_run) — scoped to ts's runs when set, the
 // rows' own scope. One read for the page.
-func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, pub string) error {
+func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, ts turnScope) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1673,11 +1675,8 @@ func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, p
 	for _, r := range rows {
 		args = append(args, r.ID)
 	}
-	scope := ""
-	if pub != "" {
-		scope = ` AND r.public_id = ? AND r.public_id <> ''`
-		args = append(args, pub)
-	}
+	scope, sargs := ts.sql("r")
+	args = append(args, sargs...)
 	tok := func(k string) string {
 		return `COALESCE(SUM(CAST(json_extract(s.attrs, '$."` + k + `"') AS INTEGER)), 0)`
 	}
@@ -1720,22 +1719,17 @@ func (d *DB) fillSummarizerUsage(ctx context.Context, rows []obsdb.SessionRow, p
 // which lets sqlite use the partial index runs_session (0001): without
 // it each session's newest turn was looked up by walking every
 // top-level run.
-func sessionRowsSQL(cutoff int64, pub, where string, wargs []any,
+func sessionRowsSQL(cutoff int64, ts turnScope, where string, wargs []any,
 	having []string, hargs []any, tail string) (string, []any) {
 	args := []any{cutoff}
-	statusScope, statusScope6 := "", ""
-	if pub != "" {
-		statusScope = ` AND r2.public_id = ? AND r2.public_id <> ''`
-		statusScope6 = ` AND r6.public_id = ? AND r6.public_id <> ''`
-		args = append(args, pub)
-	}
-	title, targs := sessionTitleExpr(pub)
-	prompt, pargs := sessionPromptExpr(pub)
-	off, oargs := sessionFirstTurnExpr(pub)
+	statusScope, sargs := ts.sql("r2")
+	statusScope6, sargs6 := ts.sql("r6")
+	args = append(args, sargs...)
+	title, targs := sessionTitleExpr(ts)
+	prompt, pargs := sessionPromptExpr(ts)
+	off, oargs := sessionFirstTurnExpr(ts)
 	args = append(append(append(args, targs...), pargs...), oargs...)
-	if pub != "" {
-		args = append(args, pub) // the first turn's caller (r6)
-	}
+	args = append(args, sargs6...) // the first turn's caller (r6)
 	args = append(append(args, wargs...), hargs...)
 	return `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),
 		MIN(started_ns), MAX(last_seen_ns),
@@ -1762,7 +1756,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	// while the list still showed it (the audit's P2-1). Same shape as
 	// Sessions' select, scoped to the one session_id.
 	now := time.Now()
-	rows, err := d.sessionRows(ctx, now.Add(-obsdb.InterruptedAfter).UnixNano(), "",
+	rows, err := d.sessionRows(ctx, now.Add(-obsdb.InterruptedAfter).UnixNano(), turnScope{},
 		sessionScope+` AND session_id = ?`, []any{id}, nil, nil, ``)
 	if err != nil {
 		return obsdb.SessionDetail{}, err

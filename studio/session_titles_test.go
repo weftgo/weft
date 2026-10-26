@@ -140,7 +140,7 @@ func TestScopedSessionRowContentOffGate(t *testing.T) {
 	} {
 		r := base
 		c.edit(&r)
-		got := scopedSessionRow(obsdb.SessionRow{ID: "conv"}, []obsdb.RunRow{r}, "pub")
+		got := scopedSessionRow(obsdb.SessionRow{ID: "conv"}, []obsdb.RunRow{r}, readScope{PublicID: "pub"})
 		if got.ContentOff != c.want {
 			t.Errorf("%s: ContentOff = %v, want %v", c.name, got.ContentOff, c.want)
 		}

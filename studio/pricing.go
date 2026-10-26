@@ -601,13 +601,13 @@ type coster struct {
 	// figures and counts read not known, never read one at a time.
 	capped map[string]bool
 	primed int // child rows primeTrees read so far
-	// scope is the request's panel token public id (scopeOf), "" for any
-	// other identity. Under it, kids holds each run's children inScope
+	// scope is the request's panel token scope (scopeOf), the zero
+	// scope for any other identity. Under it, kids holds each run's children inScope
 	// only — every count, children list and delegated figure read from
 	// the coster is the token's — and hidden counts the rest, per run;
 	// hiddenUsage sums the hidden core Subagent children's usage, which
 	// the run's own figure still takes out (the core rolled it in).
-	scope       string
+	scope       readScope
 	hidden      map[string]int
 	hiddenSubs  map[string]int
 	hiddenUsage map[string]core.Usage
@@ -1022,17 +1022,17 @@ func tooManyRuns() cost {
 // in the parent's session), and another agent's Generate inside a tool
 // handler (linked but never rolled up, so no other figure carries it).
 // The coster it returns is primed with that tree for the turn rows.
-// publicID, when set (a panel token's), keeps only the runs carrying
-// it — the runs list's rule (scopeRunsQuery): a run of another app
+// scope, when set (a panel token's), keeps only the runs in it (its
+// public id, its tags) — the runs list's rule (scopeRunsQuery): a run of another app
 // that shares the session id (a derived run's gen_ai.conversation.id)
 // is never priced into a panel token's session. The runs it read come
 // back too, for a panel token's session row: nil when the walk failed
 // or passed its bound (the row cannot be scoped), non-nil and maybe
 // empty when it read the whole set.
-func (s *Server) sessionCost(ctx context.Context, id, publicID string) (cost, *coster, []obsdb.RunRow) {
+func (s *Server) sessionCost(ctx context.Context, id string, scope readScope) (cost, *coster, []obsdb.RunRow) {
 	c := s.coster(ctx)
 	f := false
-	q := obsdb.RunQuery{SessionID: id, PublicID: publicID, ParentRunID: "*", Playground: &f, Limit: 500}
+	q := obsdb.RunQuery{SessionID: id, PublicID: scope.PublicID, Meta: scope.Tags, ParentRunID: "*", Playground: &f, Limit: 500}
 	runs := []obsdb.RunRow{} // non-nil: a whole walk, even of no run
 	total := 0
 	for pages := 0; ; pages++ {
@@ -1085,13 +1085,13 @@ const sessionCostBatch = 50
 // alone past the bound, or one whose read fails, is unknown with
 // sessionCost's reason; once the budget is spent the sessions not yet
 // priced are unknown with costReadBudget's.
-func (s *Server) sessionCosts(ctx context.Context, ids []string, publicID string) map[string]cost {
+func (s *Server) sessionCosts(ctx context.Context, ids []string, scope readScope) map[string]cost {
 	out := make(map[string]cost, len(ids))
 	n := sessionCostReads(len(ids))
 	budget := &readBudget{left: n, total: n}
 	for len(ids) > 0 {
 		n := min(sessionCostBatch, len(ids))
-		s.priceSessionBatch(ctx, ids[:n], publicID, out, budget)
+		s.priceSessionBatch(ctx, ids[:n], scope, out, budget)
 		ids = ids[n:]
 	}
 	return out
@@ -1117,9 +1117,9 @@ func costReadBudget(reads int) cost {
 // priceSessionBatch prices one batch of sessionCosts into out, halving
 // it when its runs pass sessionCost's bound, each read taken from
 // budget; with the budget spent the batch's sessions are unknown.
-func (s *Server) priceSessionBatch(ctx context.Context, ids []string, publicID string, out map[string]cost, budget *readBudget) {
+func (s *Server) priceSessionBatch(ctx context.Context, ids []string, scope readScope, out map[string]cost, budget *readBudget) {
 	f := false
-	q := obsdb.RunQuery{SessionIDs: ids, PublicID: publicID, ParentRunID: "*", Playground: &f, Limit: 500}
+	q := obsdb.RunQuery{SessionIDs: ids, PublicID: scope.PublicID, Meta: scope.Tags, ParentRunID: "*", Playground: &f, Limit: 500}
 	bySession := make(map[string][]obsdb.RunRow, len(ids))
 	read, total := 0, 0
 	for pages := 0; ; pages++ {
@@ -1132,7 +1132,7 @@ func (s *Server) priceSessionBatch(ctx context.Context, ids []string, publicID s
 			if read >= total {
 				break
 			}
-			s.splitSessionBatch(ctx, ids, publicID, out, budget)
+			s.splitSessionBatch(ctx, ids, scope, out, budget)
 			return
 		}
 		if budget.left <= 0 {
@@ -1151,7 +1151,7 @@ func (s *Server) priceSessionBatch(ctx context.Context, ids []string, publicID s
 			return
 		}
 		if pages == 0 && page.Total > sessionCostPages*500 {
-			s.splitSessionBatch(ctx, ids, publicID, out, budget)
+			s.splitSessionBatch(ctx, ids, scope, out, budget)
 			return
 		}
 		for _, r := range page.Runs {
@@ -1175,14 +1175,14 @@ func (s *Server) priceSessionBatch(ctx context.Context, ids []string, publicID s
 
 // splitSessionBatch is priceSessionBatch past the bound: two halves
 // read again, or one session's tooManyRuns.
-func (s *Server) splitSessionBatch(ctx context.Context, ids []string, publicID string, out map[string]cost, budget *readBudget) {
+func (s *Server) splitSessionBatch(ctx context.Context, ids []string, scope readScope, out map[string]cost, budget *readBudget) {
 	if len(ids) == 1 {
 		out[ids[0]] = tooManyRuns()
 		return
 	}
 	half := len(ids) / 2
-	s.priceSessionBatch(ctx, ids[:half], publicID, out, budget)
-	s.priceSessionBatch(ctx, ids[half:], publicID, out, budget)
+	s.priceSessionBatch(ctx, ids[:half], scope, out, budget)
+	s.priceSessionBatch(ctx, ids[half:], scope, out, budget)
 }
 
 // setCost is the bill of a set of runs read whole — a session's, an

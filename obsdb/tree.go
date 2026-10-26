@@ -34,8 +34,8 @@ type TreeReader interface {
 	// names the run it belongs to and that run's parent: the key a
 	// reader draws one run's spans under another's by is (RunID,
 	// SpanID). ErrNotFound for an unknown run; empty, not an error, for
-	// a run with no span stored. TreeQuery.PublicID scopes the answer
-	// to one public id (a panel token's): the cut, then the scope, then
+	// a run with no span stored. TreeQuery.PublicID and Meta scope the
+	// answer (a panel token's): the cut, then the scope, then
 	// the cap, so a run the scope leaves out never takes a visible
 	// run's place under the cap (RunTree.Hidden).
 	RunTreeSpans(ctx context.Context, q TreeQuery) (RunTree, error)
@@ -62,6 +62,43 @@ type TreeQuery struct {
 	// backend leaves the rows' outsiders out of its span read, and the
 	// cap counts the visible spans alone.
 	PublicID string
+	// Meta, when not empty, scopes the tree to the runs carrying every
+	// pair (a tag-scoped panel token's, I4) by PublicID's rule: a
+	// descendant run stays when its row's metadata and each of its spans'
+	// attributes carry every pair — run metadata rides every weft span
+	// verbatim — and its parent run stays. With PublicID both apply.
+	Meta map[string]string
+}
+
+// Scoped reports whether q scopes the tree (PublicID or Meta set).
+func (q TreeQuery) Scoped() bool { return q.PublicID != "" || len(q.Meta) > 0 }
+
+// admitsRow reports whether a member run's row lies in q's scope.
+func (q TreeQuery) admitsRow(r TreeRun) bool {
+	if q.PublicID != "" && r.PublicID != q.PublicID {
+		return false
+	}
+	for k, v := range q.Meta {
+		if got, ok := r.Meta[k]; !ok || got != v {
+			return false
+		}
+	}
+	return true
+}
+
+// admitsSpan reports whether a span's attributes lie in q's scope.
+func (q TreeQuery) admitsSpan(attrs map[string]any) bool {
+	if q.PublicID != "" {
+		if got, _ := attrs[attrPublicID].(string); got != q.PublicID {
+			return false
+		}
+	}
+	for k, v := range q.Meta {
+		if got, ok := attrs[k].(string); !ok || got != v {
+			return false
+		}
+	}
+	return true
 }
 
 // TreeSpanCap bounds the spans one RunTreeSpans answer holds: 10,000,
@@ -122,7 +159,7 @@ type RunTree struct {
 	// MissingCount is how many runs are missing: Missing's length
 	// before TreeMissingCap.
 	MissingCount int
-	// Hidden says TreeQuery.PublicID's scope left runs out.
+	// Hidden says TreeQuery's scope (PublicID, Meta) left runs out.
 	Hidden bool
 	// HiddenCount is how many runs it left out: each descendant run the
 	// tree knows (from its rows' parents or its spans) that the scope
@@ -132,11 +169,13 @@ type RunTree struct {
 
 // TreeRun names one run of a tree: its id, its parent, its public id
 // (weft.public_id, "" when none — what a scoped reader filters by),
-// when it started (RunRow.Started, the order Missing lists runs in)
-// and its derived status (DeriveStatus with the read's clock: a
-// running run is never Missing).
+// its metadata (RunRow.Meta: TreeQuery.Meta's scope reads it), when it
+// started (RunRow.Started, the order Missing lists runs in) and its
+// derived status (DeriveStatus with the read's clock: a running run is
+// never Missing).
 type TreeRun struct {
 	ID, ParentRunID, PublicID string
+	Meta                      map[string]string
 	Started                   time.Time
 	Status                    Status
 }
@@ -353,7 +392,7 @@ func CutRunTree(spans []Span, runID string, parents map[string]string) []TreeSpa
 // TreeSpanCap + 1, more true when it read that many; a derived run's
 // from its trace, more false; parents is CutRunTree's; rows is the
 // member runs it read a row of. The answer is the read cut to q's
-// subtree, then to q's scope (TreeQuery.PublicID), then to TreeSpanCap
+// subtree, then to q's scope (TreeQuery.PublicID, Meta), then to TreeSpanCap
 // — so a run the scope leaves out never takes a visible one's place —
 // and Missing: each of the visible rows but the root's that is a
 // member (TreeMembers, its parent the members'), not running, with no
@@ -363,7 +402,7 @@ func CapTree(read []Span, more bool, q TreeQuery, parents map[string]string, row
 	spans := CutRunTree(read, q.RunID, parents)
 	members := TreeMembers(q.RunID, parents)
 	out := RunTree{}
-	if q.PublicID != "" {
+	if q.Scoped() {
 		spans, rows, out.HiddenCount = scopeTree(q, spans, members, rows)
 		out.Hidden = out.HiddenCount > 0
 	}
@@ -395,25 +434,25 @@ func CapTree(read []Span, more bool, q TreeQuery, parents map[string]string, row
 }
 
 // TreeReadIDs is the run ids a backend reads a weft run tree's spans
-// by: TreeMembers' ids, sorted, and under a scope (TreeQuery.PublicID)
-// only the members the rows show visible — the root, and each run
-// whose row carries the public id under a visible parent — so a run
+// by: TreeMembers' ids, sorted, and under a scope (TreeQuery.PublicID,
+// Meta) only the members the rows show visible — the root, and each
+// run whose row carries the scope under a visible parent — so a run
 // the scope leaves out is never read and never takes a visible run's
 // place under the read's limit. A member with no row is read: its
 // spans decide (CapTree).
 func TreeReadIDs(q TreeQuery, parents map[string]string, rows []TreeRun) []string {
 	members := TreeMembers(q.RunID, parents)
-	pub := make(map[string]string, len(rows))
+	byID := make(map[string]TreeRun, len(rows))
 	for _, r := range rows {
-		pub[r.ID] = r.PublicID
+		byID[r.ID] = r
 	}
 	visible := treeVisible(q.RunID, members, func(id string) bool {
-		p, ok := pub[id]
-		return !ok || p == q.PublicID
+		r, ok := byID[id]
+		return !ok || q.admitsRow(r)
 	})
 	ids := make([]string, 0, len(members))
 	for id := range members {
-		if q.PublicID == "" || visible(id) {
+		if !q.Scoped() || visible(id) {
 			ids = append(ids, id)
 		}
 	}
@@ -440,9 +479,9 @@ func treeVisible(root string, parent map[string]string, own func(string) bool) f
 	return visible
 }
 
-// scopeTree cuts a run tree to q.PublicID: the root's spans stay, and
-// a descendant run stays when its row (when it has one) and each of
-// its spans carry the public id and its parent run stays; any other
+// scopeTree cuts a run tree to q's scope (PublicID, Meta): the root's
+// spans stay, and a descendant run stays when its row (when it has one)
+// and each of its spans carry the scope and its parent run stays; any other
 // run is left out with its whole subtree, counted: the int is how many
 // runs (members or span runs) it left out. The rows answered are the
 // visible members'.
@@ -454,12 +493,12 @@ func scopeTree(q TreeQuery, spans []TreeSpan, members map[string]string, rows []
 	foreign := map[string]bool{}
 	for _, sp := range spans {
 		parent[sp.RunID] = sp.ParentRunID
-		if got, _ := sp.Attrs[attrPublicID].(string); sp.RunID != q.RunID && got != q.PublicID {
+		if sp.RunID != q.RunID && !q.admitsSpan(sp.Attrs) {
 			foreign[sp.RunID] = true
 		}
 	}
 	for _, r := range rows {
-		if _, ok := members[r.ID]; ok && r.ID != q.RunID && r.PublicID != q.PublicID {
+		if _, ok := members[r.ID]; ok && r.ID != q.RunID && !q.admitsRow(r) {
 			foreign[r.ID] = true
 		}
 	}

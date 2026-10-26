@@ -300,14 +300,12 @@ func dbFile(db obsdb.DB) (string, *int64) {
 }
 
 // latestContent reads the latest top-level run's content mark, scoped
-// to a panel token's public id. Meta never fails on an observation: a
+// to a panel token's scope (its public id, its tags). Meta never fails on an observation: a
 // failed read is logged and reported in content.error.
 func (s *Server) latestContent(ctx context.Context, id identity) metaContent {
 	out := metaContent{Ingest: contentIngestAsReceived}
-	q := obsdb.RunQuery{Limit: 1}
-	if id.panel != nil {
-		q.PublicID = id.panel.PublicID
-	}
+	sc := scopeOfClaims(id.panel)
+	q := obsdb.RunQuery{Limit: 1, PublicID: sc.PublicID, Meta: sc.Tags}
 	page, err := s.db.Runs(ctx, q)
 	if err != nil {
 		out.Error = metaReadFailed("content: read the latest run", err)

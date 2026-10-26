@@ -76,7 +76,10 @@ var overrideNames = map[string]string{
 //     playground-scoped panel token's (303 with a minted read token)
 //     and the server token's (303, no token); a read-scoped token
 //     cannot widen (403); a to outside the base is 400;
-//   - ingest takes the ingest token and nothing else.
+//   - ingest takes the ingest token and nothing else;
+//   - a tag-scoped panel token (I4) has its rows in
+//     TestAuthMatrixTagToken (tag_token_test.go): a resource carrying
+//     its tags 200, one without them 403, a widening request 403.
 func TestAuthMatrix(t *testing.T) {
 
 	const serverTok, ingestTok = "srv-token", "ingest-token"

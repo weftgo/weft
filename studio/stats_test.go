@@ -43,6 +43,7 @@ type statsRun struct {
 	tools                              []statsTool
 	attempts                           int // on step 0's call, the last one deciding it
 	playground                         bool
+	experiment                         string // weft.experiment.id: a playground cell's
 }
 
 type statsStep struct {
@@ -77,6 +78,9 @@ func (r statsRun) batch() obsdb.Batch {
 	root["weft.run.steps"] = int64(len(r.steps))
 	if r.playground {
 		root["weft.playground"] = true
+	}
+	if r.experiment != "" {
+		root["weft.experiment.id"] = r.experiment
 	}
 	if i := strings.LastIndex(r.id, "/"); i > 0 {
 		root["weft.parent.run.id"] = r.id[:strings.LastIndex(r.id[:i], "/")]
@@ -527,5 +531,57 @@ func TestStatsScriptedBesideIdleModel(t *testing.T) {
 		if !strings.Contains(body, `"cost_known":false,"cost_badge":"unknown","cost_reason":"no model usage recorded"`) {
 			t.Errorf("playground=%s: want the unknown cost, no usage recorded:\n%s", pg, body)
 		}
+	}
+}
+
+// TestStatsExperimentDefault (P10a-pre-go2-fix 1): every experiment
+// cell is a playground run, so experiment_id with no playground counts
+// its cells (the default is all), an explicit playground=false still
+// wins (nothing), and a group's runs_query states the effective filter
+// — no playground parameter: /api/search's both — landing on the same
+// runs.
+func TestStatsExperimentDefault(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	runs := []statsRun{
+		{id: "ec_1", agent: "orders", provider: "wefttest", model: "script", playground: true, experiment: "exp_x",
+			at: time.Hour, dur: time.Second, steps: []statsStep{{in: 10, out: 5, dur: time.Millisecond}}},
+		{id: "ec_2", agent: "orders", provider: "wefttest", model: "script", playground: true, experiment: "exp_x",
+			at: 2 * time.Hour, dur: time.Second, steps: []statsStep{{in: 10, out: 5, dur: time.Millisecond}}},
+		{id: "ec_app", agent: "orders", provider: "wefttest", model: "script",
+			at: 3 * time.Hour, dur: time.Second, steps: []statsStep{{in: 10, out: 5, dur: time.Millisecond}}},
+	}
+	for _, r := range runs {
+		if err := db.Write(context.Background(), r.batch()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := Handler(DB(db))
+	_, _, body := get(t, h, "/studio/api/stats?by=agent&experiment_id=exp_x&"+statsWindow)
+	if !strings.Contains(body, `"key":"orders","runs":2,`) {
+		t.Fatalf("experiment_id alone = %s, want its 2 cells", body)
+	}
+	var page struct {
+		Groups []struct {
+			RunsQuery string `json:"runs_query"`
+		} `json:"groups"`
+	}
+	decode(t, body, &page)
+	rq := page.Groups[0].RunsQuery
+	if v, _ := url.ParseQuery(rq); v.Has("playground") || v.Get("experiment_id") != "exp_x" {
+		t.Errorf("runs_query = %s, want experiment_id and no playground filter (both)", rq)
+	}
+	ids, total, _ := searchIDs(t, h, "/studio/api/search?"+rq)
+	if total != 2 || strings.Join(ids, ",") != "ec_2,ec_1" {
+		t.Errorf("search?<runs_query> = %v (total %d), want the 2 cells", ids, total)
+	}
+	if _, _, b := get(t, h, "/studio/api/stats?by=agent&experiment_id=exp_x&playground=false&"+statsWindow); !strings.Contains(b, `"groups":[]`) {
+		t.Errorf("experiment_id with playground=false = %s, want nothing", b)
+	}
+	if _, _, b := get(t, h, "/studio/api/stats?by=agent&"+statsWindow); !strings.Contains(b, `"key":"orders","runs":1,`) {
+		t.Errorf("no experiment_id = %s, want the app's own run alone", b)
 	}
 }

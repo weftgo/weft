@@ -42,8 +42,10 @@ import (
 //	            rates, percentiles, call counts — must not mix scripted
 //	            or playground replays into the app's own; a group's
 //	            runs_query carries the effective filter, so its link
-//	            lands on the same runs
-//	experiment_id the runs of one experiment (default: any)
+//	            lands on the same runs. With experiment_id the default is
+//	            all: every cell of an experiment is a playground run
+//	experiment_id the runs of one experiment (default: any); its cells
+//	            counted whatever playground's default
 //	status      /api/runs' status words (default: any); an unknown
 //	            value is 400, as since, until, by and playground are
 //
@@ -216,14 +218,19 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request) {
 	if !scopeRunsQuery(w, r, &query.RunQuery, q.Get("public_id")) {
 		return
 	}
-	// /api/runs' other filters, its words and its defaults — experiment
-	// runs included, any status — except playground: the app's own runs
-	// unless asked (all: both).
+	// /api/runs' other filters, its words and its defaults — any status
+	// — except playground: the app's own runs unless asked (all: both).
+	// An experiment's cells are all playground runs (weft.playground), so
+	// with experiment_id and no playground the default is both: the
+	// experiment's own runs, counted.
 	query.ExperimentID = q.Get("experiment_id")
 	no := false
 	query.Playground = &no
 	switch v := q.Get("playground"); v {
 	case "":
+		if query.ExperimentID != "" {
+			query.Playground = nil
+		}
 	case "all":
 		query.Playground = nil
 	default:

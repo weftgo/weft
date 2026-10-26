@@ -2735,7 +2735,9 @@ filters `search` and `runs` to that class),
 `90m`/`24h`/`7d` back from `until`, default 24h), `until`, `agent`,
 `tag.<k>=<v>`, `public_id`, `playground` (`false` the default, unlike
 `runs`' both: health numbers never mix in scripted or playground
-replays; `true` the replays alone, `all` both), `experiment_id`,
+replays; `true` the replays alone, `all` both; with `experiment_id` the
+default is `all` — every cell of an experiment is a playground run),
+`experiment_id`,
 `status` and `parent` (`*` the default, unlike `runs`' top-level:
 children counted under their own agent) — per group `runs`, `failed`,
 `failure_rate`, `calls`, `failed_calls`, the calls' own tokens, the cost
@@ -2878,10 +2880,10 @@ as `runs/{id}` serves them. A read-scoped panel token gets `json` and
 compaction view's `messages` null under the same badge; `otlp` and
 `wefttest` are 403 with that badge),
 `diff?a=<run id>&b=<run id>` (two runs compared step by step, under the
-`diff` capability — plan E3: `{a, b, steps, summary, holes}`, `a`/`b`
-`{run_id, steps, status}`; one row per step ordinal from 0 to the
-longer run's last — the ordinal is the alignment key — `{step, changed,
-a, b, changes, unknown}`, each side the step as `runs/{id}/steps/{n}` assembles
+`diff` capability — plan E3: `{a, b, aligned, steps, summary, holes}`, `a`/`b`
+`{run_id, steps, status}`; one row per aligned step ordinal — the
+ordinal is the alignment key — `{step, a_step, b_step, kept, kept_by,
+changed, a, b, changes, unknown, differs}`, each side the step as `runs/{id}/steps/{n}` assembles
 it, reduced to `{status, system_hash, system, tool_calls: [{name,
 args}], tool_results: [{call_id, name, content, is_error}], text,
 usage, marks, holes, system_hidden?}` — `system_hidden: true` when
@@ -2915,8 +2917,25 @@ token (the hash stays: `instructions_hash` is read-scoped too, so the
 column still compares), `not_recorded` for a run written before ADR
 0028, `text: null` under `gap` when no messages record of a finished
 step was stored, or when a messages record of the run does not parse;
-`summary` is `{changed_steps, first_changed}`
-(`first_changed: null` when nothing differs); the top-level `holes` is
+`summary` is `{changed_steps, first_changed, kept}`
+(`first_changed: null` when nothing differs). The alignment: when the
+two share a lineage (`weft.forked_from` `<source>#<n>`, followed up to 8
+links), `aligned` is `{replay, source, a_from, b_from}` — `source` the
+nearest run both descend from, `a_from`/`b_from` the source ordinal each
+side's step 0 is, `replay` `"a"`, `"b"` (that side replays the other)
+or `"both"` (two replays of a third run) — and the rows are the source's
+ordinals, `a_step`/`b_step` each side's own (null where it has no step:
+link to a side's step by its own ordinal); `aligned` is null and the
+runs align by their own ordinals otherwise. A row before a replay's
+from_step whose other side is the source itself is `kept: true` (the
+replay side null, nothing compared, never a change), counted in
+`summary.kept`. Between two siblings' from_steps, `kept_by` (`"a"` or
+`"b"`) names the side that kept the source's step: its column holds the
+source's step and the re-run is compared with it — a change counts in
+`changed_steps` and `first_changed`, never in `kept`; a source Studio
+cannot read leaves the row not compared (every column in `unknown`).
+`differs` lists the columns that differ without counting as a change:
+`usage` where a side billed no tokens (a scripted replay's 0→0); the top-level `holes` is
 `truncated` with the table's `response_cap` cause when a run has more
 than 500 steps (the first 500 are compared; each side's `steps` is still
 the run's count). Both runs must be inside a panel token's public id (403

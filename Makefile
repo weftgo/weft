@@ -181,15 +181,15 @@ studio-panel-asset: studio-build
 	cd studio/web && bun run scripts/panel-asset.ts $(abspath $(RELEASE_DIR))
 
 # The freshness gate (ADR 0018 §4): rebuild the web app and prove the
-# committed dist matches, fits the 700 KiB gzip budget (§7), and that
+# committed dist matches, fits the 800 KiB gzip budget (§7), and that
 # its own checks pass. CI runs this on every push.
 studio-check: studio-build
 	git diff --exit-code -- studio/dist || { echo "studio/dist is stale: run 'make studio-build' and commit"; exit 1; }
 	test -z "$$(git status --porcelain -- studio/dist)" || { git status --short -- studio/dist; echo "studio/dist has files the commit does not: run 'make studio-build' and commit"; exit 1; }
 	total=0; for f in $$(find studio/dist -type f); do \
 	  sz=$$(gzip -c $$f | wc -c); total=$$((total+sz)); done; \
-	kib=$$((total / 1024)); echo "studio dist: $$kib KiB gzipped (budget 700)"; \
-	test $$kib -le 700 || { echo "studio dist exceeds the 700 KiB gzip budget (ADR 0018 §7)"; exit 1; }
+	kib=$$((total / 1024)); echo "studio dist: $$kib KiB gzipped (budget 800)"; \
+	test $$kib -le 800 || { echo "studio dist exceeds the 800 KiB gzip budget (ADR 0018 §7)"; exit 1; }
 	cd studio/web && bun run scripts/npm-package.ts --check
 	git diff --exit-code -- studio/web/npm/package.json || { echo "studio/web/npm/package.json is not the weft version: run 'make studio-build' and commit"; exit 1; }
 	cd studio/web && bun run typecheck && bun run test

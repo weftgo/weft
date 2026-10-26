@@ -201,7 +201,7 @@ jobs:
           if-no-files-found: ignore
 
   # The studio freshness gate (ADR 0018 §4): rebuild the web app, prove
-  # the committed studio/dist matches byte for byte and fits the 700 KiB
+  # the committed studio/dist matches byte for byte and fits the 800 KiB
   # gzip budget, then run the web typecheck and tests. Bun is pinned to
   # the version the committed dist was built with.
   studio:

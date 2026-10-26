@@ -3144,12 +3144,12 @@ the build output is committed at [dist/](./dist) and embedded with
 
 ```sh
 make studio-build   # cd studio/web && bun install && bun run build
-make studio-check   # rebuild, prove dist is fresh, check the 700 KiB gzip budget, typecheck + test
+make studio-check   # rebuild, prove dist is fresh, check the 800 KiB gzip budget, typecheck + test
 ```
 
 `make studio-check` is the freshness gate (ADR 0018 §4): it fails if
-`dist/` does not match `web/` or if the gzipped total exceeds 700 KiB
-(currently ~599 KiB, the panel bundle's ~85 included).
+`dist/` does not match `web/` or if the gzipped total exceeds 800 KiB
+(currently ~696 KiB, the panel bundle's ~92 included).
 The build is deterministic — two builds from
 one tree are byte-identical (`scripts/clean-dist.ts` pins the router's
 prerender timestamp and keeps `<base href>` first in `<head>`).

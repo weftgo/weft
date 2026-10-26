@@ -482,7 +482,7 @@ order:
    `studio/dist` byte-identical to the commit, with no stray files.
    Otherwise you see "studio/dist is stale: run 'make studio-build' and
    commit".
-2. The gzipped dist fits **700 KiB** (ADR 0018 §7).
+2. The gzipped dist fits **800 KiB** (ADR 0018 §7).
 3. `studio/web/npm/package.json` carries the weft version.
 4. `bun run typecheck` and `bun run test`, which is vitest over
    `src/**/*.test.ts(x)`. That includes:

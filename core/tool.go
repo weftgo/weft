@@ -35,7 +35,7 @@ type ToolDef struct {
 	sourceFile string
 	sourceLine int
 	// sourceFunc is the runtime name of the function that called Tool:
-	// its import path places a file no go.mod roots (sourceRel).
+	// its import path names the file (sourceRel, the import-path form).
 	sourceFunc string
 
 	// subagent names the child agent when this tool came from Subagent,
@@ -673,6 +673,29 @@ type SkippedImport struct {
 	Name string
 	// Reason is the importer's error text.
 	Reason string
+}
+
+type skippedImportsOption struct {
+	source  string
+	skipped []SkippedImport
+}
+
+func (o skippedImportsOption) apply(a *Agent) {
+	for _, k := range o.skipped {
+		a.skipped = append(a.skipped, skippedEntry{Name: k.Name, Reason: k.Reason, Source: o.source})
+	}
+}
+
+// SkippedImports records tools an importer left out of a source the
+// agent offers no tool of — a server all of whose tools were skipped,
+// so no imported tool can carry them (SourceDetail.Skipped) — in the
+// tools record's skipped[] beside the ones its tools carry (record
+// contract §4, U23.2-fix). weft/mcp's ImportError.Option builds it.
+// For the observability record only; nothing the model sees changes.
+// A run that offers no tool at all records no tools record, and so no
+// skipped[] either.
+func SkippedImports(source string, skipped ...SkippedImport) Option {
+	return skippedImportsOption{source: source, skipped: slices.Clone(skipped)}
 }
 
 type originDetailOption struct{ d *SourceDetail }

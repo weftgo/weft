@@ -476,6 +476,7 @@ describe("no panel-only badge strings", () => {
     "element.ts|, ex)", // the call's execution facts (lib/cards.ts execLine)
     "element.ts|childOutcome(", // a tool error result (data, rule 1), a Subagent call's typed outcome
     'element.ts|weft-info", c)', // the onion's effect chips (lib/onion.ts effectChips, U23.2)
+    'element.ts|weft-info", c)', // the step's model-middleware chips (lib/onion.ts stepEffectsOf, U23.2-fix)
     "request.ts|data-weft-mark", // E1.2's change chips
     "request.ts|request could not be read",
     "request.ts|data-weft-attempts",

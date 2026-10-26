@@ -8,11 +8,13 @@ import type { Span } from "./api"
 import {
   MCP_FAILURE,
   ONION,
+  SAME_KIND,
   chainLayers,
   chatSpanOf,
   deniedWord,
   effectChips,
   effectsOf,
+  isMcpOrigin,
   layerShort,
   modelCallFacts,
   modelOnion,
@@ -206,8 +208,43 @@ describe("the tool call's onion", () => {
     const end = (id: string) =>
       toolOnion([], toolCallFacts(tool(spans, id))).at(-1)!.decision
     expect(end("m3")).toBe(`error · ${MCP_FAILURE.mcp_tool_error.word}`)
-    expect(end("m4")).toBe(`error · ${MCP_FAILURE.mcp_transport.word}`)
+    expect(end("m4")).toBe("error · MCP refused the call")
+    expect(end("m5")).toBe(`error · ${MCP_FAILURE.mcp_transport.word}`)
     expect(end("m2")).toBe("ran")
+  })
+
+  it("the Timeout wraps the whole chain: outermost, acting only when it cut the call (U23.2-fix)", () => {
+    expect(
+      words(
+        toolOnion([{ name: "mw.Allow" }], {
+          timeoutMs: 50,
+          errorType: "timeout",
+          failed: true,
+        })
+      )
+    ).toEqual([
+      "Timeout · 50 ms · ⏱ cut at 50 ms",
+      "Allow (idle)",
+      "handler · error · timeout",
+    ])
+    expect(words(toolOnion([], { timeoutMs: 50, failed: false }))).toEqual([
+      "Timeout · 50 ms (idle)",
+      "handler · ran",
+    ])
+    const spans = spansOf("tools.timeout")
+    expect(toolCallFacts(tool(spans, "s1")).timeoutMs).toBe(50)
+  })
+
+  it("two layers of one kind: the record names the kind, so the outer one shows the decision, the inner says why it cannot (U23.2-fix)", () => {
+    const spans = spansOf("mw.retry")
+    const f = modelCallFacts(chatSpanOf(spans, runOf("mw.retry"), 0)!, spans)
+    const [outer, inner] = modelOnion(
+      [{ name: "mw.Retry" }, { name: "mw.Retry" }],
+      f
+    )
+    expect(outer.decision).toMatch(/^→ attempt 2/)
+    expect(inner.idle).toBe(true)
+    expect(inner.attrs).toContainEqual(["on this call", SAME_KIND])
   })
 })
 
@@ -223,6 +260,15 @@ describe("the effect chips and the MCP words (both renderers)", () => {
     expect(effectChips(fx, true).at(-1)).toBe("mcp:billing")
     expect(effectChips({ origin: "subagent" }, true)).toEqual([])
     expect(effectChips(undefined)).toEqual([])
+  })
+
+  it("isMcpOrigin: mcp and mcp:<server>, never mcpx (U23.2-fix)", () => {
+    expect(isMcpOrigin("mcp")).toBe(true)
+    expect(isMcpOrigin("mcp:billing")).toBe(true)
+    expect(isMcpOrigin("mcpx")).toBe(false)
+    expect(isMcpOrigin("mcp-gateway")).toBe(false)
+    expect(isMcpOrigin(undefined)).toBe(false)
+    expect(effectChips({ origin: "mcpx" }, true)).toEqual([])
   })
 
   it("deniedWord: policy for mw.Allow, the layer's own word otherwise", () => {

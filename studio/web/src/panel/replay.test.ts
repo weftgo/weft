@@ -463,6 +463,27 @@ describe("the verbs are capability-gated (lib/replay.ts's canReplay)", () => {
     expect(all(el, "[data-weft-verb]")).toHaveLength(0)
   })
 
+  it("re-run says the list's noun: a session's turn among harness runs is a run (U23.2-fix)", async () => {
+    const routes = replayRoutes()
+    const list = routes["runs?public_id=pub_orders&limit=50"] as {
+      total: number
+      runs: Record<string, unknown>[]
+    }
+    list.runs = [
+      ...list.runs,
+      { ...list.runs[0], id: "h_harness", session_id: "", turn: 0 },
+    ]
+    list.total = 2
+    fakeStudio(routes, REPLAY_META)
+    const el = await mount({ ...ATTRS, "data-token": claims("playground") })
+    const names = all(
+      el,
+      '[data-weft-step="2"] > .weft-step-h [data-weft-verb]'
+    ).map((b) => b.getAttribute("aria-label"))
+    expect(names).toContain("re-run the whole run")
+    expect(names).not.toContain("re-run the whole turn")
+  })
+
   it("drawn under a playground-scoped panel token, each named", async () => {
     fakeStudio(replayRoutes(), REPLAY_META)
     const el = await mount({ ...ATTRS, "data-token": claims("playground") })

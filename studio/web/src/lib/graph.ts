@@ -14,7 +14,7 @@
 // Studio only (the panel links here).
 import type { RunRow, Span } from "./api"
 import { plural, tokenPair } from "./format"
-import { MCP_FAILURE } from "./onion"
+import { MCP_FAILURE, isMcpOrigin } from "./onion"
 import type { HoleMark } from "./honesty"
 import { statusOf } from "./status"
 import type { Status, StatusKey, StatusRow } from "./status"
@@ -47,6 +47,9 @@ export interface GraphNode {
    * answered isError (mcp_tool_error); any other failure counts in
    * fails alone. */
   unreachable?: number
+  /** Calls the server answered with a JSON-RPC error (mcp_rpc_error,
+   * U23.2-fix): reached, and refusing. */
+  refused?: number
   toolErrors?: number
 }
 
@@ -209,7 +212,7 @@ export function callGraph(
       src = tool ? sourceOf(run, tool) : undefined
     }
     const from = agentOf.get(run)
-    if (!from || !src?.startsWith("mcp")) continue
+    if (!from || !isMcpOrigin(src)) continue
     const id = `m:${src}`
     const n = nodeFor(id, "mcp", src)
     const d = ms(s)
@@ -220,6 +223,7 @@ export function callGraph(
       n.fails++
       const type = str(a["error.type"])
       if (type === "mcp_transport") n.unreachable = (n.unreachable ?? 0) + 1
+      if (type === "mcp_rpc_error") n.refused = (n.refused ?? 0) + 1
       if (type === "mcp_tool_error") n.toolErrors = (n.toolErrors ?? 0) + 1
     }
     edge(from, id, d, failed)
@@ -321,20 +325,26 @@ export function nodeLine(n: GraphNode): string {
   return parts.join(" · ")
 }
 
-/** An MCP server node's third line (U23.2, O8): its failures by kind,
- * "1 MCP unreachable · 1 MCP tool error" — a transport failure never
- * reads as a tool error. Null when none of its calls failed so. */
+/** An MCP server node's third line (U23.2, O8): its failures by kind
+ * in MCP_FAILURE's short words (the node names the server), "1
+ * unreachable · 1 refused · 1 tool error" — a transport failure never
+ * reads as a refusal or a tool error. Null when none failed so. */
 export function mcpFailLine(n: GraphNode): string | null {
   const parts: string[] = []
   if (n.unreachable)
-    parts.push(`${n.unreachable} ${MCP_FAILURE.mcp_transport.word}`)
+    parts.push(`${n.unreachable} ${MCP_FAILURE.mcp_transport.short}`)
+  if (n.refused) parts.push(`${n.refused} ${MCP_FAILURE.mcp_rpc_error.short}`)
   if (n.toolErrors)
-    parts.push(`${n.toolErrors} ${MCP_FAILURE.mcp_tool_error.word}`)
+    parts.push(`${n.toolErrors} ${MCP_FAILURE.mcp_tool_error.short}`)
   return parts.length ? parts.join(" · ") : null
 }
 
 /** An MCP node's hover: its failures' two kinds told apart. */
-export const MCP_NODE_HINT = `an MCP server (the tools' Origin, weft.tool.origin): its calls, the slowest, and failures by kind — ${MCP_FAILURE.mcp_transport.word}: ${MCP_FAILURE.mcp_transport.hint}; ${MCP_FAILURE.mcp_tool_error.word}: ${MCP_FAILURE.mcp_tool_error.hint}`
+export const MCP_NODE_HINT = `an MCP server (the tools' Origin, weft.tool.origin): its calls, the slowest, and failures by kind — ${Object.values(
+  MCP_FAILURE
+)
+  .map((f) => `${f.word}: ${f.hint}`)
+  .join("; ")}`
 
 /** The least a fitted graph is scaled to: below it its text (10 px in
  * the viewBox) drops under 9 px, so the pane scrolls sideways instead —

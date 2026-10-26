@@ -298,3 +298,15 @@ Not done: a `_meta` traceparent for `mcp.Serve`, which would link a
 served agent's run to its caller — the served run is still unlinked.
 Pinned by `TestToolsRecordNamesTheServer` and the `mcp_mesh`
 conformance fixture.
+
+### U23.2-fix
+
+- A JSON-RPC error answer is the server refusing the call, not an
+  unreachable server: `error.type` `mcp_rpc_error` ("MCP refused the
+  call") beside `mcp_transport` (no answer) and `mcp_tool_error`
+  (`isError`). A server that dies mid-call on a transport that never
+  reports it (the in-memory pipe) leaves the call to its deadline.
+- A server all of whose tools were skipped has no imported tool to
+  carry the skips: `core.SkippedImports(source, …)` — an agent option,
+  the one piece of core API this costs — carries them, and
+  `ImportError.Option()` builds it from the import's report.

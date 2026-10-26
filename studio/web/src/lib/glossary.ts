@@ -593,7 +593,7 @@ export const MCP_SERVER: Term = {
   long: [
     "weft/mcp imports a server's tools as ordinary tools; mcp.Server(name) names it.",
     "Each call then records its origin (mcp:billing), and the call graph draws the server.",
-    "MCP unreachable: the call never completed; MCP tool error: the server said isError.",
+    "MCP unreachable: no answer; MCP refused the call: a JSON-RPC error; MCP tool error: isError.",
   ].join("\n"),
   docs: "docs/adr/0015-mcp-interop.md#amendment-2026-10-26--mcp-identity-in-the-record-u232-o8",
   aliases: [],

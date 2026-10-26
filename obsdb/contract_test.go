@@ -2434,7 +2434,7 @@ func genCases() []genCase {
 	mcpMesh := genCase{
 		name: "mcp_mesh",
 		dest: content,
-		desc: "rw.mcp-mesh's shape, MCP identity recorded (U23.2, O8): a front desk imports a billing server's tools with mcp.Server(\"billing\"), mcp.Transport(\"memory\") and mcp.Prefix(\"svc_\") beside a local tool, one step calling all four. The tools record names each imported tool's source mcp:billing with its source_detail (server, transport, prefix, remote_name) and the tool the listing skipped (a non-object schema root) once in skipped[] with its reason; each imported call's execute_tool span carries weft.tool.origin mcp:billing — the local call none. svc_get_invoice answers; svc_legacy_ledger's server answers isError (error.type mcp_tool_error); svc_export_statement's handler fails the JSON-RPC exchange (error.type mcp_transport): two tool errors told apart, problems tool_errors 2; weft.tool.origin stays out of meta",
+		desc: "rw.mcp-mesh's shape, MCP identity recorded (U23.2, O8): a front desk imports a billing server's tools with mcp.Server(\"billing\"), mcp.Transport(\"memory\") and mcp.Prefix(\"svc_\") beside a local tool (and, from a second session to the billing service closed before the run, svc_archive_statement), one step calling all five. The tools record names each imported tool's source mcp:billing with its source_detail (server, transport, prefix, remote_name) and the tool the listing skipped (a non-object schema root) once in skipped[] with its reason; each imported call's execute_tool span carries weft.tool.origin mcp:billing — the local call none. svc_get_invoice answers; svc_legacy_ledger's server answers isError (error.type mcp_tool_error); svc_export_statement's handler fails and the server answers a JSON-RPC error (error.type mcp_rpc_error, U23.2-fix); svc_archive_statement's closed session never answers (error.type mcp_transport): three tool errors told apart, problems tool_errors 3; weft.tool.origin stays out of meta",
 		run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 			ok := func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 				return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "INV-9: 120 EUR, due 2026-10-01, unpaid"}}}, nil
@@ -2470,8 +2470,24 @@ func genCases() []genCase {
 			profile := core.Tool("customer_profile", "Profile of a customer.", func(_ context.Context, in lookupIn) (string, error) {
 				return "customer " + in.OrderID + ": Acme SARL", nil
 			})
+			// The billing archive: a second session to the billing
+			// service, closed before the run — its call never completes
+			// (mcp_transport).
+			archive := sdk.NewServer(&sdk.Implementation{Name: "billing-archive", Version: "1"}, nil)
+			archive.AddTool(&sdk.Tool{Name: "archive_statement", Description: "Archive a statement.", InputSchema: schema}, ok)
+			ast, act := sdk.NewInMemoryTransports()
+			go func() { _ = archive.Run(runCtx, ast) }()
+			asess, err := sdk.NewClient(&sdk.Implementation{Name: "front-desk", Version: "1"}, nil).Connect(ctx, act, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			archived, err := mcp.Tools(ctx, asess, mcp.Server("billing"), mcp.Transport("memory"), mcp.Prefix("svc_"))
+			if err != nil || len(archived) != 1 {
+				t.Fatalf("archive import: %d tools, %v", len(archived), err)
+			}
+			_ = asess.Close()
 			opts := []core.Option{core.Parallelism(1), profile}
-			for _, td := range imported {
+			for _, td := range append(imported, archived...) {
 				opts = append(opts, td)
 			}
 			agt := pipelineAgent(p, "front-desk", wefttest.Script(
@@ -2479,7 +2495,8 @@ func genCases() []genCase {
 					wefttest.Call{Name: "customer_profile", Args: `{"order_id":"42"}`},
 					wefttest.Call{Name: "svc_get_invoice", Args: `{"id":"INV-9"}`},
 					wefttest.Call{Name: "svc_legacy_ledger", Args: `{"id":"42"}`},
-					wefttest.Call{Name: "svc_export_statement", Args: `{"id":"42"}`}),
+					wefttest.Call{Name: "svc_export_statement", Args: `{"id":"42"}`},
+					wefttest.Call{Name: "svc_archive_statement", Args: `{"id":"42"}`}),
 				wefttest.Say("INV-9 (120 EUR) is unpaid; the ledger and the statement export are down.")), opts...)
 			return []string{mustRun(t, ctx, agt, core.Prompt("Customer 42 asks about invoice INV-9.")).ID}
 		},

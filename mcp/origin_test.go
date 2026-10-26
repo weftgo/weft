@@ -199,3 +199,32 @@ func TestToolsRecordNamesTheServer(t *testing.T) {
 		}
 	}
 }
+
+// U23.2-fix: a server all of whose tools were skipped imports none, so
+// no tool carries the skips; ImportError.Option records them on the
+// agent — the tools record's skipped[] names the server's tools.
+func TestImportErrorOptionRecordsAnAllSkippedServer(t *testing.T) {
+	sess, stop := served(t, func(srv *sdk.Server) {
+		odd := &sdk.Tool{Name: "odd", Description: "odd", InputSchema: json.RawMessage(`{"type":"object"}`)}
+		srv.AddTool(odd, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) { return nil, nil })
+		odd.InputSchema = json.RawMessage(`{"type":["object","null"]}`)
+	})
+	defer stop()
+	tools, err := Tools(context.Background(), sess, Server("ledger"))
+	var ie *ImportError
+	if !errors.As(err, &ie) || len(tools) != 0 || ie.Source != "mcp:ledger" {
+		t.Fatalf("tools %d, err %v; want none, an ImportError from mcp:ledger", len(tools), err)
+	}
+	rec := &toolsRecords{}
+	local := core.Tool("local", "L.", func(context.Context, struct{}) (string, error) { return "", nil })
+	if _, err := core.New(wefttest.Script(wefttest.Say("ok")), core.LoggerProvider(rec), core.Content(true), local, ie.Option()).
+		Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.bodies) != 1 || !strings.Contains(rec.bodies[0], `"skipped":[{"name":"odd","reason":`) ||
+		!strings.Contains(rec.bodies[0], `"source":"mcp:ledger"`) {
+		t.Errorf("tools record = %v, want odd skipped from mcp:ledger", rec.bodies)
+	}
+}

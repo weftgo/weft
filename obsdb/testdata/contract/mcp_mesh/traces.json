@@ -95,7 +95,7 @@
                 {
                   "key": "weft.run.events",
                   "value": {
-                    "intValue": "14"
+                    "intValue": "16"
                   }
                 },
                 {
@@ -117,7 +117,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847660013000000",
+              "endTimeUnixNano": "1790847660015000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent front-desk",
@@ -193,7 +193,7 @@
                 {
                   "key": "weft.model.tool_calls",
                   "value": {
-                    "intValue": "4"
+                    "intValue": "5"
                   }
                 },
                 {
@@ -451,7 +451,7 @@
                 {
                   "key": "error.type",
                   "value": {
-                    "stringValue": "mcp_transport"
+                    "stringValue": "mcp_rpc_error"
                   }
                 }
               ],
@@ -462,6 +462,69 @@
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000006",
               "startTimeUnixNano": "1790847660009000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "svc_archive_statement"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_5"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.tool.origin",
+                  "value": {
+                    "stringValue": "mcp:billing"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "mcp_transport"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847660012000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool svc_archive_statement",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000007",
+              "startTimeUnixNano": "1790847660011000000",
               "status": {
                 "code": "STATUS_CODE_ERROR"
               },
@@ -548,13 +611,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790847660012000000",
+              "endTimeUnixNano": "1790847660014000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
-              "spanId": "5ba0000000000007",
-              "startTimeUnixNano": "1790847660011000000",
+              "spanId": "5ba0000000000008",
+              "startTimeUnixNano": "1790847660013000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },

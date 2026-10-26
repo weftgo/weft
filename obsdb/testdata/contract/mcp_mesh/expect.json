@@ -1,6 +1,6 @@
 {
   "case": "mcp_mesh",
-  "description": "rw.mcp-mesh's shape, MCP identity recorded (U23.2, O8): a front desk imports a billing server's tools with mcp.Server(\"billing\"), mcp.Transport(\"memory\") and mcp.Prefix(\"svc_\") beside a local tool, one step calling all four. The tools record names each imported tool's source mcp:billing with its source_detail (server, transport, prefix, remote_name) and the tool the listing skipped (a non-object schema root) once in skipped[] with its reason; each imported call's execute_tool span carries weft.tool.origin mcp:billing — the local call none. svc_get_invoice answers; svc_legacy_ledger's server answers isError (error.type mcp_tool_error); svc_export_statement's handler fails the JSON-RPC exchange (error.type mcp_transport): two tool errors told apart, problems tool_errors 2; weft.tool.origin stays out of meta",
+  "description": "rw.mcp-mesh's shape, MCP identity recorded (U23.2, O8): a front desk imports a billing server's tools with mcp.Server(\"billing\"), mcp.Transport(\"memory\") and mcp.Prefix(\"svc_\") beside a local tool (and, from a second session to the billing service closed before the run, svc_archive_statement), one step calling all five. The tools record names each imported tool's source mcp:billing with its source_detail (server, transport, prefix, remote_name) and the tool the listing skipped (a non-object schema root) once in skipped[] with its reason; each imported call's execute_tool span carries weft.tool.origin mcp:billing — the local call none. svc_get_invoice answers; svc_legacy_ledger's server answers isError (error.type mcp_tool_error); svc_export_statement's handler fails and the server answers a JSON-RPC error (error.type mcp_rpc_error, U23.2-fix); svc_archive_statement's closed session never answers (error.type mcp_transport): three tool errors told apart, problems tool_errors 3; weft.tool.origin stays out of meta",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",
@@ -12,8 +12,8 @@
       "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
       "weft_version": "v0.0.0-contract",
       "started": "2026-10-01T09:41:00Z",
-      "finished": "2026-10-01T09:41:00.021Z",
-      "last_seen": "2026-10-01T09:41:00.021Z",
+      "finished": "2026-10-01T09:41:00.023Z",
+      "last_seen": "2026-10-01T09:41:00.023Z",
       "status": "succeeded",
       "steps": 2,
       "stop_reason": "stop",
@@ -22,16 +22,16 @@
         "input_tokens": 20,
         "output_tokens": 10
       },
-      "event_count": 14,
+      "event_count": 16,
       "message_count": 4,
       "delta_count": 1,
       "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "catalog_hash": "65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4",
+      "catalog_hash": "1c3ac4495d7a590e85dc0cea41739f5f9bad8b5f134381eb09f2dfc80e71fa4b",
       "request_count": 2,
-      "events_emitted": 14,
+      "events_emitted": 16,
       "messages_emitted": 4,
       "problems": {
-        "tool_errors": 2
+        "tool_errors": 3
       },
       "chat": [
         {
@@ -84,12 +84,22 @@
           "step": 0,
           "seq": 7,
           "status": "error",
+          "error_type": "mcp_rpc_error",
+          "origin": "mcp:billing"
+        },
+        {
+          "name": "svc_archive_statement",
+          "call_id": "call_5",
+          "step": 0,
+          "seq": 9,
+          "status": "error",
           "error_type": "mcp_transport",
           "origin": "mcp:billing"
         }
       ],
       "sources": [
         "skipped odd_report from mcp:billing: weft: ParseSchema: top-level type must be \"object\", got \"\"",
+        "svc_archive_statement mcp:billing server=billing transport=memory prefix=svc_ remote=archive_statement",
         "svc_export_statement mcp:billing server=billing transport=memory prefix=svc_ remote=export_statement",
         "svc_get_invoice mcp:billing server=billing transport=memory prefix=svc_ remote=get_invoice",
         "svc_legacy_ledger mcp:billing server=billing transport=memory prefix=svc_ remote=legacy_ledger"

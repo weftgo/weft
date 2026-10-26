@@ -229,7 +229,8 @@ func recordCardRuns(t *testing.T, url string) {
 				wefttest.Call{ID: "m1", Name: "customer_profile", Args: `{"order_id":"42"}`},
 				wefttest.Call{ID: "m2", Name: "svc_get_invoice", Args: `{"id":"INV-9"}`},
 				wefttest.Call{ID: "m3", Name: "svc_legacy_ledger", Args: `{"id":"42"}`},
-				wefttest.Call{ID: "m4", Name: "svc_export_statement", Args: `{"id":"42"}`}),
+				wefttest.Call{ID: "m4", Name: "svc_export_statement", Args: `{"id":"42"}`},
+				wefttest.Call{ID: "m5", Name: "svc_archive_statement", Args: `{"id":"42"}`}),
 			wefttest.Say("INV-9 is unpaid; the ledger and the export are down.")), opts...),
 			"r_mesh", core.Prompt("Customer 42 asks about invoice INV-9."))
 	})
@@ -270,7 +271,22 @@ func meshTools(t *testing.T, ctx context.Context) []*core.ToolDef {
 	if !errors.As(err, &ie) || len(tools) != 3 {
 		t.Fatalf("mesh import: %d tools, %v", len(tools), err)
 	}
-	return tools
+	// The billing archive: a second session to the billing service,
+	// closed before the run — its call never completes (mcp_transport).
+	archive := sdk.NewServer(&sdk.Implementation{Name: "billing-archive", Version: "1"}, nil)
+	archive.AddTool(&sdk.Tool{Name: "archive_statement", Description: "Archive a statement.", InputSchema: schema}, ok)
+	ast, act := sdk.NewInMemoryTransports()
+	go func() { _ = archive.Run(runCtx, ast) }()
+	asess, err := sdk.NewClient(&sdk.Implementation{Name: "front-desk", Version: "1"}, nil).Connect(ctx, act, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived, err := mcp.Tools(ctx, asess, mcp.Server("billing"), mcp.Transport("memory"), mcp.Prefix("svc_"))
+	if err != nil || len(archived) != 1 {
+		t.Fatalf("archive import: %d tools, %v", len(archived), err)
+	}
+	_ = asess.Close()
+	return append(tools, archived...)
 }
 
 // cardNorm makes the golden byte-stable: times, ids the pipeline mints,
@@ -411,8 +427,8 @@ func TestRunCardsGolden(t *testing.T) {
 		{"runtimelab.option-lab", "invoke_agent", "weft.override.params", []string{`{"temperature":0.4,"top_p":0.9,"max_tokens":64,"stop":["END"],"seed":7}`}},
 		{"mw.repairjson", "execute_tool", "weft.tool.args_repaired", []string{"true"}},
 		{"mw.allow", "execute_tool", "weft.tool.denied_by", []string{"allow"}},
-		{"rw.mcp-mesh", "execute_tool", "weft.tool.origin", []string{"mcp:billing", "mcp:billing", "mcp:billing"}},
-		{"rw.mcp-mesh", "execute_tool", "error.type", []string{"mcp_tool_error", "mcp_transport"}},
+		{"rw.mcp-mesh", "execute_tool", "weft.tool.origin", []string{"mcp:billing", "mcp:billing", "mcp:billing", "mcp:billing"}},
+		{"rw.mcp-mesh", "execute_tool", "error.type", []string{"mcp_rpc_error", "mcp_tool_error", "mcp_transport"}},
 	} {
 		if got := attr(c.shape, c.span, c.key); strings.Join(got, "|") != strings.Join(c.want, "|") {
 			t.Errorf("%s %s %s = %q, want %q", c.shape, c.span, c.key, got, c.want)

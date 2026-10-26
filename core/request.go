@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -155,7 +154,10 @@ const (
 // answers (a convention like ThinkingWire — the first-party adapters
 // implement it). Names only; the core sanitises what it is handed
 // whatever the method returns. Nil when none answers, or the answer is
-// empty. Bounded, never calls the provider; a panic reads nil.
+// empty. Bounded, never calls the provider; a panic reads nil. Behind
+// an mw.Fallback (whose Unwrap is its primary) the facts are the
+// primary's, every attempt's record alike — the contract says so
+// (U23.2-fix): a backup's endpoint is not recorded.
 func wireFacts(m Model) (w *wireBody) {
 	defer func() {
 		if recover() != nil {
@@ -188,30 +190,30 @@ func wireFacts(m Model) (w *wireBody) {
 }
 
 // serverAddress reduces an endpoint to host[:port]: a URL's scheme,
-// userinfo, path and query are dropped, a bare host keeps its port.
+// userinfo, path, query and fragment are dropped. Never a credential:
+// the authority ends at the first "/", "?" or "#", and an "@" inside it
+// ends the userinfo — but an "@" past that cut makes the endpoint
+// ambiguous (a password holding "/" or "#", `https://sk-abc/def@gw`,
+// `user:pa#ss@host`, or an "@" in a path or query) and it reads ""
+// rather than risk naming a secret as the host (U23.2-fix).
 func serverAddress(s string) string {
 	s = strings.TrimSpace(s)
-	if s == "" {
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	auth := s
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		auth = s[:i]
+	}
+	if at := strings.LastIndex(auth, "@"); at >= 0 {
+		auth = auth[at+1:]
+	} else if strings.Contains(s, "@") {
 		return ""
 	}
-	if strings.Contains(s, "://") {
-		u, err := url.Parse(s)
-		if err != nil {
-			return ""
-		}
-		s = u.Host
-	} else {
-		if i := strings.IndexAny(s, "/?#"); i >= 0 {
-			s = s[:i]
-		}
-		if i := strings.LastIndex(s, "@"); i >= 0 {
-			s = s[i+1:]
-		}
-	}
-	if len(s) > maxWireName {
+	if auth == "" || len(auth) > maxWireName {
 		return ""
 	}
-	return s
+	return auth
 }
 
 // wireNames sorts, dedupes and bounds a list of names (lowercased for
@@ -530,11 +532,12 @@ type skippedEntry struct {
 }
 
 // The skipped list's bounds: a hostile listing cannot grow the record
-// without limit, and an importer's error text is cut at a rune
-// boundary.
+// without limit, and an importer's error text and a listed name are cut
+// at a rune boundary.
 const (
 	maxSkipped       = 64
 	maxSkippedReason = 256
+	maxSkippedName   = 128
 )
 
 type toolEntry struct {
@@ -616,12 +619,26 @@ func detailBody(d *SourceDetail) *sourceDetailBody {
 	return &b
 }
 
-// skippedEntries collects the offered tools' sources' skipped imports:
-// once per (source, name, reason), sorted by source then name, at most
-// maxSkipped (the count past it returned as more), each reason cut at
-// maxSkippedReason bytes.
-func skippedEntries(tools []*ToolDef) (out []skippedEntry, more int) {
+// skippedEntries collects the skipped imports of the offered tools'
+// sources and the agent's SkippedImports: once per (source, name,
+// reason), sorted by source then name, at most maxSkipped (the count
+// past it returned as more), each name cut at maxSkippedName bytes and
+// each reason at maxSkippedReason.
+func (a *Agent) skippedEntries(tools []*ToolDef) (out []skippedEntry, more int) {
 	seen := map[skippedEntry]bool{}
+	add := func(e skippedEntry) {
+		if c, cut := capUTF8([]byte(e.Name), maxSkippedName); cut > 0 {
+			e.Name = c
+		}
+		if c, cut := capUTF8([]byte(e.Reason), maxSkippedReason); cut > 0 {
+			e.Reason = c
+		}
+		if seen[e] {
+			return
+		}
+		seen[e] = true
+		out = append(out, e)
+	}
 	for _, t := range tools {
 		if t == nil || t.detail == nil {
 			continue
@@ -631,16 +648,11 @@ func skippedEntries(tools []*ToolDef) (out []skippedEntry, more int) {
 			src = toolSourceLocal
 		}
 		for _, s := range t.detail.Skipped {
-			e := skippedEntry{Name: s.Name, Reason: s.Reason, Source: src}
-			if c, cut := capUTF8([]byte(e.Reason), maxSkippedReason); cut > 0 {
-				e.Reason = c
-			}
-			if seen[e] {
-				continue
-			}
-			seen[e] = true
-			out = append(out, e)
+			add(skippedEntry{Name: s.Name, Reason: s.Reason, Source: src})
 		}
+	}
+	for _, e := range a.skipped {
+		add(e)
 	}
 	slices.SortFunc(out, func(x, y skippedEntry) int {
 		if c := strings.Compare(x.Source, y.Source); c != 0 {
@@ -912,7 +924,7 @@ func (r *recorder) emitTools(ctx context.Context, a *Agent, step int, hash strin
 		r.debug(ctx, step, "tools", err)
 		return false
 	}
-	skipped, more := skippedEntries(tools)
+	skipped, more := a.skippedEntries(tools)
 	b, err := json.Marshal(toolsBody{Hash: hash, Tools: entries, Skipped: skipped, SkippedMore: more})
 	if err != nil {
 		r.debug(ctx, step, "tools", err)

@@ -16,6 +16,7 @@
 // content-off: no repeat is claimed), the tools offered are the request
 // catalog's (null when it was not read: the renderer says so with a
 // hole badge). Plain TypeScript, no React.
+import { isMcpOrigin } from "./onion"
 import { RETRY_RESULT } from "./error-kind"
 import { plural, tokenPair } from "./format"
 import type { FoldedRun } from "./events"
@@ -377,7 +378,7 @@ export function loopGraph(
     if (src) t.source = src
   }
   // Top to bottom by first use (MCP tools beside their server's first).
-  const group = (t: LoopTool) => (t.source?.startsWith("mcp") ? t.source : t.id)
+  const group = (t: LoopTool) => (isMcpOrigin(t.source) ? t.source : t.id)
   const first = new Map<string, number>()
   tools.forEach((t, i) => {
     if (!first.has(group(t))) first.set(group(t), i)

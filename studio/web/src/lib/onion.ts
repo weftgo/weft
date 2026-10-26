@@ -50,7 +50,7 @@ export function effectChips(f?: CallEffects, origin = false): string[] {
   if (f?.deniedBy) out.push(`✋ ${f.deniedBy}`)
   if (f?.masked) out.push(`⇣ ${f.masked}`)
   if (f?.repaired) out.push("✎ repaired")
-  if (origin && f?.origin?.startsWith("mcp")) out.push(f.origin)
+  if (origin && isMcpOrigin(f?.origin)) out.push(f.origin)
   return out
 }
 
@@ -72,16 +72,31 @@ export function effectsOf(a: Attrs): CallEffects {
 
 /** An MCP call's two failures (error.type), told apart: the server was
  * not reached vs it answered isError. */
-export const MCP_FAILURE: Record<string, { word: string; hint: string }> = {
+export const MCP_FAILURE: Record<
+  string,
+  { word: string; short: string; hint: string }
+> = {
   mcp_transport: {
     word: "MCP unreachable",
-    hint: "the tools/call exchange failed: the connection or the JSON-RPC call (error.type mcp_transport)",
+    short: "unreachable",
+    hint: "the tools/call got no answer: the connection or the stream ended, the session closed (error.type mcp_transport)",
+  },
+  mcp_rpc_error: {
+    word: "MCP refused the call",
+    short: "refused",
+    hint: "the MCP server answered a JSON-RPC error: its handler failed, the tool is not listed or the arguments were refused (error.type mcp_rpc_error)",
   },
   mcp_tool_error: {
     word: "MCP tool error",
+    short: "tool error",
     hint: "the MCP server answered and said its tool failed: isError (error.type mcp_tool_error)",
   },
 }
+
+/** isMcpOrigin: a tool's origin is an MCP server's — "mcp" (unnamed)
+ * or "mcp:<server>" (U23.2-fix: never "mcpx"). */
+export const isMcpOrigin = (s: string | undefined): s is string =>
+  s === "mcp" || !!s?.startsWith("mcp:")
 
 /** A tools record entry's source_detail (O8). */
 export interface SourceDetail {
@@ -234,6 +249,9 @@ export const ONION = {
     "the run's manifest is not stored here: only the layers that reported are shown, their order unknown",
   modelEnd: "model",
   handler: "handler",
+  timeout: "Timeout",
+  noAgent: (agent: string) =>
+    `the run's stored manifest names no agent "${agent}": only the layers that reported are shown, their order unknown`,
   agentModel: "model calls",
   agentTools: "tool calls",
 } as const
@@ -357,6 +375,32 @@ function layerOf(
   }
 }
 
+/** A second layer of a name the record already decided for: the
+ * attempt spans and the execute_tool attributes name a layer's kind
+ * ("retry", "allow"), never its position, so two mw.Retry layers'
+ * decisions cannot be told apart — the first (outermost) shows them,
+ * the others say so (U23.2-fix). */
+export const SAME_KIND =
+  "the record names this layer's kind, not its position: an outer layer of the same kind shows the decision"
+
+/** decideOnce maps a chain to its layers, each layer's decision from
+ * decide; a quiet layer (Log, Audit) none; a later layer of a name an
+ * earlier one carries a decision for is idle, saying SAME_KIND. */
+function decideOnce(
+  list: readonly LayerInfo[],
+  decide: (l: LayerInfo) => { decision?: string; attrs: [string, string][] }
+): OnionLayer[] {
+  const decided = new Set<string>()
+  return list.map((l) => {
+    if (QUIET.has(l.name)) return layerOf(l, { attrs: [] })
+    if (decided.has(l.name))
+      return layerOf(l, { attrs: [["on this call", SAME_KIND]] })
+    const d = decide(l)
+    if (d.decision) decided.add(l.name)
+    return layerOf(l, d)
+  })
+}
+
 /** modelOnion draws a model call's chain, outer to inner, each layer's
  * decision from its spans, the model at the end; chain undefined (no
  * stored manifest) draws only the layers that reported. */
@@ -364,8 +408,8 @@ export function modelOnion(
   chain: readonly LayerInfo[] | undefined,
   f: ModelCallFacts
 ): OnionLayer[] {
-  const layers = (chain ?? inferredModel(f)).map((l) =>
-    layerOf(l, QUIET.has(l.name) ? { attrs: [] } : modelDecision(l, f))
+  const layers = decideOnce(chain ?? inferredModel(f), (l) =>
+    modelDecision(l, f)
   )
   const tries = f.attempts.length
   layers.push({
@@ -386,13 +430,20 @@ export function modelOnion(
 /** stepChips is a model call's effects as the story's step chips, in
  * onion order: "↻ retry ×2", "⇄ fallback", "✎ repaired 1 arg". */
 export function stepChips(f: ModelCallFacts): string[] {
+  return fxChips(
+    f.attempts.filter((a) => a.layer === "retry").length,
+    f.attempts.some((a) => a.layer === "fallback" && a.ok),
+    f.repairs.length
+  )
+}
+
+/** fxChips is stepChips' words from the three counts (the panel's
+ * lean path reads the counts straight off the spans). */
+function fxChips(retried: number, fellBack: boolean, repaired: number) {
   const out: string[] = []
-  const retried = f.attempts.filter((a) => a.layer === "retry").length
   if (retried) out.push(`↻ retry ×${retried}`)
-  if (f.attempts.some((a) => a.layer === "fallback" && a.ok))
-    out.push("⇄ fallback")
-  if (f.repairs.length)
-    out.push(`✎ repaired ${plural(f.repairs.length, "arg")}`)
+  if (fellBack) out.push("⇄ fallback")
+  if (repaired) out.push(`✎ repaired ${plural(repaired, "arg")}`)
   return out
 }
 
@@ -425,7 +476,17 @@ export function stepEffectsOf(
   for (const s of spans ?? []) {
     if (!isChat(s) || s.attrs?.["weft.run.id"] !== runId) continue
     const step = num(s.attrs["weft.step.index"])
-    const chips = stepChips(modelCallFacts(s, spans ?? []))
+    // The counts stepChips reads, without modelCallFacts' full parse
+    // (the panel bundles this path).
+    const kids = (spans ?? []).filter(
+      (a) => a.name === "attempt" && a.parent_span_id === s.span_id
+    )
+    const layer = (a: OnionSpan) => a.attrs?.["weft.attempt.layer"]
+    const chips = fxChips(
+      kids.filter((a) => layer(a) === "retry").length,
+      kids.some((a) => layer(a) === "fallback" && a.status === "ok"),
+      s.events?.filter((e) => e.name === "weft.repair").length ?? 0
+    )
     if (step !== undefined && chips.length) out.set(step, chips)
   }
   return out
@@ -441,6 +502,8 @@ export const STEP_CHIPS_HINT =
 export interface ToolCallFacts extends CallEffects {
   errorType?: string
   failed: boolean
+  /** weft.tool.timeout_ms: the deadline the call ran under. */
+  timeoutMs?: number
 }
 
 /** toolCallFacts reads an execute_tool span. */
@@ -450,6 +513,7 @@ export function toolCallFacts(sp: OnionSpan): ToolCallFacts {
     ...effectsOf(a),
     errorType: str(a["error.type"]),
     failed: sp.status === "error",
+    timeoutMs: num(a["weft.tool.timeout_ms"]),
   }
 }
 
@@ -495,9 +559,22 @@ export function toolOnion(
   f: ToolCallFacts
 ): OnionLayer[] {
   const list = chain ?? inferredTool(f)
-  const layers = list.map((l) =>
-    layerOf(l, QUIET.has(l.name) ? { attrs: [] } : toolDecision(l, f))
-  )
+  const layers = decideOnce(list, (l) => toolDecision(l, f))
+  // The call's Timeout (weft.tool.timeout_ms, UX-A-43): the deadline
+  // wraps the whole chain, so it is the outermost layer — acting when
+  // it cut the call (error.type timeout).
+  if (f.timeoutMs)
+    layers.unshift({
+      name: ONION.timeout,
+      full: ONION.timeout,
+      config: msText(f.timeoutMs),
+      decision:
+        f.errorType === "timeout"
+          ? `⏱ cut at ${msText(f.timeoutMs)}`
+          : undefined,
+      idle: f.errorType !== "timeout",
+      attrs: [["weft.tool.timeout_ms", String(f.timeoutMs)]],
+    })
   const named =
     f.deniedBy === "allow" && list.some((l) => l.name === "mw.Allow")
   if (

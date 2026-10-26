@@ -168,6 +168,18 @@ describe("the empty states (UX-F-33)", () => {
     expect(text(el, ".weft-main")).not.toContain("select a turn")
   })
 
+  it("a session scope whose turns have not loaded says turn, not run (U23.2-fix)", async () => {
+    const routes = baseRoutes()
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
+    fakeStudio(routes)
+    const el = await mount()
+    expect(text(el, "[data-weft-stats]")).toMatch(/^0 turns · /)
+  })
+
   it("the dev list says what fills it", async () => {
     const routes = empty()
     routes["runs?limit=10"] = { total: 0, runs: [], next_before: null }

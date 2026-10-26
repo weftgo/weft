@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -868,5 +869,65 @@ func TestToolsSkippedFirstEntryDoesNotBlockLaterSameName(t *testing.T) {
 	}
 	if out, err := tools[0].Invoke(context.Background(), json.RawMessage(`{}`)); err != nil || out != "called" {
 		t.Fatalf("Invoke = %q, %v; want called", out, err)
+	}
+}
+
+// U23.2-fix: a live server's JSON-RPC error answer — its raw handler
+// returned an error, or the tool is no longer listed — is the server
+// refusing the call (error.type mcp_rpc_error), never "unreachable";
+// a stdio stream that hit EOF (the server process gone) stays
+// mcp_transport. Each reads "mcp: <err>" for the model.
+func TestToolsRPCErrorIsNotTransport(t *testing.T) {
+	sess, stop := served(t, func(srv *sdk.Server) {
+		addRemoteTool(srv, "explode", true, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return nil, errors.New("remote exploded")
+		})
+	})
+	defer stop()
+	tools, err := Tools(context.Background(), sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]*core.ToolDef{}
+	for _, td := range tools {
+		byName[td.Name] = td
+	}
+	_, err = byName["explode"].Invoke(context.Background(), json.RawMessage(`{"q":"a"}`))
+	if got := errorTypeOf(err); got != "mcp_rpc_error" || !strings.HasPrefix(err.Error(), "mcp: ") {
+		t.Errorf("handler error: %v (%s), want an mcp:-prefixed mcp_rpc_error", err, got)
+	}
+	// A name the server does not list (it forgot the tool between the
+	// listing and the call).
+	unknown := callHandler(sess, "never_listed")
+	_, err = unknown(context.Background(), json.RawMessage(`{}`))
+	if got := errorTypeOf(err); got != "mcp_rpc_error" {
+		t.Errorf("unknown tool: %v (%s), want mcp_rpc_error", err, got)
+	}
+
+	// stdio: the server's stream ends (EOF) — transport.
+	cr, sw := io.Pipe()
+	sr, cw := io.Pipe()
+	srv := sdk.NewServer(&sdk.Implementation{Name: "stdio", Version: "0"}, nil)
+	addRemoteTool(srv, "ping", true, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx, &sdk.IOTransport{Reader: sr, Writer: sw}) }()
+	stdio, err := sdk.NewClient(&sdk.Implementation{Name: "c", Version: "0"}, nil).
+		Connect(context.Background(), &sdk.IOTransport{Reader: cr, Writer: cw}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pings, err := Tools(context.Background(), stdio)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = sw.Close() // the server process's stdout ends
+	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer ccancel()
+	_, err = pings[0].Invoke(cctx, json.RawMessage(`{}`))
+	if got := errorTypeOf(err); got != "mcp_transport" {
+		t.Errorf("stdio EOF: %v (%s), want mcp_transport", err, got)
 	}
 }

@@ -104,6 +104,7 @@ describe("error kinds (U4)", () => {
     )
     expect(toolFailure("mcp_transport")?.word).toBe("MCP unreachable")
     expect(toolFailure("mcp_tool_error")?.word).toBe("MCP tool error")
+    expect(toolFailure("mcp_rpc_error")?.word).toBe("MCP refused the call")
     expect(toolFailure("context.Canceled")?.word).toBe("cancelled")
     // A deadline is its own kind, the attempt phrase's word (W7-prep).
     expect(toolFailure("context.DeadlineExceeded")?.word).toBe(

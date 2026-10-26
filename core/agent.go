@@ -628,8 +628,11 @@ type Agent struct {
 	params          RequestParams
 	modelMW         []ModelMiddleware
 	toolMW          []ToolMiddleware
-	tracerProvider  trace.TracerProvider
-	loggerProvider  log.LoggerProvider
+	// skipped are SkippedImports' entries: the tools record's skipped[]
+	// beside the ones the offered tools carry (U23.2-fix).
+	skipped        []skippedEntry
+	tracerProvider trace.TracerProvider
+	loggerProvider log.LoggerProvider
 	// records is the provider resolved at New (the option's, else the
 	// global one), what LoggerProvider returns.
 	records log.LoggerProvider

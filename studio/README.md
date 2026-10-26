@@ -1190,8 +1190,8 @@ data-token (the dev token) or a panel token (POST /api/panel-tokens)
 itself signed in). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 289,582 B raw / 98,142 B gzip
-(95.8 KiB, the bundle of the ledger's row "U23.2"; 8,354 B — 8.2 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 290,672 B raw / 98,491 B gzip
+(96.2 KiB, the bundle of the ledger's row "U23.2-fix"; 8,005 B — 7.8 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -2018,8 +2018,9 @@ server (the `execute_tool` span's `weft.tool.origin` starting `mcp` —
 `mcp:<server>` under `mcp.Server`, O8 — a child run's calls included;
 a span from before O8 falls back on the request catalog's source, a
 child run's such calls said not shown, its catalog not read here; its
-third line the failures by kind, "1 MCP unreachable · 1 MCP tool
-error", U23.2), each edge its call count and slowest call (the slowest, not a
+third line the failures by kind, "1 unreachable · 1 refused · 1 tool
+error" — no answer, a JSON-RPC error answer, `isError` — U23.2,
+U23.2-fix), each edge its call count and slowest call (the slowest, not a
 percentile; an agent node's runs' own cost), a self-call a loop over
 its node; a run without spans that has subagent rows draws it from
 the run rows this page read (`rowsCallGraph`: agents, edges, statuses
@@ -2038,11 +2039,13 @@ from the run's stored manifest (`model_middleware`, `tool_middleware`,
 a tool's own `middleware`), each layer's decision on the call from its
 spans (`src/lib/onion.ts`: Retry's attempt, wait and HTTP status,
 Fallback's served model, RepairJSON's "repaired 1 arg", Allow's "✋
-denied by policy", MapErrors' "INTERNAL ← io.EOF"), an idle layer
+denied by policy", MapErrors' "INTERNAL ← io.EOF", the call's
+Timeout outermost, "⏱ cut at 50 ms" when it fired; a second layer of
+one kind says the record cannot tell which), an idle layer
 greyed — Log and Audit record no decision per call, so they are
 always drawn idle — and a click opening the layer's attributes;
-without a stored manifest only the layers that reported, "their order
-unknown". The story's step carries the same effects as chips (`↻ retry
+without a stored manifest — or one naming no agent of the run — only
+the layers that reported, "their order unknown". The story's step carries the same effects as chips (`↻ retry
 ×2`, `⇄ fallback`, `✎ repaired 1 arg`) and each tool row its own (`✋
 allow`, `⇣ io.EOF`, `✎ repaired`, the panel's too); the Agents card
 draws each agent's two chains; the Request pane's catalog lists the

@@ -3,11 +3,12 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -234,23 +235,39 @@ func toolSource(t *ToolDef) string {
 }
 
 // sourceRel renders a source file for the manifest, never as an
-// absolute path, so the document — and weft.manifest.hash — is the same
-// on every machine (ADR 0012's 2026-10-26 amendment, U23.1-fix):
+// absolute path and never depending on the machine that renders it, so
+// the document — and weft.manifest.hash — is the same for one binary on
+// every host, sources present or not (ADR 0012's 2026-10-26 amendment,
+// U23.1-fix, U23.2-fix): one form, the import-path form —
 //
-//   - a file in the module cache (…/pkg/mod/<module>@<version>/<dir>/f.go)
-//     reads <module>/<dir>/f.go, the version dropped and the cache's
-//     case escapes (!x) undone;
-//   - a file under a go.mod reads relative to that module's root (the
-//     nearest ancestor directory holding go.mod);
-//   - anything else — a binary run where its sources are not, a build
-//     host's path — reads as the function's import path and the file's
-//     base name (github.com/x/y/f.go), or the base name alone when the
-//     function is unknown.
+//   - the defining function's package import path and the file's base
+//     name (github.com/x/y/f.go; a main package by the binary's build
+//     info path — its test binary's name for it — else "main/f.go"; an
+//     external test package's "github.com/x/y_test/f_test.go");
+//   - with the function unknown, a file in the module cache
+//     (…/pkg/mod/<module>@<version>/<dir>/f.go) reads <module>/<dir>/f.go,
+//     the version dropped and the cache's case escapes (!x) undone —
+//     the same path the import-path form names;
+//   - anything else, the base name alone.
 //
-// function is the runtime name of a function defined in file ("" when
-// unknown). Separators are always "/".
+// No go.mod is consulted: a module-relative path found on the build
+// host and an import path on the deploy host would make one binary two
+// manifests, the second reading as stale. function is the runtime name
+// of a function defined in file ("" when unknown). Separators are
+// always "/".
 func sourceRel(file, function string) string {
 	slashed := filepath.ToSlash(file)
+	if pkg := funcPackage(function); pkg != "" {
+		if pkg == "main" {
+			// A binary names its main package "main" at run time, the
+			// test binary by its import path: the build info's path
+			// makes both read the same.
+			if p := mainPath(); p != "" {
+				pkg = p
+			}
+		}
+		return pkg + "/" + path.Base(slashed)
+	}
 	if i := strings.LastIndex(slashed, "/pkg/mod/"); i >= 0 {
 		rest := slashed[i+len("/pkg/mod/"):]
 		if at := strings.Index(rest, "@"); at >= 0 {
@@ -262,33 +279,18 @@ func sourceRel(file, function string) string {
 		}
 		return unescapeModPath(rest)
 	}
-	if rel, ok := moduleRel(file); ok {
-		return rel
-	}
-	if pkg := funcPackage(function); pkg != "" {
-		return pkg + "/" + path.Base(slashed)
-	}
 	return path.Base(slashed)
 }
 
-// moduleRel renders file relative to the nearest ancestor directory
-// holding go.mod; ok is false when no ancestor does.
-func moduleRel(file string) (string, bool) {
-	dir := filepath.Dir(file)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			if rel, err := filepath.Rel(dir, file); err == nil {
-				return filepath.ToSlash(rel), true
-			}
-			return "", false
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
+// mainPath is the running binary's main package import path from its
+// build info ("" when unknown, a `go run` of files, or a test binary).
+var mainPath = sync.OnceValue(func() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok || bi.Path == "" || bi.Path == "command-line-arguments" || strings.HasSuffix(bi.Path, ".test") {
+		return ""
 	}
-}
+	return bi.Path
+})
 
 // funcPackage is a runtime function name's import path:
 // "github.com/x/y.F.func1" reads "github.com/x/y", "main.main" "main".

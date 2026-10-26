@@ -278,6 +278,7 @@ export function toolFailure(
         hint: "the run's deadline passed while the call ran",
       }
     case "mcp_transport":
+    case "mcp_rpc_error":
     case "mcp_tool_error":
       return MCP_FAILURE[errorType]
     case "DENIED":

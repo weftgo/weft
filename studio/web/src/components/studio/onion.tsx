@@ -32,15 +32,22 @@ export interface OnionTarget {
 }
 
 /** The run's own agent entry in its stored manifest (U27), when Studio
- * holds it: the chains the onion draws. */
-function useAgentEntry(doc: RunDoc): ManifestAgent | undefined {
+ * holds it: the chains the onion draws. Matched by the run's agent
+ * name only — another agent's chain is never drawn as this one's
+ * (U23.2-fix): missing says the manifest was read and names no such
+ * agent. */
+function useAgentEntry(doc: RunDoc): {
+  agent?: ManifestAgent
+  missing: boolean
+} {
   const hash = doc.manifest_hash
   const q = useQuery({
     ...storedManifestQuery(hash || "-"),
     enabled: !!hash && !!doc.manifest_available,
   })
   const agents = q.data?.manifest.agents
-  return agents?.find((a) => a.name === doc.agent) ?? agents?.[0]
+  const agent = agents?.find((a) => a.name === doc.agent)
+  return { agent, missing: !!agents && !agent }
 }
 
 const attrOf = (s: TimedSpan, k: string) => s.attrs[k]
@@ -97,7 +104,7 @@ export function CallOnion({
   target: OnionTarget
   timed?: readonly TimedSpan[]
 }) {
-  const agent = useAgentEntry(doc)
+  const { agent, missing } = useAgentEntry(doc)
   const found = timed ? resolve(target, timed, doc.id) : undefined
   if (!found) return null
   // Another run's call (a child's span in the tree): this manifest is
@@ -122,6 +129,7 @@ export function CallOnion({
       label={found.kind === "model" ? ONION.model : ONION.tool}
       layers={layers}
       known={chain !== undefined}
+      unknownWhy={missing && own ? ONION.noAgent(doc.agent) : undefined}
     />
   )
 }
@@ -132,6 +140,7 @@ export function OnionRow({
   label,
   layers,
   known = true,
+  unknownWhy,
   heading = ONION.title,
 }: {
   label: string
@@ -139,6 +148,9 @@ export function OnionRow({
   /** The chain came from a manifest (else only the layers that
    * reported, ONION.noChain). */
   known?: boolean
+  /** Why the chain is not known, when more is known than "no stored
+   * manifest" (ONION.noAgent). */
+  unknownWhy?: string
   heading?: string
 }) {
   const [open, setOpen] = useState<number | null>(null)
@@ -216,7 +228,7 @@ export function OnionRow({
       ) : null}
       {known ? null : (
         <p className="font-mono text-[10px] text-faint" data-onion-unknown>
-          {ONION.noChain}
+          {unknownWhy ?? ONION.noChain}
         </p>
       )}
     </section>

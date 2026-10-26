@@ -235,7 +235,7 @@
                 {
                   "key": "weft.catalog.hash",
                   "value": {
-                    "stringValue": "65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4"
+                    "stringValue": "1c3ac4495d7a590e85dc0cea41739f5f9bad8b5f134381eb09f2dfc80e71fa4b"
                   }
                 },
                 {
@@ -246,7 +246,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"hash\":\"65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4\",\"tools\":[{\"name\":\"customer_profile\",\"description\":\"Profile of a customer.\",\"schema\":{\"type\":\"object\",\"properties\":{\"order_id\":{\"type\":\"string\",\"description\":\"the order to look up\"}},\"required\":[\"order_id\"]},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":false,\"source\":\"local\"},{\"name\":\"svc_export_statement\",\"description\":\"Export a statement.\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"}},\"type\":\"object\"},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":true,\"source\":\"mcp:billing\",\"source_detail\":{\"server\":\"billing\",\"transport\":\"memory\",\"prefix\":\"svc_\",\"remote_name\":\"export_statement\"}},{\"name\":\"svc_get_invoice\",\"description\":\"Status of an invoice.\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"}},\"type\":\"object\"},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":true,\"source\":\"mcp:billing\",\"source_detail\":{\"server\":\"billing\",\"transport\":\"memory\",\"prefix\":\"svc_\",\"remote_name\":\"get_invoice\"}},{\"name\":\"svc_legacy_ledger\",\"description\":\"Ledger balance (legacy).\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"}},\"type\":\"object\"},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":true,\"source\":\"mcp:billing\",\"source_detail\":{\"server\":\"billing\",\"transport\":\"memory\",\"prefix\":\"svc_\",\"remote_name\":\"legacy_ledger\"}}],\"skipped\":[{\"name\":\"odd_report\",\"reason\":\"weft: ParseSchema: top-level type must be \\\"object\\\", got \\\"\\\"\",\"source\":\"mcp:billing\"}]}"
+                "stringValue": "{\"hash\":\"1c3ac4495d7a590e85dc0cea41739f5f9bad8b5f134381eb09f2dfc80e71fa4b\",\"tools\":[{\"name\":\"customer_profile\",\"description\":\"Profile of a customer.\",\"schema\":{\"type\":\"object\",\"properties\":{\"order_id\":{\"type\":\"string\",\"description\":\"the order to look up\"}},\"required\":[\"order_id\"]},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":false,\"source\":\"local\"},{\"name\":\"svc_archive_statement\",\"description\":\"Archive a statement.\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"}},\"type\":\"object\"},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":true,\"source\":\"mcp:billing\",\"source_detail\":{\"server\":\"billing\",\"transport\":\"memory\",\"prefix\":\"svc_\",\"remote_name\":\"archive_statement\"}},{\"name\":\"svc_export_statement\",\"description\":\"Export a statement.\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"}},\"type\":\"object\"},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":true,\"source\":\"mcp:billing\",\"source_detail\":{\"server\":\"billing\",\"transport\":\"memory\",\"prefix\":\"svc_\",\"remote_name\":\"export_statement\"}},{\"name\":\"svc_get_invoice\",\"description\":\"Status of an invoice.\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"}},\"type\":\"object\"},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":true,\"source\":\"mcp:billing\",\"source_detail\":{\"server\":\"billing\",\"transport\":\"memory\",\"prefix\":\"svc_\",\"remote_name\":\"get_invoice\"}},{\"name\":\"svc_legacy_ledger\",\"description\":\"Ledger balance (legacy).\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"}},\"type\":\"object\"},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":true,\"source\":\"mcp:billing\",\"source_detail\":{\"server\":\"billing\",\"transport\":\"memory\",\"prefix\":\"svc_\",\"remote_name\":\"legacy_ledger\"}}],\"skipped\":[{\"name\":\"odd_report\",\"reason\":\"weft: ParseSchema: top-level type must be \\\"object\\\", got \\\"\\\"\",\"source\":\"mcp:billing\"}]}"
               },
               "eventName": "weft.tools",
               "flags": 1,
@@ -297,7 +297,7 @@
                 {
                   "key": "weft.catalog.hash",
                   "value": {
-                    "stringValue": "65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4"
+                    "stringValue": "1c3ac4495d7a590e85dc0cea41739f5f9bad8b5f134381eb09f2dfc80e71fa4b"
                   }
                 },
                 {
@@ -308,7 +308,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4\",\"names\":[\"customer_profile\",\"svc_export_statement\",\"svc_get_invoice\",\"svc_legacy_ledger\"]},\"sequential_tools\":true,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"1c3ac4495d7a590e85dc0cea41739f5f9bad8b5f134381eb09f2dfc80e71fa4b\",\"names\":[\"customer_profile\",\"svc_export_statement\",\"svc_get_invoice\",\"svc_legacy_ledger\",\"svc_archive_statement\"]},\"sequential_tools\":true,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -364,7 +364,7 @@
                 }
               ],
               "body": {
-                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"customer_profile\",\"args\":{\"order_id\":\"42\"}},{\"type\":\"tool_call\",\"id\":\"call_2\",\"name\":\"svc_get_invoice\",\"args\":{\"id\":\"INV-9\"}},{\"type\":\"tool_call\",\"id\":\"call_3\",\"name\":\"svc_legacy_ledger\",\"args\":{\"id\":\"42\"}},{\"type\":\"tool_call\",\"id\":\"call_4\",\"name\":\"svc_export_statement\",\"args\":{\"id\":\"42\"}}]}]"
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"customer_profile\",\"args\":{\"order_id\":\"42\"}},{\"type\":\"tool_call\",\"id\":\"call_2\",\"name\":\"svc_get_invoice\",\"args\":{\"id\":\"INV-9\"}},{\"type\":\"tool_call\",\"id\":\"call_3\",\"name\":\"svc_legacy_ledger\",\"args\":{\"id\":\"42\"}},{\"type\":\"tool_call\",\"id\":\"call_4\",\"name\":\"svc_export_statement\",\"args\":{\"id\":\"42\"}},{\"type\":\"tool_call\",\"id\":\"call_5\",\"name\":\"svc_archive_statement\",\"args\":{\"id\":\"42\"}}]}]"
               },
               "eventName": "weft.messages",
               "flags": 1,
@@ -923,6 +923,142 @@
                 {
                   "key": "weft.record",
                   "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "9"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_5"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "svc_archive_statement"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":9,\"call_id\":\"call_5\",\"name\":\"svc_archive_statement\",\"args\":{\"id\":\"42\"}}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660014000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660014000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "front-desk"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "11"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_5"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "svc_archive_statement"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":10,\"call_id\":\"call_5\",\"name\":\"svc_archive_statement\",\"content\":\"mcp: connection closed: calling \\\"tools/call\\\": client is closing\",\"is_error\":true}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790847660015000000",
+              "severityNumber": "SEVERITY_NUMBER_WARN",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790847660015000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
                     "stringValue": "messages"
                   }
                 },
@@ -964,14 +1100,14 @@
                 }
               ],
               "body": {
-                "stringValue": "[{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"call_id\":\"call_1\",\"name\":\"customer_profile\",\"content\":\"customer 42: Acme SARL\",\"is_error\":false},{\"type\":\"tool_result\",\"call_id\":\"call_2\",\"name\":\"svc_get_invoice\",\"content\":\"INV-9: 120 EUR, due 2026-10-01, unpaid\",\"is_error\":false},{\"type\":\"tool_result\",\"call_id\":\"call_3\",\"name\":\"svc_legacy_ledger\",\"content\":\"ledger offline: maintenance window until 18:00\",\"is_error\":true},{\"type\":\"tool_result\",\"call_id\":\"call_4\",\"name\":\"svc_export_statement\",\"content\":\"mcp: calling \\\"tools/call\\\": statement service unreachable\",\"is_error\":true}]}]"
+                "stringValue": "[{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"call_id\":\"call_1\",\"name\":\"customer_profile\",\"content\":\"customer 42: Acme SARL\",\"is_error\":false},{\"type\":\"tool_result\",\"call_id\":\"call_2\",\"name\":\"svc_get_invoice\",\"content\":\"INV-9: 120 EUR, due 2026-10-01, unpaid\",\"is_error\":false},{\"type\":\"tool_result\",\"call_id\":\"call_3\",\"name\":\"svc_legacy_ledger\",\"content\":\"ledger offline: maintenance window until 18:00\",\"is_error\":true},{\"type\":\"tool_result\",\"call_id\":\"call_4\",\"name\":\"svc_export_statement\",\"content\":\"mcp: calling \\\"tools/call\\\": statement service unreachable\",\"is_error\":true},{\"type\":\"tool_result\",\"call_id\":\"call_5\",\"name\":\"svc_archive_statement\",\"content\":\"mcp: connection closed: calling \\\"tools/call\\\": client is closing\",\"is_error\":true}]}]"
               },
               "eventName": "weft.messages",
               "flags": 1,
-              "observedTimeUnixNano": "1790847660014000000",
+              "observedTimeUnixNano": "1790847660016000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847660014000000",
+              "timeUnixNano": "1790847660016000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -1009,7 +1145,7 @@
                 {
                   "key": "weft.event.pos",
                   "value": {
-                    "intValue": "10"
+                    "intValue": "12"
                   }
                 },
                 {
@@ -1036,10 +1172,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847660015000000",
+              "observedTimeUnixNano": "1790847660017000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847660015000000",
+              "timeUnixNano": "1790847660017000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -1077,7 +1213,7 @@
                 {
                   "key": "weft.event.pos",
                   "value": {
-                    "intValue": "11"
+                    "intValue": "13"
                   }
                 },
                 {
@@ -1092,10 +1228,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847660016000000",
+              "observedTimeUnixNano": "1790847660018000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847660016000000",
+              "timeUnixNano": "1790847660018000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -1139,7 +1275,7 @@
                 {
                   "key": "weft.catalog.hash",
                   "value": {
-                    "stringValue": "65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4"
+                    "stringValue": "1c3ac4495d7a590e85dc0cea41739f5f9bad8b5f134381eb09f2dfc80e71fa4b"
                   }
                 },
                 {
@@ -1150,14 +1286,14 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"65610eccd85f3011ec0e3dd1ba69f6a3eb0ddfe4222186a27fc7b9e1cc7dd4f4\",\"names\":[\"customer_profile\",\"svc_export_statement\",\"svc_get_invoice\",\"svc_legacy_ledger\"]},\"sequential_tools\":true,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"1c3ac4495d7a590e85dc0cea41739f5f9bad8b5f134381eb09f2dfc80e71fa4b\",\"names\":[\"customer_profile\",\"svc_export_statement\",\"svc_get_invoice\",\"svc_legacy_ledger\",\"svc_archive_statement\"]},\"sequential_tools\":true,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790847660017000000",
+              "observedTimeUnixNano": "1790847660019000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000007",
-              "timeUnixNano": "1790847660017000000",
+              "spanId": "5ba0000000000008",
+              "timeUnixNano": "1790847660019000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -1204,10 +1340,10 @@
               },
               "eventName": "weft.delta",
               "flags": 1,
-              "observedTimeUnixNano": "1790847660018000000",
+              "observedTimeUnixNano": "1790847660020000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847660018000000",
+              "timeUnixNano": "1790847660020000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -1260,10 +1396,10 @@
               },
               "eventName": "weft.messages",
               "flags": 1,
-              "observedTimeUnixNano": "1790847660019000000",
+              "observedTimeUnixNano": "1790847660021000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847660019000000",
+              "timeUnixNano": "1790847660021000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -1301,7 +1437,7 @@
                 {
                   "key": "weft.event.pos",
                   "value": {
-                    "intValue": "12"
+                    "intValue": "14"
                   }
                 },
                 {
@@ -1334,10 +1470,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847660020000000",
+              "observedTimeUnixNano": "1790847660022000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847660020000000",
+              "timeUnixNano": "1790847660022000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -1375,7 +1511,7 @@
                 {
                   "key": "weft.event.pos",
                   "value": {
-                    "intValue": "13"
+                    "intValue": "15"
                   }
                 }
               ],
@@ -1384,10 +1520,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790847660021000000",
+              "observedTimeUnixNano": "1790847660023000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790847660021000000",
+              "timeUnixNano": "1790847660023000000",
               "traceId": "7ace0000000000000000000000000001"
             }
           ],

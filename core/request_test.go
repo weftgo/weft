@@ -1342,6 +1342,32 @@ func ExampleOriginDetail() {
 	// skipped: odd · schema too deep · mcp:billing
 }
 
+// ExampleSkippedImports: a source none of whose tools could be
+// imported still names them in the tools record (weft/mcp's
+// ImportError.Option builds this).
+func ExampleSkippedImports() {
+	lp := newRecLogProvider()
+	local := core.RawTool("lookup", "Look up an order.", nil,
+		func(context.Context, json.RawMessage) (string, error) { return "ok", nil })
+	agt := core.New(wefttest.Script(wefttest.Say("ok")), local, core.LoggerProvider(lp),
+		core.SkippedImports("mcp:ledger", core.SkippedImport{Name: "balance", Reason: "schema root is not an object"}))
+	if _, err := agt.Generate(context.Background(), core.Prompt("hi")); err != nil {
+		return
+	}
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	for _, r := range lp.records {
+		if r.attr("weft.record") == "tools" {
+			var body struct {
+				Skipped []struct{ Name, Reason, Source string } `json:"skipped"`
+			}
+			_ = json.Unmarshal([]byte(r.body), &body)
+			fmt.Println(body.Skipped[0].Source, body.Skipped[0].Name, "·", body.Skipped[0].Reason)
+		}
+	}
+	// Output: mcp:ledger balance · schema root is not an object
+}
+
 // O8: source_detail and skipped[] are not part of the catalog hash —
 // the same tool with and without them hashes alike — skipped[] is
 // listed once per (source, name, reason) whichever tools carry it,
@@ -1394,6 +1420,31 @@ func TestToolsRecordSkippedBoundedAndOutsideTheHash(t *testing.T) {
 	first := sk[0].(map[string]any)
 	if first["name"] != "t00" || first["source"] != "mcp:x" || len(first["reason"].(string)) != 256 || !utf8.ValidString(first["reason"].(string)) {
 		t.Errorf("first skipped = %v, want t00 from mcp:x, its reason cut at 256 bytes on a rune boundary", first)
+	}
+
+	// U23.2-fix: a listed name is cut too (128 bytes, a rune boundary),
+	// and a source none of whose tools is offered records its skips
+	// through the agent's SkippedImports.
+	long := strings.Repeat("ü", 100) // 200 bytes
+	_, carried := body(append(mk(), core.RawTool("c", "C.", nil,
+		func(context.Context, json.RawMessage) (string, error) { return "", nil },
+		core.OriginDetail(core.SourceDetail{Skipped: []core.SkippedImport{{Name: long, Reason: "r"}}}))))
+	if n := carried["skipped"].([]any)[0].(map[string]any)["name"].(string); len(n) != 128 || !utf8.ValidString(n) {
+		t.Errorf("a 200-byte name recorded as %d bytes, want 128 on a rune boundary", len(n))
+	}
+	lp := newRecLogProvider()
+	agt := core.New(wefttest.Script(wefttest.Say("ok")), core.LoggerProvider(lp), mk()[0],
+		core.SkippedImports("mcp:ledger", core.SkippedImport{Name: "odd", Reason: "schema root is not an object"}))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	for _, r := range lp.records {
+		if r.attr("weft.record") == "tools" &&
+			!strings.Contains(r.body, `"skipped":[{"name":"odd","reason":"schema root is not an object","source":"mcp:ledger"}]`) {
+			t.Errorf("SkippedImports not in the tools record: %s", r.body)
+		}
 	}
 }
 

@@ -368,7 +368,7 @@ import {
   repairedWords,
   tokenSplit,
 } from "../lib/cards"
-import { deniedWord, effectChips } from "../lib/onion"
+import { deniedWord, effectChips, stepEffectsOf } from "../lib/onion"
 
 /** hasCapability reports whether meta lists the named capability (the
  * panel renders a control only when the server reports it, §8.5). */
@@ -2975,12 +2975,13 @@ export class WeftDevtools extends HTMLElement {
 
   /** noun is the list's word (UX-F-13, lib/glossary.ts TURN): "turn"
    * only for one conversation's turns whose runs all have a session (a
-   * public id mixing harness runs says "run"); a public id's harness runs, a page of runs and the fallback say
+   * public id mixing harness runs says "run"), or a session scope whose
+   * turns have not loaded yet; a public id's harness runs, a page of runs and the fallback say
    * "run". The header, the list, the filter and the picker read it. */
   private noun(s: PanelState): "turn" | "run" {
+    // A session scope says "turn" before its turns load (U23.2-fix).
     return this.turnish() &&
-      s.turns.length &&
-      s.turns.every((r) => r.session_id)
+      (s.turns.length ? s.turns.every((r) => r.session_id) : s.session)
       ? "turn"
       : "run"
   }
@@ -5883,6 +5884,7 @@ export class WeftDevtools extends HTMLElement {
                   fork:
                     !!(row?.session_id || t.doc?.session_id) &&
                     !(childRun(row) || childRun(t.doc)),
+                  noun: this.noun(s),
                   open: (runId, draft, agent, from) => {
                     this.opener = from
                     this.go(
@@ -6502,6 +6504,9 @@ export interface ReplayCtx {
   agent?: string
   max: number | null
   fork: boolean
+  /** The list's word for a forkable run (noun(), U23.2-fix): "turn"
+   * or "run" — a child is never forkable, so its verbs say "run". */
+  noun?: "turn" | "run"
   open: (
     runId: string,
     draft: ReplayDraft,
@@ -6683,7 +6688,9 @@ function stepVerbs(n: number, r: ReplayCtx): HTMLElement {
       editPromptAndReplay(n),
       r
     ),
-    verb(`re-run the whole ${r.fork ? "turn" : "run"}`, "↻", rerun(), r),
+    // A fork is a session's own turn: the list's word for it (noun());
+    // a child's or a harness run's verbs say "run".
+    verb(`re-run the whole ${r.fork ? r.noun : "run"}`, "↻", rerun(), r),
   ]
   if (r.fork)
     list.push(verb("continue here with a new message", "⎇", continueHere(), r))
@@ -7458,6 +7465,11 @@ function renderStep(
     head.append(
       el("span", "weft-badge weft-info", line, { "data-weft-attempts": "" })
     )
+  // The model middleware's effects (U23.2-fix): lib/onion.ts, the run
+  // page's step chips (↻ retry ×2 · ⇄ fallback · ✎ repaired 1 arg).
+  if (t && !ctx?.child)
+    for (const c of stepEffectsOf(t.spans, t.id).get(step.index) ?? [])
+      head.append(el("span", "weft-badge weft-info", c))
   if (step.finish) {
     const timing = timingLine(step.finish.latencyMs, step.finish.ttftMs)
     if (timing) head.append(el("span", "", timing, { "data-weft-timing": "" }))

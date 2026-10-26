@@ -3,6 +3,7 @@ package mcp_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -231,4 +232,44 @@ func ExampleServer() {
 	t := body.Tools[0]
 	fmt.Println(t.Name, t.Source, t.SourceDetail["transport"], t.SourceDetail["remote_name"])
 	// Output: svc_get_invoice mcp:billing memory get_invoice
+}
+
+// ImportError.Option: a server whose every tool was skipped imports
+// nothing, so the agent records the skips itself — the tools record's
+// skipped[] names them under the server's origin.
+func ExampleImportError_Option() {
+	srv := sdk.NewServer(&sdk.Implementation{Name: "ledger", Version: "1"}, nil)
+	odd := &sdk.Tool{Name: "balance", Description: "Balance.", InputSchema: json.RawMessage(`{"type":"object"}`)}
+	srv.AddTool(odd, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) { return nil, nil })
+	odd.InputSchema = json.RawMessage(`{"type":["object","null"]}`) // a root the core cannot key on
+	serverTransport, clientTransport := sdk.NewInMemoryTransports()
+	go func() { _ = srv.Run(context.Background(), serverTransport) }()
+	sess, err := sdk.NewClient(&sdk.Implementation{Name: "app", Version: "1"}, nil).
+		Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		panic(err)
+	}
+	tools, err := mcp.Tools(context.Background(), sess, mcp.Server("ledger"))
+	opts := []weft.Option{weft.Tool("lookup", "Look up.", func(context.Context, struct{}) (string, error) { return "", nil })}
+	var skipped *mcp.ImportError
+	if errors.As(err, &skipped) {
+		opts = append(opts, skipped.Option())
+	}
+	fmt.Println(len(tools), "imported")
+
+	rec := &toolsRecord{}
+	opts = append(opts, weft.LoggerProvider(rec), weft.Content(true))
+	if _, err := weft.New(wefttest.Script(wefttest.Say("ok")), opts...).Generate(context.Background(), weft.Prompt("x")); err != nil {
+		panic(err)
+	}
+	var body struct {
+		Skipped []struct{ Name, Source string } `json:"skipped"`
+	}
+	rec.mu.Lock()
+	_ = json.Unmarshal([]byte(rec.body), &body)
+	rec.mu.Unlock()
+	fmt.Println("skipped:", body.Skipped[0].Name, "from", body.Skipped[0].Source)
+	// Output:
+	// 0 imported
+	// skipped: balance from mcp:ledger
 }

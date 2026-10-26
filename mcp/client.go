@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/weftgo/weft/core"
 )
@@ -28,9 +29,12 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 // no binary tool results); a remote isError result is a tool error
 // carrying the server's text verbatim (errors.Is ErrToolError; an
 // empty one reads ErrToolError's own text); a
-// transport failure is a tool error reading "mcp: <err>". Both are
-// data the model sees, never run errors; their execute_tool spans tell
-// them apart by error.type — mcp_tool_error and mcp_transport.
+// transport failure is a tool error reading "mcp: <err>", and so is a
+// JSON-RPC error answer (the server's handler failed, the tool is not
+// listed). All three are data the model sees, never run errors; their
+// execute_tool spans tell them apart by error.type — mcp_tool_error
+// (isError), mcp_rpc_error (the server refused the call) and
+// mcp_transport (no answer: the connection, the session closed).
 //
 // Every imported tool names where it came from for the record (O8):
 // its Origin is "mcp:<server>" under Server ("mcp" otherwise) and its
@@ -38,8 +42,13 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 // on the server, with the tools this listing skipped — so the tools
 // record carries source_detail per tool and skipped[] per server, and
 // each call's execute_tool span weft.tool.origin. A transport failure
-// (error.type mcp_transport) and a remote isError (mcp_tool_error) stay
-// told apart on the span.
+// (error.type mcp_transport), a JSON-RPC error answer (mcp_rpc_error)
+// and a remote isError (mcp_tool_error) stay told apart on the span. A
+// server that dies mid-call on a transport that never reports it (the
+// SDK's in-memory pipe) leaves the call to its deadline: give imported
+// tools a Timeout through Policy. A server all of whose tools were
+// skipped imports nothing to carry the skips: ImportError.Option
+// records them on the agent.
 //
 // Imported tools are ordinary weft tools: register them with New or
 // serve them through ToolSource; Timeout, MaxResultBytes,
@@ -166,14 +175,7 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*cor
 	if cfg.server != "" {
 		origin += ":" + cfg.server
 	}
-	var gone []core.SkippedImport
-	for _, sk := range skipped {
-		reason := sk.Err.Error()
-		if sk.Name == "" {
-			reason = fmt.Sprintf("entry %d: %s", sk.Index, reason)
-		}
-		gone = append(gone, core.SkippedImport{Name: sk.Name, Reason: reason})
-	}
+	gone := skippedImports(skipped)
 	out := make([]*core.ToolDef, 0, len(keep)) // non-nil: zero tools is a fact, not an error
 	for _, k := range keep {
 		t := k.t
@@ -200,7 +202,7 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*cor
 		out = append(out, tool)
 	}
 	if len(skipped) > 0 {
-		return out, &ImportError{Skipped: skipped}
+		return out, &ImportError{Skipped: skipped, Source: origin}
 	}
 	return out, nil
 }
@@ -213,6 +215,41 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*cor
 // against a ParseSchema failure still works through the report.
 type ImportError struct {
 	Skipped []SkippedTool
+	// Source is the imported tools' Origin ("mcp:<server>", "mcp"):
+	// the tools record's skipped[] names it (U23.2-fix).
+	Source string
+}
+
+// Option records the skipped tools on an agent that offers none of the
+// server's tools — every one was skipped, so no imported tool carries
+// them into the tools record (core.SkippedImports, U23.2-fix). Harmless
+// beside importable tools: the record lists each skip once.
+//
+//	tools, err := mcp.Tools(ctx, sess, mcp.Server("billing"))
+//	var skipped *mcp.ImportError
+//	if errors.As(err, &skipped) {
+//		opts = append(opts, skipped.Option())
+//	}
+func (e *ImportError) Option() core.Option {
+	return core.SkippedImports(e.Source, skippedImports(e.Skipped)...)
+}
+
+// skippedImports renders the skipped tools for the record: the name on
+// the server, the cause's text (the listing entry named when the name
+// itself was the problem).
+func skippedImports(skipped []SkippedTool) []core.SkippedImport {
+	out := make([]core.SkippedImport, 0, len(skipped))
+	for _, sk := range skipped {
+		reason := "skipped"
+		if sk.Err != nil {
+			reason = sk.Err.Error()
+		}
+		if sk.Name == "" {
+			reason = fmt.Sprintf("entry %d: %s", sk.Index, reason)
+		}
+		out = append(out, core.SkippedImport{Name: sk.Name, Reason: reason})
+	}
+	return out
 }
 
 // SkippedTool is one tool Tools left out: its server-side name (empty
@@ -320,7 +357,14 @@ func callHandler(sess *sdk.ClientSession, remoteName string) func(context.Contex
 		if err != nil {
 			// Transport and protocol failures are data too: the tool
 			// failed, the model stops calling it (deep dive ch. 5's
-			// two channels, one boundary).
+			// two channels, one boundary). A JSON-RPC error answer is
+			// the live server refusing the call — its handler failed,
+			// the tool is unknown, the arguments invalid — never an
+			// unreachable server (U23.2-fix).
+			var rpc *jsonrpc.Error
+			if errors.As(err, &rpc) {
+				return "", &rpcError{err: err}
+			}
 			return "", &transportError{err: err}
 		}
 		text := renderContent(res)
@@ -349,8 +393,8 @@ func (e *remoteError) Unwrap() error { return ErrToolError }
 // said its tool failed.
 func (e *remoteError) ErrorType() string { return "mcp_tool_error" }
 
-// transportError is a tools/call that did not complete — the
-// connection, the JSON-RPC exchange, a protocol error — reading
+// transportError is a tools/call that got no answer — the connection,
+// the stream, a closed session — reading
 // "mcp: <err>" as before, the cause unwrapped for errors.Is (a
 // cancelled call still reads as the context's error, and core names it
 // so). ErrorType is error.type mcp_transport: the server never
@@ -360,6 +404,17 @@ type transportError struct{ err error }
 func (e *transportError) Error() string     { return "mcp: " + e.err.Error() }
 func (e *transportError) Unwrap() error     { return e.err }
 func (e *transportError) ErrorType() string { return "mcp_transport" }
+
+// rpcError is a tools/call the server answered with a JSON-RPC error —
+// its handler returned an error, the tool is not listed, the arguments
+// were refused — reading "mcp: <err>" like a transport failure (the
+// model's text is unchanged) but typed apart: error.type mcp_rpc_error,
+// the server reached and refusing, not unreachable (U23.2-fix).
+type rpcError struct{ err error }
+
+func (e *rpcError) Error() string     { return "mcp: " + e.err.Error() }
+func (e *rpcError) Unwrap() error     { return e.err }
+func (e *rpcError) ErrorType() string { return "mcp_rpc_error" }
 
 // renderContent is the result rendering, pinned by test (ADR 0015):
 // structuredContent's JSON when the server sends it (the spec says

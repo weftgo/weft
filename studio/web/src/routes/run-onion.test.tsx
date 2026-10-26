@@ -183,18 +183,23 @@ describe("the onion shown (U23.2)", () => {
       '[data-node="m:mcp:billing"]'
     )!
     expect(node.textContent).toContain("mcp:billing")
-    expect(node.textContent).toMatch(/3 calls · slowest \S+ · 2 failed/)
+    expect(node.textContent).toMatch(/4 calls · slowest \S+ · 3 failed/)
+    // U23.2-fix: unreachable (no answer), refused (a JSON-RPC error
+    // answer) and a tool error (isError), each its own kind.
     expect(node.querySelector("[data-node-mcp-failures]")!.textContent).toBe(
-      `1 ${MCP_FAILURE.mcp_transport.word} · 1 ${MCP_FAILURE.mcp_tool_error.word} `
+      `1 ${MCP_FAILURE.mcp_transport.short} · 1 ${MCP_FAILURE.mcp_rpc_error.short} · 1 ${MCP_FAILURE.mcp_tool_error.short} `
     )
   })
 
-  it("rw.mcp-mesh: the story's pills say MCP unreachable and MCP tool error; the Request pane lists the skipped tool greyed", async () => {
+  it("rw.mcp-mesh: the story's pills say MCP unreachable, MCP refused the call and MCP tool error; the Request pane lists the skipped tool greyed", async () => {
     open("rw.mcp-mesh")
     await waitFor(() =>
-      expect(call("m4")?.querySelector("[data-tool-pill]")?.textContent).toBe(
+      expect(call("m5")?.querySelector("[data-tool-pill]")?.textContent).toBe(
         MCP_FAILURE.mcp_transport.word
       )
+    )
+    expect(call("m4")!.querySelector("[data-tool-pill]")!.textContent).toBe(
+      "MCP refused the call"
     )
     expect(call("m3")!.querySelector("[data-tool-pill]")!.textContent).toBe(
       MCP_FAILURE.mcp_tool_error.word
@@ -214,5 +219,46 @@ describe("the onion shown (U23.2)", () => {
       /^skipped: odd_report \(mcp:billing\) — /
     )
     expect(skipped.className).toContain("text-faint")
+  })
+
+  it("a stored manifest that names no agent of the run draws no other agent's chain, and says why (U23.2-fix)", async () => {
+    const s = shape("mw.repairjson")
+    open("mw.repairjson", "sel=s0", (st) => {
+      st.on(`GET runs/${s.run.id}`, {
+        ...s.run,
+        manifest_hash: "h_other",
+        manifest_available: true,
+      })
+      st.on("GET manifests/h_other", {
+        manifest_hash: "h_other",
+        agent: "someone-else",
+        source: "runtime",
+        first_seen: "2026-10-01T09:00:00Z",
+        current_manifest_hash: "h_other",
+        manifest: {
+          weft: 1,
+          agents: [
+            {
+              name: "someone-else",
+              model: { provider: "wefttest", name: "script" },
+              policy: {
+                parallelism: 1,
+                max_steps: 10,
+                max_result_bytes: 0,
+                max_model_retries: 3,
+              },
+              tools: [],
+              model_middleware: [{ name: "mw.Log" }, { name: "mw.RepairJSON" }],
+            },
+          ],
+        },
+      })
+    })
+    await waitFor(() =>
+      expect(drawer().querySelector("[data-onion-unknown]")?.textContent).toBe(
+        ONION.noAgent(s.run.agent)
+      )
+    )
+    expect(layers().map((l) => l.name)).toEqual(["mw.RepairJSON", "model"])
   })
 })

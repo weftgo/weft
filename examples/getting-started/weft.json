@@ -36,7 +36,7 @@
               "type": "string"
             }
           },
-          "source": "examples/getting-started/main.go:19"
+          "source": "github.com/weftgo/weft/examples/getting-started/main.go:19"
         }
       ]
     }

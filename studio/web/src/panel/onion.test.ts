@@ -6,10 +6,20 @@
 // mw.repairjson's call "✎ repaired", rw.mcp-mesh's calls their server.
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-import { deniedWord, effectChips } from "../lib/onion"
+import { deniedWord, effectChips, skippedLine } from "../lib/onion"
 import { panelRoutes } from "../test/cards-fixture"
 import type { WeftDevtools } from "./element"
-import { $, fakeStudio, META, mount, settle, setup, teardown } from "./testkit"
+import {
+  $,
+  all,
+  click,
+  fakeStudio,
+  META,
+  mount,
+  settle,
+  setup,
+  teardown,
+} from "./testkit"
 
 beforeEach(setup)
 afterEach(teardown)
@@ -51,5 +61,36 @@ describe("the panel's effect chips (U23.2)", () => {
     for (const id of ["m2", "m3", "m4"])
       expect(badges(call(el, id)), id).toContain("mcp:billing")
     expect(badges(call(el, "m1"))).not.toContain("mcp:billing")
+  })
+
+  it("the step head carries the model middleware's chips, the run page's words (U23.2-fix)", async () => {
+    let el = await story("mw.retry")
+    const head = (e: WeftDevtools) =>
+      all(e, '[data-weft-step="0"] > .weft-step-h .weft-badge').map(
+        (b) => b.textContent
+      )
+    expect(head(el)).toContain("↻ retry ×2")
+    teardown()
+    setup()
+    el = await story("mw.repairjson")
+    expect(head(el)).toContain("✎ repaired 1 arg")
+  })
+
+  it("rw.mcp-mesh: the Request tab lists the skipped tool in lib/onion.ts's words (U23.2-fix)", async () => {
+    const el = await story("rw.mcp-mesh")
+    click($(el, "#weft-tab-request"))
+    await settle()
+    const notes = all(el, ".weft-rq-tools .weft-note").map((n) => n.textContent)
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toMatch(/^skipped: odd_report \(mcp:billing\) — /)
+    expect(
+      notes[0]?.startsWith(
+        skippedLine({
+          name: "odd_report",
+          reason: "",
+          source: "mcp:billing",
+        }).slice(0, -1)
+      )
+    ).toBe(true)
   })
 })

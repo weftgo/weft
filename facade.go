@@ -1857,6 +1857,18 @@ type SourceDetail = core.SourceDetail
 // record's skipped[] entry.
 type SkippedImport = core.SkippedImport
 
+// SkippedImports records tools an importer left out of a source the
+// agent offers no tool of — a server all of whose tools were skipped,
+// so no imported tool can carry them (SourceDetail.Skipped) — in the
+// tools record's skipped[] beside the ones its tools carry (record
+// contract §4, U23.2-fix). weft/mcp's ImportError.Option builds it.
+// For the observability record only; nothing the model sees changes.
+// A run that offers no tool at all records no tools record, and so no
+// skipped[] either.
+func SkippedImports(source string, skipped ...SkippedImport) Option {
+	return core.SkippedImports(source, skipped...)
+}
+
 // OriginDetail sets the tool's origin in parts (SourceDetail), recorded
 // beside its Origin as the tools record's source_detail and skipped[]
 // (record contract §4). The value is copied; the last OriginDetail

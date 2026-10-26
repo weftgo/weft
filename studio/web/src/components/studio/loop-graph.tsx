@@ -16,6 +16,7 @@
 // are lib/loopgraph.ts's, the colours the palette's roles
 // (lib/palette.ts: error-as-data mustard, a park in the parked colour),
 // a hole the A3 table's badge (lib/honesty.ts).
+import { isMcpOrigin } from "@/lib/onion"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { KeyboardEvent as ReactKeyboardEvent } from "react"
 
@@ -364,7 +365,7 @@ export function LoopGraphView({
   // MCP frames: consecutive shown tools of one mcp source.
   const frames: { source: string; from: number; to: number }[] = []
   shown.forEach((t, i) => {
-    if (!t.source?.startsWith("mcp")) return
+    if (!isMcpOrigin(t.source)) return
     const f = frames.at(-1)
     if (f && f.source === t.source && f.to === i - 1) f.to = i
     else frames.push({ source: t.source, from: i, to: i })

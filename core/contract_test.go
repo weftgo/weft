@@ -1640,7 +1640,7 @@ func TestManifestPinsFormat(t *testing.T) {
               "order_id"
             ]
           },
-          "source": "contract_test.go:L"
+          "source": "github.com/weftgo/weft/core_test/contract_test.go:L"
         }
       ]
     }
@@ -1706,15 +1706,16 @@ func TestManifestOutputSchema(t *testing.T) {
 	}
 }
 
-// The tool's source is the defining call site, module-relative.
+// The tool's source is the defining call site in the import-path form
+// (U23.2-fix): the package's import path and the file's base name.
 func TestManifestSource(t *testing.T) {
 	sourced := core.Tool("sourced", "", func(_ context.Context, _ struct{}) (string, error) { return "", nil })
 	b, err := core.Manifest(core.New(wefttest.Script(wefttest.Say("ok")), core.Name("a"), sourced))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), `"source": "contract_test.go:`) {
-		t.Errorf("source is not a module-relative file:line of this test file:\n%s", b)
+	if !strings.Contains(string(b), `"source": "github.com/weftgo/weft/core_test/contract_test.go:`) {
+		t.Errorf("source is not the import-path file:line of this test file:\n%s", b)
 	}
 }
 

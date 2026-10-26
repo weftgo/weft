@@ -165,7 +165,7 @@ func TestOnionGovernancePatterns(t *testing.T) {
 	doc := manifestOf(t, scrubbed, limited)
 	tools, models := doc.Agents[0], doc.Agents[1]
 	if len(tools.ToolMiddleware) != 1 || !strings.HasPrefix(tools.ToolMiddleware[0].Name, "core_test.governance.func") ||
-		!strings.HasPrefix(tools.ToolMiddleware[0].Source, "onion_test.go:") || tools.ModelMiddleware != nil {
+		!strings.HasPrefix(tools.ToolMiddleware[0].Source, "github.com/weftgo/weft/core_test/onion_test.go:") || tools.ModelMiddleware != nil {
 		t.Errorf("scrubbed agent's onion = model %v, tool %+v; want the scrub closure by name and file:line", tools.ModelMiddleware, tools.ToolMiddleware)
 	}
 	if got := layerNames(models.ModelMiddleware); !slices.Equal(got, []string{"core_test.yieldModel (opaque)"}) {
@@ -299,7 +299,7 @@ func TestManifestListsTheOnion(t *testing.T) {
 		t.Fatalf("hooks = %+v, want one tap, one prepare_step, one on_run_end", h)
 	}
 	for _, f := range [][]core.MiddlewareInfo{h.Tap, h.PrepareStep, h.OnRunEnd} {
-		if !strings.HasPrefix(f[0].Source, "onion_test.go:") || !strings.HasPrefix(f[0].Name, "core_test.TestManifestListsTheOnion.func") {
+		if !strings.HasPrefix(f[0].Source, "github.com/weftgo/weft/core_test/onion_test.go:") || !strings.HasPrefix(f[0].Name, "core_test.TestManifestListsTheOnion.func") {
 			t.Errorf("hook = %+v, want the closure's name and file:line", f[0])
 		}
 	}
@@ -680,9 +680,9 @@ func TestErrorMaskedKinds(t *testing.T) {
 }
 
 // The manifest's source paths are the same on every machine: a module
-// cache file reads as its module path without the version, a file no
-// go.mod roots as its function's import path and base name — never an
-// absolute path (U23.1-fix).
+// cache file reads as its module path without the version, any file
+// as its function's import path and base name — never an absolute
+// path, never a go.mod lookup (U23.1-fix, U23.2-fix).
 func TestSourceRelMachineIndependent(t *testing.T) {
 	for _, c := range []struct{ file, fn, want string }{
 		{"/home/u/go/pkg/mod/github.com/acme/tools@v1.2.3/mw/audit.go", "github.com/acme/tools/mw.Audit.func1", "github.com/acme/tools/mw/audit.go"},
@@ -696,9 +696,17 @@ func TestSourceRelMachineIndependent(t *testing.T) {
 			t.Errorf("SourceRel(%q, %q) = %q, want %q", c.file, c.fn, got, c.want)
 		}
 	}
-	// Under a go.mod: module-relative.
+	// One form whatever the machine (U23.2-fix): the same function
+	// renders identically with its go.mod reachable (the build host)
+	// and without (a deploy host where the sources are not).
+	const fn = "github.com/weftgo/weft/core_test.TestSourceRelMachineIndependent"
+	here := core.SourceRel(filepath.Join(mustWd(t), "onion_test.go"), fn)
+	there := core.SourceRel("/deploy/host/somewhere/onion_test.go", fn)
+	if here != there || here != "github.com/weftgo/weft/core_test/onion_test.go" {
+		t.Errorf("with a go.mod %q, without %q: want both github.com/weftgo/weft/core_test/onion_test.go", here, there)
+	}
 	if got := core.SourceRel(filepath.Join(mustWd(t), "onion_test.go"), ""); got != "onion_test.go" {
-		t.Errorf("in-module source = %q, want onion_test.go", got)
+		t.Errorf("in-module source, function unknown = %q, want the base name", got)
 	}
 }
 
@@ -827,6 +835,14 @@ func TestRequestRecordWireFacts(t *testing.T) {
 		{"bounded", wiredFacts{wefttest.Script(wefttest.Say("ok")), "api.example.com", many, nil},
 			`{"server_address":"api.example.com","extra_body_keys":["k00","k01","k02","k03","k04","k05","k06","k07","k08","k09","k10","k11","k12","k13","k14","k15","k16","k17","k18","k19","k20","k21","k22","k23","k24","k25","k26","k27","k28","k29","k30","k31"],"dropped":8}`},
 		{"none", wefttest.Script(wefttest.Say("ok")), ""},
+		// U23.2-fix: an "@" past the authority's cut is ambiguous — a
+		// password holding "#" or "/" — and names no host at all.
+		{"userinfo with #", wiredFacts{wefttest.Script(wefttest.Say("ok")), "user:pa#ss@host.example", []string{"k"}, nil},
+			`{"extra_body_keys":["k"]}`},
+		{"userinfo with /", wiredFacts{wefttest.Script(wefttest.Say("ok")), "https://sk-abc/def@gw.example", []string{"k"}, nil},
+			`{"extra_body_keys":["k"]}`},
+		{"userinfo, no scheme", wiredFacts{wefttest.Script(wefttest.Say("ok")), "user:secret@gw.example:9000/v1", []string{"k"}, nil},
+			`{"server_address":"gw.example:9000","extra_body_keys":["k"]}`},
 	} {
 		lp := newRecLogProvider()
 		agt := core.New(c.m, core.LoggerProvider(lp), core.WrapModel(mw.Retry()))
@@ -846,7 +862,8 @@ func TestRequestRecordWireFacts(t *testing.T) {
 		if string(body.Wire) != c.want {
 			t.Errorf("%s: wire = %s, want %s", c.name, body.Wire, c.want)
 		}
-		if strings.Contains(reqs[0].body, "secret") || strings.Contains(reqs[0].body, "token=") {
+		if strings.Contains(reqs[0].body, "secret") || strings.Contains(reqs[0].body, "token=") ||
+			strings.Contains(reqs[0].body, "sk-abc") || strings.Contains(reqs[0].body, `"user`) {
 			t.Errorf("%s: a credential reached the record: %s", c.name, reqs[0].body)
 		}
 	}

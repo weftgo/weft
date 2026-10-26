@@ -19,6 +19,7 @@
 // Every absent block is a badge with its reason; a run-wide hole
 // (hidden for a read-scoped token, not_recorded before A1) is that
 // badge and nothing else — a read token never asked for a byte.
+import { skippedLine } from "../lib/onion"
 import { plural } from "../lib/format"
 import type { Manifest, RequestRow, RunCompaction, ToolEntry } from "../lib/api"
 import { isHoleRef } from "../lib/api"
@@ -482,6 +483,10 @@ function catalogView(
     }
     list.append(item)
   }
+  // The tools an MCP listing skipped (O8): never offered, greyed —
+  // lib/onion.ts's words, the run page's.
+  for (const k of c.skipped ?? [])
+    list.append(el("div", "weft-note", skippedLine(k)))
   const out: Node[] = [
     list,
     el("div", "weft-holes", [mono(shortHash(c.hash), "weft-rq-hash")]),

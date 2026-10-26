@@ -227,6 +227,7 @@ describe("MCP identity in the graph (U23.2, O8)", () => {
       mcpCall("x1", OPS, "mcp:billing", "ok"),
       mcpCall("x2", OPS, "mcp:billing", "error", "mcp_transport"),
       mcpCall("x3", OPS, "mcp:billing", "error", "mcp_tool_error"),
+      mcpCall("x4", OPS, "mcp:billing", "error", "mcp_rpc_error"),
     ]
     // The page read no catalog of the child (known: the root alone).
     const g2 = callGraph(
@@ -238,11 +239,17 @@ describe("MCP identity in the graph (U23.2, O8)", () => {
     const m = g2.nodes.find((n) => n.id === "m:mcp:billing")!
     expect(m.kind).toBe("mcp")
     expect(m.label).toBe("mcp:billing")
-    expect([m.calls, m.fails, m.unreachable, m.toolErrors]).toEqual([
-      3, 2, 1, 1,
+    expect([m.calls, m.fails, m.unreachable, m.refused, m.toolErrors]).toEqual([
+      4, 3, 1, 1, 1,
     ])
-    expect(nodeLine(m)).toBe("3 calls · slowest 47.0ms · 2 failed")
-    expect(mcpFailLine(m)).toBe("1 MCP unreachable · 1 MCP tool error")
+    expect(nodeLine(m)).toBe("4 calls · slowest 47.0ms · 3 failed")
+    expect(mcpFailLine(m)).toBe("1 unreachable · 1 refused · 1 tool error")
+    // An origin that only starts with "mcp" is no MCP server (U23.2-fix).
+    expect(
+      callGraph([...SPANS, mcpCall("y1", OPS, "mcpx", "ok")], DIR).nodes.some(
+        (n) => n.kind === "mcp"
+      )
+    ).toBe(false)
     expect(g2.edges.find((e) => e.to === m.id)!.from).toBe("a:ops-manager")
     // Its other calls (spans from before O8, no origin) still say
     // their catalog was not read.

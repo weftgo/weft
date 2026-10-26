@@ -763,12 +763,15 @@ export function EngineRadios({
   choice,
   engine,
   refused,
+  refusedID,
   onPick,
   note,
 }: {
   choice: EngineChoice
   engine: Engine
   refused: string
+  /** The refusal's id: Run's aria-describedby points at it. */
+  refusedID?: string
   onPick: (e: Engine) => void
   /** UX-C-09: what live calls here when it is not a provider. */
   note?: string
@@ -828,7 +831,12 @@ export function EngineRadios({
         </p>
       ) : null}
       {refused ? (
-        <p className="text-xs text-status-bad" role="alert" data-engine-refused>
+        <p
+          id={refusedID}
+          className="text-xs text-status-bad"
+          role="alert"
+          data-engine-refused
+        >
           {refused}
         </p>
       ) : null}

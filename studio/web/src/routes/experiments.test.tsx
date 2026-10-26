@@ -625,6 +625,21 @@ describe("/experiments/{id}", () => {
     ).toBe("/runtimes?agent=orders")
   })
 
+  // P10a-pre-web-fix: a registration that is not connected is no
+  // target — the refusal, never a re-run that 503s.
+  it("the matrix's agent registered only by a disconnected runtime: the Runs in refusal, re-runs held", async () => {
+    studio.on("GET runtimes", {
+      runtimes: runtimes.runtimes.map((r) => ({ ...r, connected: false })),
+    })
+    renderApp("/experiments/exp_tone")
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-rerun-blocked]")?.textContent
+      ).toContain(runtimeRefusal("orders"))
+    )
+    expect(studio.calls("POST playground/runs")).toHaveLength(0)
+  })
+
   // The palette moves /experiments/A → /experiments/B: B is a fresh
   // page, none of A's cell states, polls or batch carried over.
   it("a different experiment is a fresh page: A's cell states do not follow onto B", async () => {

@@ -1,7 +1,7 @@
 // The runtimes page's reading (U20.1; §6.11, UX-C-12, UX-S4-01,
 // UX-S4-05, UX-S4-06, UX-S4-10, UX-S4-12, UX-S5a-15, UX-E-56): every
 // runtime that registered with this Studio — connected, restored after a
-// Studio restart, or stale (forgettable) — told apart by pid and cwd,
+// Studio restart, or gone (forgettable) — told apart by pid and cwd,
 // links of one process grouped as one process, each agent's registered
 // manifest against its latest run's, and what Studio may do on the
 // runtime's runs and on the app's own turns, with why not. Studio only:
@@ -14,10 +14,12 @@ import { BREAKPOINT_WORDS } from "./settings"
 import type { Role } from "./palette"
 
 /** A runtime's state on the page. */
-export type RuntimeState = "connected" | "restored" | "stale"
+// "gone", never "stale" (P10a-pre-web-fix): stale is the manifest mark's
+// word (MANIFEST_WORDS); one word means one thing on /runtimes.
+export type RuntimeState = "connected" | "restored" | "gone"
 
 export const runtimeState = (rt: RuntimeView): RuntimeState =>
-  rt.connected === false ? (rt.restored ? "restored" : "stale") : "connected"
+  rt.connected === false ? (rt.restored ? "restored" : "gone") : "connected"
 
 /** Each state's word, its role (lib/palette.ts) and what it means. */
 export const STATE_WORDS: Record<
@@ -36,16 +38,16 @@ export const STATE_WORDS: Record<
     note: "listed from Studio's store after a Studio restart — waiting for the app to reconnect; nothing reaches it until it does",
     section: "restored after a Studio restart",
   },
-  stale: {
-    word: "stale",
+  gone: {
+    word: "gone",
     role: "resumed",
     note: "its stream is gone: the app stopped, or came back under another id — forget it once its commands resolve",
-    section: "stale",
+    section: "gone",
   },
 }
 
 /** The page's section order. */
-export const STATE_ORDER: RuntimeState[] = ["connected", "restored", "stale"]
+export const STATE_ORDER: RuntimeState[] = ["connected", "restored", "gone"]
 
 /** One process (host and pid): the runtime links it holds. Two links of
  * one process are one process with two links, never two runtimes
@@ -97,9 +99,9 @@ export function overlapping(g: ProcessGroup): string[] {
 export const overlapWords = (names: string[]): string =>
   `registered by more than one link: ${names.join(", ")} — an experiment runs on the newest connected one`
 
-/** The page's count line: "3 connected · 1 restored after restart · 2 stale". */
+/** The page's count line: "3 connected · 1 restored after restart · 2 gone". */
 export function countLine(runtimes: RuntimeView[]): string {
-  const n = { connected: 0, restored: 0, stale: 0 }
+  const n = { connected: 0, restored: 0, gone: 0 }
   for (const rt of runtimes) n[runtimeState(rt)]++
   return STATE_ORDER.filter((s) => n[s] > 0 || s === "connected")
     .map((s) => `${n[s]} ${STATE_WORDS[s].word}`)

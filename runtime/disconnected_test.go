@@ -79,7 +79,7 @@ func TestStoppedAppTurnReadsDisconnected(t *testing.T) {
 	rt := rts.Runtimes[0]
 	wantMsg := "app-owned turn · read-only: the app's runtime " + rt.ID + " of service " + rt.Service +
 		" disconnected — last seen " + rt.LastSeen.UTC().Format(time.RFC3339)
-	const wantFix = "restart the app: it re-registers under the same id"
+	const wantFix = "restart the app: its runtime link registers again"
 	for _, verb := range []struct{ path, body string }{
 		{"/approvals", `{"call_id":"` + callID + `","decision":"approve"}`},
 		{"/steer", `{"message":"hurry"}`},

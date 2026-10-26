@@ -281,7 +281,8 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
       ? "reading the connected runtimes…"
       : "unnamed" in target && target.unnamed
         ? "the experiment names no agent: open it in the playground and pick one"
-        : !target.runtime || !target.agent
+        : // A registration that is not connected is no target.
+          !target.runtime || !target.agent || target.runtime.connected === false
           ? runtimeRefusal(exp?.agent ?? "?")
           : target.mismatch
             ? runtimeRefusal(target.mismatch)

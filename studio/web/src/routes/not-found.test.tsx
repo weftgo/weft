@@ -31,9 +31,7 @@ function serve(route: string, res: () => Response | object) {
   setStudioToken("")
   FakeEventSource.reset()
   vi.stubGlobal("EventSource", FakeEventSource)
-  return new FakeStudio()
-    .on("GET meta", golden<object>("meta"))
-    .on(route, res)
+  return new FakeStudio().on("GET meta", golden<object>("meta")).on(route, res)
 }
 
 const failed = () => document.querySelector<HTMLElement>("[data-load-failed]")

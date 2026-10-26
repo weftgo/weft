@@ -2721,20 +2721,20 @@ export class PanelModel {
     if (this.state.app[`${runID}:`] as AppVerb | undefined) return
     this.state.app[`${runID}:`] = { state: "sending" }
     // A Studio without run_commands answers 404: nothing marked.
-    panelGet<{ commands: (CommandStatus & { call_id?: string })[] }>(
-      this.ep,
-      `runs/${runID}/commands`
-    )
+    panelGet<{
+      commands: (CommandStatus & { call_id?: string; verb: string })[]
+    }>(this.ep, `runs/${runID}/commands`)
       .then((d) => {
-        const app = { ...this.state.app }
-        // A lost row is an AppVerb as it stands (state, error); a call
-        // decided since reads its decision instead (the record's).
-        for (const c of d.commands) {
-          const k = `${runID}:${c.call_id}`
-          if (c.state === "lost" && !(app[k] as AppVerb | undefined))
-            app[k] = c as AppVerb
-        }
-        this.state.app = app
+        // Studio's rule (useLostDecisions): each call's latest decide,
+        // marked only when that one was lost — a call decided again
+        // since is not. A lost row is an AppVerb as it stands (state,
+        // error); a verb sent here wins.
+        const app: Record<string, AppVerb | undefined> = {}
+        for (const c of d.commands)
+          if (c.verb === "decide")
+            app[`${runID}:${c.call_id}`] =
+              c.state === "lost" ? (c as AppVerb) : undefined
+        this.state.app = { ...app, ...this.state.app } as typeof this.state.app
         this.emit()
       })
       .catch(quiet)

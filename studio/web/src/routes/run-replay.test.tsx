@@ -7,6 +7,7 @@
 // back to its source step. The verbs are hidden under a read-scoped
 // token, a child row replays the child as its own run (A10), and the
 // step pickers list the source run's steps.
+import { runtimeRefusal } from "@/lib/runs-in"
 import {
   cleanup,
   configure,
@@ -1123,7 +1124,7 @@ describe("the drawer's refusals and failures (review 10)", () => {
     ).toBe(false)
   })
 
-  it("a 503 on Run says no runtime is connected and how to start one", async () => {
+  it("a 503 on Run says no connected runtime registers the agent and the fix", async () => {
     studio.on(
       "POST playground/runs",
       () =>
@@ -1144,9 +1145,33 @@ describe("the drawer's refusals and failures (review 10)", () => {
     fireEvent.click(d.getByRole("button", { name: RUN_BTN }))
     await waitFor(() =>
       expect(drawer()!.querySelector("[data-replay-error]")?.textContent).toBe(
-        "runtime rt_1 is not connected · no runtime connected · start the app with WEFT_ENV=dev"
+        `runtime rt_1 is not connected · ${runtimeRefusal("acme-support")}`
       )
     )
+  })
+
+  // P10a-pre-web-fix: Run's aria-describedby names every hold that
+  // applies, not only the target check's.
+  it("a held Run is described by each hold that applies: a disconnected target's refusal", async () => {
+    studio.on("GET runtimes", {
+      runtimes: [{ ...runtime, connected: false }],
+    })
+    const card = await openStory('[data-step="2"]')
+    fireEvent.click(
+      within(card).getByRole("button", {
+        name: "replay from this step (step 2)",
+      })
+    )
+    const d = await waitFor(() => within(drawer()!))
+    await waitFor(() =>
+      expect(drawer()!.querySelector('[data-runs-in="none"]')).toBeTruthy()
+    )
+    const run = d.getByRole<HTMLButtonElement>("button", { name: RUN_BTN })
+    await waitFor(() => expect(run.disabled).toBe(true))
+    const ids = (run.getAttribute("aria-describedby") ?? "").split(" ")
+    const said = ids.map((id) => document.getElementById(id))
+    expect(said.some((n) => n?.hasAttribute("data-runs-in"))).toBe(true)
+    expect(said.every(Boolean)).toBe(true)
   })
 
   it("no runtime at all: said, Run held", async () => {

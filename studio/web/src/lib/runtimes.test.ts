@@ -85,11 +85,11 @@ describe("the runtimes page's reading (U20.1)", () => {
     expect([batch, restored, stale].map(runtimeState)).toEqual([
       "connected",
       "restored",
-      "stale",
+      "gone",
     ])
     expect(STATE_WORDS.restored.word).toBe("restored after restart")
     expect(countLine([batch, fleet, restored, stale])).toBe(
-      "2 connected · 1 restored after restart · 1 stale"
+      "2 connected · 1 restored after restart · 1 gone"
     )
     expect(countLine([])).toBe("0 connected")
   })

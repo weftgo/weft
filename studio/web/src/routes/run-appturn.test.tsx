@@ -445,7 +445,7 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
   it("an opted-in app's runtime gone (U20.2, UX-H-14): disconnected, last seen, restart it — the panel's words", async () => {
     await open({ runtimes: [runtimeRow({ connected: false })] })
     expect(line()).toBe(
-      `app-owned turn · read-only: the app's runtime rt_01 of service app disconnected — last seen 2026-10-01T09:00:00Z — fix: restart the app: it re-registers under the same id`
+      `app-owned turn · read-only: the app's runtime rt_01 of service app disconnected — last seen 2026-10-01T09:00:00Z — fix: restart the app: its runtime link registers again`
     )
   })
 

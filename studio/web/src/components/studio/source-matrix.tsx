@@ -181,7 +181,8 @@ export function SourceMatrix({
     ? "this token may read the playground, not run it"
     : runtimes.isPending
       ? "reading the connected runtimes…"
-      : !target.runtime || !target.agent
+      : // A registration that is not connected is no target.
+        !target.runtime || !target.agent || target.runtime.connected === false
         ? runtimeRefusal(agent)
         : target.mismatch
           ? runtimeRefusal(target.mismatch)

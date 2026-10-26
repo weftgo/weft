@@ -219,8 +219,10 @@ describe("the size ledger (panel-budget.json)", () => {
       "total 78,098 B (76.3 KiB) of 81,920 B · headroom 3,822 B (3.7 KiB)"
     )
     expect(
-      budgetTable({ ...ledger, cap: 98304, rows: ledger.rows.slice(0, i + 1) }, 78098)
-        .lines.at(-1)
+      budgetTable(
+        { ...ledger, cap: 98304, rows: ledger.rows.slice(0, i + 1) },
+        78098
+      ).lines.at(-1)
     ).toBe(
       "total 78,098 B (76.3 KiB) of 98,304 B · headroom 20,206 B (19.7 KiB)"
     ) // the cap of that era (96 KiB, before P10-cap)

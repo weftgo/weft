@@ -17,6 +17,7 @@ import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
+  lostWords,
   APP_ELSEWHERE_FIX,
   APP_LINK_FIX,
   APP_RUN,
@@ -148,7 +149,7 @@ describe("the server's words", () => {
       `appOwned + " · read-only: run " + row.ID + " is the app's own, and no connected runtime of its service " + service + " acts on the app's sessions"`,
       `"set runtime.Sessions(resolver) at runtime.Install in the app (service " + service + "): its turns then take approvals and steer"`,
       // U20.2: an opted-in app gone, and the app's link elsewhere.
-      `appOwned + " · read-only: the app's runtime " + v.ID + " of service " + v.Service +\n\t\t\t" disconnected — last seen " + v.LastSeen.UTC().Format(time.RFC3339),\n\t\t"restart the app: it re-registers under the same id"`,
+      `appOwned + " · read-only: the app's runtime " + v.ID + " of service " + v.Service +\n\t\t\t" disconnected — last seen " + v.LastSeen.UTC().Format(time.RFC3339),\n\t\t"restart the app: its runtime link registers again"`,
       `appOwned + " · read-only: no runtime of service " + service + " is connected here — the app's link dialled " + l.StudioURL`,
       `"${APP_ELSEWHERE_FIX}"`,
       `"${APP_LINK_FIX}"`,
@@ -335,7 +336,7 @@ describe("an app turn no Sessions runtime of its service acts on", () => {
   const SVC_WORDS = `app-owned turn · read-only: run ${PARKED} is the app's own, and no connected runtime of its service app acts on the app's sessions — fix: set runtime.Sessions(resolver) at runtime.Install in the app (service app): its turns then take approvals and steer`
   const LINK_WORDS = `app-owned turn · read-only: no runtime of service app is connected — fix: ${APP_LINK_FIX}`
   // appturn.go's appGoneWords for runtimeRow's rt_01, last seen T0.
-  const GONE_WORDS = `app-owned turn · read-only: the app's runtime rt_01 of service app disconnected — last seen 2026-10-01T09:00:00Z — fix: restart the app: it re-registers under the same id`
+  const GONE_WORDS = `app-owned turn · read-only: the app's runtime rt_01 of service app disconnected — last seen 2026-10-01T09:00:00Z — fix: restart the app: its runtime link registers again`
 
   it("connected without Sessions: the verbs refused, appturn.go's words, nothing posted", async () => {
     const { el, fake } = await open({
@@ -383,7 +384,12 @@ describe("an app turn no Sessions runtime of its service acts on", () => {
     await vi.waitFor(
       () =>
         expect($(el, '[data-weft-app-verb="lost"]')?.textContent).toBe(
-          "lost: no ack in time"
+          // Studio's words (lib/honesty.ts lostWords), the golden's row.
+          lostWords(
+            golden<{
+              commands: Parameters<typeof lostWords>[0][]
+            }>("run-commands").commands[0]
+          )
         ),
       { timeout: 5_000 }
     )

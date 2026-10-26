@@ -21,7 +21,7 @@ const gone = {
 }
 const GONE =
   "app-owned turn · read-only: the app's runtime rt_app of service acme disconnected — last seen 2026-10-26T14:23:05Z"
-const FIX = "restart the app: it re-registers under the same id"
+const FIX = "restart the app: its runtime link registers again"
 const row = { id: "s1-t1", session_id: "s1", public_id: "pub", service: "acme" }
 
 describe("appGone", () => {
@@ -32,6 +32,14 @@ describe("appGone", () => {
     expect(appGone([{ ...gone, last_seen: undefined }], "acme")?.words).toBe(
       "app-owned turn · read-only: the app's runtime rt_app of service acme disconnected"
     )
+  })
+  it("is nothing while a Sessions runtime of the service is connected (a restart under a new id, a stale row beside it)", () => {
+    const back = { ...gone, id: "rt_new", connected: true }
+    expect(appGone([gone, back], "acme")).toBeNull()
+    expect(appGoneScope([gone, back])).toBe("")
+    // Another service's gone app is still said.
+    const other = { ...gone, id: "rt_bill", service: "billing" }
+    expect(appGoneScope([gone, back, other])).toContain("rt_bill")
   })
   it("ignores a runtime that never registered Sessions, or another service", () => {
     expect(appGone([{ ...gone, sessions: false }], "acme")).toBeNull()

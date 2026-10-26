@@ -144,7 +144,7 @@ export const registers = (
   runtimes: Pick<RuntimeView, "agents">[],
   name?: string
 ): boolean =>
-  !!name && runtimes.some((r) => r.agents.some((a) => a.name == name))
+  !!name && runtimes.some((r) => r.agents.some((a) => a.name === name))
 
 /** targetKey is what an escape is taken for (TargetCheck.key): the
  * source position, its agent, the runtime, the target and its build — a

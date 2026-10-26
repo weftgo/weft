@@ -1734,6 +1734,9 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     click?: boolean
     regated?: boolean
     kind: string
+    /** The run's commands are read: wait for the lost mark (or for
+     * the read, when none is expected). */
+    marked?: boolean
   }[] = [
     {
       name: "a Sessions runtime of the service: continue decides, the parked turn reads resumed",
@@ -1789,6 +1792,18 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       name: "no runtime of the service connected: the link's fix",
       o: { runtimes: [] },
       kind: "read-only",
+    },
+    {
+      name: "a decision lost before it landed is marked on both after a reload (P10a-pre-web-fix)",
+      o: { runtimes: [appRuntime({ connected: false })], lost: true },
+      kind: "read-only",
+      marked: true,
+    },
+    {
+      name: "a call lost and then decided again is not marked on either: the latest decide decides (P10a-pre-web-fix)",
+      o: { runtimes: [appRuntime({ connected: false })], lost: "redecided" },
+      kind: "read-only",
+      marked: false,
     },
     {
       name: "an opted-in app's runtime gone (U20.2): disconnected, the restart fix",
@@ -1904,6 +1919,21 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       await vi.waitFor(() => expect(done()).toBeTruthy(), { timeout: 5_000 })
       await settle()
     }
+    if (c.marked !== undefined) {
+      await vi.waitFor(
+        () =>
+          expect(
+            fake.calls(`GET runs/${APP_PARKED}/commands`).length
+          ).toBeGreaterThan(0),
+        { timeout: 5_000 }
+      )
+      if (c.marked)
+        await vi.waitFor(
+          () => expect($(el, '[data-weft-app-verb="lost"]')).toBeTruthy(),
+          { timeout: 5_000 }
+        )
+      await settle()
+    }
     const owned = $(el, "[data-weft-app-owned]")
     const seen = {
       kind:
@@ -1912,6 +1942,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       line: owned?.textContent ?? "",
       refused: all(el, '[data-weft-refused="app-owned"]').length,
       after: $(el, `${callSel} [data-weft-app-verb]`)?.textContent ?? "",
+      lost: !!$(el, '[data-weft-app-verb="lost"]'),
     }
     el.remove()
     await settle()
@@ -1963,6 +1994,18 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
         ).toBeTruthy()
       )
     }
+    if (c.marked !== undefined) {
+      await waitFor(() =>
+        expect(
+          fake.calls(`GET runs/${APP_PARKED}/commands`).length
+        ).toBeGreaterThan(0)
+      )
+      if (c.marked)
+        await waitFor(() =>
+          expect(box()!.querySelector("[data-command-lost]")).toBeTruthy()
+        )
+      await new Promise((r) => setTimeout(r, 50))
+    }
     const owned = box()!.querySelector("[data-app-owned]")
     const seen = {
       kind:
@@ -1975,6 +2018,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       line: owned?.textContent ?? "",
       refused: box()!.querySelectorAll('[data-refused="app-owned"]').length,
       after: box()!.querySelector("[data-app-verb]")?.textContent ?? "",
+      lost: !!box()!.querySelector("[data-command-lost]"),
     }
     cleanup()
     return seen
@@ -5070,6 +5114,9 @@ describe("the engine per command on both drawers (U17)", () => {
       expect(r.target.startsWith(head)).toBe(true)
       expect(r.target).toContain(RUNS_IN.connected([]))
       expect(r.target).toContain(RUNS_IN.fix("acme-support"))
+      // And Run waits (P10a-pre-web-fix): no command for a runtime
+      // that is not connected, never a 503 afterwards.
+      expect(r.held).toBe(true)
     }
   })
 

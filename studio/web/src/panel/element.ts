@@ -64,6 +64,7 @@ import {
 } from "../lib/decisions"
 import {
   appVerbWords,
+  lostWords,
   childRun,
   DERIVED_HOLE,
   derivedUsageUnknown,
@@ -3549,10 +3550,11 @@ export class WeftDevtools extends HTMLElement {
     // id, a select when two connected ones register the agent; else the
     // refusal — what is connected, the fix, the Studio asked.
     // No agent picked yet: the picker asks, no refusal (as Studio).
+    // A disconnected registration runs nothing: the refusal, as Studio,
+    // and Run held.
+    const ok = agent && rt && rt.connected !== false
     if (d.agent) {
       const live = s.runtimes.filter((r) => r.connected !== false)
-      // A disconnected registration runs nothing: the refusal, as Studio.
-      const ok = agent && rt && rt.connected !== false
       tg.append(
         el(
           "div",
@@ -3584,7 +3586,7 @@ export class WeftDevtools extends HTMLElement {
           "aria-label": "runtime",
         }) as HTMLSelectElement
         for (const r of regs)
-          option(rs, runsInLine(r), { value: r.id }, r.id == rt.id)
+          option(rs, runsInLine(r), { value: r.id }, r.id === rt.id)
         on(rs, "change", (_, n) =>
           this.model?.pickTarget((n as HTMLSelectElement).value, d.agent)
         )
@@ -4084,6 +4086,7 @@ export class WeftDevtools extends HTMLElement {
       "data-drawer-section": "run",
     })
     const held =
+      !ok ||
       tc.held ||
       engHeld ||
       refused ||
@@ -5971,7 +5974,15 @@ export class WeftDevtools extends HTMLElement {
    * runtime's rejection / the route's refusal word for word. */
   private appSaid(v: AppVerb | undefined, runID: string): HTMLElement | null {
     if (!v) return null
-    const w = appVerbWords(v, runID)
+    // A decision lost before a reload is its command row (wantCommands):
+    // said in Studio's words, lostWords.
+    const w =
+      "verb" in v
+        ? {
+            text: lostWords(v as unknown as Parameters<typeof lostWords>[0]),
+            bad: true,
+          }
+        : appVerbWords(v, runID)
     const box = el("div", w.bad ? "weft-note weft-warn" : "weft-note", w.text, {
       "data-weft-app-verb": v.state,
     })

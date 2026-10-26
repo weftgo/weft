@@ -36,4 +36,33 @@ describe("the source matrix's runtime refusal (U20.1-fix)", () => {
       held.querySelector("[data-runtime-refusal]")!.getAttribute("href")
     ).toBe("/runtimes?agent=orders")
   })
+
+  it("a registration that is not connected is no target (P10a-pre-web-fix): the same refusal, Run held", async () => {
+    const rt = golden<{ runtimes: Record<string, unknown>[] }>("runtimes")
+      .runtimes[0]
+    new FakeStudio()
+      .on("GET meta", {
+        ...golden<Record<string, unknown>>("meta"),
+        capabilities: ["playground", "runtimes"],
+      })
+      .on("GET runtimes", {
+        runtimes: [
+          {
+            ...rt,
+            connected: false,
+            agents: [{ name: "orders", tools: [], models: [] }],
+          },
+        ],
+      })
+      .on("GET runs/r_1", { id: "r_1", agent: "orders", children: [] })
+      .install()
+    await renderWithRouter(
+      <SourceMatrix sources={["r_1"]} agentName="orders" />
+    )
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-matrix-held]")?.textContent
+      ).toContain(runtimeRefusal("orders"))
+    )
+  })
 })

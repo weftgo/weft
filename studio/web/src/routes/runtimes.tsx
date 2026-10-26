@@ -1,5 +1,5 @@
 // The runtimes page (U20.1, §6.11): every runtime that registered with
-// this Studio — connected, restored after a Studio restart, stale
+// this Studio — connected, restored after a Studio restart, gone
 // (forget) — each told apart by pid and cwd, the links of one process
 // grouped as one process; per agent its registered manifest against its
 // latest run's; what Studio may do on the runtime's runs and on the

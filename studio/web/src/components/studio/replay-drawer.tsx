@@ -106,6 +106,7 @@ import {
   useSourceSteps,
 } from "@/components/studio/experiment-form"
 import { RunsIn } from "@/components/studio/runs-in"
+import { runtimeRefusal } from "@/lib/runs-in"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { StepCompare } from "@/components/studio/step-diff"
 import {
@@ -714,6 +715,13 @@ function ReplayForm({
   // The recorded agent, registered: the miss line's "from step 0".
   const recordedHere = registers(all, sourceAgent)
   const heldID = useId()
+  // Run's aria-describedby names every hold that applies (each
+  // refusal's own id), not only the target's.
+  const blockedID = useId()
+  const engineID = useId()
+  const compactedID = useId()
+  const pastEndID = useId()
+  const runsInID = useId()
   const picker =
     !!pick ||
     check.kind === "unnamed" ||
@@ -775,7 +783,7 @@ function ReplayForm({
     } catch (e) {
       setError(
         e instanceof ApiError && e.status === 503
-          ? `${e.message} · no runtime connected · start the app with WEFT_ENV=dev`
+          ? `${e.message} · ${runtimeRefusal(wantAgent ?? "")}`
           : e instanceof Error
             ? e.message
             : String(e)
@@ -797,9 +805,13 @@ function ReplayForm({
     blocked = sourceUnread(source.isError ? source.error.message : undefined)
   // What holds Run, the command in flight aside: "send again" on a
   // rejected or lost command is held by the same rules.
+  // A registration that is not connected is no target (P10a-pre-web-
+  // fix): the Runs in line refuses it, and Run waits with it.
+  const gone = runtime?.connected === false
   const held =
     Boolean(blocked) ||
     !runtime ||
+    gone ||
     !agent ||
     busy ||
     Boolean(check.held) ||
@@ -840,6 +852,7 @@ function ReplayForm({
       <div ref={formBody} className="space-y-3 px-6 pb-6">
         {blocked ? (
           <p
+            id={blockedID}
             className="text-xs text-status-bad"
             role="alert"
             data-replay-blocked
@@ -871,6 +884,7 @@ function ReplayForm({
             agent={wantAgent ?? ""}
             runtime={agent ? runtime : undefined}
             runtimes={all}
+            refusalID={runsInID}
             onPick={(id) =>
               wantAgent && setPick({ runtime: id, agent: wantAgent })
             }
@@ -890,6 +904,7 @@ function ReplayForm({
           choice={choice}
           engine={engine}
           refused={engineRefused}
+          refusedID={engineID}
           onPick={setPicked}
           note={scriptNote(agent)}
         />
@@ -963,6 +978,7 @@ function ReplayForm({
         ) : null}
         {compactedEdit ? (
           <p
+            id={compactedID}
             className="text-xs text-status-bad"
             role="alert"
             data-replay-view-edit
@@ -989,6 +1005,7 @@ function ReplayForm({
         ) : null}
         {pastEnd ? (
           <p
+            id={pastEndID}
             className="text-xs text-status-bad"
             role="alert"
             data-replay-past-end
@@ -1058,7 +1075,18 @@ function ReplayForm({
         >
           <Button
             ref={runButton}
-            aria-describedby={check.held ? heldID : undefined}
+            aria-describedby={
+              [
+                blocked && blockedID,
+                check.held && heldID,
+                wantAgent && (!agent || gone) && runsInID,
+                engineRefused && engineID,
+                compactedEdit && compactedID,
+                pastEnd && pastEndID,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined
+            }
             onClick={() => void run()}
             disabled={held || Boolean(experiment && !settled(experiment.state))}
             data-run-engine={engine}

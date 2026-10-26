@@ -21,3 +21,7 @@ self.onmessage = (e: MessageEvent<Job>) => {
   }
   self.postMessage(out)
 }
+
+// Loaded: the runner starts a job's time bound only after this, so the
+// module's load is never charged to the pattern (P10a-pre-web-fix).
+self.postMessage({ ready: true })

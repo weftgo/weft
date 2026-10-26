@@ -155,7 +155,7 @@ func TestAppTurnGoneAppWinsOverACLI(t *testing.T) {
 	code, body := pt.authed(t, http.MethodPost, "/api/runs/app_gone/approvals", pt.token, `{"call_id":"call_1","decision":"approve"}`)
 	if code != http.StatusForbidden ||
 		!strings.Contains(body, `"message":"app-owned turn · read-only: the app's runtime rt_app of service acme-api disconnected — last seen `) ||
-		!strings.Contains(body, `"fix":"restart the app: it re-registers under the same id"`) {
+		!strings.Contains(body, `"fix":"restart the app: its runtime link registers again"`) {
 		t.Errorf("approve beside a CLI = %d %s, want the gone app's words", code, body)
 	}
 }

@@ -7,9 +7,12 @@
 //      ((a+)+, (a*)*, (\w+\s?)*) or a backreference is refused at once,
 //      with its reason — the classic catastrophic shapes;
 //   3. every other pattern runs in one module worker (lib/regex-worker.ts),
-//      one job at a time, each bounded by REGEX_TIMEOUT_MS: a job past it
-//      terminates the worker (a fresh one takes the next job) and reads
-//      "timeout". Where no Worker exists (a test's jsdom), the screened
+//      one job at a time, each bounded by REGEX_TIMEOUT_MS from the moment
+//      it is handed to a worker that said it is loaded (its ready
+//      message: the module's load is never charged to a pattern, the
+//      first job's nor the one after a respawn's) — a load is bounded on
+//      its own (REGEX_LOAD_MS). A job past its bound terminates the worker
+//      (a fresh one takes the next job) and reads "timeout". Where no Worker exists (a test's jsdom), the screened
 //      pattern runs inline on the capped text.
 // Outcomes are memoised by the caller per (run id, predicate text).
 
@@ -18,6 +21,9 @@ export const REGEX_TEXT_CAP = 8 * 1024
 
 /** The most one pattern may run on one answer. */
 export const REGEX_TIMEOUT_MS = 250
+
+/** The most a worker may take to load (its ready message). */
+export const REGEX_LOAD_MS = 10_000
 
 /** One test's outcome: matched or not, or why it was not run. */
 export type RegexOutcome = { hit: boolean; capped: boolean } | { why: string }
@@ -125,6 +131,8 @@ interface Pending {
 }
 
 let worker: Worker | null = null
+/** The worker posted its ready message (it loaded). */
+let ready = false
 /** Why the worker could not start (a CSP refusal, a 404, a proxy): once
  * set, no worker is spawned again and every job reads it. */
 let broken = ""
@@ -133,6 +141,7 @@ const queue: Pending[] = []
 let busy = false
 
 function spawn(): Worker {
+  ready = false
   return new Worker(new URL("./regex-worker.ts", import.meta.url), {
     type: "module",
   })
@@ -170,6 +179,7 @@ function pump() {
   const current = job
   const capped = current.text.length > REGEX_TEXT_CAP
   let over = false
+  let timer: ReturnType<typeof setTimeout> | undefined
   const done = (o: RegexOutcome) => {
     if (over) return
     over = true
@@ -181,13 +191,6 @@ function pump() {
     current.resolve(o)
     pump()
   }
-  const timer = setTimeout(() => {
-    // The pattern is still running: the worker cannot be interrupted,
-    // only replaced.
-    w.terminate()
-    if (worker === w) worker = null
-    done({ why: REGEX_WORDS.timeout })
-  }, REGEX_TIMEOUT_MS)
   const failed = (msg: string) => {
     // The worker did not load: say so for every job, spawn no other.
     broken = startFailed(msg)
@@ -199,14 +202,41 @@ function pump() {
     busy = false
     stopAll(broken, current)
   }
+  // The job's bound starts when the loaded worker takes it.
+  const start = () => {
+    timer = setTimeout(() => {
+      // The pattern is still running: the worker cannot be interrupted,
+      // only replaced.
+      w.terminate()
+      if (worker === w) worker = null
+      done({ why: REGEX_WORDS.timeout })
+    }, REGEX_TIMEOUT_MS)
+    w.postMessage({
+      id: current.id,
+      source: current.source,
+      flags: current.flags,
+      text: current.text.slice(0, REGEX_TEXT_CAP),
+    })
+  }
   w.onerror = (e: ErrorEvent) => {
     e.preventDefault()
     failed(e.message)
   }
   w.onmessageerror = () => failed("a message could not be read")
   w.onmessage = (
-    e: MessageEvent<{ id: number; hit?: boolean; error?: string }>
+    e: MessageEvent<{
+      id?: number
+      hit?: boolean
+      error?: string
+      ready?: boolean
+    }>
   ) => {
+    if (e.data.ready) {
+      ready = true
+      clearTimeout(timer)
+      start()
+      return
+    }
     if (e.data.id !== current.id) return
     done(
       e.data.error !== undefined
@@ -214,18 +244,19 @@ function pump() {
         : { hit: !!e.data.hit, capped }
     )
   }
-  w.postMessage({
-    id: current.id,
-    source: current.source,
-    flags: current.flags,
-    text: current.text.slice(0, REGEX_TEXT_CAP),
-  })
+  if (ready) start()
+  else
+    timer = setTimeout(
+      () => failed(`it did not load in ${REGEX_LOAD_MS / 1000} s`),
+      REGEX_LOAD_MS
+    )
 }
 
 /** resetRegexRunner forgets a failed worker (tests). */
 export function resetRegexRunner() {
   broken = ""
   worker = null
+  ready = false
   busy = false
   queue.splice(0)
 }

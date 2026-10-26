@@ -60,3 +60,11 @@ export const TONE_TEXT: Record<keyof typeof TONE, string> = {
  * against the line's (axe link-in-text-block, both themes). */
 export const THREAD_LINK =
   "text-foreground underline decoration-thread-ink underline-offset-2 hover:decoration-2"
+
+/** The text class each pass-predicate verdict is drawn in (lib/
+ * predicate.ts VERDICT_WORDS; the matrix's VerdictChip). */
+export const VERDICT_TEXT = {
+  pass: "text-status-ok",
+  fail: "text-status-bad",
+  unknown: "text-faint",
+} as const

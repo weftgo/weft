@@ -243,7 +243,7 @@ func TestWeftDevApprovesFromThePagePanel(t *testing.T) {
 	wantMsg := "app-owned turn · read-only: the app's runtime " + rts.Runtimes[0].ID + " of service " + rts.Runtimes[0].Service + " disconnected — last seen " +
 		rts.Runtimes[0].LastSeen.UTC().Format(time.RFC3339)
 	if code != http.StatusForbidden || json.Unmarshal([]byte(body), &refusal) != nil || refusal.Error.Message != wantMsg ||
-		refusal.Fix != "restart the app: it re-registers under the same id" {
+		refusal.Fix != "restart the app: its runtime link registers again" {
 		t.Errorf("approving the killed app's turn = %d %s\nwant 403 %q with the restart fix", code, body, wantMsg)
 	}
 }

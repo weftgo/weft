@@ -462,7 +462,8 @@ export const APP_LINK_FIX =
  * newest seen) — the app stopped, or Studio restarted under it and it
  * is not back yet (/runtimes says which). Never "add runtime.Sessions"
  * or "open the link": appturn.go's appGoneWords, last seen to the
- * second, in UTC. */
+ * second, in UTC. null while a Sessions runtime of the service is
+ * connected (appturn.go never refuses then). */
 export function appGone(
   rts: readonly RuntimeLike[] | null | undefined,
   service: string | undefined
@@ -471,23 +472,28 @@ export function appGone(
     (r) =>
       service && r.connected === false && r.sessions && r.service === service
   )
-  return rt
+  // A connected Sessions runtime of the service (a restart under a new
+  // id, a stale registration beside it) acts: nothing is gone.
+  return rt && !live(rts, service, true)
     ? {
         words: `${APP_OWNED}: the app's runtime ${rt.id} of service ${service} disconnected${rt.last_seen ? ` — last seen ${new Date(rt.last_seen).toISOString().slice(0, 19)}Z` : ""}`,
-        fix: "restart the app: it re-registers under the same id",
+        fix: "restart the app: its runtime link registers again",
       }
     : null
 }
 /** The playground header's reading of the app's own turns while the
  * opted-in app is gone (U20.2-fix, UX-H-14): appGone's words and fix,
- * for the newest-seen disconnected Sessions runtime of any service —
- * never "viewer-only" for an app that opted in. "" when none is. */
+ * for the first service whose opted-in runtime is gone and none of
+ * whose Sessions runtimes is connected — never "viewer-only" for an app
+ * that opted in. "" when none is. */
 export function appGoneScope(
   rts: readonly RuntimeLike[] | null | undefined
 ): string {
-  const rt = rts?.find((r) => r.connected === false && r.sessions)
-  const w = rt ? appGone(rts, rt.service) : null
-  return w ? `· the app's own turns: ${refusalLine(w)}` : ""
+  for (const r of rts ?? []) {
+    const w = appGone(rts, r.service)
+    if (w) return `· the app's own turns: ${refusalLine(w)}`
+  }
+  return ""
 }
 /** A decision that never landed (U20.2, UX-H-15): the run's lost
  * command (GET /api/runs/{id}/commands), said on the parked call after

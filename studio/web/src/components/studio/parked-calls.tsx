@@ -669,6 +669,7 @@ export function ParkedCalls({
               <p
                 className="font-sans text-status-int"
                 data-command-lost={lost.get(p.id)!.command_id}
+                data-app-verb="lost"
               >
                 {lostWords(lost.get(p.id)!)}
               </p>

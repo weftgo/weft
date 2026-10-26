@@ -27,6 +27,7 @@ export function RunsIn({
   runtime,
   runtimes,
   onPick,
+  refusalID,
 }: {
   /** The agent the command targets ("" none picked yet). */
   agent: string
@@ -35,6 +36,8 @@ export function RunsIn({
   runtimes: RuntimeView[]
   /** A pick of another runtime registering the agent. */
   onPick?: (runtimeID: string) => void
+  /** The refusal's id: a held Run's aria-describedby points at it. */
+  refusalID?: string
 }) {
   const regs = registering(runtimes, agent).filter((r) => r.connected !== false)
   const here = runtime && regs.some((r) => r.id === runtime.id)
@@ -53,6 +56,7 @@ export function RunsIn({
     const dialled = connected.filter((r) => r.studio_url).map(runsInDialled)
     return (
       <div
+        id={refusalID}
         className="space-y-0.5 font-mono text-xs [overflow-wrap:anywhere]"
         data-runs-in="none"
         role="status"

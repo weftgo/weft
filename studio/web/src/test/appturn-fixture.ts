@@ -250,8 +250,9 @@ export interface AppTurnOptions {
    * Studio. */
   runtimeLink?: { studio_url?: string; in_process: boolean }
   /** The run's commands (capability run_commands, U20.2): CALL's
-   * approval was lost — testdata/api/run-commands.golden.json's row. */
-  lost?: boolean
+   * approval was lost — testdata/api/run-commands.golden.json's row;
+   * "redecided": then decided again (a later decide, rejected). */
+  lost?: boolean | "redecided"
 }
 
 /** The 500 a failed runtimes read answers in these tests. */
@@ -360,7 +361,19 @@ export function serveAppTurn(
       const c = golden<{ commands: Record<string, unknown>[] }>("run-commands")
       return {
         commands: o.lost
-          ? c.commands.map((r) => ({ ...r, call_id: CALL.id }))
+          ? [
+              ...c.commands.map((r) => ({ ...r, call_id: CALL.id })),
+              ...(o.lost === "redecided"
+                ? c.commands.map((r) => ({
+                    ...r,
+                    command_id: "cmd_again",
+                    call_id: CALL.id,
+                    state: "rejected",
+                    error: "the app is writing this session; fork instead",
+                    created: "2026-10-26T14:30:00Z",
+                  }))
+                : []),
+            ]
           : [],
       }
     })

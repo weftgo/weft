@@ -15,6 +15,7 @@ import { answerText } from "@/lib/experiments"
 import { MATRIX_SOURCES_MAX } from "@/lib/matrix"
 import { cellKey } from "@/lib/form-state"
 import {
+  COST_WORDS,
   DEFAULT_PREDICATE,
   VERDICT_WORDS,
   judgeWith,
@@ -25,6 +26,7 @@ import {
   summarize,
 } from "@/lib/predicate"
 import type { ColumnTally, Judged, Predicate } from "@/lib/predicate"
+import { VERDICT_TEXT } from "@/lib/status-class"
 import { testRegex } from "@/lib/regex-run"
 
 /** The summary's words. */
@@ -135,7 +137,7 @@ export function VerdictChip({ v }: { v: Judged | undefined }) {
   if (!v) return null
   return (
     <span
-      className={`font-mono ${v.verdict === "pass" ? "text-status-ok" : v.verdict === "fail" ? "text-status-bad" : "text-faint"}`}
+      className={`font-mono ${VERDICT_TEXT[v.verdict]}`}
       title={v.why}
       data-verdict={v.verdict}
     >
@@ -176,7 +178,8 @@ export function tallies(
     const bill = sumCost(runs)
     t.usd = bill.known ? (bill.usd ?? 0) : null
     if (!bill.known) {
-      t.costWord = bill.badge === "unpriced" ? "unpriced" : "cost unknown"
+      t.costWord =
+        bill.badge === "unpriced" ? COST_WORDS.unpriced : COST_WORDS.unknown
       t.costTitle = bill.title
     }
     return t

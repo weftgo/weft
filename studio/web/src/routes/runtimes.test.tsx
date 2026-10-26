@@ -152,7 +152,7 @@ describe("the runtimes page (U20.1)", () => {
   it("tells the arena's three runtimes apart by pid and cwd, says a restored one is restored, groups by state", async () => {
     await open()
     expect(document.querySelector("[data-runtime-states]")!.textContent).toBe(
-      "3 connected · 1 restored after restart · 1 stale"
+      "3 connected · 1 restored after restart · 1 gone"
     )
     const facts = [batch, fleet, lab].map((r) => {
       const c = card(r.id)!
@@ -243,7 +243,7 @@ describe("the runtimes page (U20.1)", () => {
     )
   })
 
-  it("two stale links sharing a host and pid are two stale runtimes, never one process (U20.1-fix)", async () => {
+  it("two gone links sharing a host and pid are two gone runtimes, never one process (U20.1-fix)", async () => {
     const s1 = rt({
       id: "rt_s1",
       pid: 77,
@@ -263,7 +263,7 @@ describe("the runtimes page (U20.1)", () => {
       card("rt_s1")!
         .closest("[data-runtime-section]")!
         .getAttribute("data-runtime-section")
-    ).toBe("stale")
+    ).toBe("gone")
     expect(card("rt_s2")).toBeTruthy()
   })
 

@@ -115,6 +115,15 @@ describe("summarize", () => {
     expect(s.why).toContain("not known")
     expect(s.cheapestOverall?.key).toBe("paid")
   })
+  // P10a-pre-web-fix: a column missing rows billed fewer of them.
+  it("never names a column missing rows the cheapest overall", () => {
+    const short = col({ key: "short", pass: 3, missing: 4, usd: 0.0001 })
+    const full = col({ key: "full", pass: 6, fail: 1, usd: 0.002 })
+    const best = col({ key: "best", pass: 7, usd: 0.01 })
+    const s = summarize([short, full, best])
+    expect(s.cheapestOverall?.key).toBe("full")
+    expect(s.cheapestPassing?.key).toBe("best")
+  })
   // U24.2-fix2 1, the backstop: one cell not judged — a cap, a timeout,
   // an unreadable answer — and no cheapest is claimed, the reason said;
   // pass rates count the judged rows.
@@ -203,8 +212,7 @@ describe("testRegex (lib/regex-run.ts)", () => {
       onmessageerror: unknown = null
       constructor() {
         made++
-      }
-      postMessage() {
+        // A load failure: no ready message, the error event.
         setTimeout(
           () =>
             this.onerror?.({
@@ -214,6 +222,7 @@ describe("testRegex (lib/regex-run.ts)", () => {
           1
         )
       }
+      postMessage() {}
       terminate() {}
     }
     vi.stubGlobal("Worker", Broken)
@@ -238,6 +247,13 @@ describe("testRegex (lib/regex-run.ts)", () => {
       onmessage: ((e: MessageEvent) => void) | null = null
       onerror: unknown = null
       onmessageerror: unknown = null
+      constructor() {
+        // Loaded: the runner's ready message (P10a-pre-web-fix).
+        setTimeout(
+          () => this.onmessage?.({ data: { ready: true } } as MessageEvent),
+          1
+        )
+      }
       postMessage(job: { id: number; source: string }) {
         ran.push(job.source)
         setTimeout(
@@ -272,6 +288,10 @@ describe("testRegex (lib/regex-run.ts)", () => {
       terminated = false
       constructor() {
         made.push(this)
+        setTimeout(
+          () => this.onmessage?.({ data: { ready: true } } as MessageEvent),
+          1
+        )
       }
       postMessage(job: { id: number; text: string }) {
         // The first worker hangs (a catastrophic pattern); the next answers.

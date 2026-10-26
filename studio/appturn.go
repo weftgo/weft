@@ -137,7 +137,7 @@ func goneSessionsRuntime(rs *linkruntime.RuntimeServer, service string) (linkrun
 func appGoneWords(v linkruntime.RuntimeView) (msg, fix string) {
 	return appOwned + " · read-only: the app's runtime " + v.ID + " of service " + v.Service +
 			" disconnected — last seen " + v.LastSeen.UTC().Format(time.RFC3339),
-		"restart the app: it re-registers under the same id"
+		"restart the app: its runtime link registers again"
 }
 
 // serviceConnected reports whether any runtime of service holds its

@@ -301,9 +301,16 @@ export interface ColumnTally {
   why?: string
 }
 
+/** A column's bill when it is not known: "unpriced" only when a model
+ * has no price, else "cost unknown" (ENGINE_WORDS.unknown's word). */
+export const COST_WORDS = {
+  unpriced: "unpriced",
+  unknown: "cost unknown",
+} as const
+
 /** costWords is a column's bill in words: $x, or why not. */
 export const costWords = (t: Pick<ColumnTally, "usd" | "costWord">): string =>
-  t.usd === null ? (t.costWord ?? "cost unknown") : formatUSD(t.usd)
+  t.usd === null ? (t.costWord ?? COST_WORDS.unknown) : formatUSD(t.usd)
 
 /** The grid's summary line (the audit's "cheapest model passing every
  * row: kimi ($0.0108) · cheapest overall: glm (5/7)"). */
@@ -344,7 +351,9 @@ export function summarize(cols: ColumnTally[]): MatrixSummary {
       cheapestOverall: null,
       why: UNJUDGED_WORDS(unjudged, cols.find((c) => c.why)?.why),
     }
-  const priced = cols.filter((c) => c.usd !== null)
+  // A column missing rows billed fewer of them: its smaller bill is no
+  // "cheapest overall" (P10a-pre-web-fix).
+  const priced = cols.filter((c) => c.usd !== null && c.missing === 0)
   const byCost = (a: ColumnTally, b: ColumnTally) => a.usd! - b.usd!
   const allPass = cols.filter(
     (c) => c.fail === 0 && c.unknown === 0 && c.missing === 0 && c.pass > 0

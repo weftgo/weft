@@ -1,1 +1,0 @@
-(function(){self.onmessage=e=>{let{id:t,source:n,flags:r,text:i}=e.data,a;try{a={id:t,hit:new RegExp(n,r).test(i)}}catch(e){a={id:t,error:e instanceof Error?e.message:String(e)}}self.postMessage(a)}})();

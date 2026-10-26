@@ -1675,6 +1675,8 @@ function Playground({ caps }: { caps: string[] }) {
                     onClick={() => void run()}
                     disabled={
                       !runtime ||
+                      // A registration that is not connected runs nothing.
+                      runtime.connected === false ||
                       !agent ||
                       busy ||
                       resolving ||

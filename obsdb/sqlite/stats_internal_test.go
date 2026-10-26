@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -438,13 +439,19 @@ func BenchmarkSpanStatsIngest(b *testing.B) {
 // TestSpanStatsIngestCost runs the benchmark briefly and fails on a
 // per-span cost that says the derivation is parsed per span again
 // (213 µs/span then; ~54 now): the bound, 150 µs, leaves room for a
-// loaded machine.
+// loaded machine. The best of three runs counts (load only adds
+// time). Not on CI: a shared runner measured 234 µs/span on the
+// unchanged code (CI 40354621447), so a wall-clock bound there says
+// nothing; the benchmark still runs with -bench.
 func TestSpanStatsIngestCost(t *testing.T) {
-	if testing.Short() || raceEnabled {
-		t.Skip("a timing bound: not under -short or -race")
+	if testing.Short() || raceEnabled || os.Getenv("CI") != "" {
+		t.Skip("a timing bound: not under -short, -race or CI")
 	}
-	r := testing.Benchmark(BenchmarkSpanStatsIngest)
-	if us := r.Extra["µs/span"]; us > 150 {
+	us := math.Inf(1)
+	for range 3 {
+		us = min(us, testing.Benchmark(BenchmarkSpanStatsIngest).Extra["µs/span"])
+	}
+	if us > 150 {
 		t.Errorf("span_stats ingest costs %.0f µs/span, want under 150: is the INSERT … SELECT prepared once per Write?", us)
 	}
 }

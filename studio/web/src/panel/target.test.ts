@@ -58,7 +58,7 @@ const missed = {
   status: "failed",
   run_id: "pg_new",
   error:
-    "weft: run failed at step 0: model stream: weft/runtime: no recorded turn for step 2 (scripted engine, key 700b66abcf4561ab): the tool list differs from the recording [tools]; the scripted engine answers only what the source recorded: re-run on engine live",
+    "weft: run failed at step 0: model stream: weft/runtime: no recorded turn for step 2 (scripted engine, key 700b66abcf4561ab): the tool list differs from the recording [tools]; the scripted engine answers only what the source recorded: run on live",
   reason: {
     kind: "scripted_miss",
     step: 2,

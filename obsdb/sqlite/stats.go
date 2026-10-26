@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
@@ -97,6 +99,33 @@ type spanStatWriter struct {
 	insert, attempt *sql.Stmt
 }
 
+// spanStatsWarn is the once-per-process WARN of a span_stats write
+// that failed (writeSaved); a var so a test can reset it.
+var spanStatsWarn sync.Once
+
+// writeSaved is write inside a SAVEPOINT: on its failure the rollup's
+// half is rolled back and the span — stored before it in the same
+// transaction — is kept. The rollup is a derived index (rebuildable
+// from spans), so a failure there must not lose the OTLP batch; it
+// logs one WARN per process through slog's default logger. Only a
+// failure of the savepoint itself is returned.
+func (w *spanStatWriter) writeSaved(ctx context.Context, s obsdb.Span) error {
+	if _, err := w.tx.ExecContext(ctx, `SAVEPOINT span_stats`); err != nil {
+		return err
+	}
+	if err := w.write(ctx, s); err != nil {
+		if _, rerr := w.tx.ExecContext(ctx, `ROLLBACK TO span_stats`); rerr != nil {
+			return rerr
+		}
+		spanStatsWarn.Do(func() {
+			slog.Default().WarnContext(ctx, "weft/obsdb/sqlite: span_stats rollup write failed; the span is stored, the stats skip it (further failures are not logged)",
+				"trace_id", s.TraceID, "span_id", s.SpanID, "error", err)
+		})
+	}
+	_, err := w.tx.ExecContext(ctx, `RELEASE span_stats`)
+	return err
+}
+
 func (w *spanStatWriter) write(ctx context.Context, s obsdb.Span) error {
 	if w.insert == nil {
 		st, err := w.tx.PrepareContext(ctx, spanStatsInsert(`trace_id = ? AND span_id = ?`))
@@ -148,8 +177,27 @@ var spanStatsBatchSize = 5000
 // key order — each statement bounded, the whole inside the migration's
 // transaction (a large file's first open at 0023 takes as long as its
 // spans take to derive: TestSpanStatsBackfillTime measures it).
-func backfillSpanStats(tx *sql.Tx) error {
+func backfillSpanStats(tx *sql.Tx) (err error) {
 	ctx := context.Background()
+	// Open blocks for the backfill's length: one INFO line before (the
+	// span count) and one after (its duration), never a silent wait. A
+	// file with no spans (a new one) has nothing to wait for and logs
+	// nothing.
+	var spans int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM spans`).Scan(&spans); err != nil {
+		return err
+	}
+	if spans == 0 {
+		return nil
+	}
+	slog.Default().InfoContext(ctx, "weft/obsdb/sqlite: migration 0023 backfills the span_stats rollup; Open waits for it", "spans", spans)
+	began := time.Now()
+	defer func() {
+		if err != nil {
+			return
+		}
+		slog.Default().InfoContext(ctx, "weft/obsdb/sqlite: migration 0023 backfill done", "spans", spans, "duration", time.Since(began).Round(time.Millisecond).String())
+	}()
 	// The lower bound is a separate condition, never "first OR (…) >
 	// (…)": an OR with a bind defeats the primary key range, and every
 	// batch would scan the table from its start.

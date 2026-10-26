@@ -2748,8 +2748,11 @@ export interface StatsPage {
  * run, children included), "" top-level, or a run id. */
 export interface StatsFilters {
   by: StatsBy
-  /** /api/runs' filters with its defaults: both, any. */
-  playground?: boolean
+  /** false (the server's default: the app's own runs alone — health
+   * numbers never mix in replays), true (playground runs alone, /api/runs'
+   * meaning) or "all" (both). */
+  playground?: boolean | "all"
+  /** /api/runs' filters with its defaults: any. */
   experiment_id?: string
   status?: RunStatusFilter
   since?: string

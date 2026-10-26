@@ -2493,3 +2493,136 @@ func TestScriptedPastTheEndAgreesEndToEnd(t *testing.T) {
 		t.Errorf("command row = %s, want the same step and component as the preview", row)
 	}
 }
+
+// TestScriptedPastTheEndWithMissingToolAgreesEndToEnd (P10a-pre-go-fix
+// item 1): the source calls lookup_order, then ghost, then its model
+// fails; the registered agent lacks ghost. The replay's ghost result is
+// the unknown-tool error, not the recorded one, so the step the source
+// never answered is asked with other messages — the preview and the
+// engine both say step 2 [tools, unanswered], in the same sentence.
+func TestScriptedPastTheEndWithMissingToolAgreesEndToEnd(t *testing.T) {
+	e := newE2E(t)
+	lookup := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+		OrderID string `json:"order_id"`
+	}) (string, error) {
+		return "shipped", nil
+	}, core.Replay(core.ReplaySafe))
+	ghost := core.Tool("ghost", "A tool the replay no longer registers.", func(ctx context.Context, in struct{}) (string, error) {
+		return "boo", nil
+	}, core.Replay(core.ReplaySafe))
+	source := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"4411"}`, ID: "c1"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "ghost", Args: `{}`, ID: "c2"}),
+		wefttest.Fail(errors.New("provider down")),
+	), core.Name("acme-support"), lookup, ghost,
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()))
+	if _, err := source.Generate(context.Background(), core.RunID("r_ghost"), core.Prompt("where is my order #4411?")); err == nil {
+		t.Fatal("the source run did not fail")
+	}
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.waitTranscript(t, "r_ghost", "boo")
+
+	// The registered agent: the same name, without ghost.
+	e.agent = core.New(wefttest.Script(), core.Name("acme-support"), lookup,
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()))
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true))
+	defer shutdown()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+	body := fmt.Sprintf(`{"command_id": "cmd_ghost", "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": "r_ghost", "from_step": 0}, "engine": "scripted", "side_effects": "substitute"}`, runtimes.Runtimes[0].ID)
+	const sentence = "scripted has no recorded answer for step 2: the tool list differs from the recording; the source never answered it — run on live, or replay from an earlier step"
+	if _, pv := e.api(t, http.MethodPost, "/api/playground/preview", body); !strings.Contains(pv,
+		`"scripted_key_match":{"ok":false,"because":["tools","unanswered"],"step":2,"message":"`+sentence+`"}`) {
+		t.Errorf("preview = %s, want the step-2 [tools, unanswered] miss", pv)
+	}
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", body); code != http.StatusAccepted {
+		t.Fatalf("run = %d %s", code, resp)
+	}
+	row := e.waitCommand(t, "cmd_ghost", "finished")
+	if !strings.Contains(row, `"reason":{"kind":"scripted_miss","step":2,"components":["tools","unanswered"],"message":"`+sentence+`"}`) {
+		t.Errorf("command row = %s, want the same step, components and sentence as the preview", row)
+	}
+}
+
+// TestStatsCountsTheAppsOwnRunsEndToEnd (P10a-pre-go-fix item 3, the
+// probe): one real run and two scripted replays of it, both sides real
+// — GET /api/stats?by=agent counts the real run alone by default; with
+// playground=all it counts all three.
+func TestStatsCountsTheAppsOwnRunsEndToEnd(t *testing.T) {
+	e := newE2E(t)
+	e.agent = core.New(wefttest.Script(wefttest.Say("your order shipped")), core.Name("acme-support"),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()))
+	if _, err := e.agent.Generate(context.Background(), core.RunID("r_real"), core.Prompt("where is my order #4411?")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.waitTranscript(t, "r_real", "your order shipped")
+
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true))
+	defer shutdown()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+	for _, id := range []string{"cmd_s1", "cmd_s2"} {
+		body := fmt.Sprintf(`{"command_id": %q, "runtime": %q, "agent": "acme-support",
+		  "source": {"run_id": "r_real", "from_step": 0}, "engine": "scripted", "side_effects": "substitute"}`, id, runtimes.Runtimes[0].ID)
+		if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", body); code != http.StatusAccepted {
+			t.Fatalf("run = %d %s", code, resp)
+		}
+		if row := e.waitCommand(t, id, "finished"); !strings.Contains(row, `"status":"succeeded"`) {
+			t.Fatalf("%s: %s", id, row)
+		}
+	}
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	runsOf := func(path string) int {
+		var page struct {
+			Groups []struct {
+				Key  string `json:"key"`
+				Runs int    `json:"runs"`
+			} `json:"groups"`
+		}
+		_, b := e.api(t, http.MethodGet, path, "")
+		if err := json.Unmarshal([]byte(b), &page); err != nil {
+			t.Fatalf("%s: %v %s", path, err, b)
+		}
+		n := 0
+		for _, g := range page.Groups {
+			if g.Key == "acme-support" {
+				n += g.Runs
+			}
+		}
+		return n
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for runsOf("/api/stats?by=agent&playground=all") != 3 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := runsOf("/api/stats?by=agent&playground=all"); n != 3 {
+		t.Fatalf("stats?playground=all counts %d runs, want the real run and both replays", n)
+	}
+	if n := runsOf("/api/stats?by=agent"); n != 1 {
+		t.Errorf("stats?by=agent counts %d runs by default, want the real run alone", n)
+	}
+}

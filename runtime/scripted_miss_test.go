@@ -22,7 +22,7 @@ func TestScriptedMissNamesStepAndComponent(t *testing.T) {
 	refund := core.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) {
 		return "ok", nil
 	})
-	const remedy = "; the scripted engine answers only what the source recorded: re-run on engine live"
+	const remedy = "; the scripted engine answers only what the source recorded: run on live"
 	for _, c := range []struct {
 		name  string
 		tools []string // the list the record is keyed with
@@ -127,7 +127,7 @@ func TestScriptedMissPastTheRecordedEnd(t *testing.T) {
 	_, err := core.New(newScriptedModel(src, []string{"lookup_order"}), core.Name("a"), lookup).
 		Generate(context.Background(), core.Prompt("where is my order #4411?"))
 	key := scriptedRequestKeyOfMiss(t, err)
-	if want := "weft/runtime: no recorded turn for step 1 (scripted engine, key " + key + "): the source recorded no turn for it [unanswered]; the scripted engine answers only what the source recorded: re-run on engine live"; missText(err) != want {
+	if want := "weft/runtime: no recorded turn for step 1 (scripted engine, key " + key + "): the source recorded no turn for it [unanswered]; the scripted engine answers only what the source recorded: run on live"; missText(err) != want {
 		t.Errorf("past-the-end miss =\n  %s\nwant\n  %s", missText(err), want)
 	}
 }
@@ -148,7 +148,7 @@ func TestScriptedMissNamesAToolTheAgentLacks(t *testing.T) {
 	_, err := core.New(newScriptedModel(src, []string{"web_search"}), core.Name("a"), web).
 		Generate(context.Background(), core.Prompt("find the docs"))
 	key := scriptedRequestKeyOfMiss(t, err)
-	if want := "weft/runtime: no recorded turn for step 1 (scripted engine, key " + key + "): the tool list differs from the recording [tools]; the scripted engine answers only what the source recorded: re-run on engine live"; missText(err) != want {
+	if want := "weft/runtime: no recorded turn for step 1 (scripted engine, key " + key + "): the tool list differs from the recording [tools]; the scripted engine answers only what the source recorded: run on live"; missText(err) != want {
 		t.Errorf("missing-tool miss =\n  %s\nwant\n  %s", missText(err), want)
 	}
 }

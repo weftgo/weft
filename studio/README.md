@@ -1094,7 +1094,7 @@ reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
 committed `studio/dist/panel/panel.js`, 281,281 B raw / 94,658 B gzip
-(92.4 KiB, the bundle of the ledger's row "I2b-fix"; 11,838 B — 11.6 KiB — of headroom under
+(92.4 KiB, the bundle of the ledger's row "P10a-pre-go-fix"; 11,838 B — 11.6 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -2542,8 +2542,8 @@ recorded no turn); Studio prefers it to the text and keeps only the
 known components. The error text's grammar, for a client that sends no
 `reason` (Studio reads it): `… no recorded turn for step <N> (scripted
 engine, key <hex>): <clause>[; <clause>…] [<component>[, <component>…]];
-the scripted engine answers only what the source recorded: re-run on
-engine live`, or `for this request` in place of `for step <N>`; the
+the scripted engine answers only what the source recorded: run on
+live`, or `for this request` in place of `for step <N>`; the
 components are `tools`, `thinking`, `tool_choice`, `sequential`,
 `messages`, `unanswered`, `exhausted`. The registration's agent
 `defaults` gain `thinking_budget` (tokens, absent for none), each agent
@@ -2656,15 +2656,21 @@ filters `search` and `runs` to that class),
 `stats` (UX plan A4, under the `stats` capability:
 `?by=agent|model|tool|error_type|step` with `since` (RFC 3339 or
 `90m`/`24h`/`7d` back from `until`, default 24h), `until`, `agent`,
-`tag.<k>=<v>`, `public_id`, `playground`, `experiment_id`, `status` and
-`parent` (`*` the default, unlike `runs`' top-level: children counted
-under their own agent) — per group `runs`, `failed`,
+`tag.<k>=<v>`, `public_id`, `playground` (`false` the default, unlike
+`runs`' both: health numbers never mix in scripted or playground
+replays; `true` the replays alone, `all` both), `experiment_id`,
+`status` and `parent` (`*` the default, unlike `runs`' top-level:
+children counted under their own agent) — per group `runs`, `failed`,
 `failure_rate`, `calls`, `failed_calls`, the calls' own tokens, the cost
 block, `duration_ms` and `ttft_ms` `{p50, p95, n}` (nearest-rank, exact
 on both backends), `retry_rate`, `denials` and a 24-bucket `series` for
 sparklines; by=agent adds `delegated` (its subagents' calls, apart from
 its own), agent and error_type groups a `runs_query` (the `search`
-query string whose total is the group's runs); scoped like `runs`; SQLite reads its `span_stats` rollup
+query string whose total is the group's runs, the effective
+`playground` filter carried); by=model keys on the model name alone
+(two providers' same name are one group, priced per part) and by=step
+on the run's own step index (a replay's from 0 at its from_step, not
+the diff's aligned ordinal); scoped like `runs`; SQLite reads its `span_stats` rollup
 (migration 0023, a derived index written at ingest), ClickHouse groups
 `otel_traces` natively),
 `runs/{id}` (the row and the subagent children, each child row with its own `holes` — never events; with

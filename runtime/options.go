@@ -44,7 +44,14 @@ type config struct {
 // pipeline with a Local destination and no Studio (otel.LocalDB() set,
 // otel.StudioEndpoint() empty) skips the file: the link would register
 // with a Studio its runs never reach, so Install opens nothing and
-// WARNs once, naming Local(srv) and Studio(url, token).
+// WARNs once, naming Local(srv) and Studio(url, token). The rule reads
+// the *installed* pipeline only (otel.LocalDB(), set by otel.Install /
+// otel.Start without otel.NoGlobal): an app that builds its pipeline
+// with otel.Start(otel.Local(p), otel.NoGlobal()) leaves it unset, so
+// Install without Studio or Local still joins a discovered Studio —
+// one whose spans never arrive, since the pipeline sends them nowhere
+// but p. Such an app names its Studio itself: Local(srv) for the
+// embedded one, or Studio(url, token) beside otel.Studio(url, token).
 func Studio(url, token string) Option {
 	return func(c *config) { c.studioURL, c.studioToken = url, token }
 }
@@ -261,6 +268,14 @@ func Enabled(on bool) Option {
 // ignored), executes it as a run of the named agent, and reports the
 // run's end with a finished ack. The run's content flows back through
 // the normal OTel pipeline, not through the link.
+//
+// With no Studio or Local option, which Studio it dials is Studio's
+// fallback chain (the pipeline's Studio destination, then the
+// discovery file, skipped beside an installed Local-only pipeline). A
+// pipeline started with otel.NoGlobal is not installed, so Install
+// cannot see it: pass Local(srv) or Studio(url, token) explicitly
+// there, or the link may join a discovered Studio its runs never
+// reach.
 func Install(opts ...Option) (shutdown func()) {
 	c := &config{}
 	for _, o := range opts {

@@ -36,12 +36,26 @@ import (
 //	            top-level runs | a run id its children. Note the
 //	            default differs from /api/runs', which lists the
 //	            top-level runs: a group's runs_query says all=1
-//	playground  true | false (default: both, as /api/runs)
+//	playground  false (the default: the app's own runs alone) | true
+//	            (playground runs alone, /api/runs' meaning) | all
+//	            (both). Not /api/runs' default (both): health numbers —
+//	            rates, percentiles, call counts — must not mix scripted
+//	            or playground replays into the app's own; a group's
+//	            runs_query carries the effective filter, so its link
+//	            lands on the same runs
 //	experiment_id the runs of one experiment (default: any)
 //	status      /api/runs' status words (default: any); an unknown
 //	            value is 400, as since, until, by and playground are
 //
 // since and until must lie in 1678..2262 (Unix nanoseconds), else 400.
+//
+// Two keys to read with care: by=model keys on the model name alone
+// (gen_ai.request.model), so two providers' models of one name are one
+// group — its cost still priced per provider/model part; by=step keys a
+// call on its own run's step index, and a replay numbers its steps from
+// 0 at its from_step (not the source's ordinal the diff aligns on), so
+// a replay from step 3 counts under step 0 — playground=false, the
+// default, leaves replays out.
 //
 // A run is in the window when it started in [since, until); its spans
 // count with it, in its bucket. The series has statsBuckets buckets of
@@ -202,13 +216,20 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request) {
 	if !scopeRunsQuery(w, r, &query.RunQuery, q.Get("public_id")) {
 		return
 	}
-	// /api/runs' other filters, its words and its defaults: every run,
-	// playground and experiment runs included, any status.
+	// /api/runs' other filters, its words and its defaults — experiment
+	// runs included, any status — except playground: the app's own runs
+	// unless asked (all: both).
 	query.ExperimentID = q.Get("experiment_id")
-	if v := q.Get("playground"); v != "" {
+	no := false
+	query.Playground = &no
+	switch v := q.Get("playground"); v {
+	case "":
+	case "all":
+		query.Playground = nil
+	default:
 		b, err := strconv.ParseBool(v)
 		if err != nil {
-			badRequest(w, r, "playground must be true or false")
+			badRequest(w, r, "playground must be true, false or all")
 			return
 		}
 		query.Playground = &b
@@ -312,9 +333,14 @@ func (s *Server) statsCost(by obsdb.StatsBy, g obsdb.StatsGroup) cost {
 // statsCost's rule, for a group's own calls and its delegated ones.
 func (s *Server) priceModels(models []obsdb.ModelUsage, usage core.Usage) cost {
 	out := cost{known: true, cache: cacheOf(usage)}
-	var unpriced, parts, scriptedParts int
+	var unpriced, parts, scriptedParts, scriptedIdle int
 	for _, m := range models {
 		if m.Usage == (core.Usage{}) {
+			// A scripted model reports no usage by design: its part is an
+			// exact $0, not "no usage recorded".
+			if s.pricing.price(m.Provider, m.Model, m.Usage).badge == costScripted {
+				scriptedIdle++
+			}
 			continue
 		}
 		parts++
@@ -334,6 +360,10 @@ func (s *Server) priceModels(models []obsdb.ModelUsage, usage core.Usage) cost {
 		out.usd += c.usd
 	}
 	switch {
+	case parts == 0 && scriptedIdle > 0:
+		// Every call was scripted (zero usage by design): an exact $0,
+		// as each of its runs reads.
+		return cost{known: true, badge: costScripted, reason: scriptedReason, cache: cacheExact}
 	case parts == 0:
 		// No call reported usage (none ran, or every one failed before
 		// its usage arrived): nothing to price, not a $0.
@@ -379,10 +409,15 @@ func runsQueryOf(params url.Values, q obsdb.StatsQuery, by obsdb.StatsBy, key st
 	for k, val := range q.Meta {
 		v.Set("tag."+k, val)
 	}
-	for _, k := range []string{"public_id", "experiment_id", "playground"} {
+	for _, k := range []string{"public_id", "experiment_id"} {
 		if p := params.Get(k); p != "" {
 			v.Set(k, p)
 		}
+	}
+	// The effective playground filter (the default false included), in
+	// /api/search's spelling; both is its default, no parameter.
+	if q.Playground != nil {
+		v.Set("playground", strconv.FormatBool(*q.Playground))
 	}
 	if q.Status != "" && by != obsdb.StatsByErrorType {
 		v.Set("status", string(q.Status))

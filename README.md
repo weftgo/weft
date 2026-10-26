@@ -470,7 +470,12 @@ the installed pipeline has neither a Studio nor a Local: beside a
 Local-only pipeline it opens no link and WARNs once (the link would
 register with a Studio its runs never reach) — `runtime.Local(srv)`
 dials the embedded Studio, `runtime.Studio(url, tok)` with
-`otel.Studio(url, tok)` a running one.
+`otel.Studio(url, tok)` a running one. The rule sees the *installed*
+pipeline only: one started with `otel.Start(otel.Local(p),
+otel.NoGlobal())` is not installed, so `runtime.Install` without
+`runtime.Studio` / `runtime.Local` still joins a discovered Studio,
+whose replays' spans never arrive — name it there: `runtime.Local(srv)`
+or `runtime.Studio(url, tok)`.
 
 Setup A's handler serves `GET <base>/panel-config.json` —
 `{"endpoint", "version", "capabilities"}` — to a loopback (or

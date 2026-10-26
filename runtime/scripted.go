@@ -305,7 +305,7 @@ func (e *scriptedMiss) Error() string {
 	for i, c := range e.components {
 		clauses[i] = missPhrase[c]
 	}
-	return fmt.Sprintf("weft/runtime: no recorded turn for %s (scripted engine, key %s): %s [%s]; the scripted engine answers only what the source recorded: re-run on engine live",
+	return fmt.Sprintf("weft/runtime: no recorded turn for %s (scripted engine, key %s): %s [%s]; the scripted engine answers only what the source recorded: run on live",
 		at, e.key, strings.Join(clauses, "; "), strings.Join(e.components, ", "))
 }
 
@@ -365,10 +365,23 @@ func (m *scriptedModel) miss(req core.ModelRequest, key string) error {
 	// A recorded call before this step to a tool the replay does not
 	// offer: its result at replay is not the recorded one, so the
 	// messages differ because of the tool list — said as tools, as the
-	// preview says it.
-	if !exact && m.callsOutside(e.step) {
+	// preview says it. A request longer than the nearest entry carries
+	// that entry's own answer and its calls' results too, so its calls
+	// count; when that entry is the last recorded step, the request is
+	// the step the source never answered (the preview's [tools,
+	// unanswered] at m.steps).
+	longer := len(got) > len(m.entries[best].msgs)
+	upTo := e.step
+	if longer {
+		upTo++
+	}
+	if !exact && m.callsOutside(upTo) {
 		if !slices.Contains(e.components, missTools) {
 			e.components = append([]string{missTools}, e.components...)
+		}
+		if longer && e.step == m.steps-1 {
+			e.step = m.steps
+			e.components = append(e.components, missUnanswered)
 		}
 		return e
 	}
@@ -381,8 +394,8 @@ func (m *scriptedModel) miss(req core.ModelRequest, key string) error {
 	return e
 }
 
-// callsOutside reports whether a recorded step before step called a
-// tool outside the list the record is keyed with.
+// callsOutside reports whether a recorded step before step (k < step)
+// called a tool outside the list the record is keyed with.
 func (m *scriptedModel) callsOutside(step int) bool {
 	for k := 0; k < step && k < len(m.calls); k++ {
 		for _, name := range m.calls[k] {

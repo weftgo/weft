@@ -237,7 +237,7 @@
         "cost_known": true,
         "cache": "exact"
       },
-      "runs_query": "agent=researcher\u0026all=1\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"
+      "runs_query": "agent=researcher\u0026all=1\u0026playground=false\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"
     },
     {
       "key": "director",
@@ -472,7 +472,7 @@
           "zai/glm-5.3-flash"
         ]
       },
-      "runs_query": "agent=director\u0026all=1\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"
+      "runs_query": "agent=director\u0026all=1\u0026playground=false\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"
     },
     {
       "key": "orders",
@@ -703,7 +703,7 @@
         "cost_known": true,
         "cache": "exact"
       },
-      "runs_query": "agent=orders\u0026all=1\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"
+      "runs_query": "agent=orders\u0026all=1\u0026playground=false\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"
     }
   ]
 }

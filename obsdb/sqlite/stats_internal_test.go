@@ -1,15 +1,18 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -584,5 +587,101 @@ func TestStatsDelegatedScale(t *testing.T) {
 	}
 	if took > 3*time.Second {
 		t.Errorf("by=agent over %d runs took %v: is the delegated query driving from the runs on span_stats_run?", n, took)
+	}
+}
+
+// TestSpanStatsFailureKeepsTheBatch (P10a-pre-go-fix item 2): a
+// span_stats write that fails (here: spans_attempt dropped, so the
+// derivation's INDEXED BY cannot prepare) rolls back to its savepoint —
+// the spans and the run are stored, the rollup skips them, and one WARN
+// is logged for the process, not one per span.
+func TestSpanStatsFailureKeepsTheBatch(t *testing.T) {
+	var logged bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(prev)
+	spanStatsWarn = sync.Once{}
+	defer func() { spanStatsWarn = sync.Once{} }()
+
+	path := filepath.Join(t.TempDir(), "nostats.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`DROP INDEX spans_attempt`); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+	d, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	first, late := statSpans("r_nostats", time.Unix(1_800_000_000, 0))
+	if err := d.Write(context.Background(), obsdb.Batch{Spans: append(first, late...)}); err != nil {
+		t.Fatalf("a span_stats failure failed the batch: %v", err)
+	}
+	var spans int
+	if err := d.(*DB).reads.QueryRow(`SELECT COUNT(*) FROM spans WHERE run_id = 'r_nostats'`).Scan(&spans); err != nil {
+		t.Fatal(err)
+	}
+	if spans != len(first)+len(late) {
+		t.Errorf("stored spans = %d, want %d", spans, len(first)+len(late))
+	}
+	if _, err := d.Run(context.Background(), "r_nostats"); err != nil {
+		t.Errorf("the run row: %v", err)
+	}
+	if n := len(spanStatRows(t, d.(*DB).reads, "run_id = 'r_nostats'")); n != 0 {
+		t.Errorf("rollup rows = %d, want 0 (each write rolled back to its savepoint)", n)
+	}
+	if n := strings.Count(logged.String(), "span_stats rollup write failed"); n != 1 || !strings.Contains(logged.String(), "level=WARN") {
+		t.Errorf("WARN lines = %d, want 1:\n%s", n, logged.String())
+	}
+}
+
+// TestUpgradeTo0023LogsTheBackfill (P10a-pre-go-fix item 6): Open
+// blocks for 0023's backfill, so it says so — one INFO line with the
+// span count before, one with the duration after; a file with no spans
+// logs neither.
+func TestUpgradeTo0023LogsTheBackfill(t *testing.T) {
+	var logged bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(prev)
+
+	path := filepath.Join(t.TempDir(), "at22.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logged.String(), "0023") {
+		t.Errorf("a new file logged the backfill:\n%s", logged.String())
+	}
+	first, late := statSpans("r_log", time.Unix(1_800_000_000, 0))
+	spans := append(first, late...)
+	if err := d.Write(context.Background(), obsdb.Batch{Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rewindTo22(t, path)
+	logged.Reset()
+	d, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	out := logged.String()
+	if !strings.Contains(out, "level=INFO msg=\"weft/obsdb/sqlite: migration 0023 backfills the span_stats rollup; Open waits for it\" spans="+strconv.Itoa(len(spans))) ||
+		!strings.Contains(out, "migration 0023 backfill done") || !strings.Contains(out, "duration=") {
+		t.Errorf("the backfill's INFO lines:\n%s", out)
 	}
 }

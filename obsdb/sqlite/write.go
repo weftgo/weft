@@ -65,8 +65,10 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 		}
 		if inserted && w.RunID != "" {
 			// The span_stats rollup row (0023), in the span's own
-			// transaction: a derived index of what was just stored.
-			if err := stats.write(ctx, s); err != nil {
+			// transaction: a derived index of what was just stored. A
+			// failure rolls back to its savepoint and keeps the span —
+			// the index is rebuildable, the batch is not (warned once).
+			if err := stats.writeSaved(ctx, s); err != nil {
 				return err
 			}
 		}

@@ -200,7 +200,7 @@ func TestCommandReasonNamesScriptedMiss(t *testing.T) {
 	}
 	miss := "weft: run failed at step 0: model stream: weft/runtime: no recorded turn for step 2 (scripted engine, key 700b66abcf4561ab): " +
 		"the tool list differs from the recording; the messages differ from the recording (a changed input or tool result) [tools, messages]; " +
-		"the scripted engine answers only what the source recorded: re-run on engine live"
+		"the scripted engine answers only what the source recorded: run on live"
 	out := run("cmd_miss", miss)
 	var st struct {
 		Error  string              `json:"error"`

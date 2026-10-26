@@ -48,7 +48,7 @@ func ExampleRuntimeServer() {
 func ExampleReasonOf() {
 	r := runtime.ReasonOf("weft: run failed at step 0: model stream: weft/runtime: no recorded turn for step 2 " +
 		"(scripted engine, key 700b66abcf4561ab): the tool list differs from the recording [tools]; " +
-		"the scripted engine answers only what the source recorded: re-run on engine live")
+		"the scripted engine answers only what the source recorded: run on live")
 	fmt.Println(r.Kind, r.Step, r.Components)
 	fmt.Println(r.Message)
 	fmt.Println(runtime.ReasonOf("weft: run failed at step 0: boom") == nil)

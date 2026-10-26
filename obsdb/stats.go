@@ -50,12 +50,19 @@ const (
 	// for a failure whose root carried none).
 	StatsByErrorType StatsBy = "error_type"
 	// StatsByModel groups model calls (chat spans) by the model they
-	// asked for (gen_ai.request.model).
+	// asked for (gen_ai.request.model). The key is the model name alone:
+	// two providers' models of the same name are one group (its cost is
+	// still priced per provider/model part, StatsGroup.Models).
 	StatsByModel StatsBy = "model"
 	// StatsByTool groups tool calls (execute_tool spans) by tool name.
 	StatsByTool StatsBy = "tool"
 	// StatsByStep groups model calls by their step index
-	// (weft.step.index, the key its decimal string).
+	// (weft.step.index, the key its decimal string). A replay's calls
+	// key on the replay's own step index, counted from its from_step's
+	// 0 — not the source's step it re-asks (the playground diff's
+	// aligned step): a replay from step 3 adds to step 0's group. Studio
+	// leaves playground runs out by default, which removes the common
+	// case.
 	StatsByStep StatsBy = "step"
 )
 
@@ -87,7 +94,9 @@ var ErrInvalidStats = errors.New("obsdb: invalid stats query")
 // filters /api/runs reads — agent, public id (the panel token's scope),
 // metadata (tag.<k>), parent ("*" every run, children included; "" the
 // top-level runs only), playground, experiment, status — with the same
-// meaning; RunQuery's Before, BeforeID, Limit and Oldest are not read.
+// meaning (Playground nil: both; Studio's /api/stats sends false unless
+// asked, so health numbers never mix in replays); RunQuery's Before,
+// BeforeID, Limit and Oldest are not read.
 // A derived run (RunRow.Derived: built from stock spans) counts as a
 // run — so a group's Runs is the runs list's count under the same
 // filters — with no calls: it has no weft spans to aggregate.

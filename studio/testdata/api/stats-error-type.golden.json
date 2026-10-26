@@ -229,7 +229,7 @@
           "output_tokens": 0
         }
       ],
-      "runs_query": "all=1\u0026error_type=usage_limit\u0026since=2020-01-01T00%3A00%3A00Z\u0026status=failed\u0026until=2020-01-02T00%3A00%3A00Z"
+      "runs_query": "all=1\u0026error_type=usage_limit\u0026playground=false\u0026since=2020-01-01T00%3A00%3A00Z\u0026status=failed\u0026until=2020-01-02T00%3A00%3A00Z"
     },
     {
       "key": "model_error",
@@ -448,7 +448,7 @@
           "output_tokens": 0
         }
       ],
-      "runs_query": "all=1\u0026error_type=model_error\u0026since=2020-01-01T00%3A00%3A00Z\u0026status=failed\u0026until=2020-01-02T00%3A00%3A00Z"
+      "runs_query": "all=1\u0026error_type=model_error\u0026playground=false\u0026since=2020-01-01T00%3A00%3A00Z\u0026status=failed\u0026until=2020-01-02T00%3A00%3A00Z"
     },
     {
       "key": "loop_detected",
@@ -674,7 +674,7 @@
           "output_tokens": 0
         }
       ],
-      "runs_query": "all=1\u0026error_type=loop_detected\u0026since=2020-01-01T00%3A00%3A00Z\u0026status=failed\u0026until=2020-01-02T00%3A00%3A00Z"
+      "runs_query": "all=1\u0026error_type=loop_detected\u0026playground=false\u0026since=2020-01-01T00%3A00%3A00Z\u0026status=failed\u0026until=2020-01-02T00%3A00%3A00Z"
     }
   ]
 }

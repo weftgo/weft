@@ -1586,24 +1586,33 @@ func TestAuthMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		var stats struct {
-			Groups []struct {
-				Runs int `json:"runs"`
-			} `json:"groups"`
+		// The default counts the app's own runs (playground=false);
+		// playground=all counts both, as the runs list's default does.
+		for _, c := range []struct{ stats, runs string }{
+			{"", "&playground=false"},
+			{"&playground=all", ""},
+		} {
+			var stats struct {
+				Groups []struct {
+					Runs int `json:"runs"`
+				} `json:"groups"`
+			}
+			read("/api/stats?by=agent&since=2000-01-01T00:00:00Z&until=2100-01-01T00:00:00Z"+c.stats, &stats)
+			var runs struct {
+				Total int `json:"total"`
+			}
+			read("/api/runs?all=1&limit=500"+c.runs, &runs)
+			counted := 0
+			for _, g := range stats.Groups {
+				counted += g.Runs
+			}
+			if counted != runs.Total || counted == 0 {
+				t.Errorf("GET /api/stats%s as %s counts %d runs, its runs list%s %d: want equal, and some", c.stats, id.name, counted, c.runs, runs.Total)
+			}
+			if c.stats == "" {
+				countedBy[id.kind] = counted
+			}
 		}
-		read("/api/stats?by=agent&since=2000-01-01T00:00:00Z&until=2100-01-01T00:00:00Z", &stats)
-		var runs struct {
-			Total int `json:"total"`
-		}
-		read("/api/runs?all=1&limit=500", &runs)
-		counted := 0
-		for _, g := range stats.Groups {
-			counted += g.Runs
-		}
-		if counted != runs.Total || counted == 0 {
-			t.Errorf("GET /api/stats as %s counts %d runs, its runs list %d: want equal, and some", id.name, counted, runs.Total)
-		}
-		countedBy[id.kind] = counted
 	}
 	if countedBy["read"] >= countedBy["server"] {
 		t.Errorf("GET /api/stats counts %d runs for a read token, %d for the server: want the token's scope narrower", countedBy["read"], countedBy["server"])

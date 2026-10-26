@@ -42,6 +42,7 @@ type statsRun struct {
 	steps                              []statsStep
 	tools                              []statsTool
 	attempts                           int // on step 0's call, the last one deciding it
+	playground                         bool
 }
 
 type statsStep struct {
@@ -74,6 +75,9 @@ func (r statsRun) batch() obsdb.Batch {
 	root := attrs("invoke_agent")
 	root["gen_ai.agent.name"], root["gen_ai.provider.name"], root["gen_ai.request.model"] = r.agent, r.provider, r.model
 	root["weft.run.steps"] = int64(len(r.steps))
+	if r.playground {
+		root["weft.playground"] = true
+	}
 	if i := strings.LastIndex(r.id, "/"); i > 0 {
 		root["weft.parent.run.id"] = r.id[:strings.LastIndex(r.id[:i], "/")]
 		root["weft.parent.call.id"] = r.id[i+1:]
@@ -210,7 +214,7 @@ func TestStatsGoldens(t *testing.T) {
 		`"key":"orders","runs":2,"failed":0`, `"cost_badge":"scripted"`,
 		// director's subagent bill, apart from its own: unpriced.
 		`"delegated":{"runs":1,"input_tokens":40,"output_tokens":8,"cost_usd":null,"cost_known":false,"cost_badge":"unpriced"`,
-		`"runs_query":"agent=director\u0026all=1\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"`,
+		`"runs_query":"agent=director\u0026all=1\u0026playground=false\u0026since=2020-01-01T00%3A00%3A00Z\u0026until=2020-01-02T00%3A00%3A00Z"`,
 		`"buckets":24,"bucket_ms":3600000`,
 	} {
 		if !strings.Contains(body, want) {
@@ -240,7 +244,7 @@ func TestStatsRoute(t *testing.T) {
 		{"by=agent&public_id=pub_other&" + statsWindow, http.StatusOK, `"groups":[{"key":"orders","runs":1,`},
 		{"by=tool&agent=orders&" + statsWindow, http.StatusOK, `"key":"lookup_order","runs":1,"failed":0,"failure_rate":0,"calls":1`},
 		{"by=agent&parent=&" + statsWindow, http.StatusOK, `"key":"researcher"`},
-		{"by=agent&playground=maybe", http.StatusBadRequest, "playground must be true or false"},
+		{"by=agent&playground=maybe", http.StatusBadRequest, "playground must be true, false or all"},
 		{"by=agent&status=nope", http.StatusBadRequest, "status"},
 		{"by=agent&since=1000-01-01T00:00:00Z&until=2020-01-02T00:00:00Z", http.StatusBadRequest, "years 1678..2262"},
 		{"by=agent&since=2020-01-01T00:00:00Z&until=3000-01-01T00:00:00Z", http.StatusBadRequest, "years 1678..2262"},
@@ -411,6 +415,84 @@ func checkRunsQueries(t *testing.T, h http.Handler) {
 	for _, by := range []string{"model", "tool", "step"} {
 		if _, _, body := get(t, h, "/studio/api/stats?by="+by+"&"+statsWindow); strings.Contains(body, "runs_query") {
 			t.Errorf("stats?by=%s carries a runs_query: %s", by, body)
+		}
+	}
+}
+
+// TestStatsPlaygroundDefault (P10a-pre-go-fix item 3): health numbers
+// never mix replays into the app's own — one real run and two scripted
+// replays of the same agent count 1 by default, 2 with playground=true,
+// 3 with playground=all, and each group's runs_query (the effective
+// filter carried) lands on the same N.
+func TestStatsPlaygroundDefault(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for i, pg := range []bool{false, true, true} {
+		r := statsRun{id: fmt.Sprintf("pg_%d", i), agent: "orders", provider: "wefttest", model: "script",
+			at: time.Duration(i+1) * time.Hour, dur: time.Second, playground: pg,
+			steps: []statsStep{{in: 10, out: 5, ttft: 1, dur: 2 * time.Millisecond}}}
+		if err := db.Write(context.Background(), r.batch()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := Handler(DB(db))
+	for _, c := range []struct {
+		param, query string
+		runs         int
+	}{
+		{"", "playground=false", 1},
+		{"&playground=false", "playground=false", 1},
+		{"&playground=true", "playground=true", 2},
+		{"&playground=all", "", 3},
+	} {
+		code, _, body := get(t, h, "/studio/api/stats?by=agent&"+statsWindow+c.param)
+		var page struct {
+			Groups []struct {
+				Runs      int    `json:"runs"`
+				Calls     int    `json:"calls"`
+				RunsQuery string `json:"runs_query"`
+			} `json:"groups"`
+		}
+		decode(t, body, &page)
+		if code != http.StatusOK || len(page.Groups) != 1 || page.Groups[0].Runs != c.runs || page.Groups[0].Calls != c.runs {
+			t.Errorf("stats?by=agent%s = %d %s, want one group of %d runs and calls", c.param, code, body, c.runs)
+			continue
+		}
+		g := page.Groups[0]
+		if (c.query == "") == strings.Contains(g.RunsQuery, "playground=") || c.query != "" && !strings.Contains(g.RunsQuery, c.query) {
+			t.Errorf("stats?by=agent%s runs_query = %q, want the filter %q", c.param, g.RunsQuery, c.query)
+		}
+		if _, total, _ := searchIDs(t, h, "/studio/api/search?"+g.RunsQuery); total != c.runs {
+			t.Errorf("stats?by=agent%s: runs_query %q lists %d, want %d", c.param, g.RunsQuery, total, c.runs)
+		}
+	}
+}
+
+// TestStatsScriptedZeroUsage (P10a-pre-go-fix item 4): an all-scripted
+// group — the scripted engine reports no usage by design — reads the
+// exact $0 its runs read, never "no model usage recorded".
+func TestStatsScriptedZeroUsage(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for i := range 2 {
+		r := statsRun{id: fmt.Sprintf("sz_%d", i), agent: "orders", provider: "weft/runtime", model: "scripted",
+			at: time.Duration(i+1) * time.Hour, dur: time.Second,
+			steps: []statsStep{{dur: 2 * time.Millisecond}}}
+		if err := db.Write(context.Background(), r.batch()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := Handler(DB(db))
+	const want = `"cost_usd":0,"cost_known":true,"cost_badge":"scripted","cost_reason":"a scripted model: nothing bills it, an exact $0","cache":"exact"`
+	for _, by := range []string{"model", "agent", "step"} {
+		if _, _, body := get(t, h, "/studio/api/stats?by="+by+"&"+statsWindow); !strings.Contains(body, want) {
+			t.Errorf("stats?by=%s, an all-scripted group: want the exact $0:\n%s", by, body)
 		}
 	}
 }

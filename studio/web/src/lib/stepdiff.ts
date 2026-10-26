@@ -111,6 +111,12 @@ export interface DiffRowDoc {
   b_step?: number | null
   /** A source step before the replay's from_step: kept, not re-run. */
   kept?: boolean
+  /** Two replays of one source from different steps: the side that
+   * kept the source's step here while the other re-ran it. That side's
+   * column is the source's step and the re-run is compared with it
+   * (U24.2-fix); a source Studio could not read leaves that side null
+   * and every column unknown — not compared. */
+  kept_by?: "a" | "b"
   changed: boolean
   a: DiffSide | null
   b: DiffSide | null
@@ -211,6 +217,27 @@ export const ROW_WORDS: Record<RowState, string> = {
   changed: "changed",
 }
 
+/** The words of a sibling row (kept_by): one side kept the source's
+ * step, the other was compared with it. */
+export const SOURCE_ROW = {
+  suffix: "vs source",
+  note: (keptBy: "a" | "b", word: string) =>
+    `${keptBy} kept the source's step; ${keptBy === "a" ? "b" : "a"} vs source: ${word}`,
+  notCompared: "not compared: the source could not be read",
+} as const
+
+/** rowNote is a sibling row's note ("" for any other row). */
+export function rowNote(
+  row: Pick<DiffRowDoc, "kept_by" | "a" | "b">,
+  state: RowState
+): string {
+  if (!row.kept_by) return ""
+  return SOURCE_ROW.note(
+    row.kept_by,
+    !row.a || !row.b ? SOURCE_ROW.notCompared : ROW_WORDS[state]
+  )
+}
+
 /** rowState reads a row from its cells: kept or missing when every
  * cell is, else changed (the server's flag) or same. */
 export function rowState(
@@ -234,6 +261,8 @@ const list = <T>(v: T[] | undefined): T[] => v ?? []
 /** cellOf reads one column of one row as the server compared it. */
 export function cellOf(row: DiffRowDoc, col: DiffColumn): CellState {
   if (row.kept) return "kept"
+  // A sibling row whose source could not be read: not compared.
+  if (row.kept_by && (!row.a || !row.b)) return "unknown"
   const changes = list(row.changes)
   if (!row.a || !row.b || changes.includes("missing")) return "missing"
   if (list(row.unknown).includes(col)) return "unknown"
@@ -391,6 +420,8 @@ export interface StepRowView {
   aStep: number | null
   bStep: number | null
   state: RowState
+  /** A sibling row's note (rowNote), "" otherwise. */
+  note: string
   changed: boolean
   cells: Record<DiffColumn, CellState>
   /** The changed columns, by their headers ("tool results"). */
@@ -439,13 +470,15 @@ export function stepDiffView(doc: DiffDoc): StepDiffView {
     .sort((x, y) => x.step - y.step)
     .map((r): StepRowView => {
       const cells = cellsOf(r)
+      const state = rowState(cells, r.changed)
       return {
         step: r.step,
         // Each side's own ordinal: the server's, else (a Studio before
         // A8, or a side with no step: null) the row's when it is there.
         aStep: r.a_step ?? (r.a ? r.step : null),
         bStep: r.b_step ?? (r.b ? r.step : null),
-        state: rowState(cells, r.changed),
+        state,
+        note: rowNote(r, state),
         changed: r.changed,
         cells,
         changedColumns: DIFF_COLUMNS.filter((c) => cells[c] === "changed").map(
@@ -515,6 +548,8 @@ export interface OtherCell {
   /** The compared run's own ordinal at this row (null: none). */
   step: number | null
   state: RowState
+  /** A sibling row's note (rowNote), "" otherwise. */
+  note: string
   changed: boolean
   cells: Record<DiffColumn, CellState>
   changedColumns: string[]
@@ -590,6 +625,7 @@ export function nWayView(docs: DiffDoc[]): NWayView {
             run_id: v.b.run_id,
             step: r.bStep,
             state: r.state,
+            note: r.note,
             changed: r.changed,
             cells: r.cells,
             changedColumns: r.changedColumns,
@@ -599,6 +635,7 @@ export function nWayView(docs: DiffDoc[]): NWayView {
             run_id: v.b.run_id,
             step: null,
             state: rowState(ALL_MISSING(), false),
+            note: "",
             changed: false,
             cells: ALL_MISSING(),
             changedColumns: [],

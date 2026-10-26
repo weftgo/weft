@@ -546,3 +546,20 @@ describe("loadDraftOutcome (P8-fix-b #3)", () => {
     resetDrafts()
   })
 })
+
+describe("a multi-source row's own step (U24.2-fix 11)", () => {
+  it("cellBody re-runs input 3 of the golden from its own from_step", () => {
+    const saved = golden<ExperimentRow>("experiment")
+    const f = formFromExperiment(saved)
+    expect(saved.inputs.find((i) => i.key === "3")?.from_step).toBe(2)
+    expect(cellBody(saved, f, "A", "3", { runtime: "rt_1" }).source).toEqual({
+      run_id: "r_ok",
+      from_step: 2,
+    })
+    // Its sibling row keeps the experiment's step.
+    expect(cellBody(saved, f, "A", "1", { runtime: "rt_1" }).source).toEqual({
+      run_id: "r_ok",
+      from_step: 1,
+    })
+  })
+})

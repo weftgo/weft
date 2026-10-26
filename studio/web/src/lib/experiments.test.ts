@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { RunRow } from "./api"
 import {
   answerLine,
+  answerText,
   idTail,
   replayChanges,
   replayGroups,
@@ -271,5 +272,24 @@ describe("the replays list and the grid cell (UX-C-15, UX-C-16)", () => {
     expect(answerLine([])).toBeNull()
     expect(idTail("pg_01M4R0YKXDFEANRNTC16VGKSMX")).toBe("…VGKSMX")
     expect(idTail("pg_a1")).toBe("pg_a1")
+  })
+})
+
+describe("answerText (U24.2-fix 2)", () => {
+  it("is null, never '', for no assistant text or an unreadable batch", () => {
+    const say = (text: string) => ({
+      step: 0,
+      messages: [
+        {
+          role: "assistant" as const,
+          content: text ? [{ type: "text" as const, text }] : [],
+        },
+      ],
+    })
+    expect(answerText([say("")])).toBeNull()
+    expect(
+      answerText([{ ...say("fine"), unreadable: true as const }])
+    ).toBeNull()
+    expect(answerText([say("42 units")])).toBe("42 units")
   })
 })

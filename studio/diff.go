@@ -30,7 +30,13 @@ import (
 // and its from_step), and each row names both sides' own ordinals
 // (a_step, b_step) beside the aligned one (step) — a link to a side's
 // step is by its own ordinal. Runs with no such lineage align by
-// their own ordinals, as before. Each step assembled
+// their own ordinals, as before. Two replays of one source from
+// different steps (aligned replay "both") have rows between their
+// from_steps where one side kept the source's step and the other re-ran
+// it: kept_by names the keeping side, whose column is the source's step,
+// compared with the re-run — a change there is a change (first_changed
+// too); a source Studio cannot read leaves those rows not compared
+// (every column unknown). Each step assembled
 // exactly as GET /api/runs/{id}/steps/{n} assembles it (assembleStep),
 // then compared field by field: the system prompt (by hash when both
 // sides have one), the tool calls as name(args) with the arguments
@@ -122,10 +128,20 @@ type diffSummary struct {
 // not re-run it (its side null), so nothing was compared and the row
 // is no change.
 type diffRow struct {
-	Step    int       `json:"step"`
-	AStep   *int      `json:"a_step"`
-	BStep   *int      `json:"b_step"`
-	Kept    bool      `json:"kept"`
+	Step  int  `json:"step"`
+	AStep *int `json:"a_step"`
+	BStep *int `json:"b_step"`
+	Kept  bool `json:"kept"`
+	// KeptBy names the side ("a" or "b") that kept the common source's
+	// step at this row while the other side re-ran it: two replays of
+	// one source from different steps (aligned replay "both"), the rows
+	// between their from_steps. That side's column holds the SOURCE's
+	// step (its kept copy; its own ordinal null) and the re-run side is
+	// compared with it — a change counts, first_changed included. When
+	// the source cannot be read (scope, a database error), the kept
+	// side stays null and every column is unknown: not compared, never
+	// kept, never the same.
+	KeptBy  string    `json:"kept_by,omitempty"`
 	Changed bool      `json:"changed"`
 	A       *diffSide `json:"a"`
 	B       *diffSide `json:"b"`
@@ -257,6 +273,22 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Two replays of one source from different steps (siblings): the
+	// rows between their from_steps are the source's steps one side
+	// kept and the other re-ran, compared against the source read here
+	// — its sides, nil when it cannot be read (srcWhy).
+	var src []*diffSide
+	srcRead := false
+	srcSide := func(n int) *diffSide {
+		if !srcRead {
+			srcRead = true
+			src = s.siblingSource(r, doc.Aligned.Source, prompts)
+		}
+		if n < 0 || n >= len(src) {
+			return nil
+		}
+		return src[n]
+	}
 	at := func(sides []*diffSide, off, n int) (*diffSide, *int) {
 		k := n - off
 		if k < 0 || k >= len(sides) {
@@ -271,10 +303,26 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case row.A == nil && row.B == nil:
 			continue // neither side has a step here: no row
+		case doc.Aligned != nil && doc.Aligned.Replay == "both" && (row.A == nil && n < offA || row.B == nil && n < offB):
+			// Siblings: one side kept the source's step n, the other
+			// re-ran it — compared with the source's own step.
+			row.KeptBy = "a"
+			if row.B == nil {
+				row.KeptBy = "b"
+			}
+			if kept := srcSide(n); kept == nil {
+				row.Unknown = []string{diffSystem, diffToolCalls, diffToolResults, diffText, diffUsage}
+			} else if row.KeptBy == "a" {
+				row.A = kept
+				row.Changes, row.Unknown, row.Differs = compareSides(row.A, row.B)
+			} else {
+				row.B = kept
+				row.Changes, row.Unknown, row.Differs = compareSides(row.A, row.B)
+			}
 		case row.A == nil && n < offA || row.B == nil && n < offB:
 			// A source step before that side's from_step, the other side
-			// holding it: kept by the replay, not re-run — nothing to
-			// compare, never a change.
+			// (the source itself) holding it: kept by the replay, not
+			// re-run — nothing to compare, never a change.
 			row.Kept = true
 			doc.Summary.Kept++
 		case row.A == nil || row.B == nil:
@@ -293,6 +341,24 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 		doc.Steps = append(doc.Steps, row)
 	}
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// siblingSource reads the common source of two sibling replays for the
+// rows one kept and the other re-ran: nil when the token may not read
+// it (a panel token's other public id) or it cannot be read — the rows
+// then read not compared.
+func (s *Server) siblingSource(r *http.Request, id string, prompts bool) []*diffSide {
+	if p := idFrom(r).panel; p != nil {
+		det, err := s.db.Run(r.Context(), id)
+		if err != nil || det.PublicID != p.PublicID {
+			return nil
+		}
+	}
+	src, err := s.diffSteps(r, id, prompts)
+	if err != nil {
+		return nil
+	}
+	return src.sides
 }
 
 // diffRunSteps is one run's steps, reduced.

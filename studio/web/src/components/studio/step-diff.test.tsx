@@ -206,3 +206,27 @@ describe("StepCompare arriving (the drawer's compare right after a replay)", () 
     expect(container.querySelector("[data-step-diff-not-yet]")).toBeNull()
   })
 })
+
+// U24.2-fix 3: two replays of one source from different steps — the row
+// between their from_steps is compared against the source's step the
+// other kept, said in its words, and counted as the change it is.
+describe("StepDiffTable over diff-siblings.golden.json", () => {
+  it("reads changed · vs source with the note, the marker at step 1", async () => {
+    const view = nWayView([golden<DiffDoc>("diff-siblings")])
+    const { container } = await renderWithRouter(
+      createElement(StepDiffTable, { view })
+    )
+    const word = await waitFor(() => {
+      const w = container.querySelector(
+        'tr[data-diff-step="1"] [data-diff-row-state]'
+      )
+      expect(w).toBeTruthy()
+      return w!
+    })
+    expect(word.textContent).toBe("changed · vs source")
+    expect(word.getAttribute("title")).toBe(
+      "b kept the source's step; a vs source: changed"
+    )
+    expect(view.rows[0].others[0].changed).toBe(true)
+  })
+})

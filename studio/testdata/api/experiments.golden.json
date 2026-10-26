@@ -55,6 +55,11 @@
         {
           "key": "2",
           "text": "angry user"
+        },
+        {
+          "key": "3",
+          "source_run_id": "r_ok",
+          "from_step": 2
         }
       ],
       "pass_predicate": "status = succeeded AND answer ~ /shipped/",

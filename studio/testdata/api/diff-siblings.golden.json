@@ -1,0 +1,139 @@
+{
+  "a": {
+    "run_id": "q1",
+    "steps": 2,
+    "status": "succeeded"
+  },
+  "b": {
+    "run_id": "s2",
+    "steps": 1,
+    "status": "succeeded"
+  },
+  "aligned": {
+    "replay": "both",
+    "source": "r3",
+    "a_from": 1,
+    "b_from": 2
+  },
+  "steps": [
+    {
+      "step": 1,
+      "a_step": 0,
+      "b_step": null,
+      "kept": false,
+      "kept_by": "b",
+      "changed": true,
+      "a": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": {
+              "order_id": "9"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "call_id": "c9",
+            "name": "lookup_order",
+            "content": "order 9 shipped",
+            "is_error": false
+          }
+        ],
+        "text": "",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "marks": [],
+        "holes": []
+      },
+      "b": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": {
+              "order_id": "1"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "call_id": "c1",
+            "name": "lookup_order",
+            "content": "order 1 shipped",
+            "is_error": false
+          }
+        ],
+        "text": "",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "changes": [
+        "tool_calls",
+        "tool_results"
+      ],
+      "unknown": [],
+      "differs": [
+        "usage"
+      ]
+    },
+    {
+      "step": 2,
+      "a_step": 1,
+      "b_step": 0,
+      "kept": false,
+      "changed": false,
+      "a": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [],
+        "tool_results": [],
+        "text": "all looked up",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "marks": [],
+        "holes": []
+      },
+      "b": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [],
+        "tool_results": [],
+        "text": "all looked up",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "marks": [],
+        "holes": []
+      },
+      "changes": [],
+      "unknown": [],
+      "differs": []
+    }
+  ],
+  "summary": {
+    "changed_steps": [
+      1
+    ],
+    "first_changed": 1,
+    "kept": 0
+  },
+  "holes": []
+}
+

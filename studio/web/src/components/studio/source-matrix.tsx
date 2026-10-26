@@ -111,34 +111,53 @@ export function SourceMatrix({
   const [free, setFree] = useState("")
 
   // Each row's recorded usage from its failing step on (U17's reading).
-  const at = mine.map((r) => ({
-    run: r,
-    from: failingStep(r),
-    steps: stepsOf(failingStep(r), r.steps),
-  }))
+  // From the failing step on, and the step before it: a failing call
+  // that billed nothing back is estimated at that step's input.
+  const at = mine.map((r) => {
+    const from = failingStep(r)
+    return {
+      run: r,
+      from,
+      steps: [from > 0 ? from - 1 : -2, ...stepsOf(from, r.steps)],
+    }
+  })
   const stepsCap = caps.has("steps")
   const flat = at.flatMap((a) => a.steps.map((n) => ({ id: a.run.id, n })))
   const stepQs = useQueries({
-    queries: flat.map((x) => ({
-      ...stepQuery(x.id, Math.max(x.n, 0)),
-      enabled: stepsCap && x.n >= 0,
-      retry: false,
-      staleTime: 60_000,
-    })),
+    queries: flat.map((x, i) =>
+      x.n >= 0
+        ? {
+            ...stepQuery(x.id, x.n),
+            enabled: stepsCap,
+            retry: false,
+            staleTime: 60_000,
+          }
+        : {
+            // A step not read (past COST_STEPS, none before step 0): its
+            // own key, never a duplicate of a read one.
+            queryKey: ["step-unread", x.id, i],
+            queryFn: () => null,
+            enabled: false,
+          }
+    ),
   })
   let k = 0
   const usage = at.map((a) => {
     let unread = ""
-    const docs = a.steps.map((n) => {
+    const docs = a.steps.map((n, i) => {
       const q = stepQs[k++]
-      if (n < 0) return null // past COST_STEPS: not read, a floor
-      if (q.isError)
+      if (n < 0) return null // past COST_STEPS (or no step before): not read
+      if (q.isError && i > 0)
         unread ||= `step ${n} of ${idTail(a.run.id, 8)} could not be read: ${q.error.message}`
       return q.data
     })
     if (!stepsCap) return { why: caps.why("steps") ?? "no step route" }
     if (unread) return { why: unread }
-    return sourceUsage(a.from, docs)
+    const [prev, ...rest] = docs
+    return sourceUsage(a.from, rest, {
+      prev,
+      failed: a.run.status === "failed",
+    })
   })
   const pricing = useQuery({ ...pricingQuery(), enabled: caps.has("pricing") })
   const estimate = estimateMatrix({
@@ -398,6 +417,11 @@ export function SourceMatrix({
         <p className="text-muted-foreground" data-matrix-estimate-columns>
           {estimate.columns.map((c) => `${c.label} ${c.text}`).join(" · ")}
         </p>
+        {estimate.notes.map((note) => (
+          <p key={note} className="text-faint" data-matrix-estimate-note>
+            {note}
+          </p>
+        ))}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -446,7 +470,7 @@ export function SourceMatrix({
             <>
               {" · "}
               <Link
-                {...experimentLink(saved)}
+                {...experimentLink(saved, issued.filter((c) => c.ok).length)}
                 className="text-thread-ink hover:underline"
               >
                 open the grid

@@ -22,6 +22,7 @@ import {
   COLUMN_LABELS,
   DIFF_COLUMNS,
   ROW_WORDS,
+  SOURCE_ROW,
   cellHole,
   cellText,
   markerWords,
@@ -59,14 +60,16 @@ const ROW_TONE: Record<RowState, string> = {
 
 /** RowWord is a compared run's row in one word — kept (not re-run) ·
  * same · changed — lib/stepdiff.ts's ROW_WORDS. */
-function RowWord({ state }: { state: RowState }) {
+function RowWord({ state, note = "" }: { state: RowState; note?: string }) {
   return (
     <span
       className={`mr-1 font-sans ${ROW_TONE[state]}`}
       data-diff-row-state={state}
-      title={state === "kept" ? CELL_REASONS.kept : undefined}
+      data-diff-row-note={note || undefined}
+      title={note || (state === "kept" ? CELL_REASONS.kept : undefined)}
     >
       {ROW_WORDS[state]}
+      {note ? ` · ${SOURCE_ROW.suffix}` : ""}
     </span>
   )
 }
@@ -496,7 +499,7 @@ export function StepDiffTable({
                       data-diff-run={o.run_id}
                       data-diff-marks
                     >
-                      <RowWord state={o.state} />
+                      <RowWord state={o.state} note={o.note} />
                       <SideMarks side={o.side} />
                     </td>
                     {DIFF_COLUMNS.map((c) => (

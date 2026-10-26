@@ -288,3 +288,24 @@ describe("the panel's compare of an identical scripted replay from step 1", () =
     ).toBe("kept")
   })
 })
+
+// U24.2-fix 3, the panel's side of the same golden (parity with
+// Studio's StepDiffTable): the sibling row reads "changed · vs source".
+describe("the panel's compare of two sibling replays", () => {
+  it("diff-siblings.golden.json compares the re-run with the kept source step", () => {
+    const box = stepDiffBlock(
+      golden<DiffDoc>("diff-siblings"),
+      "http://studio.test/studio/"
+    )
+    const word = box.querySelector(
+      '[data-weft-diff-step="1"] [data-weft-diff-row-state]'
+    )!
+    expect(word.textContent).toBe("changed · vs source")
+    expect(word.getAttribute("title")).toBe(
+      "b kept the source's step; a vs source: changed"
+    )
+    expect(box.querySelector(".weft-diff-h")!.textContent).toContain(
+      "first at step 1"
+    )
+  })
+})

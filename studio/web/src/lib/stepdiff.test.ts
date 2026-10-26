@@ -291,3 +291,39 @@ describe("nWayView: a compared run absent at an ordinal (U19-fix 5)", () => {
     expect(last.others[0].state).toBe("same")
   })
 })
+
+describe("a sibling row (kept_by)", () => {
+  it("is compared, never kept; an unread source is not compared", () => {
+    const doc = golden("diff-siblings")
+    const v = stepDiffView(doc)
+    expect(v.kept).toBe(0)
+    expect(v.markers).toEqual([1])
+    expect(v.rows[0].note).toBe(
+      "b kept the source's step; a vs source: changed"
+    )
+    const unread = {
+      ...doc,
+      steps: doc.steps.map((r: DiffRowDoc, i: number) =>
+        i === 0
+          ? {
+              ...r,
+              b: null,
+              changed: false,
+              changes: [],
+              unknown: [
+                "system",
+                "tool_calls",
+                "tool_results",
+                "text",
+                "usage",
+              ],
+            }
+          : r
+      ),
+    }
+    const u = stepDiffView(unread)
+    expect(u.rows[0].cells.text).toBe("unknown")
+    expect(u.rows[0].note).toContain("not compared")
+    expect(u.kept).toBe(0)
+  })
+})

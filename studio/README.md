@@ -1093,8 +1093,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 282,219 B raw / 94,990 B gzip
-(92.8 KiB, the bundle of the ledger's row "U20.1-fix"; 11,506 B — 11.2 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 282,623 B raw / 95,129 B gzip
+(92.9 KiB, the bundle of the ledger's row "U24.2-fix"; 11,367 B — 11.1 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -2381,14 +2381,21 @@ place it is read):
 ```
 predicate := clause { AND clause }
 clause    := status ( = | != ) succeeded | failed | interrupted | running
-           | answer ( ~ | !~ ) /regex/flags      (JavaScript RegExp)
+           | answer ( ~ | !~ ) /regex/flags      (JavaScript RegExp; flags: any of i m s u)
            | answer ( = | != ) "text"            (the whole last answer)
            | ( steps | tokens | cost ) ( < | <= | = | >= | > ) <number>
 ```
 
 Empty is `status = succeeded`. A clause whose fact is not known — the
-answer not read, an unpriced cost — leaves the cell "? not judged",
-never a pass. The grid tallies each column ("5/7 · $0.0021") and names
+answer not read, content off, stripped or unreadable, an unpriced cost —
+leaves the cell "? not judged" with its reason, never a pass. A pattern
+is tested on the answer's first 8 KiB (a miss past it is not judged), a
+pattern nesting quantifiers (`(a+)+`) or using a backreference is
+refused when typed, and every other one runs in a worker bounded at
+250 ms per answer (past it: not judged). The predicate is Studio's
+alone: the server stores `pass_predicate` verbatim (at most 4,096
+bytes) and validates nothing in it, and verdicts are drawn by Studio's
+grid only — no API route judges a cell. The grid tallies each column ("5/7 · $0.0021") and names
 the cheapest column passing every row and the cheapest overall.
 
 Keyboard: `⌘K` jumps to any recent run, `/` filters, `j`/`k` move,

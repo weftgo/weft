@@ -704,13 +704,20 @@ export interface ExperimentsLink {
 export interface ExperimentLink {
   to: "/experiments/$id"
   params: { id: string }
-  search: Record<string, never>
+  /** issued: the cells a matrix just issued (U24.2-fix 4) — the grid
+   * polls until that many runs joined, its empty cells "issued, not
+   * started" meanwhile. */
+  search: { issued?: number }
 }
 
 /** experimentLink is a saved experiment's page (plan F5: its grid,
- * re-run, clone and compare). */
-export function experimentLink(id: string): ExperimentLink {
-  return { to: "/experiments/$id", params: { id }, search: {} }
+ * re-run, clone and compare); issued, the cells a matrix just sent. */
+export function experimentLink(id: string, issued?: number): ExperimentLink {
+  return {
+    to: "/experiments/$id",
+    params: { id },
+    search: issued ? { issued } : {},
+  }
 }
 
 /** experimentsLink is the saved experiments' list. */

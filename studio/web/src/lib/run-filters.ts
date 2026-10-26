@@ -234,8 +234,11 @@ export function viaSearch(search: RunsSearch, caps: FilterCaps): boolean {
   if (effectiveSort(s, caps)) return true
   // The failures' error-class facet is search's (UX-C-37): a failed
   // list, or one class of it, reads /api/search where the database
-  // aggregates.
-  if (caps.stats && (s.status === "failed" || s.error_class)) return true
+  // aggregates — unless a ?before= cursor pins the page: search pages
+  // by offset and would drop it, so that list stays /api/runs' (which
+  // filters error_class too), without the facet (U24.2-fix 9).
+  if (caps.stats && !s.before && (s.status === "failed" || s.error_class))
+    return true
   return SEARCH_ONLY.some((k) =>
     k !== "min_cost"
       ? s[k] !== undefined

@@ -89,11 +89,18 @@ import {
   CheapestLine,
   PASS_WORDS,
   PredicateField,
+  VERDICT_CAP_WORDS,
+  VERDICT_CELLS,
   VerdictChip,
   tallies,
   useVerdicts,
 } from "@/components/studio/pass-predicate"
-import { DEFAULT_PREDICATE, parsePredicate, passRate } from "@/lib/predicate"
+import {
+  DEFAULT_PREDICATE,
+  costWords,
+  parsePredicate,
+  passRate,
+} from "@/lib/predicate"
 import { NotFound } from "@/components/studio/not-found"
 import { isNotFound } from "@/lib/not-found"
 import {
@@ -107,8 +114,23 @@ export const Route = createFileRoute("/experiments/$id")({
   // palette) is a fresh page, none of A's cell states, polls or batch
   // carried onto B.
   remountDeps: ({ params }) => params.id,
+  // The cells a matrix just issued (lib/links.ts's experimentLink).
+  validateSearch: (search: Record<string, unknown>): { issued?: number } =>
+    typeof search.issued === "number" &&
+    Number.isInteger(search.issued) &&
+    search.issued > 0
+      ? { issued: search.issued }
+      : {},
   component: ExperimentPage,
 })
+
+/** The words of a cell a matrix issued whose run has not joined yet. */
+export const ISSUED_WORDS = {
+  cell: "issued, not started",
+  hint: "the matrix sent this cell; its run has not reached Studio yet — the page reads the experiment again until it does",
+  summary: (n: number) =>
+    `${n} issued ${n === 1 ? "cell has" : "cells have"} not started: the summary waits for them`,
+} as const
 
 function ExperimentPage() {
   const { id } = Route.useParams()
@@ -156,14 +178,19 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
   const mayRun = canReplay(caps, studioToken())
   const [issued, setIssued] = useState<Record<string, Issued>>({})
   const inFlight = Object.values(issued).some((c) => !settled(c.state))
+  // A matrix that just issued its cells (U24.2-fix 4): read again until
+  // that many runs joined.
+  const sent = Route.useSearch().issued ?? 0
   const q = useQuery({
     ...experimentQuery(id),
     refetchInterval: (query) =>
       inFlight ||
+      (query.state.data?.runs?.length ?? 0) < sent ||
       (query.state.data?.runs ?? []).some((r) => r.status === "running")
         ? POLL_MS
         : false,
   })
+  const waiting = Math.max(0, sent - (q.data?.runs?.length ?? 0))
   const exp = q.data
   // The shell polls this key (use-notices.ts), every 5 s while the run
   // controls are drawn: a runtime's coming or going re-gates them.
@@ -597,6 +624,13 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
           void qc.invalidateQueries({ queryKey: experimentQuery(id).queryKey })
         }}
       />
+      {parsedPred.ok &&
+      parsedPred.pred.needsAnswer &&
+      exp.variants.length * exp.inputs.length > VERDICT_CELLS ? (
+        <p className="text-xs text-faint" data-verdict-capped>
+          {VERDICT_CAP_WORDS(VERDICT_CELLS)}
+        </p>
+      ) : null}
       <div className="overflow-x-auto rounded-lg border" data-scroll-box="">
         <table className="w-full text-xs">
           <caption className="sr-only">
@@ -648,6 +682,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                     return r ? [r] : []
                   })}
                   fallback={i.source_run_id ?? exp.source_run_id}
+                  fallbackStep={i.from_step ?? exp.from_step ?? 0}
                 />
                 {exp.variants.map((v, vi) => {
                   const key = cellKey(v.key, i.key)
@@ -724,7 +759,13 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                             ) : null}
                           </>
                         ) : (
-                          <span className="text-faint">no run</span>
+                          <span
+                            className="text-faint"
+                            title={waiting ? ISSUED_WORDS.hint : undefined}
+                            data-cell-issued={waiting ? "" : undefined}
+                          >
+                            {waiting ? ISSUED_WORDS.cell : "no run"}
+                          </span>
                         )}
                         {mine ? (
                           <span
@@ -775,12 +816,11 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                   <td
                     key={c.key}
                     className="px-3 py-2 font-mono"
+                    title={c.costTitle}
                     data-pass-rate={c.key}
                   >
                     {passRate(c)}
-                    {costCapable
-                      ? ` · ${c.usd === null ? "unpriced" : formatUSD(c.usd)}`
-                      : ""}
+                    {costCapable ? ` · ${costWords(c)}` : ""}
                   </td>
                 ))}
               </tr>
@@ -809,7 +849,13 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
           </tfoot>
         </table>
       </div>
-      <CheapestLine cols={cols} />
+      {waiting ? (
+        <p className="font-mono text-xs text-faint" data-issued-waiting>
+          {ISSUED_WORDS.summary(waiting)}
+        </p>
+      ) : (
+        <CheapestLine cols={cols} />
+      )}
 
       {placed.loose.length ? (
         <div className="space-y-1 text-xs" data-loose-runs>
@@ -900,7 +946,17 @@ function VsSource({ run, read }: { run: RunRow; read: boolean }) {
 
 /** SourceCell is a grid row's source column (UX-C-16): the run its
  * cells replay (their forked_from, else the input's) and the step. */
-function SourceCell({ runs, fallback }: { runs: RunRow[]; fallback?: string }) {
+function SourceCell({
+  runs,
+  fallback,
+  fallbackStep = 0,
+}: {
+  runs: RunRow[]
+  fallback?: string
+  /** The row's step when no run names it: the input's own from_step,
+   * else the experiment's (U24.2-fix 7). */
+  fallbackStep?: number
+}) {
   const srcs = [
     ...new Map(
       runs
@@ -912,7 +968,7 @@ function SourceCell({ runs, fallback }: { runs: RunRow[]; fallback?: string }) {
   const one = srcs.length
     ? srcs
     : fallback
-      ? [{ runID: fallback, fromStep: 0 }]
+      ? [{ runID: fallback, fromStep: fallbackStep }]
       : []
   return (
     <td className="px-3 py-2 align-top font-mono" data-cell-source>

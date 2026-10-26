@@ -668,7 +668,7 @@ func TestExperimentsGolden(t *testing.T) {
 	      "options":{"max_steps":4,"parallelism":1,"temperature":0.2},"params":{"top_p":0.9,"max_tokens":256,"stop":["END"],"seed":7},
 	      "tool_choice":{"mode":"named","name":"lookup_order"},"park_on":["refund"],"only_tools":["lookup_order"]},
 	     "engine":"scripted","side_effects":"park","thread":"ephemeral"}],
-	  "inputs":[{"key":"1","source_run_id":"r_ok"},{"key":"2","text":"angry user"}],
+	  "inputs":[{"key":"1","source_run_id":"r_ok"},{"key":"2","text":"angry user"},{"key":"3","source_run_id":"r_ok","from_step":2}],
 	  "pass_predicate":"status = succeeded AND answer ~ /shipped/",
 	  "engine":"live","side_effects":"substitute","thread":"ephemeral","from_step":1,"source_run_id":"r_ok",
 	  "transcript_edits":[{"kind":"tool_result","step":0,"call_id":"call_1","content":"order 42: lost"}]}`
@@ -688,6 +688,8 @@ func TestExperimentsGolden(t *testing.T) {
 	}
 	for _, want := range []string{`"engine":"live"`, `"side_effects":"substitute"`, `"from_step":1`, `"source_run_id":"r_ok"`,
 		`"pass_predicate":"status = succeeded AND answer ~ /shipped/"`,
+		// A multi-source row's own step (U24.2-fix 11).
+		`{"key":"3","source_run_id":"r_ok","from_step":2}`,
 		`"transcript_edits":[{"kind":"tool_result"`, `"engine":"scripted"`, `"only_tools":["lookup_order"]`} {
 		if !strings.Contains(saved, want) {
 			t.Errorf("saved experiment missing %s: %s", want, saved)

@@ -15,6 +15,7 @@ import {
   COLUMN_LABELS,
   DIFF_COLUMNS,
   ROW_WORDS,
+  SOURCE_ROW,
   cellHole,
   cellText,
   markerWords,
@@ -99,9 +100,16 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
     // The row's one word (kept · same · changed) beside its ordinal.
     const th = el("th", "", `${r.step} `, { scope: "row" })
     th.append(
-      el("span", `weft-diff-${r.state}`, ROW_WORDS[r.state], {
-        "data-weft-diff-row-state": r.state,
-      })
+      el(
+        "span",
+        `weft-diff-${r.state}`,
+        r.note
+          ? `${ROW_WORDS[r.state]} · ${SOURCE_ROW.suffix}`
+          : ROW_WORDS[r.state],
+        r.note
+          ? { "data-weft-diff-row-state": r.state, title: r.note }
+          : { "data-weft-diff-row-state": r.state }
+      )
     )
     for (const [which, side] of [
       ["a", r.a],

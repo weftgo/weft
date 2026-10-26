@@ -1,15 +1,24 @@
 // The pass predicate (UX plan D8): the language parsed, a cell judged —
 // an unknown fact is "unknown", never a pass — and the grid's summary.
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   DEFAULT_PREDICATE,
+  NOT_JUDGED,
+  costWords,
   judge,
+  judgeWith,
   parsePredicate,
   passRate,
   summarize,
 } from "./predicate"
 import type { ColumnTally, Predicate } from "./predicate"
+import {
+  REGEX_TEXT_CAP,
+  REGEX_TIMEOUT_MS,
+  REGEX_WORDS,
+  testRegex,
+} from "./regex-run"
 
 const p = (s: string): Predicate => {
   const r = parsePredicate(s)
@@ -101,7 +110,94 @@ describe("summarize", () => {
     const pending = col({ key: "pending", pass: 6, unknown: 1, usd: 0.001 })
     const s = summarize([free, pending])
     expect(s.cheapestPassing).toBeNull()
-    expect(s.why).toContain("unpriced")
+    expect(s.why).toContain("not known")
     expect(s.cheapestOverall?.key).toBe("pending")
+  })
+})
+
+describe("the ReDoS guards (U24.2-fix 1)", () => {
+  it("refuses a nested-quantifier pattern when parsed, fast", () => {
+    const t0 = performance.now()
+    const r = parsePredicate("answer ~ /(a+)+$/")
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain("nests quantifiers")
+    expect(parsePredicate(String.raw`answer ~ /(\w+\s?)*$/`).ok).toBe(false)
+    expect(parsePredicate(String.raw`answer ~ /(.)\1/`).ok).toBe(false)
+    expect(performance.now() - t0).toBeLessThan(50)
+  })
+  it("tests a capped answer: a miss past the cap is not judged", () => {
+    const pred = p("answer ~ /needle/")
+    const long = "x".repeat(REGEX_TEXT_CAP) + " needle"
+    expect(judgeWith(pred, { status: "succeeded", answer: long })).toEqual({
+      verdict: "unknown",
+      why: REGEX_WORDS.capped,
+    })
+    expect(judge(pred, { status: "succeeded", answer: "needle" + long })).toBe(
+      "pass"
+    )
+  })
+  it("a timed-out or still-running pattern reads not judged with its reason", () => {
+    const pred = p("answer ~ /x/")
+    expect(
+      judgeWith(pred, {
+        status: "succeeded",
+        answer: "x",
+        matches: [{ why: REGEX_WORDS.timeout }],
+      })
+    ).toEqual({ verdict: "unknown", why: REGEX_WORDS.timeout })
+    expect(
+      judgeWith(pred, { status: "succeeded", answer: "x", matches: [] }).why
+    ).toBe(NOT_JUDGED.evaluating)
+  })
+})
+
+describe("testRegex (lib/regex-run.ts)", () => {
+  afterEach(() => vi.unstubAllGlobals())
+  it("refuses a risky shape without running it", async () => {
+    expect(await testRegex("(a+)+$", "", "a".repeat(28) + "!")).toEqual({
+      why: REGEX_WORDS.risky,
+    })
+  })
+  it("terminates a worker past the timeout and answers the next job on a fresh one", async () => {
+    const made: FakeWorker[] = []
+    class FakeWorker {
+      onmessage: ((e: MessageEvent) => void) | null = null
+      terminated = false
+      constructor() {
+        made.push(this)
+      }
+      postMessage(job: { id: number; text: string }) {
+        // The first worker hangs (a catastrophic pattern); the next answers.
+        if (made.length === 1) return
+        setTimeout(
+          () =>
+            this.onmessage?.({
+              data: { id: job.id, hit: job.text === "y" },
+            } as MessageEvent),
+          1
+        )
+      }
+      terminate() {
+        this.terminated = true
+      }
+    }
+    vi.stubGlobal("Worker", FakeWorker)
+    const t0 = performance.now()
+    const [slow, next] = await Promise.all([
+      testRegex("x", "", "x"),
+      testRegex("y", "", "y"),
+    ])
+    expect(slow).toEqual({ why: REGEX_WORDS.timeout })
+    expect(next).toEqual({ hit: true, capped: false })
+    expect(made[0].terminated).toBe(true)
+    expect(performance.now() - t0).toBeLessThan(REGEX_TIMEOUT_MS + 1_000)
+  })
+})
+
+describe("costWords (U24.2-fix 8)", () => {
+  it("says unpriced only for a model with no price", () => {
+    expect(costWords({ usd: 0.0021 })).toBe("$0.0021")
+    expect(costWords({ usd: null, costWord: "unpriced" })).toBe("unpriced")
+    expect(costWords({ usd: null })).toBe("cost unknown")
   })
 })

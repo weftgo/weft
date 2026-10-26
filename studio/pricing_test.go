@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1060,5 +1061,35 @@ func TestCostModelsCapped(t *testing.T) {
 	}
 	if !strings.HasSuffix(r.CostReason, ", (+2)") || strings.Count(r.CostReason, "acme/") != 5 {
 		t.Errorf("reason = %q; want five models then (+2)", r.CostReason)
+	}
+}
+
+// TestPricingCasesShared (U24.2-fix 5): testdata/pricing-cases.json is
+// priced here and by Studio's client restatement (web lib/matrix.ts's
+// priceAt, matrix.test.ts) to the same figures — globs, the alias, the
+// any-provider row, cache splits, reasoning, unknown and scripted.
+func TestPricingCasesShared(t *testing.T) {
+	b, err := os.ReadFile("testdata/pricing-cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Table PricingTable `json:"table"`
+		Cases []struct {
+			Name, Provider, Model string
+			Usage                 core.Usage
+			Known, Scripted       bool
+			USD                   float64
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range doc.Cases {
+		got := doc.Table.price(c.Provider, c.Model, c.Usage)
+		if got.known != c.Known || (c.Known && math.Abs(got.usd-c.USD) > 1e-12) || (got.badge == costScripted) != c.Scripted {
+			t.Errorf("%s: price(%s/%s) = known %v usd %v badge %q, want known %v usd %v scripted %v",
+				c.Name, c.Provider, c.Model, got.known, got.usd, got.badge, c.Known, c.USD, c.Scripted)
+		}
 	}
 }

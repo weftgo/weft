@@ -5,11 +5,12 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
-import type { ModelPrice, StatsPage } from "./api"
+import type { ModelPrice, StatsPage, Usage } from "./api"
 import {
   columnKey,
   estimateMatrix,
   failingStep,
+  globRe,
   matrixDefinition,
   priceAt,
   sourceUsage,
@@ -190,5 +191,81 @@ describe("the matrix's pieces", () => {
     expect(columnKey("zai/glm-5.3-flash", ["glm-5.3-flash"])).toBe(
       "glm-5.3-flash-2"
     )
+  })
+})
+
+// U24.2-fix 5: the cases pricing_test.go's TestPricingCasesShared
+// prices — the same table, the same figures on both sides.
+describe("priceAt against studio/testdata/pricing-cases.json", () => {
+  const doc = JSON.parse(
+    readFileSync(
+      resolve(process.cwd(), "../testdata/pricing-cases.json"),
+      "utf8"
+    )
+  ) as {
+    table: { models: ModelPrice[] }
+    cases: {
+      name: string
+      provider: string
+      model: string
+      usage: Usage
+      known: boolean
+      usd?: number
+      scripted?: boolean
+    }[]
+  }
+  it.each(doc.cases.map((c) => [c.name, c] as const))("%s", (_, c) => {
+    const p = priceAt(
+      doc.table.models,
+      { provider: c.provider, name: c.model },
+      c.usage
+    )
+    expect(p.known).toBe(c.known)
+    if (p.known) {
+      expect(p.usd).toBeCloseTo(c.usd ?? 0, 12)
+      expect(!!p.scripted).toBe(!!c.scripted)
+    }
+  })
+  it("reads a malformed glob as no match (Go's ErrBadPattern)", () => {
+    expect(globRe("claude-[")).toBeNull()
+    expect(globRe("a\\")).toBeNull()
+    expect(globRe("[]a]")!.test("]")).toBe(true)
+    expect(globRe("[^a-c]x")!.test("dx")).toBe(true)
+    expect(globRe("[^a-c]x")!.test("bx")).toBe(false)
+  })
+})
+
+// U24.2-fix 6: a failed source's estimate is a floor, and a failing
+// step that billed nothing is estimated at the step before's input.
+describe("a failed source's estimate", () => {
+  const d = (i: number, o: number) => ({
+    usage: { input_tokens: i, output_tokens: o },
+  })
+  it("takes the previous step's input for a step with no usage, said", () => {
+    const r = sourceUsage(2, [d(0, 0)], { prev: d(900, 40), failed: true })
+    expect(r).toEqual({
+      usage: { input_tokens: 900, output_tokens: 0 },
+      partial: true,
+      note: "step 2 recorded no usage (it failed): its input estimated as step 1's, a floor",
+    })
+    expect(sourceUsage(0, [d(0, 0)], { failed: true })).toEqual({
+      why: "step 0 recorded no usage",
+    })
+  })
+  it("reads ≥ for a failed source, with its note", () => {
+    const e = estimateMatrix({
+      columns: [
+        { key: "h", model: "anthropic/claude-haiku-4-5", engine: "live" },
+      ],
+      rows: [
+        sourceUsage(2, [d(0, 0)], { prev: d(1000, 0), failed: true }),
+        sourceUsage(1, [d(1000, 200)], { failed: true }),
+      ],
+      table: TABLE,
+    })
+    expect(e.line).toMatch(/^2 cells · ≥ 2\.2k tokens · ≥ \$0\./)
+    expect(e.notes).toEqual([
+      "step 2 recorded no usage (it failed): its input estimated as step 1's, a floor",
+    ])
   })
 })

@@ -221,8 +221,12 @@ export function answerLine(batches: TranscriptBatch[]): string | null {
 }
 
 /** answerText is a run's whole last own assistant text (the pass
- * predicate's answer, lib/predicate.ts), null when it produced none. */
+ * predicate's answer, lib/predicate.ts) — null, never "", when it is
+ * not known: no assistant text (content off, stripped, a run that never
+ * answered) or a batch whose body did not read as messages
+ * (asTranscript's unreadable). */
 export function answerText(batches: TranscriptBatch[]): string | null {
+  if (batches.some((b) => b.unreadable)) return null
   return producedTexts(batches).at(-1) || null
 }
 

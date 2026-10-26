@@ -85,23 +85,52 @@ export function byAgent<T extends Pick<RunRow, "agent">>(
 const PROVIDER_ALIASES: Record<string, string> = { "gcp.gemini": "google" }
 const SCRIPTED_PROVIDERS = new Set(["wefttest"])
 
-/** globRe is Go's path.Match for one pattern: * and ? stop at "/". */
-function globRe(glob: string): RegExp {
+const reEscape = (c: string) => c.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&")
+
+/** globRe is Go's path.Match for one pattern as a RegExp: * any run of
+ * non-"/" characters, ? one non-"/" character, [class] with ^
+ * negation, a-z ranges and \ escapes inside, \c a literal c. A
+ * malformed pattern (an unclosed class, a trailing \) is null: Go's
+ * ErrBadPattern, which lookup reads as no match. */
+export function globRe(glob: string): RegExp | null {
   let re = ""
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i]
     if (c === "*") re += "[^/]*"
     else if (c === "?") re += "[^/]"
-    else if (c === "\\" && i + 1 < glob.length)
-      re += glob[++i].replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")
-    else if (c === "[") {
-      const j = glob.indexOf("]", i + 1)
-      if (j < 0) re += "\\["
-      else {
-        re += `[${glob.slice(i + 1, j).replace(/\\/g, "\\\\")}]`
-        i = j
+    else if (c === "\\") {
+      if (i + 1 >= glob.length) return null
+      re += reEscape(glob[++i])
+    } else if (c === "[") {
+      let k = i + 1
+      let cls = ""
+      if (glob[k] === "^") {
+        cls = "^"
+        k++
       }
-    } else re += c.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")
+      let items = 0
+      for (; k < glob.length && (glob[k] !== "]" || items === 0); items++) {
+        let lo = glob[k]
+        if (lo === "\\") {
+          if (k + 1 >= glob.length) return null
+          lo = glob[++k]
+        }
+        k++
+        if (glob[k] === "-" && k + 1 < glob.length && glob[k + 1] !== "]") {
+          let hi = glob[k + 1]
+          k += 2
+          if (hi === "\\") {
+            if (k >= glob.length) return null
+            hi = glob[k++]
+          }
+          if (hi < lo) return null
+          cls += `${reEscape(lo)}-${reEscape(hi)}`
+        } else cls += reEscape(lo)
+      }
+      if (k >= glob.length || items === 0) return null // unclosed or empty
+      re += `[${cls}]`
+      i = k
+    } else re += reEscape(c)
   }
   return new RegExp(`^${re}$`)
 }
@@ -121,26 +150,32 @@ export type Priced =
 
 /** priceAt is usage on provider/model under the table: pricing.go's
  * price — the first matching row, cached and cache-write and reasoning
- * tokens at their rates when the row has them; a scripted model an
- * exact $0; no row "no price for provider/model". */
+ * tokens at their rates when the row has them; with no row a scripted
+ * model is an exact $0, any other "<provider>/<model> has no price".
+ * studio/testdata/pricing-cases.json holds both sides to the same
+ * figures (pricing_test.go, matrix.test.ts). */
 export function priceAt(
   table: readonly ModelPrice[],
   m: ModelInfo,
   u: Usage
 ): Priced {
-  if (
-    SCRIPTED_PROVIDERS.has(m.provider) ||
-    (m.provider === "weft/runtime" && m.name === "scripted")
-  )
-    return { known: true, usd: 0, scripted: true }
   if (!m.provider && !m.name) return { known: false, why: "no model to price" }
   const key = `${PROVIDER_ALIASES[m.provider] ?? m.provider}/${m.name}`
+  // The first matching row (pricing.go's lookup) — then, with none, the
+  // scripted rule, in pricing.go's order: a row for a scripted model wins.
   const row = table.find((r) =>
     r.provider === "*"
-      ? globRe(r.model_glob).test(m.name)
-      : globRe(`${r.provider}/${r.model_glob}`).test(key)
+      ? !!globRe(r.model_glob)?.test(m.name)
+      : !!globRe(`${r.provider}/${r.model_glob}`)?.test(key)
   )
-  if (!row) return { known: false, why: `${m.provider}/${m.name} has no price` }
+  if (!row) {
+    if (
+      SCRIPTED_PROVIDERS.has(m.provider) ||
+      (m.provider === "weft/runtime" && m.name === "scripted")
+    )
+      return { known: true, usd: 0, scripted: true }
+    return { known: false, why: `${m.provider}/${m.name} has no price` }
+  }
   const cached = u.cached_input_tokens ?? 0
   const write = u.cache_write_tokens ?? 0
   const reasoning = u.reasoning_tokens ?? 0
@@ -158,16 +193,29 @@ export function priceAt(
 
 // ── The estimate ───────────────────────────────────────────────────
 
+/** The words of a row's estimate that is a floor. */
+export const ESTIMATE_WORDS = {
+  prevInput: (step: number, prev: number) =>
+    `step ${step} recorded no usage (it failed): its input estimated as step ${prev}'s, a floor`,
+} as const
+
 /** One row's recorded usage from its from_step on (the step docs
- * stepsOf reads, index 0 its from_step), or why it is not known. */
+ * stepsOf reads, index 0 its from_step), or why it is not known. A
+ * failed source is a floor (its replay may run past where it stopped:
+ * partial). A step that recorded no usage (the failing call billed
+ * nothing back) takes the step before it's input tokens — the prefix
+ * it would have resent, at least — noted, never the whole matrix
+ * unknown. */
 export function sourceUsage(
   from: number,
-  docs: readonly (StepCost | null | undefined)[] | null
-): { usage: Usage; partial: boolean } | { why: string } {
+  docs: readonly (StepCost | null | undefined)[] | null,
+  opts: { prev?: StepCost | null; failed?: boolean } = {}
+): { usage: Usage; partial: boolean; note?: string } | { why: string } {
   if (!docs) return { why: "reading the source's steps…" }
   if (!docs.length) return { why: `the source never answered step ${from}` }
   const u: Usage = { input_tokens: 0, output_tokens: 0 }
-  let partial = false
+  let partial = !!opts.failed
+  let note: string | undefined
   for (const [i, d] of docs.entries()) {
     if (d === null) {
       // stepsOf's -1: steps past COST_STEPS, not read.
@@ -175,17 +223,25 @@ export function sourceUsage(
       break
     }
     if (d === undefined) return { why: "reading the source's steps…" }
-    if (!d.usage) return { why: `step ${from + i} recorded no usage` }
-    u.input_tokens += d.usage.input_tokens
-    u.output_tokens += d.usage.output_tokens
+    const used = d.usage ? d.usage.input_tokens + d.usage.output_tokens : 0
+    if (!used) {
+      const before = i === 0 ? opts.prev : docs[i - 1]
+      if (!before?.usage) return { why: `step ${from + i} recorded no usage` }
+      u.input_tokens += before.usage.input_tokens
+      note ??= ESTIMATE_WORDS.prevInput(from + i, from + i - 1)
+      partial = true
+      continue
+    }
+    const du = d.usage!
+    u.input_tokens += du.input_tokens
+    u.output_tokens += du.output_tokens
     u.cached_input_tokens =
-      (u.cached_input_tokens ?? 0) + (d.usage.cached_input_tokens ?? 0)
+      (u.cached_input_tokens ?? 0) + (du.cached_input_tokens ?? 0)
     u.cache_write_tokens =
-      (u.cache_write_tokens ?? 0) + (d.usage.cache_write_tokens ?? 0)
-    u.reasoning_tokens =
-      (u.reasoning_tokens ?? 0) + (d.usage.reasoning_tokens ?? 0)
+      (u.cache_write_tokens ?? 0) + (du.cache_write_tokens ?? 0)
+    u.reasoning_tokens = (u.reasoning_tokens ?? 0) + (du.reasoning_tokens ?? 0)
   }
-  return { usage: u, partial }
+  return note ? { usage: u, partial, note } : { usage: u, partial }
 }
 
 /** One column of the matrix: a model ("" the agent's own) on an
@@ -211,8 +267,11 @@ export interface MatrixEstimate {
   /** The one line: "28 cells · ≈ 34k tokens · ≈ $0.012", or with
    * "cost unknown: <why>". */
   line: string
-  /** Some row's later steps were not read: the figure is a floor. */
+  /** A row's figure is a floor (a failed source, steps not read, a
+   * step estimated): the figure is a floor ("≥"). */
   partial: boolean
+  /** Why a row's figure is estimated (sourceUsage's notes), deduped. */
+  notes: string[]
 }
 
 /** estimateMatrix prices every live cell: each row's recorded usage
@@ -221,7 +280,9 @@ export interface MatrixEstimate {
  * never summed as $0. */
 export function estimateMatrix(p: {
   columns: readonly MatrixColumn[]
-  rows: readonly ({ usage: Usage; partial: boolean } | { why: string })[]
+  rows: readonly (
+    { usage: Usage; partial: boolean; note?: string } | { why: string }
+  )[]
   table: readonly ModelPrice[] | null
   /** The agent's own model as the sources recorded it. */
   own?: ModelInfo
@@ -231,7 +292,7 @@ export function estimateMatrix(p: {
   const cells = p.columns.length * p.rows.length
   const unread = p.rows.find((r): r is { why: string } => "why" in r)
   const read = p.rows.filter(
-    (r): r is { usage: Usage; partial: boolean } => !("why" in r)
+    (r): r is { usage: Usage; partial: boolean; note?: string } => !("why" in r)
   )
   const partial = read.some((r) => r.partial)
   const rowTokens = read.reduce(
@@ -266,7 +327,9 @@ export function estimateMatrix(p: {
       }
       usd += pr.usd
     }
-    if (colWhy) whys.push(`${label}: ${colWhy}`)
+    // The why names the model already ("zai/x has no price"): once.
+    if (colWhy)
+      whys.push(colWhy.includes(label) ? colWhy : `${label}: ${colWhy}`)
     columns.push({
       key: c.key,
       label,
@@ -293,6 +356,7 @@ export function estimateMatrix(p: {
     columns,
     line: parts.join(" · "),
     partial,
+    notes: [...new Set(read.flatMap((r) => (r.note ? [r.note] : [])))],
   }
 }
 

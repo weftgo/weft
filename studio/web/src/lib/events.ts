@@ -439,6 +439,9 @@ export interface TranscriptBatch {
   input?: boolean
   /** "not_recorded" when the record carried no step. */
   badge?: string
+  /** The stored body did not read as messages (lib/api.ts's
+   * asTranscript): its messages are not the record's. */
+  unreadable?: true
 }
 
 /** A batch's messages, whatever the body held: only objects count,

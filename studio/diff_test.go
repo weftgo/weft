@@ -39,6 +39,7 @@ type diffDocT struct {
 		AStep   *int       `json:"a_step"`
 		BStep   *int       `json:"b_step"`
 		Kept    bool       `json:"kept"`
+		KeptBy  string     `json:"kept_by"`
 		Changed bool       `json:"changed"`
 		A       *diffSideT `json:"a"`
 		B       *diffSideT `json:"b"`
@@ -989,6 +990,11 @@ func rowWords(d diffDocT) []string {
 			w = "kept"
 		case r.Changed:
 			w = "changed"
+		case len(r.Unknown) == 5:
+			w = "unknown"
+		}
+		if r.KeptBy != "" {
+			w = r.KeptBy + "-kept-" + w
 		}
 		out = append(out, strconv.Itoa(r.Step)+":"+w)
 	}
@@ -1017,11 +1023,20 @@ func TestDiffFollowsTheForkChain(t *testing.T) {
 	if d.Aligned == nil || d.Aligned.Source != "p1" || d.Aligned.BFrom != 1 || !slices.Equal(rowWords(d), []string{"0:kept", "1:same"}) {
 		t.Errorf("p1 vs x2 = %+v %v", d.Aligned, rowWords(d))
 	}
-	// Siblings: p1 (from 1) and s2 (from 2), both r3's.
+	// Siblings: p1 (from 1) and s2 (from 2), both r3's. Row 1 is p1's
+	// re-run against r3's step 1, which s2 kept: compared, the same —
+	// never "kept", never counted in summary.kept.
 	d, _ = getDiff(t, ts, "p1", "s2", "")
 	if d.Aligned == nil || d.Aligned.Source != "r3" || d.Aligned.Replay != "both" || d.Aligned.AFrom != 1 || d.Aligned.BFrom != 2 ||
-		!slices.Equal(rowWords(d), []string{"1:kept", "2:same"}) {
-		t.Errorf("p1 vs s2 = aligned %+v rows %v, want r3's ordinals from 1: 1 kept by s2, 2 the same", d.Aligned, rowWords(d))
+		!slices.Equal(rowWords(d), []string{"1:b-kept-same", "2:same"}) || d.Summary.Kept != 0 {
+		t.Errorf("p1 vs s2 = aligned %+v rows %v kept %d, want r3's ordinals from 1: 1 p1 vs the source s2 kept, the same; 2 the same", d.Aligned, rowWords(d), d.Summary.Kept)
+	}
+	if r := d.Steps[0]; r.B == nil || r.BStep != nil {
+		t.Errorf("p1 vs s2 row 1: b = %v b_step %v, want the source's step and no ordinal of s2's", r.B, r.BStep)
+	}
+	// The other way round: s2 is a, keeping row 1.
+	if d2, _ := getDiff(t, ts, "s2", "p1", ""); !slices.Equal(rowWords(d2), []string{"1:a-kept-same", "2:same"}) {
+		t.Errorf("s2 vs p1 rows = %v", rowWords(d2))
 	}
 	if r := d.Steps[1]; *r.AStep != 1 || *r.BStep != 0 {
 		t.Errorf("p1 vs s2 step 2 = a_step %d b_step %d, want 1 and 0", *r.AStep, *r.BStep)
@@ -1043,5 +1058,45 @@ func TestDiffFromStepPastTheSource(t *testing.T) {
 	}
 	if len(d.Holes) != 1 || d.Holes[0].Hole != "gap" || !strings.Contains(d.Holes[0].Reason, "names step 5 of r_two, which recorded 2") {
 		t.Errorf("past diff holes = %+v, want the gap naming step 5", d.Holes)
+	}
+}
+
+// TestDiffSiblingsCompareAgainstTheSource (U24.2-fix 3): two replays of
+// one source from different steps — q1 from step 1 diverging there, s2
+// from step 2 — row 1 is q1's re-run against the source's step 1 (s2's
+// kept copy): changed, so first_changed is 1 — the old rule called it
+// kept and found no change at all.
+func TestDiffSiblingsCompareAgainstTheSource(t *testing.T) {
+	ts, _ := requestsServer(t)
+	recordChain(t, ts)
+	other := wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"9"}`, ID: "c9"})
+	recordFork(t, ts.URL, "q1", "r3#1", ordersPrefix(1), other, wefttest.Say("all looked up"))
+	waitRun(t, ts, "q1", 2, "")
+	d, body := getDiff(t, ts, "q1", "s2", "")
+	if !slices.Equal(rowWords(d), []string{"1:b-kept-changed", "2:same"}) || d.Summary.FirstChanged == nil ||
+		*d.Summary.FirstChanged != 1 || d.Summary.Kept != 0 || !slices.Equal(d.Summary.ChangedSteps, []int{1}) {
+		t.Errorf("q1 vs s2 = rows %v summary %+v, want row 1 changed against the source, first_changed 1", rowWords(d), d.Summary)
+	}
+	if !slices.Contains(d.Steps[0].Changes, "tool_calls") {
+		t.Errorf("q1 vs s2 row 1 changes = %v, want tool_calls", d.Steps[0].Changes)
+	}
+	golden(t, "diff-siblings.golden.json", body)
+}
+
+// TestDiffSiblingsSourceUnreadable (U24.2-fix 3): a source Studio
+// cannot read leaves the sibling rows not compared — every column
+// unknown, never kept, never a change.
+func TestDiffSiblingsSourceUnreadable(t *testing.T) {
+	ts, srv := requestsServer(t)
+	recordChain(t, ts)
+	if err := srv.db.DeleteRun(context.Background(), "r3"); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := getDiff(t, ts, "p1", "s2", "")
+	if d.Aligned == nil || d.Aligned.Replay != "both" {
+		t.Skipf("the chain needs r3's row to align; aligned %+v", d.Aligned)
+	}
+	if !slices.Equal(rowWords(d), []string{"1:b-kept-unknown", "2:same"}) || d.Summary.Kept != 0 || d.Summary.FirstChanged != nil {
+		t.Errorf("unreadable source = rows %v summary %+v, want row 1 not compared", rowWords(d), d.Summary)
 	}
 }

@@ -299,17 +299,17 @@ describe("usage limit: one facet, one matrix (UX-C-37, UX-C-38)", () => {
       const el = document.querySelector<HTMLElement>(
         "[data-matrix-estimate-line]"
       )!
-      expect(el.textContent).toMatch(/^14 cells · ≈ [\d.]+k tokens · /)
+      expect(el.textContent).toMatch(/^14 cells · ≥ [\d.]+k tokens · /)
       return el
     })
     // glm has no price: cost unknown with why, never $0.
     expect(line.textContent).toContain(
-      "cost unknown: zai/glm-5.3-flash: zai/glm-5.3-flash has no price"
+      "cost unknown: zai/glm-5.3-flash has no price"
     )
     const cols = document.querySelector(
       "[data-matrix-estimate-columns]"
     )!.textContent
-    expect(cols).toMatch(/anthropic\/claude-haiku-4-5 ≈ \$0\.\d+/)
+    expect(cols).toMatch(/anthropic\/claude-haiku-4-5 ≥ \$0\.\d+/)
     // Each row continues from its own failing step.
     for (const r of usageRuns) {
       const at = /at step (\d+)/.exec(r.err)![1]
@@ -324,10 +324,10 @@ describe("usage limit: one facet, one matrix (UX-C-37, UX-C-38)", () => {
     await waitFor(() =>
       expect(
         document.querySelector("[data-matrix-estimate-line]")!.textContent
-      ).toMatch(/^7 cells · ≈ [\d.]+k tokens · ≈ \$0\.\d+$/)
+      ).toMatch(/^7 cells · ≥ [\d.]+k tokens · ≥ \$0\.\d+$/)
     )
     expect(
-      screen.getByRole("button", { name: /Run matrix live · ≈ \$0\./ })
+      screen.getByRole("button", { name: /Run matrix live · ≥ \$0\./ })
     ).toBeTruthy()
     // Live cells are never run here.
     expect(studio.calls("POST playground/runs")).toHaveLength(0)
@@ -389,9 +389,13 @@ describe("usage limit: one facet, one matrix (UX-C-37, UX-C-38)", () => {
         Number(/at step (\d+)/.exec(src.err)![1])
       )
     }
+    const grid = await screen.findByRole("link", { name: "open the grid" })
+    // The grid is told how many cells were sent (U24.2-fix 4).
     expect(
-      await screen.findByRole("link", { name: "open the grid" })
-    ).toBeTruthy()
+      new URL(grid.getAttribute("href")!, "http://studio").searchParams.get(
+        "issued"
+      )
+    ).toBe("7")
   })
 })
 
@@ -450,5 +454,105 @@ describe("the grid's pass predicate (UX-C-38, UX-C-16)", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "status is one of"
     )
+  })
+
+  // U24.2-fix 2: content off (no assistant text), and a body that does
+  // not read as messages, are not a known empty answer — `answer !~
+  // /error/` must not pass them.
+  it("reads a content-off or unreadable answer as not judged, never a pass", async () => {
+    studio.on("GET experiments/exp_tone", exp("answer !~ /error/"))
+    const contentOff = {
+      batches: [
+        {
+          index: 0,
+          step: 0,
+          input: true,
+          messages: [{ role: "user", content: [] }],
+        },
+        { index: 1, step: 0, messages: [{ role: "assistant", content: [] }] },
+      ],
+    }
+    const unreadable = {
+      batches: [
+        { index: 0, step: 0, input: true, messages: "not messages" },
+        {
+          index: 1,
+          step: 0,
+          messages: [
+            { role: "assistant", content: [{ type: "text", text: "fine" }] },
+          ],
+        },
+      ],
+    }
+    const said = {
+      batches: [
+        {
+          index: 0,
+          step: 0,
+          input: true,
+          messages: [{ role: "user", content: [{ type: "text", text: "q" }] }],
+        },
+        {
+          index: 1,
+          step: 0,
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "42 units" }],
+            },
+          ],
+        },
+      ],
+    }
+    studio
+      .on("GET runs/pg_a1/transcript", contentOff)
+      .on("GET runs/pg_a2/transcript", unreadable)
+      .on("GET runs/pg_b1/transcript", said)
+    renderApp("/experiments/exp_tone")
+    const verdict = (k: string) =>
+      document.querySelector(`[data-cell="${k}"] [data-verdict]`)
+    await waitFor(() =>
+      expect(verdict("B×1")?.getAttribute("data-verdict")).toBe("pass")
+    )
+    for (const k of ["A×1", "A×2"]) {
+      expect(verdict(k)!.getAttribute("data-verdict")).toBe("unknown")
+      expect(verdict(k)!.getAttribute("title")).toContain(
+        "the answer is not known"
+      )
+    }
+  })
+
+  // U24.2-fix 1: a catastrophic pattern never runs on the page.
+  it("refuses a nested-quantifier pattern at once, saying why", async () => {
+    studio.on("GET experiments/exp_tone", exp("answer ~ /(a+)+$/"))
+    const t0 = performance.now()
+    renderApp("/experiments/exp_tone")
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "nests quantifiers"
+    )
+    expect(performance.now() - t0).toBeLessThan(5_000)
+  })
+
+  // U24.2-fix 4: right after Run the grid's cells have no runs yet —
+  // "issued, not started", the summary waits, and the page reads the
+  // experiment again until the runs join.
+  it("says issued cells are not started and reads again until they join", async () => {
+    let now: ExperimentRow = { ...exp("status = succeeded"), runs: [] }
+    studio.on("GET experiments/exp_tone", () => now)
+    renderApp("/experiments/exp_tone?issued=4")
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-cell-issued]")).toHaveLength(4)
+    )
+    expect(document.querySelector("[data-issued-waiting]")!.textContent).toBe(
+      "4 issued cells have not started: the summary waits for them"
+    )
+    expect(document.querySelector("[data-cheapest]")).toBeNull()
+    now = exp("status = succeeded")
+    await waitFor(() =>
+      expect(document.querySelector("[data-cheapest]")?.textContent).toContain(
+        "cheapest overall: A (2/2)"
+      )
+    )
+    expect(document.querySelector("[data-cell-issued]")).toBeNull()
   })
 })

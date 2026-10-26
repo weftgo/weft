@@ -449,3 +449,21 @@ describe("the queries", () => {
     expect(page.traces).toHaveLength(4)
   })
 })
+
+describe("a failed list and the error-class facet (U24.2-fix 9)", () => {
+  const STATS = { search: true, pricing: true, stats: true }
+  it("reads /api/search for the facet, but keeps a ?before= page on /api/runs", () => {
+    expect(viaSearch({ status: "failed" }, STATS)).toBe(true)
+    expect(viaSearch({ error_class: "c" }, STATS)).toBe(true)
+    // search pages by offset: the cursor would be dropped.
+    expect(
+      viaSearch({ status: "failed", before: "2026-10-01T00:00:00Z" }, STATS)
+    ).toBe(false)
+    expect(
+      filtersFromSearchOf({ error_class: "c", before: "2026-10-01T00:00:00Z" })
+    ).toMatchObject({ error_class: "c", before: "2026-10-01T00:00:00Z" })
+    expect(viaSearch({ status: "failed" }, { ...STATS, stats: false })).toBe(
+      false
+    )
+  })
+})

@@ -10,18 +10,21 @@ import { useState } from "react"
 
 import { postExperiment, transcriptQuery } from "@/lib/api"
 import type { ExperimentRow, RunRow } from "@/lib/api"
-import { formatUSD, sumCost } from "@/lib/cost"
-import { answerText } from "@/lib/experiments"
+import { sumCost } from "@/lib/cost"
+import { VS_CHIP_CELLS, answerText } from "@/lib/experiments"
 import { cellKey } from "@/lib/form-state"
 import {
   DEFAULT_PREDICATE,
   VERDICT_WORDS,
-  judge,
+  judgeWith,
+  costWords,
   parsePredicate,
+  regexClauses,
   passRate,
   summarize,
 } from "@/lib/predicate"
-import type { ColumnTally, Predicate, Verdict } from "@/lib/predicate"
+import type { ColumnTally, Judged, Predicate } from "@/lib/predicate"
+import { testRegex } from "@/lib/regex-run"
 
 /** The summary's words. */
 export const PASS_WORDS = {
@@ -34,14 +37,26 @@ export const PASS_WORDS = {
   unsavedEdit: "tried here, not saved",
 } as const
 
-/** useVerdicts judges every cell's latest run under p: the answer
- * (a transcript read, only when a clause reads it), steps, tokens and
- * the run's whole bill. */
+/** The most cells whose transcript the verdicts read (the vs-source
+ * chip's bound, VS_CHIP_CELLS): past it an answer clause reads "not
+ * judged", said by VERDICT_CAP_WORDS. */
+export const VERDICT_CELLS = VS_CHIP_CELLS
+
+export const VERDICT_CAP_WORDS = (n: number) =>
+  `the answer is read for the first ${n} cells only (each is a transcript read): not judged`
+
+/** useVerdicts judges every cell's latest run under p: the answer (a
+ * transcript read, only when a clause reads it, the first
+ * VERDICT_CELLS cells), steps, tokens and the run's whole bill. Each
+ * answer ~ clause runs through lib/regex-run.ts (capped text, risky
+ * shapes refused, a worker with a timeout), memoised per (run id,
+ * predicate text) in the query cache — never re-run on a render or a
+ * poll. */
 export function useVerdicts(
   exp: ExperimentRow | undefined,
   latest: (v: string, i: string) => RunRow | undefined,
   p: Predicate | null
-): Map<string, Verdict> {
+): Map<string, Judged> {
   const cells = (exp?.variants ?? []).flatMap((v) =>
     (exp?.inputs ?? []).map((i) => ({
       key: cellKey(v.key, i.key),
@@ -49,42 +64,71 @@ export function useVerdicts(
     }))
   )
   const needs = !!p?.needsAnswer
+  const read = (n: number) => {
+    const r = cells[n].run
+    return (
+      needs && n < VERDICT_CELLS && !!r && r.status !== "running" && !r.settling
+    )
+  }
   const ts = useQueries({
-    queries: cells.map((c) => ({
+    queries: cells.map((c, n) => ({
       ...transcriptQuery(c.run?.id ?? ""),
-      enabled:
-        needs && !!c.run && c.run.status !== "running" && !c.run.settling,
+      enabled: read(n),
     })),
   })
-  const out = new Map<string, Verdict>()
+  const answers = cells.map((_, n) => {
+    const t = ts[n]
+    return read(n) && t.data ? answerText(t.data.batches) : null
+  })
+  const jobs = p ? regexClauses(p) : []
+  const ms = useQueries({
+    queries: cells.map((c, n) => {
+      const answer = answers[n]
+      return {
+        queryKey: ["verdict-regex", c.run?.id ?? "", p?.text ?? ""],
+        queryFn: () =>
+          Promise.all(
+            jobs.map((j) => testRegex(j.source, j.flags, answer ?? ""))
+          ),
+        enabled: jobs.length > 0 && answer !== null,
+        staleTime: Infinity,
+        gcTime: 10 * 60_000,
+      }
+    }),
+  })
+  const out = new Map<string, Judged>()
   if (!p) return out
   cells.forEach((c, n) => {
     if (!c.run) return
-    const t = ts[n]
     const cost = sumCost([c.run])
+    const judged = judgeWith(p, {
+      status: c.run.status,
+      answer: answers[n],
+      matches: jobs.length ? (ms[n].data ?? []) : undefined,
+      steps: c.run.steps,
+      tokens: c.run.usage.input_tokens + c.run.usage.output_tokens,
+      cost: cost.known ? (cost.usd ?? null) : null,
+    })
     out.set(
       c.key,
-      judge(p, {
-        status: c.run.status,
-        answer: t.data ? (answerText(t.data.batches) ?? "") : null,
-        steps: c.run.steps,
-        tokens: c.run.usage.input_tokens + c.run.usage.output_tokens,
-        cost: cost.known ? (cost.usd ?? null) : null,
-      })
+      judged.verdict === "unknown" && needs && n >= VERDICT_CELLS
+        ? { verdict: "unknown", why: VERDICT_CAP_WORDS(VERDICT_CELLS) }
+        : judged
     )
   })
   return out
 }
 
-/** VerdictChip is one cell's verdict. */
-export function VerdictChip({ v }: { v: Verdict | undefined }) {
+/** VerdictChip is one cell's verdict, its reason as its hover. */
+export function VerdictChip({ v }: { v: Judged | undefined }) {
   if (!v) return null
   return (
     <span
-      className={`font-mono ${v === "pass" ? "text-status-ok" : v === "fail" ? "text-status-bad" : "text-faint"}`}
-      data-verdict={v}
+      className={`font-mono ${v.verdict === "pass" ? "text-status-ok" : v.verdict === "fail" ? "text-status-bad" : "text-faint"}`}
+      title={v.why}
+      data-verdict={v.verdict}
     >
-      {VERDICT_WORDS[v]}
+      {VERDICT_WORDS[v.verdict]}
     </span>
   )
 }
@@ -92,7 +136,7 @@ export function VerdictChip({ v }: { v: Verdict | undefined }) {
 /** tallies is each column's count of verdicts and its bill. */
 export function tallies(
   exp: ExperimentRow,
-  verdicts: Map<string, Verdict>,
+  verdicts: Map<string, Judged>,
   latest: (v: string, i: string) => RunRow | undefined,
   label: (key: string) => string
 ): ColumnTally[] {
@@ -114,10 +158,14 @@ export function tallies(
         continue
       }
       runs.push(r)
-      t[verdicts.get(cellKey(v.key, i.key)) ?? "unknown"]++
+      t[verdicts.get(cellKey(v.key, i.key))?.verdict ?? "unknown"]++
     }
     const bill = sumCost(runs)
     t.usd = bill.known ? (bill.usd ?? 0) : null
+    if (!bill.known) {
+      t.costWord = bill.badge === "unpriced" ? "unpriced" : "cost unknown"
+      t.costTitle = bill.title
+    }
     return t
   })
 }
@@ -214,8 +262,7 @@ export function PredicateField({
 export function CheapestLine({ cols }: { cols: ColumnTally[] }) {
   if (!cols.length) return null
   const s = summarize(cols)
-  const usd = (t: ColumnTally) =>
-    t.usd === null ? "unpriced" : formatUSD(t.usd)
+  const usd = costWords
   return (
     <p className="font-mono text-xs text-muted-foreground" data-cheapest>
       {s.cheapestPassing ? (

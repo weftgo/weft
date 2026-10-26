@@ -18,7 +18,16 @@
 // predicate is the default, `status = succeeded`. A clause that reads a
 // fact not known (an answer not read yet, an unpriced cost) makes the
 // cell's verdict unknown — never a pass or a fail it did not earn; a
-// known fail wins over an unknown (AND).
+// known fail wins over an unknown (AND). An answer ~ pattern is a
+// user's regex: parsePredicate refuses the catastrophic shapes and the
+// grid tests the rest off the page's thread under a time bound
+// (lib/regex-run.ts, U24.2-fix 1). Studio's alone: the server stores
+// the text verbatim and validates nothing in it.
+
+import { REGEX_TEXT_CAP, REGEX_WORDS, riskyPattern } from "./regex-run"
+import type { RegexOutcome } from "./regex-run"
+
+import { formatUSD } from "./cost"
 
 /** The predicate a matrix starts with, and an empty one means. */
 export const DEFAULT_PREDICATE = "status = succeeded"
@@ -26,7 +35,7 @@ export const DEFAULT_PREDICATE = "status = succeeded"
 type Num = "steps" | "tokens" | "cost"
 type Clause =
   | { field: "status"; neg: boolean; word: string }
-  | { field: "answer"; neg: boolean; re: RegExp }
+  | { field: "answer"; neg: boolean; re: RegExp; source: string; flags: string }
   | { field: "answer"; neg: boolean; text: string }
   | { field: Num; op: "<" | "<=" | "=" | ">=" | ">"; n: number }
 
@@ -41,7 +50,14 @@ export interface Predicate {
 /** The facts one cell is judged on (null: not known). */
 export interface CellFacts {
   status: string
+  /** The run's whole last answer; null when not known (not read yet,
+   * content off, stripped, unreadable) — never "" for "not known". */
   answer?: string | null
+  /** The answer ~ clauses' outcomes, in clause order (regexClauses),
+   * run off the page's thread by lib/regex-run.ts; an entry not there
+   * yet is "evaluating". Absent: the clause is tested inline on the
+   * capped answer (tests; a pattern parsePredicate let through). */
+  matches?: (RegexOutcome | undefined)[]
   steps?: number | null
   tokens?: number | null
   cost?: number | null
@@ -92,11 +108,15 @@ export function parsePredicate(
       if (op === "~" || op === "!~") {
         const rm = /^\/([\s\S]*)\/([imsu]*)$/.exec(v)
         if (!rm) return { ok: false, error: "answer ~ takes /regex/flags" }
+        const risky = riskyPattern(rm[1])
+        if (risky) return { ok: false, error: `answer ~ ${v}: ${risky}` }
         try {
           clauses.push({
             field,
             neg: op === "!~",
             re: new RegExp(rm[1], rm[2]),
+            source: rm[1],
+            flags: rm[2],
           })
         } catch (e) {
           return {
@@ -168,19 +188,60 @@ function splitAnd(s: string): string[] {
   return out
 }
 
-function one(c: Clause, f: CellFacts): Verdict {
-  const v = (b: boolean): Verdict => (b ? "pass" : "fail")
+/** A verdict and, when it is not a pass, why. */
+export interface Judged {
+  verdict: Verdict
+  why?: string
+}
+
+/** regexClauses is p's answer ~ clauses in order: the jobs a grid runs
+ * through lib/regex-run.ts per cell. */
+export function regexClauses(
+  p: Predicate
+): { source: string; flags: string }[] {
+  return p.clauses.flatMap((c) =>
+    c.field === "answer" && "re" in c
+      ? [{ source: c.source, flags: c.flags }]
+      : []
+  )
+}
+
+/** The words of a clause not judged. */
+export const NOT_JUDGED = {
+  answer:
+    "the answer is not known (not read yet, content off, stripped or unreadable)",
+  evaluating: "evaluating the pattern…",
+  fact: (f: string) => `the run's ${f} is not known`,
+  running: "the run is still running",
+} as const
+
+function one(c: Clause, f: CellFacts, k: number): Judged {
+  const v = (b: boolean): Judged => ({ verdict: b ? "pass" : "fail" })
   switch (c.field) {
     case "status":
       return v((f.status === c.word) !== c.neg)
     case "answer": {
-      if (f.answer === undefined || f.answer === null) return "unknown"
-      const hit = "re" in c ? c.re.test(f.answer) : f.answer === c.text
-      return v(hit !== c.neg)
+      if (f.answer === undefined || f.answer === null)
+        return { verdict: "unknown", why: NOT_JUDGED.answer }
+      if (!("re" in c)) return v((f.answer === c.text) !== c.neg)
+      let o: RegexOutcome | undefined
+      if (f.matches) o = f.matches[k]
+      else
+        o = {
+          hit: c.re.test(f.answer.slice(0, REGEX_TEXT_CAP)),
+          capped: f.answer.length > REGEX_TEXT_CAP,
+        }
+      if (!o) return { verdict: "unknown", why: NOT_JUDGED.evaluating }
+      if ("why" in o) return { verdict: "unknown", why: o.why }
+      // A miss past the cap is not a known miss.
+      if (!o.hit && o.capped)
+        return { verdict: "unknown", why: REGEX_WORDS.capped }
+      return v(o.hit !== c.neg)
     }
     default: {
       const x = f[c.field]
-      if (x === undefined || x === null) return "unknown"
+      if (x === undefined || x === null)
+        return { verdict: "unknown", why: NOT_JUDGED.fact(c.field) }
       switch (c.op) {
         case "<":
           return v(x < c.n)
@@ -197,18 +258,26 @@ function one(c: Clause, f: CellFacts): Verdict {
   }
 }
 
-/** judge is a cell's verdict under p: every clause must pass; a known
- * fail wins over an unknown. A run still running is not judged. */
-export function judge(p: Predicate, f: CellFacts): Verdict {
-  if (f.status === "running") return "unknown"
-  let out: Verdict = "pass"
+/** judgeWith is a cell's verdict under p and why: every clause must
+ * pass; a known fail wins over an unknown. A run still running is not
+ * judged. */
+export function judgeWith(p: Predicate, f: CellFacts): Judged {
+  if (f.status === "running")
+    return { verdict: "unknown", why: NOT_JUDGED.running }
+  let out: Judged = { verdict: "pass" }
+  let k = 0
   for (const c of p.clauses) {
-    const r = one(c, f)
-    if (r === "fail") return "fail"
-    if (r === "unknown") out = "unknown"
+    const r = one(c, f, k)
+    if (c.field === "answer" && "re" in c) k++
+    if (r.verdict === "fail") return r
+    if (r.verdict === "unknown" && out.verdict === "pass") out = r
   }
   return out
 }
+
+/** judge is judgeWith's verdict alone. */
+export const judge = (p: Predicate, f: CellFacts): Verdict =>
+  judgeWith(p, f).verdict
 
 /** One column's tally under the predicate. */
 export interface ColumnTally {
@@ -222,7 +291,16 @@ export interface ColumnTally {
   missing: number
   /** The column's bill (USD), null when any run's is not known. */
   usd: number | null
+  /** The bill's words when usd is null: "unpriced" only when a model
+   * has no price, else "cost unknown" (lib/cost.ts's sumCost badge);
+   * its title says why. */
+  costWord?: string
+  costTitle?: string
 }
+
+/** costWords is a column's bill in words: $x, or why not. */
+export const costWords = (t: Pick<ColumnTally, "usd" | "costWord">): string =>
+  t.usd === null ? (t.costWord ?? "cost unknown") : formatUSD(t.usd)
 
 /** The grid's summary line (the audit's "cheapest model passing every
  * row: kimi ($0.0108) · cheapest overall: glm (5/7)"). */
@@ -255,7 +333,7 @@ export function summarize(cols: ColumnTally[]): MatrixSummary {
   const why = !allPass.length
     ? "no column passed every row"
     : !cheapestPassing
-      ? "the passing columns' cost is not known (unpriced)"
+      ? "the passing columns' cost is not known"
       : !cheapestOverall
         ? "no column's cost is known"
         : ""

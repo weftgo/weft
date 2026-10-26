@@ -1337,8 +1337,9 @@ to the same answers. The **error class** of a failed run is its `err`
 normalised at read time (`obsdb.ErrorClass`: numbers `N`, hex ids,
 UUIDs and mixed ids `<id>`, quoted strings kept) — nothing stored —
 and the experiment definition's `pass_predicate` (SQLite 0024,
-ClickHouse 0028) is the playground's text, kept verbatim (its language
-is Studio's `lib/predicate.ts`), as is each input's own `from_step` (a
+ClickHouse 0028) is the playground's text, kept verbatim and never
+validated server-side (its language is Studio's `lib/predicate.ts`, and
+verdicts are Studio's grid's alone — no route judges a cell), as is each input's own `from_step` (a
 multi-source matrix row's failing step, inside the stored inputs JSON):
 none is a record.
 

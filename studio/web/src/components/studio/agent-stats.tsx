@@ -13,7 +13,7 @@ import type { ReactNode } from "react"
 
 import { fetchStats } from "@/lib/api"
 import type { RunDoc, StatsBy, StatsGroup, StatsPage } from "@/lib/api"
-import { costView } from "@/lib/cost"
+import { costView, isScripted } from "@/lib/cost"
 import { spanMs, tokens } from "@/lib/format"
 import { runsLink } from "@/lib/links"
 import {
@@ -318,6 +318,11 @@ export function VsTypical({ doc }: { doc: RunDoc }) {
       data-vs-typical
     >
       <span className="text-faint">vs typical</span>
+      {doc.playground || isScripted(doc) ? (
+        <span className="text-faint" data-vs-typical-app>
+          {STATS_WORDS.typicalAppRuns}
+        </span>
+      ) : null}
       {chips.map((c) => (
         <RunsOf key={c.key} group={g!}>
           <span

@@ -45,6 +45,9 @@ export const STATS_WORDS = {
     `vs typical: ${n} of the agent's runs in the last 7d — at least ${TYPICAL_MIN_RUNS} to compare`,
   typicalHint:
     "this run against the agent's own runs over the last 7d: duration vs their p50; tokens and cost vs their mean per run (the stats carry no per-run token percentile)",
+  /** Beside the chips on a playground (or scripted) run's header: the
+   * typical is the app's own runs, never the replays (U24.2-fix 10). */
+  typicalAppRuns: "(the app's runs; playground left out)",
   chart: (metric: string) => `${metric} per agent`,
   runsLink: "open these runs",
 } as const

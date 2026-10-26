@@ -25,6 +25,7 @@ import {
   AgentCharts,
   AgentStatsStrip,
   ToolStatsLine,
+  useRegisteredNumbers,
   useStats,
 } from "@/components/studio/agent-stats"
 import { TextDiff } from "@/components/studio/step-request"
@@ -62,6 +63,12 @@ function AgentsPage() {
   const caps = useCapabilities()
   const window = statsWindowOf(Route.useSearch().window)
   const stats = useStats("agent", window)
+  // Registered agents always get their numbers: a group the page's cap
+  // cut is read on its own (useRegisteredNumbers).
+  const numbersOf = useRegisteredNumbers(
+    stats.data,
+    manifest.data?.agents.map((a) => a.name) ?? []
+  )
   if (manifest.isPending) {
     return (
       <div className="flex justify-center py-24">
@@ -130,7 +137,7 @@ function AgentsPage() {
           {a.proposed && <Proposed agent={a} caps={caps.caps} />}
           {caps.has("stats") && stats.data ? (
             <AgentStatsStrip
-              group={stats.data.groups.find((g) => g.key === a.name)}
+              {...numbersOf(a.name)}
               window={window}
               bucketMs={stats.data.bucket_ms}
               since={stats.data.since}

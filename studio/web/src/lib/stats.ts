@@ -27,6 +27,11 @@ export const TYPICAL_MIN_RUNS = 5
 export const STATS_WORDS = {
   window: (w: StatsWindow) => `over the last ${w}`,
   noRuns: (w: StatsWindow) => `no runs in the last ${w}`,
+  unread: (why: string) => `numbers not read: ${why}`,
+  cutReading: (n: number) =>
+    `the page's ${n} agents past its cap left this one out; reading its own numbers…`,
+  cutFailed: (n: number, err: string) =>
+    `the page's cap left this one out (${n} agents past it), and its own read failed: ${err}`,
   appRuns:
     "the app's own runs (subagent children counted under their own agent); playground and scripted replays left out",
   delegated:

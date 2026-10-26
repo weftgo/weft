@@ -7,7 +7,7 @@
 // statsRunsSearch), so a link lands on exactly the runs it counts.
 // Kept apart from agent-cards.tsx: the card's header and badges are
 // the manifest's.
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 
@@ -43,6 +43,60 @@ export function useStats(by: StatsBy, window: string, agent?: string) {
   })
 }
 
+/** One registered agent's numbers: its group, or why it was not read
+ * (none of both: it ran nothing in the window). */
+export interface AgentNumbers {
+  group?: StatsGroup
+  unread?: string
+}
+
+/** useRegisteredNumbers is every registered agent's group: from the
+ * page when the page holds it; when the page was cut (groups_cut, the
+ * route's MaxStatsGroups) and lacks it, from its own GET /api/stats
+ * ?by=agent&agent=<name> over the page's exact window — one small read
+ * per registered agent the cut left out, never a guess: an agent whose
+ * own read is pending or failed reads "not read", never "no runs". */
+export function useRegisteredNumbers(
+  page: StatsPage | undefined,
+  names: readonly string[]
+): (name: string) => AgentNumbers {
+  const cut = !!page?.groups_cut
+  const missing = cut
+    ? [...new Set(names)].filter((n) => !page.groups.some((g) => g.key === n))
+    : []
+  const qs = useQueries({
+    queries: missing.map((agent) => ({
+      queryKey: ["stats", "agent", page?.since ?? "", page?.until ?? "", agent],
+      queryFn: () =>
+        fetchStats({
+          by: "agent",
+          since: page!.since,
+          until: page!.until,
+          agent,
+        }),
+      enabled: !!page,
+      staleTime: 30_000,
+      retry: false,
+    })),
+  })
+  return (name) => {
+    const own = page?.groups.find((g) => g.key === name)
+    if (own) return { group: own }
+    const i = missing.indexOf(name)
+    if (i < 0) return {}
+    const q = qs[i]
+    if (q.data) {
+      const g = q.data.groups.find((x) => x.key === name)
+      return g ? { group: g } : {}
+    }
+    return {
+      unread: q.isError
+        ? STATS_WORDS.cutFailed(page!.groups_cut ?? 0, q.error.message)
+        : STATS_WORDS.cutReading(page!.groups_cut ?? 0),
+    }
+  }
+}
+
 /** RunsOf wraps children in a link to the group's runs, when the group
  * carries its runs_query (agent and error_type groups); else plain. */
 export function RunsOf({
@@ -76,12 +130,22 @@ export function AgentStatsStrip({
   window,
   bucketMs,
   since,
+  unread,
 }: {
-  group: StatsGroup | undefined
+  group?: StatsGroup
   window: StatsWindow
   bucketMs: number
   since: string
+  /** Why this agent's numbers were not read (the page cut its group
+   * and its own read is pending or failed): said, never "no runs". */
+  unread?: string
 }) {
+  if (!group && unread)
+    return (
+      <p className="font-mono text-[11px] text-faint" data-agent-stats="unread">
+        {STATS_WORDS.unread(unread)}
+      </p>
+    )
   if (!group)
     return (
       <p className="font-mono text-[11px] text-faint" data-agent-stats="none">

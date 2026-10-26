@@ -25,6 +25,7 @@ import type {
   RunDoc,
   RunRow,
   SearchPage,
+  StatsPage,
 } from "@/lib/api"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
@@ -34,7 +35,7 @@ import { renderApp, stubBrowser } from "@/test/app"
 import { experiment, priced, runOf } from "@/test/experiment-fixture"
 import { ISSUED_WAIT } from "@/routes/experiments.$id"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio, golden } from "@/test/fake-studio"
+import { FakeStudio, apiError, golden } from "@/test/fake-studio"
 import { choose } from "@/test/select"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -238,6 +239,62 @@ describe("the Agents page's numbers (UX-A-14, UX-E-25)", () => {
             r.query.get("by") === "tool"
         )
     ).toBe(true)
+  })
+
+  // P10a-gate-fix2: a page past the route's 200-group cap (the gate's
+  // seed: 434 agent groups) left registered agents out — they read
+  // "no runs". Each one the cut left out is read on its own; one whose
+  // read fails says so, never "no runs".
+  it("reads a registered agent the 200-group cap cut, and never claims no runs", async () => {
+    const full = golden<StatsPage>("stats-agent")
+    const filler = Array.from({ length: 200 }, (_, n) => ({
+      ...full.groups[2],
+      key: `filler-${n}`,
+      runs_query: `agent=filler-${n}`,
+    }))
+    const cut: StatsPage = { ...full, groups: filler, groups_cut: 234 }
+    studio.on("GET stats", (req) => {
+      if (req.query.get("by") === "tool") return golden("stats-tool")
+      const one = req.query.get("agent")
+      if (one === "director")
+        return apiError(500, "internal", "the database is busy")
+      if (one)
+        return {
+          ...full,
+          groups: full.groups.filter((g) => g.key === one),
+        }
+      return cut
+    })
+    renderApp("/agents")
+    const strip = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(
+        '[data-agent-stats="researcher"]'
+      )
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(strip.querySelector('[data-metric="runs"]')!.textContent).toContain(
+      "5"
+    )
+    // Its own read: the page's exact window, by agent.
+    const own = studio
+      .calls("GET stats")
+      .find(
+        (r) =>
+          r.query.get("agent") === "researcher" && r.query.get("by") === "agent"
+      )!
+    expect(own.query.get("since")).toBe(full.since)
+    expect(own.query.get("until")).toBe(full.until)
+    // director's own read failed: said, never "no runs".
+    const director = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(
+        '[data-agent-stats="unread"]'
+      )
+      expect(el?.textContent).toContain("its own read failed")
+      return el!
+    })
+    expect(director.textContent).toContain("numbers not read")
+    expect(document.querySelector('[data-agent-stats="none"]')).toBeNull()
   })
 
   it("rides the window in the URL", async () => {

@@ -144,3 +144,26 @@ func ExampleRuntimeServer_CommandsOn() {
 	// Output:
 	// decide call_refund approve queued
 }
+
+// ExampleRuntimeServer_HoldsInstance tells a link that dialled this
+// server from one that dialled another: the registration carries the
+// link's random instance.
+func ExampleRuntimeServer_HoldsInstance() {
+	rs := runtime.New()
+	mux := http.NewServeMux()
+	rs.Mount(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	reg := `{"runtime_id":"rt_app","host":"laptop","pid":1,"service":"acme-api","instance":"inst_a",
+	         "agents":[{"name":"acme-support","manifest":"{}"}]}`
+	resp, err := http.Post(ts.URL+"/api/runtime/register", "application/json", strings.NewReader(reg))
+	if err != nil {
+		fmt.Println("register:", err)
+		return
+	}
+	_ = resp.Body.Close()
+	fmt.Println(rs.HoldsInstance("inst_a"), rs.HoldsInstance("inst_b"))
+	// Output:
+	// true false
+}

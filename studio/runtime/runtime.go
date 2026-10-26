@@ -1792,6 +1792,23 @@ func (rs *RuntimeServer) Registration(runtimeID string) (Registration, bool) {
 	return c.reg, true
 }
 
+// HoldsInstance reports whether a runtime registered here with this
+// link instance (Registration.Instance), connected or not: an HTTP link
+// of this process that dialled this very server.
+func (rs *RuntimeServer) HoldsInstance(instance string) bool {
+	if instance == "" {
+		return false
+	}
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	for _, c := range rs.runtimes {
+		if c.reg.Instance == instance {
+			return true
+		}
+	}
+	return false
+}
+
 // Connected reports whether the runtime holds a live command stream.
 func (rs *RuntimeServer) Connected(runtimeID string) bool {
 	rs.mu.Lock()
@@ -1820,8 +1837,8 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			WeftVersion:    c.reg.WeftVersion,
 			Service:        c.reg.Service,
 			Env:            c.reg.Env,
-			ConnectedSince: c.connectedSince,
-			LastSeen:       c.lastSeen,
+			ConnectedSince: c.connectedSince.UTC(),
+			LastSeen:       c.lastSeen.UTC(),
 			Connected:      c.feed != nil,
 			Restored:       c.restored,
 			Sessions:       c.reg.Sessions,

@@ -375,6 +375,21 @@ describe("an app turn no Sessions runtime of its service acts on", () => {
     expect(line(el)).toBe(GONE_WORDS)
   })
 
+  it("a decision lost before it landed is marked after a reload (U20.2-fix, UX-H-15): the run's commands read once", async () => {
+    const { el, fake } = await open({
+      runtimes: [runtimeRow({ connected: false })],
+      lost: true,
+    })
+    await vi.waitFor(
+      () =>
+        expect($(el, '[data-weft-app-verb="lost"]')?.textContent).toBe(
+          "lost: no ack in time"
+        ),
+      { timeout: 5_000 }
+    )
+    expect(fake.calls(`GET runs/${PARKED}/commands`)).toHaveLength(1)
+  })
+
   it("the app's own link dialled another Studio (meta.runtime_link, UX-D-01): named, with the fix", async () => {
     const { el } = await open({
       runtimes: [],

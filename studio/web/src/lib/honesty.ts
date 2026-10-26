@@ -468,14 +468,26 @@ export function appGone(
   service: string | undefined
 ): { words: string; fix: string } | null {
   const rt = rts?.find(
-    (r) => service && !r.connected && r.sessions && r.service === service
+    (r) =>
+      service && r.connected === false && r.sessions && r.service === service
   )
   return rt
     ? {
-        words: `${APP_OWNED}: the app's runtime ${rt.id} of service ${service} disconnected — last seen ${new Date(rt.last_seen ?? 0).toISOString().slice(0, 19)}Z`,
+        words: `${APP_OWNED}: the app's runtime ${rt.id} of service ${service} disconnected${rt.last_seen ? ` — last seen ${new Date(rt.last_seen).toISOString().slice(0, 19)}Z` : ""}`,
         fix: "restart the app: it re-registers under the same id",
       }
     : null
+}
+/** The playground header's reading of the app's own turns while the
+ * opted-in app is gone (U20.2-fix, UX-H-14): appGone's words and fix,
+ * for the newest-seen disconnected Sessions runtime of any service —
+ * never "viewer-only" for an app that opted in. "" when none is. */
+export function appGoneScope(
+  rts: readonly RuntimeLike[] | null | undefined
+): string {
+  const rt = rts?.find((r) => r.connected === false && r.sessions)
+  const w = rt ? appGone(rts, rt.service) : null
+  return w ? `· the app's own turns: ${refusalLine(w)}` : ""
 }
 /** A decision that never landed (U20.2, UX-H-15): the run's lost
  * command (GET /api/runs/{id}/commands), said on the parked call after
@@ -816,9 +828,11 @@ export function refusalWords(
     return { words: `${SESSION_UNREAD}: ${facts.sessionError}`, fix: "" }
   if (rtErr) return { words: `${RUNTIMES_UNREAD}: ${rtErr}`, fix: "" }
   const svc = row.service || "(none recorded)"
+  // The opted-in app gone wins over another process of the service
+  // connected without Sessions (UX-H-14): restart it, not "set Sessions".
+  const gone = appGone(runtimes, row.service)
+  if (gone) return gone
   if (!live(runtimes, row.service, false)) {
-    const gone = appGone(runtimes, row.service)
-    if (gone) return gone
     const url = facts?.link?.in_process ? "" : facts?.link?.studio_url
     return url
       ? {

@@ -452,9 +452,10 @@ func closedChan() chan struct{} { c := make(chan struct{}); close(c); return c }
 //
 //	studio <link> · app pid <n> · runtime <rt_id> registered
 //
-// The runtime is the first one this Studio lists that was not listed
-// before the app started (GET /api/runtimes, the API the UI reads).
-func (d *devLoop) announce(pid int, before map[string]bool) *oneLine {
+// The runtime is the first one this Studio lists connected that was
+// not connected before the app started (GET /api/runtimes, the API the
+// UI reads; newRuntime).
+func (d *devLoop) announce(pid int, before map[string]int) *oneLine {
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &oneLine{cancel: cancel, done: make(chan struct{})}
 	head := fmt.Sprintf("studio %s · app pid %d · ", d.link, pid)
@@ -502,34 +503,51 @@ func (d *devLoop) announce(pid int, before map[string]bool) *oneLine {
 // without the playground.
 var errNoPlayground = errors.New("the Studio's playground is off: no runtime link")
 
-// newRuntime is the id of a runtime listed now and not in before; ""
-// when there is none (or the view could not be read — the next poll
-// retries).
-func (d *devLoop) newRuntime(ctx context.Context, before map[string]bool) (string, error) {
-	ids, err := d.listRuntimes(ctx)
+// newRuntime is the id of a runtime connected now that was not
+// connected before the app started — absent from before, or connected
+// then from another process (another pid: the old app's link not yet
+// dropped when the restart read the list); "" when there is none (or
+// the view could not be read — the next poll retries). Only connected
+// rows count: a stable id listed disconnected or restored (a weft dev
+// restart over the same database, a .go-save restart) comes back under
+// the same id, and is this app's registration once it is connected.
+func (d *devLoop) newRuntime(ctx context.Context, before map[string]int) (string, error) {
+	rts, err := d.listRuntimes(ctx)
 	if errors.Is(err, errNoPlayground) {
 		return "", err
 	}
-	for _, id := range ids {
-		if !before[id] {
-			return id, nil
+	for _, r := range rts {
+		if !r.Connected {
+			continue
+		}
+		if pid, ok := before[r.ID]; !ok || pid != r.Pid {
+			return r.ID, nil
 		}
 	}
 	return "", nil
 }
 
-// runtimeIDs is the set of runtimes listed now.
-func (d *devLoop) runtimeIDs(ctx context.Context) map[string]bool {
-	ids, _ := d.listRuntimes(ctx)
-	set := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		set[id] = true
+// runtimeIDs is the runtimes connected now, by id, with their pid.
+func (d *devLoop) runtimeIDs(ctx context.Context) map[string]int {
+	rts, _ := d.listRuntimes(ctx)
+	set := make(map[string]int, len(rts))
+	for _, r := range rts {
+		if r.Connected {
+			set[r.ID] = r.Pid
+		}
 	}
 	return set
 }
 
+// listedRuntime is one row of GET /api/runtimes, as weft dev reads it.
+type listedRuntime struct {
+	ID        string `json:"id"`
+	Pid       int    `json:"pid"`
+	Connected bool   `json:"connected"`
+}
+
 // listRuntimes reads GET /api/runtimes.
-func (d *devLoop) listRuntimes(ctx context.Context) ([]string, error) {
+func (d *devLoop) listRuntimes(ctx context.Context) ([]listedRuntime, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.url+"/api/runtimes", nil)
@@ -551,18 +569,12 @@ func (d *devLoop) listRuntimes(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("GET /api/runtimes: %s", resp.Status)
 	}
 	var body struct {
-		Runtimes []struct {
-			ID string `json:"id"`
-		} `json:"runtimes"`
+		Runtimes []listedRuntime `json:"runtimes"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&body); err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(body.Runtimes))
-	for _, r := range body.Runtimes {
-		ids = append(ids, r.ID)
-	}
-	return ids, nil
+	return body.Runtimes, nil
 }
 
 // lockedWriter serialises weft dev's own lines (the one line's waiter

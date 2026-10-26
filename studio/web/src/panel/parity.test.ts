@@ -1796,6 +1796,16 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       kind: "read-only",
     },
     {
+      name: "an opted-in app gone beside a CLI of its service without Sessions (U20.2-fix): the restart fix, never set Sessions",
+      o: {
+        runtimes: [
+          appRuntime({ id: "rt_cli", sessions: false, breakpoints_own: false }),
+          appRuntime({ connected: false }),
+        ],
+      },
+      kind: "read-only",
+    },
+    {
       name: "the app's own link dialled another Studio (U20.2): named, the fix",
       o: {
         runtimes: [],

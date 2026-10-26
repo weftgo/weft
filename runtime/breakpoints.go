@@ -103,7 +103,7 @@ var liveLinks struct {
 }
 
 func addLiveLink(l *link) {
-	entry := &linkreg.Link{StudioURL: dialledURL(l.base)}
+	entry := &linkreg.Link{StudioURL: dialledURL(l.base), Instance: l.instance}
 	if l.cfg != nil && l.cfg.local != nil {
 		entry.Local = l.cfg.local
 	}

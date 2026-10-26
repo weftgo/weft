@@ -150,6 +150,36 @@ func atoi(t *testing.T, s string) int {
 	return n
 }
 
+// TestDevRuntimeRegisteredAfterRestart (U20.2-fix): weft dev stopped
+// and started again over the same database. The app's runtime comes
+// back under its stable id, which the restarted Studio lists restored
+// (disconnected) before the app starts; once the app's link registers
+// it reads connected — and the one line names it registered, never
+// "no runtime registered yet".
+func TestDevRuntimeRegisteredAfterRestart(t *testing.T) {
+	shortRuntimeWait(t, 3*time.Second)
+	dir := t.TempDir()
+	db := "sqlite://" + filepath.Join(dir, "weft.db")
+	var ids []string
+	for i := 0; i < 2; i++ {
+		addr := loop(freeBase(t, 1))
+		d := startDev(t, []string{"--addr", addr, "--db", db, "--watch", dir},
+			map[string]string{"WEFT_DEV_HELPER_RUNTIME": "1", "WEFT_STUDIO_TOKEN": ""})
+		line := d.waitOut(t, oneLineRe, 1)[0]
+		m := regexp.MustCompile(`^runtime (rt_\S+) registered$`).FindStringSubmatch(line[3])
+		if m == nil {
+			t.Fatalf("run %d: runtime part %q, want runtime rt_… registered:\n%s", i+1, line[3], d.out.String())
+		}
+		ids = append(ids, m[1])
+		d.interrupt(t)
+		gone(t, "the app", atoi(t, line[2]))
+		notListening(t, addr)
+	}
+	if ids[0] != ids[1] {
+		t.Errorf("the restart registered %s, want the stable id %s (the case under test)", ids[1], ids[0])
+	}
+}
+
 // TestDevEnvAndOneLine: the app sees the four variables, the one line
 // names its pid, and the link is the bare URL for the database's stable
 // token (the default, plan B3) and for a fixed one — both the panel

@@ -182,7 +182,12 @@ import { StatusChip } from "@/components/studio/runs-table"
 import { AWAITING } from "@/lib/status"
 import { DECIDE_FIELD, DONE, VERB, VERB_TITLE } from "@/lib/decisions"
 import { formatUSD, lostCellCost, sumCost } from "@/lib/cost"
-import { OWN_RUNTIME, SCOPE_OWN, SCOPE_RUNTIME_ONLY } from "@/lib/honesty"
+import {
+  appGoneScope,
+  OWN_RUNTIME,
+  SCOPE_OWN,
+  SCOPE_RUNTIME_ONLY,
+} from "@/lib/honesty"
 import { SourceMatrix } from "@/components/studio/source-matrix"
 import { sourcesOf } from "@/lib/matrix"
 
@@ -1424,7 +1429,12 @@ function Playground({ caps }: { caps: string[] }) {
             · breakpoints &amp; steer act on{" "}
             {meta.data.debug_scope === OWN_RUNTIME
               ? SCOPE_OWN
-              : `${meta.data.debug_scope} ${SCOPE_RUNTIME_ONLY}`}
+              : appGoneScope(runtimes.data?.runtimes)
+                ? // The opted-in app is gone (UX-H-14): its own
+                  // turns read disconnected, with the fix — never
+                  // "viewer-only".
+                  `${meta.data.debug_scope} only ${appGoneScope(runtimes.data?.runtimes)}`
+                : `${meta.data.debug_scope} ${SCOPE_RUNTIME_ONLY}`}
           </span>
         )}
       </header>

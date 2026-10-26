@@ -89,7 +89,8 @@ type metaDoc struct {
 	PID int `json:"pid,omitempty"`
 	// RuntimeLink is this process's runtime link as this server sees it
 	// (U20.2, UX-D-01): in_process when a link talks to this very server
-	// (runtime.Local(srv)), studio_url the Studio a link of this process
+	// (runtime.Local(srv), or over HTTP to this server: it holds the
+	// link's registration), studio_url the Studio a link of this process
 	// dialled instead (runtime.Studio, weft dev's WEFT_STUDIO_URL) — so
 	// an embedded Studio whose app registered elsewhere says where,
 	// rather than reading as an app whose link is closed. Omitted when
@@ -104,8 +105,9 @@ type metaRuntimeLink struct {
 	// StudioURL is the Studio another link of this process dialled
 	// (the first by URL when several did); omitted when none did.
 	StudioURL string `json:"studio_url,omitempty"`
-	// InProcess is whether a link of this process talks to this server
-	// in-process (runtime.Local(srv)).
+	// InProcess is whether a link of this process talks to this server:
+	// in-process (runtime.Local(srv)), or over HTTP to this very server
+	// (this Studio holds its registration).
 	InProcess bool `json:"in_process"`
 }
 
@@ -116,6 +118,10 @@ func (s *Server) runtimeLink() *metaRuntimeLink {
 	for _, l := range linkreg.All() {
 		switch {
 		case l.Local != nil && l.Local == any(s):
+			out.InProcess = true
+		case l.Local == nil && s.runtimeSrv != nil && s.runtimeSrv.HoldsInstance(l.Instance):
+			// An HTTP link that dialled this very server: this Studio
+			// holds its registration, so it is not elsewhere.
 			out.InProcess = true
 		case l.Local == nil && l.StudioURL != "" && out.StudioURL == "":
 			out.StudioURL = l.StudioURL

@@ -138,3 +138,24 @@ func TestAppTurnNamesTheStudioTheLinkDialled(t *testing.T) {
 		t.Errorf("a panel token's approve = %d %s, want the closed-link words", code, body)
 	}
 }
+
+// TestAppTurnGoneAppWinsOverACLI (U20.2-fix, UX-H-14): the opted-in app
+// of a service crashed (its Sessions runtime listed disconnected) while
+// another process of the service is connected without Sessions — a
+// CLI. The refusal is the gone app's, with the restart fix, never "set
+// runtime.Sessions".
+func TestAppTurnGoneAppWinsOverACLI(t *testing.T) {
+	pt := newPlaygroundServer(t, "s3cr3t") // rt_test: acme-api, connected, no Sessions
+	reg := `{"runtime_id":"rt_app","host":"tester","pid":43,"service":"acme-api","sessions":true,
+	         "agents":[{"name":"acme-support","manifest":"{}"}]}`
+	if code, body := pt.authed(t, http.MethodPost, "/api/runtime/register", pt.token, reg); code != http.StatusOK {
+		t.Fatalf("register = %d %s", code, body) // never streams: listed disconnected
+	}
+	seedRunAs(t, pt.db, "acme-api", "app_gone", "pub_7Hk2", "s_g", "", nil)
+	code, body := pt.authed(t, http.MethodPost, "/api/runs/app_gone/approvals", pt.token, `{"call_id":"call_1","decision":"approve"}`)
+	if code != http.StatusForbidden ||
+		!strings.Contains(body, `"message":"app-owned turn · read-only: the app's runtime rt_app of service acme-api disconnected — last seen `) ||
+		!strings.Contains(body, `"fix":"restart the app: it re-registers under the same id"`) {
+		t.Errorf("approve beside a CLI = %d %s, want the gone app's words", code, body)
+	}
+}

@@ -77,7 +77,9 @@ func TestWeftDevApprovesFromThePagePanel(t *testing.T) {
 	t.Setenv("WEFT_DB", dbPath)
 	t.Setenv("WEFT_ENV", "dev")
 
-	a, err := build(filepath.Join(dir, "threads"))
+	// A threads directory under a parent that does not exist yet (weft
+	// dev --db elsewhere leaves no ./.weft): build creates it.
+	a, err := build(filepath.Join(dir, "no-such-dir", "threads"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +116,15 @@ func TestWeftDevApprovesFromThePagePanel(t *testing.T) {
 		t.Error("the page carries the server token, or the embedded Studio's panel")
 	}
 	panelToken := tag[3]
+	// Only GET / is the page: a favicon is a 404 and mints nothing.
+	if resp, err := http.Get(app.URL + "/favicon.ico"); err != nil {
+		t.Fatal(err)
+	} else {
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET /favicon.ico = %d, want 404 (no page, no mint)", resp.StatusCode)
+		}
+	}
 	if code, _ := dev.call(t, http.MethodGet, "/panel.js", "", ""); code != http.StatusOK {
 		t.Errorf("weft dev's Studio does not serve the tag's panel.js: %d", code)
 	}

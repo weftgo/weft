@@ -24,6 +24,11 @@ type Link struct {
 	// StudioURL is the Studio an HTTP link dialled, without userinfo,
 	// query or fragment (the registration's studio_url); "" in-process.
 	StudioURL string
+	// Instance is the link's random tag on every registration
+	// (Registration.Instance): a Studio that holds a registration with
+	// it is the Studio this HTTP link dialled — the same server, over a
+	// socket — and not another one.
+	Instance string
 }
 
 var reg struct {

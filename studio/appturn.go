@@ -79,10 +79,11 @@ func (s *Server) appTurnRuntime(w http.ResponseWriter, r *http.Request, rs *link
 // the run's service registered runtime.Sessions — the four cases the
 // UIs tell apart in the same words (lib/honesty.ts refusalWords):
 //
+//   - a runtime of the service that registered Sessions is listed
+//     disconnected (U20.2, UX-H-14): the app was opted in and went away
+//     — restart it, never "add runtime.Sessions", even while another
+//     process of the service is connected without Sessions;
 //   - one of the service is connected without Sessions: set it;
-//   - none is connected, but a runtime of the service that registered
-//     Sessions is listed disconnected (U20.2, UX-H-14): the app was
-//     opted in and went away — restart it, never "add runtime.Sessions";
 //   - none of the service is known here, and this process's own link
 //     dialled another Studio (meta's runtime_link, UX-D-01): name it;
 //   - otherwise the link is closed: open it.
@@ -91,12 +92,15 @@ func (s *Server) appRefusal(r *http.Request, rs *linkruntime.RuntimeServer, row 
 	if service == "" {
 		service = "(none recorded)"
 	}
+	// The opted-in app gone wins over another process of the service
+	// connected without Sessions (a CLI beside a crashed app): the app's
+	// fix is its restart, never "set runtime.Sessions" (UX-H-14).
+	if gone, ok := goneSessionsRuntime(rs, row.Service); ok {
+		return appGoneWords(gone)
+	}
 	if serviceConnected(rs, row.Service) {
 		return appOwned + " · read-only: run " + row.ID + " is the app's own, and no connected runtime of its service " + service + " acts on the app's sessions",
 			"set runtime.Sessions(resolver) at runtime.Install in the app (service " + service + "): its turns then take approvals and steer"
-	}
-	if gone, ok := goneSessionsRuntime(rs, row.Service); ok {
-		return appGoneWords(gone)
 	}
 	if mayReadDBPath(s, r) {
 		if l := s.runtimeLink(); l != nil && l.StudioURL != "" && !l.InProcess {

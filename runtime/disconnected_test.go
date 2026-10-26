@@ -142,4 +142,9 @@ func TestMetaNamesTheStudioTheLinkDialled(t *testing.T) {
 	if body := get("/api/meta"); !strings.Contains(body, want) {
 		t.Errorf("the embedded Studio's meta = %s, want %s", body, want)
 	}
+	// The Studio the link dialled — this process's too — holds the
+	// registration: its own meta never says the link went elsewhere.
+	if _, body := e.api(t, http.MethodGet, "/api/meta", ""); !strings.Contains(body, `"runtime_link":{"in_process":true}`) {
+		t.Errorf("the dialled Studio's own meta = %s, want runtime_link in_process, not its own URL", body)
+	}
 }

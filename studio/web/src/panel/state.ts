@@ -2712,6 +2712,34 @@ export class PanelModel {
     )
   }
 
+  /** wantCommands reads a parked turn's commands once (capability
+   * run_commands, U20.2-fix, UX-H-15): a call whose latest decision was
+   * lost — the runtime went away, Studio restarted — reads lost with
+   * why after a reload, as on the run page; a verb sent here wins. */
+  wantCommands(runID: string) {
+    // Asked once: the run's bare key (no call id) marks it.
+    if (this.state.app[`${runID}:`] as AppVerb | undefined) return
+    this.state.app[`${runID}:`] = { state: "sending" }
+    // A Studio without run_commands answers 404: nothing marked.
+    panelGet<{ commands: (CommandStatus & { call_id?: string })[] }>(
+      this.ep,
+      `runs/${runID}/commands`
+    )
+      .then((d) => {
+        const app = { ...this.state.app }
+        // A lost row is an AppVerb as it stands (state, error); a call
+        // decided since reads its decision instead (the record's).
+        for (const c of d.commands) {
+          const k = `${runID}:${c.call_id}`
+          if (c.state === "lost" && !(app[k] as AppVerb | undefined))
+            app[k] = c as AppVerb
+        }
+        this.state.app = app
+        this.emit()
+      })
+      .catch(quiet)
+  }
+
   /** decideApp answers one parked call of an app turn (plan F4.3):
    * the same route and verbs as an experiment's, text the deny's
    * reason or the resolve's result. */

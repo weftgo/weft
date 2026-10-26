@@ -276,6 +276,12 @@ func build(threadsDir string) (*app, error) {
 	// Handler mounted, and the runtime link dials it in-process.
 	// The demo's sessions live in one jsonl store; the runtime gets it
 	// too, so the playground's fork mode (thread=fork) can branch them.
+	// The directory may not exist yet (weft dev --db elsewhere leaves
+	// no ./.weft): jsonl.Open needs it.
+	if err := os.MkdirAll(threadsDir, 0o755); err != nil {
+		stopOtel()
+		return nil, err
+	}
 	store, err := jsonl.Open(threadsDir)
 	if err != nil {
 		stopOtel()
@@ -313,7 +319,9 @@ func build(threadsDir string) (*app, error) {
 	// The page's panel reads the Studio the runtime registered with:
 	// the embedded one (setup A), or weft dev's (setup B).
 	panel := panelTag{studioURL: studioURL, studioToken: studioToken}
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	// GET / alone: each page mints a panel token (one POST under weft
+	// dev), so a favicon or any other path is the mux's 404, not a mint.
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprint(w, pageWith(panel.tag(r.Context())))
 	})

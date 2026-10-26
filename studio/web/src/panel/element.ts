@@ -5823,6 +5823,7 @@ export class WeftDevtools extends HTMLElement {
     s: PanelState
   ): HTMLElement {
     const runID = run.id
+    this.model?.wantCommands(runID)
     // A refusal a later runtimes read re-gated to decide is history:
     // the verbs come back (the runtime reconnected, the fix applied).
     const sent = (id: string): AppVerb | undefined => {
@@ -5916,6 +5917,9 @@ export class WeftDevtools extends HTMLElement {
             )
           )
         )
+      // A decision lost before it landed (wantCommands, UX-H-15).
+      const v = sent(call.id)
+      if (!next && v?.state === "lost") row.append(this.appSaid(v, runID)!)
       body.append(row)
     }
     if (dec) {

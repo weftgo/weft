@@ -67,3 +67,17 @@ func TestCommandsOnARun(t *testing.T) {
 		t.Errorf("CommandsOn(s_1-t2) = %+v, want its own deny alone", other)
 	}
 }
+
+// TestSnapshotTimesAreUTC (U20.2-fix): GET /api/runtimes serialises
+// connected_since and last_seen in UTC alike, whatever the Studio's
+// zone — the refusal's "last seen" and the runtimes view agree.
+func TestSnapshotTimesAreUTC(t *testing.T) {
+	rs := fastServer()
+	rs.now = func() time.Time { return time.Now().In(time.FixedZone("CET", 3600)) }
+	register(t, mux(rs), regBody("rt_utc"))
+	for _, v := range rs.Snapshot() {
+		if v.LastSeen.Location() != time.UTC || v.ConnectedSince.Location() != time.UTC {
+			t.Errorf("%s: last_seen %v, connected_since %v, want both UTC", v.ID, v.LastSeen, v.ConnectedSince)
+		}
+	}
+}

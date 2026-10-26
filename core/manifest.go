@@ -55,6 +55,23 @@ type manifestAgent struct {
 	Instructions string         `json:"instructions,omitempty"`
 	Policy       manifestPolicy `json:"policy"`
 	Tools        []manifestTool `json:"tools"`
+	// ModelMiddleware and ToolMiddleware are the onion (U23.1): the
+	// WrapModel chain as its Unwrap walk reads it and the agent's
+	// WrapTools list, outer to inner; Hooks the user functions the loop
+	// calls. Each omitted when empty, so an agent without them renders
+	// exactly as before.
+	ModelMiddleware []MiddlewareInfo `json:"model_middleware,omitempty"`
+	ToolMiddleware  []MiddlewareInfo `json:"tool_middleware,omitempty"`
+	Hooks           *manifestHooks   `json:"hooks,omitempty"`
+}
+
+// manifestHooks are the agent's hook functions, each named as a tool
+// middleware is (funcInfo), in registration order.
+type manifestHooks struct {
+	PrepareStep []MiddlewareInfo `json:"prepare_step,omitempty"`
+	Tap         []MiddlewareInfo `json:"tap,omitempty"`
+	OnRunEnd    []MiddlewareInfo `json:"on_run_end,omitempty"`
+	ToolSource  *MiddlewareInfo  `json:"tool_source,omitempty"`
 }
 
 type manifestPolicy struct {
@@ -99,6 +116,9 @@ type manifestTool struct {
 	// fleet. The manifest does not recurse into the child: it describes
 	// the agents it was given, not the fleet (ADR 0012).
 	Subagent string `json:"subagent,omitempty"`
+	// Middleware is the tool's own WrapTools list, outer to inner; it
+	// runs inside the agent's (U23.1).
+	Middleware []MiddlewareInfo `json:"middleware,omitempty"`
 }
 
 func (a *Agent) manifestEntry() manifestAgent {
@@ -115,7 +135,21 @@ func (a *Agent) manifestEntry() manifestAgent {
 			MaxModelRetries: a.maxModelRetries,
 			DetectLoops:     a.detectLoops,
 		},
-		Tools: make([]manifestTool, 0, len(a.toolList)),
+		Tools:           make([]manifestTool, 0, len(a.toolList)),
+		ModelMiddleware: modelLayers(a.model, a.base, len(a.modelMW)),
+		ToolMiddleware:  toolLayers(a.toolMW),
+	}
+	hooks := manifestHooks{
+		PrepareStep: funcInfos(a.prepare),
+		Tap:         funcInfos(a.taps),
+		OnRunEnd:    funcInfos(a.onRunEnd),
+	}
+	if a.toolSource != nil {
+		ts := funcInfo(a.toolSource)
+		hooks.ToolSource = &ts
+	}
+	if hooks.PrepareStep != nil || hooks.Tap != nil || hooks.OnRunEnd != nil || hooks.ToolSource != nil {
+		ma.Hooks = &hooks
 	}
 	if a.usageLimit != (Usage{}) {
 		ma.Policy.UsageLimit = &manifestUsage{
@@ -139,6 +173,7 @@ func (a *Agent) manifestEntry() manifestAgent {
 			PromptSnippet:   t.snippet,
 			Source:          toolSource(t),
 			Subagent:        t.subagent,
+			Middleware:      toolLayers(t.mw),
 		}
 		if t.capSet {
 			resultCap := t.resultCap

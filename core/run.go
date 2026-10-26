@@ -136,9 +136,11 @@ func ApproveBy(callID, by, grantID string) RunOption {
 	return approveOption{id: callID, by: by, grant: grantID}
 }
 
-type denyOption struct{ id, reason string }
+type denyOption struct{ id, reason, by, grant string }
 
-func (o denyOption) applyRun(c *runConfig) { c.decide(o.id, decision{reason: o.reason}) }
+func (o denyOption) applyRun(c *runConfig) {
+	c.decide(o.id, decision{reason: o.reason, by: o.by, grant: o.grant})
+}
 
 // Deny resolves a pending call without running it: the model sees an
 // error result reading "DENIED: <reason>" and the loop continues.
@@ -147,7 +149,19 @@ func (o denyOption) applyRun(c *runConfig) { c.decide(o.id, decision{reason: o.r
 // runs and emits no event; its execute_tool span is zero-length,
 // marked weft.tool.denied with weft.tool.denied_kind denied or
 // no_decision (never the reason, which is the transcript's).
-func Deny(callID, reason string) RunOption { return denyOption{callID, reason} }
+func Deny(callID, reason string) RunOption { return denyOption{id: callID, reason: reason} }
+
+// DenyBy is Deny naming what refused the call, as ApproveBy names what
+// approved one: by "grant" with grantID the standing refusal that
+// decided (weft/thread passes it when a deny grant matched). Reporting
+// only: the call is denied exactly as Deny denies it, and its
+// zero-length execute_tool span carries weft.tool.denied_by "grant" and
+// weft.grant.id; any other by — or none, a plain Deny — reads
+// weft.tool.denied_by "approval", the approval boundary's refusal. Ids
+// and enums, never the reason.
+func DenyBy(callID, reason, by, grantID string) RunOption {
+	return denyOption{id: callID, reason: reason, by: by, grant: grantID}
+}
 
 type resolveOption struct {
 	id, content string

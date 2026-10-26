@@ -245,7 +245,9 @@
           "status": "error",
           "error_type": "DENIED",
           "denied": true,
-          "denied_kind": "denied"
+          "denied_kind": "denied",
+          "grant_id": "e_thread_grants_0003",
+          "denied_by": "grant"
         }
       ],
       "holes": []

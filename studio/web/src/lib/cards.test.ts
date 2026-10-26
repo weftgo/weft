@@ -168,8 +168,8 @@ describe("the run cards' facts (U25)", () => {
       [1, 2, 3].map((n) => attemptTag(s.spans.spans, s.run.id, 0, n))
     ).toEqual([
       "attempt 1 · 503 · Service Unavailable: overloaded",
-      "attempt 2 · 503 · Service Unavailable: overloaded · waited 1 ms",
-      "attempt 3 · waited 1 ms",
+      "attempt 2 · retry · 503 · Service Unavailable: overloaded · waited 1 ms",
+      "attempt 3 · retry · waited 1 ms",
     ])
   })
 

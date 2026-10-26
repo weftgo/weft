@@ -34,12 +34,13 @@ type AttemptInfo struct {
 	// RetryAfter is the wait the provider asked for on a failed attempt
 	// (a retry-after header), zero when it asked for none.
 	RetryAfter time.Duration
-	// Layer names the role of the request in the model chain when it is
-	// not the primary's: AttemptLayerFallback for a request mw.Fallback
-	// sent to a backup. Empty for a primary attempt (a first try or a
-	// retry of the model asked). The attempt span carries it as
-	// weft.attempt.layer — what a reader's fallbacks counter keys on
-	// (docs/record-contract.md §3, §6), never a model-name comparison.
+	// Layer names the layer that made the request when it is not the
+	// call's first try of the model asked: AttemptLayerFallback for a
+	// request mw.Fallback sent to a backup, AttemptLayerRetry for one
+	// mw.Retry sent again after a failure. Empty for a first try. The
+	// attempt span carries it as weft.attempt.layer — fallback is what a
+	// reader's fallbacks counter keys on (docs/record-contract.md §3,
+	// §6), never a model-name comparison.
 	Layer string
 	// Wait is how long the reporting layer waited before it sent this
 	// attempt (a retry's backoff or the provider's retry-after it
@@ -56,6 +57,10 @@ type AttemptInfo struct {
 // AttemptLayerFallback is AttemptInfo.Layer for a request a fallback
 // layer sent to a backup model rather than the one asked.
 const AttemptLayerFallback = "fallback"
+
+// AttemptLayerRetry is AttemptInfo.Layer for a request a retry layer
+// sent again after a failed try of the same model.
+const AttemptLayerRetry = "retry"
 
 // RawPair is one attempt's wire exchange: the request as sent and the
 // response as received, as the reporter holds them (ADR 0028 §12). The

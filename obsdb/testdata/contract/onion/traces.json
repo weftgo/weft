@@ -1,0 +1,1764 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "contract-app"
+            }
+          },
+          {
+            "key": "weft.version",
+            "value": {
+              "stringValue": "v0.0.0-contract"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "github.com/weftgo/weft/core",
+            "version": "v0.0.0-contract"
+          },
+          "spans": [
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "20"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "weft.run.steps",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.run.events",
+                  "value": {
+                    "intValue": "14"
+                  }
+                },
+                {
+                  "key": "weft.run.messages",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "weft.run.stop_reason",
+                  "value": {
+                    "stringValue": "stop"
+                  }
+                },
+                {
+                  "key": "weft.run.stopped_by",
+                  "value": {
+                    "stringValue": "final_answer"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600057000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "invoke_agent support",
+              "spanId": "5ba0000000000001",
+              "startTimeUnixNano": "1790847600000000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.stream",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.finish_reasons",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "tool_calls"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "weft.model.tool_calls",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600015000000",
+              "events": [
+                {
+                  "attributes": [
+                    {
+                      "key": "gen_ai.tool.call.id",
+                      "value": {
+                        "stringValue": "call_1"
+                      }
+                    },
+                    {
+                      "key": "weft.repair.bytes_before",
+                      "value": {
+                        "intValue": "31"
+                      }
+                    },
+                    {
+                      "key": "weft.repair.bytes_after",
+                      "value": {
+                        "intValue": "19"
+                      }
+                    },
+                    {
+                      "key": "weft.repair.kind",
+                      "value": {
+                        "stringValue": "fence"
+                      }
+                    },
+                    {
+                      "key": "weft.repair.original",
+                      "value": {
+                        "stringValue": "```json\n{\"order_id\":\"1234\"}\n```"
+                      }
+                    }
+                  ],
+                  "name": "weft.repair",
+                  "timeUnixNano": "1790847600002000000"
+                }
+              ],
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "chat script",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000002",
+              "startTimeUnixNano": "1790847600001000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "http.response.status_code",
+                  "value": {
+                    "intValue": "503"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "model_error"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600004000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "attempt",
+              "parentSpanId": "5ba0000000000002",
+              "spanId": "5ba0000000000003",
+              "startTimeUnixNano": "1790847600003000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR",
+                "message": "503 Service Unavailable: overloaded"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.attempt.layer",
+                  "value": {
+                    "stringValue": "retry"
+                  }
+                },
+                {
+                  "key": "weft.attempt.wait_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600006000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "attempt",
+              "parentSpanId": "5ba0000000000002",
+              "spanId": "5ba0000000000004",
+              "startTimeUnixNano": "1790847600005000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Log"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "model"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600014000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Log",
+              "parentSpanId": "5ba0000000000002",
+              "spanId": "5ba0000000000005",
+              "startTimeUnixNano": "1790847600007000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Retry"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "model"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600013000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Retry",
+              "parentSpanId": "5ba0000000000005",
+              "spanId": "5ba0000000000006",
+              "startTimeUnixNano": "1790847600008000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.RepairJSON"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "model"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "model_error"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600010000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.RepairJSON",
+              "parentSpanId": "5ba0000000000006",
+              "spanId": "5ba0000000000007",
+              "startTimeUnixNano": "1790847600009000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.RepairJSON"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "model"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600012000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.RepairJSON",
+              "parentSpanId": "5ba0000000000006",
+              "spanId": "5ba0000000000008",
+              "startTimeUnixNano": "1790847600011000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "lookup_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.tool.args_repaired",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "weft.tool.result_bytes",
+                  "value": {
+                    "intValue": "19"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600023000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool lookup_order",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000009",
+              "startTimeUnixNano": "1790847600016000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Audit"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "lookup_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600022000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Audit",
+              "parentSpanId": "5ba0000000000009",
+              "spanId": "5ba000000000000a",
+              "startTimeUnixNano": "1790847600017000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Allow"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "lookup_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600021000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Allow",
+              "parentSpanId": "5ba000000000000a",
+              "spanId": "5ba000000000000b",
+              "startTimeUnixNano": "1790847600018000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.MapErrors"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "lookup_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600020000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.MapErrors",
+              "parentSpanId": "5ba000000000000b",
+              "spanId": "5ba000000000000c",
+              "startTimeUnixNano": "1790847600019000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "delete_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_2"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.tool.queue_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "DENIED"
+                  }
+                },
+                {
+                  "key": "weft.tool.denied_by",
+                  "value": {
+                    "stringValue": "allow"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600029000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool delete_order",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba000000000000d",
+              "startTimeUnixNano": "1790847600024000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Audit"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "delete_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_2"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "DENIED"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600028000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Audit",
+              "parentSpanId": "5ba000000000000d",
+              "spanId": "5ba000000000000e",
+              "startTimeUnixNano": "1790847600025000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Allow"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "delete_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_2"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "DENIED"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600027000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Allow",
+              "parentSpanId": "5ba000000000000e",
+              "spanId": "5ba000000000000f",
+              "startTimeUnixNano": "1790847600026000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "refund_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_3"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.tool.queue_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "INTERNAL"
+                  }
+                },
+                {
+                  "key": "weft.tool.error_masked",
+                  "value": {
+                    "stringValue": "*errors.errorString"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600037000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool refund_order",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000010",
+              "startTimeUnixNano": "1790847600030000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Audit"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "refund_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_3"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "INTERNAL"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600036000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Audit",
+              "parentSpanId": "5ba0000000000010",
+              "spanId": "5ba0000000000011",
+              "startTimeUnixNano": "1790847600031000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Allow"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "refund_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_3"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "INTERNAL"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600035000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Allow",
+              "parentSpanId": "5ba0000000000011",
+              "spanId": "5ba0000000000012",
+              "startTimeUnixNano": "1790847600032000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.MapErrors"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "refund_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_3"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "INTERNAL"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600034000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.MapErrors",
+              "parentSpanId": "5ba0000000000012",
+              "spanId": "5ba0000000000013",
+              "startTimeUnixNano": "1790847600033000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "charge_card"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_4"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "7"
+                  }
+                },
+                {
+                  "key": "weft.tool.queue_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "panic"
+                  }
+                },
+                {
+                  "key": "weft.panic.layer",
+                  "value": {
+                    "stringValue": "handler"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600046000000",
+              "events": [
+                {
+                  "attributes": [
+                    {
+                      "key": "weft.panic.stack",
+                      "value": {
+                        "stringValue": "goroutine 1 [running]:\n(stack fixed by the generator)"
+                      }
+                    }
+                  ],
+                  "name": "weft.panic",
+                  "timeUnixNano": "1790847600039000000"
+                }
+              ],
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool charge_card",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000014",
+              "startTimeUnixNano": "1790847600038000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Audit"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "charge_card"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_4"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600045000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Audit",
+              "parentSpanId": "5ba0000000000014",
+              "spanId": "5ba0000000000015",
+              "startTimeUnixNano": "1790847600040000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Allow"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "charge_card"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_4"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600044000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Allow",
+              "parentSpanId": "5ba0000000000015",
+              "spanId": "5ba0000000000016",
+              "startTimeUnixNano": "1790847600041000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.MapErrors"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "charge_card"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_4"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600043000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.MapErrors",
+              "parentSpanId": "5ba0000000000016",
+              "spanId": "5ba0000000000017",
+              "startTimeUnixNano": "1790847600042000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.stream",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.finish_reasons",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "stop"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "weft.model.tool_calls",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.ttft_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600056000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "chat script",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000018",
+              "startTimeUnixNano": "1790847600047000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600049000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "attempt",
+              "parentSpanId": "5ba0000000000018",
+              "spanId": "5ba0000000000019",
+              "startTimeUnixNano": "1790847600048000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Log"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "model"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600055000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Log",
+              "parentSpanId": "5ba0000000000018",
+              "spanId": "5ba000000000001a",
+              "startTimeUnixNano": "1790847600050000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.Retry"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "model"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600054000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.Retry",
+              "parentSpanId": "5ba000000000001a",
+              "spanId": "5ba000000000001b",
+              "startTimeUnixNano": "1790847600051000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.layer.name",
+                  "value": {
+                    "stringValue": "mw.RepairJSON"
+                  }
+                },
+                {
+                  "key": "weft.layer.kind",
+                  "value": {
+                    "stringValue": "model"
+                  }
+                },
+                {
+                  "key": "weft.layer.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790847600053000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "layer mw.RepairJSON",
+              "parentSpanId": "5ba000000000001b",
+              "spanId": "5ba000000000001c",
+              "startTimeUnixNano": "1790847600052000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

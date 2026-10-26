@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -28,6 +29,9 @@ func Allow(permit func(core.Call) bool) core.ToolMiddleware {
 				c = core.Call{CallID: call.ID, Name: call.Name}
 			}
 			if permit != nil && !permit(c) {
+				// The refusal is named on the call's span
+				// (weft.tool.denied_by allow): reporting only.
+				core.ToolReportFromContext(ctx).Denied(deniedByAllow)
 				return "", &core.ToolError{Code: core.CodeDenied, Message: fmt.Sprintf("tool %q is not allowed", call.Name)}
 			}
 			return next(ctx, call)
@@ -100,16 +104,32 @@ func MapErrors(fn func(error) error) core.ToolMiddleware {
 				return out, err
 			}
 			if fn == nil {
+				// The hidden error's kind rides the call's span
+				// (weft.tool.error_masked), never its text.
+				core.ToolReportFromContext(ctx).Masked(err)
 				return out, &core.ToolError{Code: "INTERNAL", Message: fmt.Sprintf("tool %q failed", call.Name), Err: err}
 			}
 			mapped := fn(err)
 			if mapped == nil {
 				mapped = err
 			}
+			if !sameError(mapped, err) {
+				core.ToolReportFromContext(ctx).Masked(err)
+			}
 			return out, mapped
 		}
 	}
 }
+
+// sameError compares two errors without panicking on an uncomparable
+// dynamic type, which never reads as the same.
+func sameError(a, b error) bool {
+	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
+	return ta == tb && ta != nil && ta.Comparable() && a == b
+}
+
+// deniedByAllow is weft.tool.denied_by for a call Allow refused.
+const deniedByAllow = "allow"
 
 func passThrough(err error) bool {
 	var te *core.ToolError

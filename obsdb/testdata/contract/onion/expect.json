@@ -1,0 +1,123 @@
+{
+  "case": "onion",
+  "description": "the middleware onion recorded (U23.1), with a handler panic's stack: mw.Log › mw.Retry › mw.RepairJSON around the model and mw.Audit › mw.Allow › mw.MapErrors around the tools, under the development detail level (otel.DevDetail, a Studio destination with content on). The first model request fails with HTTP 503 and mw.Retry sends it again (attempt 2 carries weft.attempt.layer retry); the answer asks for a lookup with fenced arguments mw.RepairJSON repairs (a weft.repair event on the chat span with the original; the call's weft.tool.args_repaired), a delete mw.Allow refuses (weft.tool.denied_by allow) a flaky call whose io.EOF mw.MapErrors hides (error.type INTERNAL, weft.tool.error_masked *errors.errorString) and a charge whose handler panics (error.type panic, weft.panic.layer handler; its stack a weft.panic event, the text fixed by the generator); one layer span per layer per call (weft.layer.*), nested outer to inner. Problems attempts_retried 1, tool_errors 2, denied 1, repaired 1; the six new span keys stay out of meta",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:40:00Z",
+      "finished": "2026-10-01T09:40:00.057Z",
+      "last_seen": "2026-10-01T09:40:00.057Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 14,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "3561d47c6c71c9d08ab0ecb7c3e0748f0073b6150f156359f497bc06b1655f02",
+      "request_count": 3,
+      "events_emitted": 14,
+      "messages_emitted": 4,
+      "problems": {
+        "attempts_retried": 1,
+        "tool_errors": 2,
+        "denied": 1,
+        "repaired": 1
+      },
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok",
+          "args_repaired": true
+        },
+        {
+          "name": "delete_order",
+          "call_id": "call_2",
+          "step": 0,
+          "seq": 3,
+          "status": "error",
+          "error_type": "DENIED",
+          "denied_by": "allow"
+        },
+        {
+          "name": "refund_order",
+          "call_id": "call_3",
+          "step": 0,
+          "seq": 5,
+          "status": "error",
+          "error_type": "INTERNAL",
+          "error_masked": "*errors.errorString"
+        },
+        {
+          "name": "charge_card",
+          "call_id": "call_4",
+          "step": 0,
+          "seq": 7,
+          "status": "error",
+          "error_type": "panic",
+          "panic_layer": "handler"
+        }
+      ],
+      "layers": [
+        "model 0 mw.Log under chat script unset",
+        "model 0 mw.Log under chat script unset",
+        "model 1 mw.Retry under layer mw.Log unset",
+        "model 1 mw.Retry under layer mw.Log unset",
+        "model 2 mw.RepairJSON under layer mw.Retry error model_error",
+        "model 2 mw.RepairJSON under layer mw.Retry unset",
+        "model 2 mw.RepairJSON under layer mw.Retry unset",
+        "tool 0 mw.Audit under execute_tool charge_card unset",
+        "tool 0 mw.Audit under execute_tool delete_order error DENIED",
+        "tool 0 mw.Audit under execute_tool lookup_order unset",
+        "tool 0 mw.Audit under execute_tool refund_order error INTERNAL",
+        "tool 1 mw.Allow under layer mw.Audit error DENIED",
+        "tool 1 mw.Allow under layer mw.Audit error INTERNAL",
+        "tool 1 mw.Allow under layer mw.Audit unset",
+        "tool 1 mw.Allow under layer mw.Audit unset",
+        "tool 2 mw.MapErrors under layer mw.Allow error INTERNAL",
+        "tool 2 mw.MapErrors under layer mw.Allow unset",
+        "tool 2 mw.MapErrors under layer mw.Allow unset"
+      ],
+      "repairs": [
+        "call_1 fence 31→19 original \"```json\\n{\\\"order_id\\\":\\\"1234\\\"}\\n```\"",
+        "panic on execute_tool charge_card: stack \"goroutine 1 [running]:\\n(stack fixed by the generator)\""
+      ],
+      "holes": []
+    }
+  ]
+}

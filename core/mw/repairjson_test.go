@@ -90,3 +90,19 @@ func TestRepairJSONKeepsUnicodeWhitespace(t *testing.T) {
 		}
 	}
 }
+
+// The repair kind RepairJSON reports (core.RepairInfo.Kind, the
+// weft.repair event's weft.repair.kind; U23.1).
+func TestRepairJSONKind(t *testing.T) {
+	for _, c := range []struct{ in, kind string }{
+		{"```json\n{\"a\":1}\n```", repairFence},
+		{`{"a":"b`, repairUnterminated},
+		{"```\n{\"a\":\"b", repairBoth},
+		{"  {\"a\":1} ", repairTrim},
+		{"   ", repairTrim},
+	} {
+		if _, kind, ok := repairJSONKind(c.in); !ok || kind != c.kind {
+			t.Errorf("repairJSONKind(%q) = %q, %v; want %q", c.in, kind, ok, c.kind)
+		}
+	}
+}

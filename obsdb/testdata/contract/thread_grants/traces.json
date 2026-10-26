@@ -1562,9 +1562,21 @@
                   }
                 },
                 {
+                  "key": "weft.tool.denied_by",
+                  "value": {
+                    "stringValue": "grant"
+                  }
+                },
+                {
                   "key": "error.type",
                   "value": {
                     "stringValue": "DENIED"
+                  }
+                },
+                {
+                  "key": "weft.grant.id",
+                  "value": {
+                    "stringValue": "e_thread_grants_0003"
                   }
                 },
                 {

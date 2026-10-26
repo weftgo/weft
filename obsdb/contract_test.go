@@ -211,8 +211,16 @@ type contractRun struct {
 	// (§4's app log records, U11.1): "<SEVERITY> <body> · <span name>"
 	// per line, the span its trace and span ids name, then its attribute
 	// keys sorted in brackets; omitted for a run with none.
-	Logs  []string     `json:"logs,omitempty"`
-	Holes []obsdb.Hole `json:"holes"`
+	Logs []string `json:"logs,omitempty"`
+	// Layers are the run's development detail layer spans (§3, U23.1:
+	// otel.DevDetail), "<kind> <index> <name> under <parent span name>
+	// <status>[ <error.type>]", sorted; Repairs its chat spans'
+	// weft.repair events, "<call id> <kind> <bytes before>→<bytes
+	// after>[ original <text>]", and its weft.panic events, "panic on
+	// <span name>: stack <text>". Each omitted when none.
+	Layers  []string     `json:"layers,omitempty"`
+	Repairs []string     `json:"repairs,omitempty"`
+	Holes   []obsdb.Hole `json:"holes"`
 	// HoleCauses names the cause of each run-level hole the row's rules
 	// decide (§7: LostRecordsHole, TailLostHole), "<hole>:<cause>".
 	HoleCauses []string `json:"hole_causes,omitempty"`
@@ -275,6 +283,11 @@ type contractRPC struct {
 	PendingSource   string `json:"pending_source,omitempty"`
 	TimeoutMS       int64  `json:"timeout_ms,omitempty"`
 	SubagentPending string `json:"subagent_pending,omitempty"`
+	// What a tool layer decided (§3, U23.1): the refusing layer, the
+	// error kind a layer hid, arguments a model middleware repaired.
+	DeniedBy     string `json:"denied_by,omitempty"`
+	ErrorMasked  string `json:"error_masked,omitempty"`
+	ArgsRepaired bool   `json:"args_repaired,omitempty"`
 }
 
 func TestContract(t *testing.T) {
@@ -453,6 +466,7 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			t.Fatal(err)
 		}
 		c.Chat, c.Tools = spanSteps(spans)
+		c.Layers, c.Repairs = onionOf(spans)
 		c.Tree = treeOf(t, db, r.ID, len(spans))
 		c.Logs = logsOf(t, db, r.ID, spans)
 		c.Holes, c.HoleCauses = runHoles(t, db, r, len(spans) > 0)
@@ -614,6 +628,10 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 				PendingSource:   strAttr(s.Attrs, "weft.tool.pending.source"),
 				TimeoutMS:       intAttr(s.Attrs, "weft.tool.timeout_ms", 0),
 				SubagentPending: strAttr(s.Attrs, "weft.subagent.pending"),
+
+				DeniedBy:     strAttr(s.Attrs, "weft.tool.denied_by"),
+				ErrorMasked:  strAttr(s.Attrs, "weft.tool.error_masked"),
+				ArgsRepaired: boolAttr(s.Attrs, "weft.tool.args_repaired"),
 			})
 		}
 	}
@@ -627,6 +645,44 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 		return tools[i].CallID < tools[j].CallID
 	})
 	return chat, tools
+}
+
+// onionOf reads a run's layer spans and repair events (contractRun's
+// Layers and Repairs).
+func onionOf(spans []obsdb.Span) (layers, repairs []string) {
+	names := map[string]string{}
+	for _, s := range spans {
+		names[s.SpanID] = s.Name
+	}
+	for _, s := range spans {
+		if strings.HasPrefix(s.Name, "layer ") && strAttr(s.Attrs, "weft.layer.name") != "" {
+			l := fmt.Sprintf("%s %d %s under %s %s", strAttr(s.Attrs, "weft.layer.kind"), intAttr(s.Attrs, "weft.layer.index", -1),
+				strAttr(s.Attrs, "weft.layer.name"), names[s.ParentSpanID], statusWord(s.StatusCode))
+			if et := strAttr(s.Attrs, "error.type"); et != "" {
+				l += " " + et
+			}
+			layers = append(layers, l)
+		}
+		for _, ev := range s.Events {
+			if ev.Name != "weft.repair" {
+				continue
+			}
+			r := fmt.Sprintf("%v %v %v→%v", ev.Attrs["gen_ai.tool.call.id"], ev.Attrs["weft.repair.kind"],
+				ev.Attrs["weft.repair.bytes_before"], ev.Attrs["weft.repair.bytes_after"])
+			if o, ok := ev.Attrs["weft.repair.original"]; ok {
+				r += fmt.Sprintf(" original %q", fmt.Sprint(o))
+			}
+			repairs = append(repairs, r)
+		}
+		for _, ev := range s.Events {
+			if ev.Name == "weft.panic" {
+				repairs = append(repairs, fmt.Sprintf("panic on %s: stack %q", s.Name, fmt.Sprint(ev.Attrs["weft.panic.stack"])))
+			}
+		}
+	}
+	slices.Sort(layers)
+	slices.Sort(repairs)
+	return layers, repairs
 }
 
 func statusWord(code int) string {
@@ -913,8 +969,13 @@ func TestRecordContractDocNames(t *testing.T) {
 type genCase struct {
 	name, desc string
 	dest       []otel.DestOption
-	run        func(t *testing.T, ctx context.Context, p *otel.Pipeline, c *otlpCapture) []string
-	edit       func(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest)
+	// studio captures through a Studio destination (otel.Studio) rather
+	// than OTLP, and start adds pipeline options: the development detail
+	// level reaches a Studio destination alone (U23.1).
+	studio bool
+	start  []otel.Option
+	run    func(t *testing.T, ctx context.Context, p *otel.Pipeline, c *otlpCapture) []string
+	edit   func(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest)
 }
 
 // fixtureEpoch is where every generated case's clock starts:
@@ -960,8 +1021,13 @@ func captureCase(t *testing.T, gc genCase, epoch time.Time, dir string) []string
 	c := &otlpCapture{}
 	srv := httptest.NewServer(c)
 	defer srv.Close()
-	p, err := otel.Start(ctx, otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0),
-		otel.Service("contract-app"), otel.OTLP(srv.URL, gc.dest...))
+	dest := otel.OTLP(srv.URL, gc.dest...)
+	if gc.studio {
+		dest = otel.Studio(srv.URL, "", gc.dest...)
+	}
+	opts := append([]otel.Option{otel.NoGlobal(), otel.NoEnv(), otel.Heartbeat(0),
+		otel.Service("contract-app"), dest}, gc.start...)
+	p, err := otel.Start(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2223,7 +2289,63 @@ func genCases() []genCase {
 				core.Metadata(map[string]string{"arena.batch": "b_contract"})).ID}
 		},
 	}
-	return append(append(cases, threadGenCases()...), flowScope)
+	// After flow_scope, for the same reason.
+	onion := genCase{
+		name:   "onion",
+		desc:   "the middleware onion recorded (U23.1), with a handler panic's stack: mw.Log › mw.Retry › mw.RepairJSON around the model and mw.Audit › mw.Allow › mw.MapErrors around the tools, under the development detail level (otel.DevDetail, a Studio destination with content on). The first model request fails with HTTP 503 and mw.Retry sends it again (attempt 2 carries weft.attempt.layer retry); the answer asks for a lookup with fenced arguments mw.RepairJSON repairs (a weft.repair event on the chat span with the original; the call's weft.tool.args_repaired), a delete mw.Allow refuses (weft.tool.denied_by allow) a flaky call whose io.EOF mw.MapErrors hides (error.type INTERNAL, weft.tool.error_masked *errors.errorString) and a charge whose handler panics (error.type panic, weft.panic.layer handler; its stack a weft.panic event, the text fixed by the generator); one layer span per layer per call (weft.layer.*), nested outer to inner. Problems attempts_retried 1, tool_errors 2, denied 1, repaired 1; the six new span keys stay out of meta",
+		dest:   content,
+		studio: true,
+		start:  []otel.Option{otel.DevMode(), otel.DevDetail()},
+		// A stack names addresses, goroutine ids and this machine's
+		// paths: the event is kept, its text fixed.
+		edit: func(tr *coltracepb.ExportTraceServiceRequest, _ *collogspb.ExportLogsServiceRequest) {
+			for _, rs := range tr.GetResourceSpans() {
+				for _, ss := range rs.GetScopeSpans() {
+					for _, sp := range ss.GetSpans() {
+						for _, e := range sp.GetEvents() {
+							if e.GetName() != "weft.panic" {
+								continue
+							}
+							e.Attributes = dropAttr(e.GetAttributes(), "weft.panic.stack_cut")
+							for _, kv := range e.GetAttributes() {
+								if kv.GetKey() == "weft.panic.stack" {
+									kv.Value = &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "goroutine 1 [running]:\n(stack fixed by the generator)"}}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+			quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+			lookup := core.Tool("lookup_order", "Look up an order by ID.", func(_ context.Context, in lookupIn) (string, error) {
+				return "order " + in.OrderID + ": shipped", nil
+			})
+			del := core.Tool("delete_order", "Delete an order.", func(context.Context, lookupIn) (string, error) {
+				return "deleted", nil
+			})
+			flaky := core.Tool("refund_order", "Refund an order.", func(context.Context, lookupIn) (string, error) {
+				return "", io.EOF
+			})
+			boom := core.Tool("charge_card", "Charge a card.", func(context.Context, lookupIn) (string, error) {
+				panic("card service exploded")
+			})
+			agt := pipelineAgent(p, "support", wefttest.Script(
+				wefttest.Fail(statusErr{StatusCode: 503}),
+				wefttest.ToolCalls(
+					wefttest.Call{Name: "lookup_order", Args: "```json\n{\"order_id\":\"1234\"}\n```"},
+					wefttest.Call{Name: "delete_order", Args: `{"order_id":"1234"}`},
+					wefttest.Call{Name: "refund_order", Args: `{"order_id":"1234"}`},
+					wefttest.Call{Name: "charge_card", Args: `{"order_id":"1234"}`}),
+				wefttest.Say("Order 1234 is shipped; I could not delete, refund or charge it.")),
+				core.Instructions("You are a support agent."), core.Parallelism(1), lookup, del, flaky, boom,
+				core.WrapModel(mw.Log(quiet), mw.Retry(mw.MaxRetries(2), mw.BaseDelay(time.Millisecond)), mw.RepairJSON()),
+				core.WrapTools(mw.Audit(quiet), mw.Allow(func(c core.Call) bool { return c.Name != "delete_order" }), mw.MapErrors(nil)))
+			return []string{mustRun(t, ctx, agt, core.Prompt("Look up, delete and refund order 1234.")).ID}
+		},
+	}
+	return append(append(cases, threadGenCases()...), flowScope, onion)
 }
 
 // redactCards is bridge_overrides' Redact: a bridged line's "4111…"

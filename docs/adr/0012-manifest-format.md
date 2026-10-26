@@ -145,3 +145,19 @@ emits `Schema.MarshalJSON`'s verbatim bytes), no `source` (the RawTool
 rule). The format gains no MCP field: a server's tool count is runtime
 data, not code, so TODO 2.9's "MCP servers with tool counts" sentence
 is retired to Studio's run view (ADR 0015).
+
+## Amendment (2026-10-26 — the middleware onion and the hooks; UX plan U23.1)
+
+Additive. Each agent may carry `model_middleware` and `tool_middleware`
+(outer to inner), each tool its own `middleware`, and `hooks`
+(`prepare_step`, `tap`, `on_run_end` lists, `tool_source`); every key is
+omitted when empty, so an agent without them renders byte for byte as
+before. An entry is `{name, params?, source?, opaque?}` — a model
+layer's optional `Describe() core.MiddlewareInfo`, else its type; a
+function by `runtime.FuncForPC`, weft's own by name alone, any other with
+its `source` file:line (module-relative, as a tool's `source` is); a
+model layer without `Unwrap` ends the walk `opaque`. Configuration only,
+never a captured value. An agent whose chain or hooks change now hashes
+differently (`weft.manifest.hash`), which is the point: which onion ran
+is part of which version of the agent ran. The record contract's "The
+onion in the manifest" paragraph is the reader's spec.

@@ -79,8 +79,17 @@ func (p *Pipeline) LoggerProvider() *LoggerProvider { return p.lp }
 // bodies, whatever its processors answer Enabled.
 type LoggerProvider struct {
 	*sdklog.LoggerProvider
-	raw bool
+	raw    bool
+	detail bool
 }
+
+// DevDetail reports whether this pipeline records the development
+// detail level: otel.DevDetail() and the dev gate at Start. It is the
+// duck-typed marker the core asks before it starts a layer span or
+// keeps a repair's original arguments (ADR 0016's 2026-10-26
+// amendment); the destinations still decide (Local and Studio with
+// content on only).
+func (p *LoggerProvider) DevDetail() bool { return p != nil && p.detail }
 
 // RawBodies reports whether this pipeline records provider wire bodies:
 // otel.RawBodies(true) and the dev gate at Start (WEFT_ENV=dev read
@@ -240,6 +249,10 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	if rawRefused {
 		cfg.rawBodies = false
 	}
+	detailRefused := cfg.devDetail && !dev
+	if detailRefused {
+		cfg.devDetail = false
+	}
 	// Blocking is the same kind of switch (U5): a destination that waits
 	// for queue room slows the app, which only development may ask for.
 	blockingRefused := false
@@ -265,14 +278,18 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 			"hint", "WEFT_STUDIO_URL names another; otel.NoDiscovery() or WEFT_DISCOVERY=off ignores the file")
 	}
 	switch {
-	case refusal.devMode && (rawRefused || blockingRefused):
-		// One line for both switches: DevMode itself was overruled.
+	case refusal.devMode && (rawRefused || blockingRefused || detailRefused):
+		// One line for every switch: DevMode itself was overruled.
 		slog.Warn("otel: DevMode ignored: "+refusal.reason,
-			"hint", refusal.hint+"; RawBodies and Blocking stay off")
+			"hint", refusal.hint+"; RawBodies, DevDetail and Blocking stay off")
 	default:
 		if rawRefused {
 			slog.Warn("otel: RawBodies ignored: "+refusal.reason,
 				"hint", "to record provider wire bodies, "+refusal.hint)
+		}
+		if detailRefused {
+			slog.Warn("otel: DevDetail ignored: "+refusal.reason,
+				"hint", "to record one span per middleware layer, "+refusal.hint)
 		}
 		if blockingRefused {
 			slog.Warn("otel: Blocking ignored: "+refusal.reason,
@@ -284,6 +301,10 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	if byDevMode && cfg.rawBodies {
 		slog.Info("otel: raw bodies on by otel.DevMode()",
 			"hint", "every model call's provider request and response is recorded (Local and Studio); a production binary never sets DevMode")
+	}
+	if byDevMode && cfg.devDetail {
+		slog.Info("otel: dev detail on by otel.DevDetail() under otel.DevMode()",
+			"hint", "every model and tool call records one span per middleware layer (Local and Studio); a production binary never sets DevMode")
 	}
 	if byDevMode && hasBlocking(dests) {
 		slog.Info("otel: Blocking on by otel.DevMode()",
@@ -522,7 +543,7 @@ func build(ctx context.Context, cfg config, dests []dest) (p *Pipeline, failed e
 	for _, lp := range logProcs {
 		lpOpts = append(lpOpts, sdklog.WithProcessor(lp))
 	}
-	p.lp = &LoggerProvider{LoggerProvider: sdklog.NewLoggerProvider(lpOpts...), raw: cfg.rawBodies}
+	p.lp = &LoggerProvider{LoggerProvider: sdklog.NewLoggerProvider(lpOpts...), raw: cfg.rawBodies, detail: cfg.devDetail}
 	p.bridge.logger = p.lp.Logger(bridgeScope)
 	p.startHeartbeat()
 	return p, nil
@@ -586,7 +607,7 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 		}
 		rt.localDB = db
 		if d.traces {
-			rt.spanProc = sdktrace.NewSimpleSpanProcessor(unmarkUnlessAppLogs(d, &localSpanExporter{db: db, drops: drops}))
+			rt.spanProc = sdktrace.NewSimpleSpanProcessor(detailFor(d, cfg, unmarkUnlessAppLogs(d, &localSpanExporter{db: db, drops: drops})))
 		}
 		if d.logs {
 			rt.logProc = &destProc{
@@ -639,7 +660,7 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 		if spanDelay > 0 {
 			spanOpts = append(spanOpts, sdktrace.WithBatchTimeout(spanDelay))
 		}
-		rt.spanProc = newAdmittedSpanProc(countingSpanExporter{SpanExporter: unmarkUnlessAppLogs(d, spanExp), drops: drops},
+		rt.spanProc = newAdmittedSpanProc(countingSpanExporter{SpanExporter: detailFor(d, cfg, unmarkUnlessAppLogs(d, spanExp)), drops: drops},
 			queue, d.blocking, drops, spanOpts...)
 	}
 	if logExp != nil {

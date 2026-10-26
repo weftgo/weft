@@ -306,6 +306,12 @@
                   }
                 },
                 {
+                  "key": "weft.attempt.layer",
+                  "value": {
+                    "stringValue": "retry"
+                  }
+                },
+                {
                   "key": "weft.attempt.wait_ms",
                   "value": {
                     "intValue": "1"
@@ -361,6 +367,12 @@
                   "key": "gen_ai.request.model",
                   "value": {
                     "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.attempt.layer",
+                  "value": {
+                    "stringValue": "retry"
                   }
                 },
                 {
@@ -429,7 +441,7 @@
                 {
                   "key": "weft.manifest.hash",
                   "value": {
-                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000002"
                   }
                 },
                 {
@@ -976,6 +988,12 @@
                   }
                 },
                 {
+                  "key": "weft.attempt.layer",
+                  "value": {
+                    "stringValue": "retry"
+                  }
+                },
+                {
                   "key": "weft.attempt.wait_ms",
                   "value": {
                     "intValue": "1"
@@ -1031,6 +1049,12 @@
                   "key": "gen_ai.request.model",
                   "value": {
                     "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.attempt.layer",
+                  "value": {
+                    "stringValue": "retry"
                   }
                 },
                 {
@@ -1100,7 +1124,7 @@
                 {
                   "key": "weft.manifest.hash",
                   "value": {
-                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000003"
                   }
                 },
                 {

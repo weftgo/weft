@@ -656,3 +656,80 @@ Readers derive the reverse link — a parked run's `resumed_by`, the
 latest run by start time whose `resumed_from` names it (a tie: the
 larger id; U13.1-fix — never the largest id alone) — at read time
 (`docs/record-contract.md` §6).
+
+## Amendment (2026-10-26 — the middleware onion recorded; UX plan U23.1)
+
+The middleware onion was invisible: nothing said which `WrapModel` /
+`WrapTools` layers ran, in which order, or what each decided — only
+`mw.Retry` and `mw.Fallback` left `attempt` spans. Three levels, each
+reporting only (ADR 0006): no record, hook or attribute alters a call,
+a retry, a denial or a result (`TestOnionRecordChangesNothing`: the
+onion run made quiet, loud and at the detail level yields one
+transcript and event stream).
+
+1. **Static — the manifest** (ADR 0012, additive). `model_middleware`
+   (the chain walked through `core.Unwrap`, each layer's optional
+   `Describe() core.MiddlewareInfo` — a convention, like
+   `ReportsAttempts`, ADR 0013 — else its type; a layer without
+   `Unwrap` ends the walk marked `opaque`), `tool_middleware` and a
+   tool's own `middleware` (each function named by `runtime.FuncForPC`,
+   weft's own alone, any other with its file:line) and `hooks`
+   (`prepare_step`, `tap`, `on_run_end`, `tool_source`). Zero per-run
+   cost; an agent's `weft.manifest.hash` now changes when its chain
+   does.
+2. **Default — attributes on spans that already exist**, through the
+   context-carried hooks: `core.Reporter` gains `Repair(RepairInfo)` (a
+   `weft.repair` event on the `chat` span: call id, kind, sizes; the
+   call's `execute_tool` span `weft.tool.args_repaired`), and a new
+   tool-side twin, `core.ToolReportFromContext(ctx)`'s `ToolReporter`
+   — a sealed struct like `Reporter`, a no-op outside a
+   loop-dispatched call (and for an `Agent.CallTool` made inside one) —
+   with `Denied(by)` (`weft.tool.denied_by`) and `Masked(err)`
+   (`weft.tool.error_masked`, the hidden error's kind, never its text).
+   `core.AttemptLayerRetry` marks the requests `mw.Retry` sends again
+   (`weft.attempt.layer` `retry`); `weft.attempt.wait_ms` and
+   `http.response.status_code` were already there (U25). A resume's
+   denied span names its decider (`weft.tool.denied_by` `approval`, or
+   `grant` with `weft.grant.id` through the new `core.DenyBy`).
+3. **Opt-in — one span per layer.** Under the development detail level
+   (`otel.DevDetail()`, dev-gated like `otel.RawBodies`; the pipeline's
+   `LoggerProvider` carries the duck-typed marker `DevDetail() bool`,
+   which the core asks) each layer gets a `layer <name>` span per call
+   (`weft.layer.name`, `weft.layer.kind`, `weft.layer.index`,
+   `error.type`), nested outer to inner through a private context key —
+   never as the context's span, so a handler's own spans and the
+   `attempt` spans keep their parents and a destination that drops the
+   layer spans orphans nothing — and `weft.repair` carries the original
+   arguments (content on, 4 KiB). The model chain with its boundaries is
+   built once per agent, the first time a run under the level asks (its
+   middleware constructors run a second time, the precedent of
+   `UseModel`'s rebuild); the tool chain is built per call already. Only
+   the Local and Studio destinations with content on receive the detail
+   (`otel/devdetail.go`); never by default — a default run's span count
+   is unchanged (`TestOnionGovernancePatterns` pins it on the arena's
+   mw.governance-patterns chain).
+
+| where | key | value |
+|---|---|---|
+| `attempt` span | `weft.attempt.layer` | gains `retry` (`core.AttemptLayerRetry`) |
+| `chat` span event | `weft.repair` | `gen_ai.tool.call.id`, `weft.repair.kind` (`fence`, `unterminated`, `fence+unterminated`, `trim`), `weft.repair.bytes_before`, `weft.repair.bytes_after`; under the detail level `weft.repair.original`, `weft.repair.original_cut` |
+| `execute_tool` span | `weft.tool.args_repaired` | bool, at start |
+| `execute_tool` span | `weft.tool.denied_by` | `allow`, a middleware's word; on a denied span `approval` or `grant` |
+| `execute_tool` span | `weft.tool.error_masked` | the hidden error's kind |
+| `layer <name>` span | `weft.layer.name`, `weft.layer.kind`, `weft.layer.index` | development detail only |
+
+The panic stack this ADR's 2026-10-12 amendment parked behind the same
+switch is recorded with it: under the detail level with content on, the
+tool-call containment keeps the panicking goroutine's stack
+(`runtime/debug.Stack`, taken in the recovering deferred call, so the
+frames that panicked are in it — the handler's or a middleware's) and the
+`execute_tool` span carries it as a `weft.panic` event
+(`weft.panic.stack`, 16 KiB, `weft.panic.stack_cut`). The question is
+asked only once a call panicked: a default call pays nothing. Third-party
+destinations never receive the event (`TestPanicStackUnderDevDetail`,
+`TestDevDetailNeverToThirdParty`). The model-visible text is unchanged.
+
+| `execute_tool` span event | `weft.panic` | `weft.panic.stack`, `weft.panic.stack_cut`; detail level, content on |
+
+The core imports nothing new (`runtime`, `runtime/debug`, `reflect`
+are stdlib).

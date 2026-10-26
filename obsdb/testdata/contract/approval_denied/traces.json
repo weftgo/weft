@@ -603,6 +603,12 @@
                   }
                 },
                 {
+                  "key": "weft.tool.denied_by",
+                  "value": {
+                    "stringValue": "approval"
+                  }
+                },
+                {
                   "key": "error.type",
                   "value": {
                     "stringValue": "DENIED"
@@ -663,6 +669,12 @@
                   "key": "weft.tool.denied_kind",
                   "value": {
                     "stringValue": "no_decision"
+                  }
+                },
+                {
+                  "key": "weft.tool.denied_by",
+                  "value": {
+                    "stringValue": "approval"
                   }
                 },
                 {

@@ -114,8 +114,11 @@ type recSpan struct {
 	status    codes.Code
 	statusMsg string
 	events    []string
-	ended     bool
-	recording bool
+	// eventAttrs are AddEvent's attributes, one map per event in order
+	// (an event's name is in events too).
+	eventAttrs []map[string]string
+	ended      bool
+	recording  bool
 	// startTS and endTS are the explicit timestamps passed with
 	// WithTimestamp, zero when none was.
 	startTS, endTS time.Time
@@ -153,6 +156,18 @@ func (s *recSpan) RecordError(err error, _ ...trace.EventOption) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.events = append(s.events, "exception: "+err.Error())
+}
+
+func (s *recSpan) AddEvent(name string, opts ...trace.EventOption) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, name)
+	m := map[string]string{"": name}
+	cfg := trace.NewEventConfig(opts...)
+	for _, kv := range cfg.Attributes() {
+		m[string(kv.Key)] = kv.Value.String()
+	}
+	s.eventAttrs = append(s.eventAttrs, m)
 }
 
 func (s *recSpan) Name() string {

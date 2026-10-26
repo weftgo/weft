@@ -248,11 +248,12 @@ describe("the step story's attempts and timing (A4.2)", () => {
       rows.map((r) => r.querySelector("[data-attempt-outcome]")?.textContent)
     ).toEqual([IDLE, IDLE, IDLE, "ok"])
     // The fallback layer's attempts (weft.attempt.layer) say so, in
-    // lib/attempts' words — the panel's Request tab says the same.
+    // lib/attempts' words — the panel's Request tab says the same; the
+    // retried request to the primary says retry (U23.1).
     expect(rows.map((r) => r.querySelector("span")?.textContent)).toEqual([
       "attempt 1",
       "attempt 2 · fallback",
-      "attempt 3",
+      "attempt 3 · retry",
       "attempt 4 · fallback",
     ])
     // The phrase, the raw error.type in the hover (UX-S2-15).

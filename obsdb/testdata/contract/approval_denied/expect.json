@@ -115,7 +115,8 @@
           "status": "error",
           "error_type": "DENIED",
           "denied": true,
-          "denied_kind": "denied"
+          "denied_kind": "denied",
+          "denied_by": "approval"
         },
         {
           "name": "refund_order",
@@ -125,7 +126,8 @@
           "status": "error",
           "error_type": "DENIED",
           "denied": true,
-          "denied_kind": "no_decision"
+          "denied_kind": "no_decision",
+          "denied_by": "approval"
         }
       ],
       "holes": []

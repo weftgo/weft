@@ -24,6 +24,9 @@ type config struct {
 	// rawBodies is RawBodies' ask; Start keeps it only when the dev
 	// gate holds (devGate), else one WARN and off.
 	rawBodies bool
+	// devDetail is DevDetail's ask; Start keeps it only when the dev
+	// gate holds, like rawBodies.
+	devDetail bool
 	// devMode is DevMode's attestation: the dev gate holds without
 	// WEFT_ENV=dev — under NoEnv, or with WEFT_ENV unset (an explicit
 	// other value wins).

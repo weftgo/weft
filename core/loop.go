@@ -9,6 +9,7 @@ import (
 	"hash/fnv"
 	"maps"
 	"reflect"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -75,12 +76,23 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// run carries, not a seam). Every model call, span and RunStart of
 	// this run resolves against this chain.
 	model := a.model
+	// Under the development detail level (otel.DevDetail) the chain has
+	// a layer span boundary outside each layer (layers.go): the agent's
+	// built once, a UseModel run's with its rebuild. Asked only when
+	// there is a chain to detail.
+	detail := len(a.modelMW) > 0 && a.obs.devDetailMarked()
+	if detail && cfg.model == nil {
+		model = a.detailModel()
+	}
 	if cfg.model != nil {
 		model = cfg.model
 		for i := len(a.modelMW) - 1; i >= 0; i-- {
 			model = a.modelMW[i](model)
 			if isNilModel(model) {
 				return nil, &RunError{Step: 0, Err: fmt.Errorf("%w: model middleware returned a nil Model", ErrModelContract), Result: &RunResult{ID: cfg.id}}
+			}
+			if detail {
+				model = &layerModel{next: model, name: describeModel(model).Name, index: i}
 			}
 		}
 	}
@@ -1236,7 +1248,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 	// already recorded (the usage half of the late-event rule, ADR 0004
 	// and ADR 0014).
 	nestFor := func(call ToolCallPart) *nest {
-		n := new(nest)
+		n := &nest{callID: call.ID}
 		n.emit = func(ev Event) {
 			emitMu.Lock()
 			defer emitMu.Unlock()
@@ -1333,12 +1345,12 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			// the call's outcome, before ToolFinish is emitted so no span
 			// operation runs under emitMu (ADR 0016).
 			callCtx, endTool := a.obs.tool(callCtx, rec, c, startSeq, toolStartFacts{timeout: a.callTimeout(def), queue: queue, contentOff: a.content != nil && !*a.content,
-				approvedBy: prov.by, grantID: prov.grant})
+				approvedBy: prov.by, grantID: prov.grant, argsRepaired: rec.takeRepaired(call.ID)})
 			var retry bool
 			var fail toolFailure
 			var cut int
 			var park string
-			outcomes[i], park, retry, cut, fail = a.callTool(callCtx, call, def, parkSet)
+			outcomes[i], park, retry, cut, fail = a.callTool(callCtx, call, def, parkSet, rec)
 			parked[i] = park != ""
 			retriedAt[i] = retry
 			if retry && retryBase != nil {
@@ -1474,9 +1486,12 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			results = append(results, r)
 			continue
 		}
-		reason, kind := "no decision", deniedKindNoDecision
+		reason, kind, by, grant := "no decision", deniedKindNoDecision, deniedByApproval, ""
 		if d, ok := cfg.decisions[c.ID]; ok {
 			reason, kind = d.reason, deniedKindDenied
+			if d.by == deniedByGrant {
+				by, grant = deniedByGrant, d.grant
+			}
 		}
 		results = append(results, ToolResultPart{
 			CallID:  c.ID,
@@ -1487,7 +1502,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 		// A denied call never ran: no event (ADR 0007), a zero-length
 		// execute_tool span naming its kind (UX-E-17), and the run's
 		// root counts it (weft.run.denied).
-		a.obs.deniedTool(ctx, rec, cfg.id, c, kind)
+		a.obs.deniedTool(ctx, rec, cfg.id, c, kind, by, grant)
 		rec.noteDenied()
 	}
 	return results, pending, sub, nil
@@ -1702,7 +1717,7 @@ func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error)
 	if outer, ok := CallFromContext(ctx); ok {
 		ctx = withCall(ctx, Call{RunID: outer.RunID, Step: outer.Step, CallID: call.ID, Name: call.Name})
 	}
-	return a.chain(def, strict, nil, nil)(ctx, call)
+	return a.chain(def, strict, nil, nil, nil)(ctx, call)
 }
 
 // chain builds the tool-call chain for one call: agent middleware
@@ -1716,7 +1731,11 @@ func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error)
 // unwinds through the base (handlerMark): the containment then tells a
 // handler's panic from one the middleware around it raised (the
 // observer's weft.panic.layer; nothing else reads it).
-func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handlerMark) ToolCaller {
+//
+// layers, when not nil (the development detail level), puts a "layer
+// <name>" span outside each middleware, numbered outer to inner across
+// the agent's and the tool's lists.
+func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handlerMark, layers *toolLayerSpans) ToolCaller {
 	base := func(ctx context.Context, call ToolCallPart) (string, error) {
 		if def == nil {
 			return "", noSuchTool(call.Name)
@@ -1760,10 +1779,16 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handle
 	if def != nil {
 		for i := len(def.mw) - 1; i >= 0; i-- {
 			c = def.mw[i](c)
+			if layers != nil {
+				c = layers.wrap(c, funcInfo(def.mw[i]).Name, len(a.toolMW)+i)
+			}
 		}
 	}
 	for i := len(a.toolMW) - 1; i >= 0; i-- {
 		c = a.toolMW[i](c)
+		if layers != nil {
+			c = layers.wrap(c, funcInfo(a.toolMW[i]).Name, i)
+		}
 	}
 	return c
 }
@@ -1785,7 +1810,7 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handle
 //
 // cut is the bytes the result cap removed from the content (0 when it
 // cut nothing): the observer's weft.tool.truncated_bytes.
-func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet *parkRule) (res ToolResultPart, park string, retry bool, cut int, fail toolFailure) {
+func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet *parkRule, rec *recorder) (res ToolResultPart, park string, retry bool, cut int, fail toolFailure) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
 	resultCap := a.resultCap
 	timeout := a.toolTimeout
@@ -1806,7 +1831,14 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, p
 	// abandon it on a deadline of its own while the handler returns
 	// late, so every field is read and written under its lock.
 	mark := new(handlerMark)
-	fn := a.chain(def, strict, parkSet, mark)
+	mark.wantStack = func() bool { return a.panicStackWanted(ctx, rec) }
+	// Under the development detail level (otel.DevDetail) each layer of
+	// the chain gets its own span; otherwise the chain is the plain one.
+	var layers *toolLayerSpans
+	if (len(a.toolMW) > 0 || (def != nil && len(def.mw) > 0)) && a.obs.devDetailMarked() {
+		layers = &toolLayerSpans{tracer: a.obs.tracer, rec: rec}
+	}
+	fn := a.chain(def, strict, parkSet, mark, layers)
 	var out string
 	if timeout <= 0 {
 		out, fail = invokeContained(ctx, fn, call, mark, nil)
@@ -1854,6 +1886,9 @@ type toolFailure struct {
 	// errType, panicLayer and inputKind are the execute_tool span's
 	// error.type, weft.panic.layer and weft.tool.input_error.
 	errType, panicLayer, inputKind string
+	// panicStack is a contained panic's stack when the development
+	// detail level kept it (the weft.panic event), nil otherwise.
+	panicStack []byte
 }
 
 // settleToolError reads err's facts. A panic while reading them is the
@@ -1912,7 +1947,7 @@ func readToolError(err error) toolFailure {
 	f.deadline = errors.Is(err, context.DeadlineExceeded)
 	pe, isPE := errors.AsType[*toolPanicError](err)
 	if isPE {
-		f.panicLayer = pe.layer
+		f.panicLayer, f.panicStack = pe.layer, pe.stack
 	}
 	f.errType = classifyToolError(err, te, isTE, isPE)
 	f.inputKind = inputErrorKind(err)
@@ -1950,6 +1985,10 @@ type toolPanicError struct {
 	name  string
 	value any
 	layer string
+	// stack is the panicking goroutine's stack, kept only under the
+	// development detail level with content on (handlerMark.wantStack);
+	// never in Error.
+	stack []byte
 }
 
 func (e *toolPanicError) Error() string {
@@ -1985,7 +2024,13 @@ func invokeChain(ctx context.Context, fn ToolCaller, call ToolCallPart, mark *ha
 			if mark.from(p) {
 				layer = panicLayerHandler
 			}
-			err = &toolPanicError{name: call.Name, value: p, layer: layer}
+			pe := &toolPanicError{name: call.Name, value: p, layer: layer}
+			if mark != nil && mark.wantStack != nil && mark.wantStack() {
+				// Still on the panicking goroutine's stack: the frames
+				// that panicked are below this deferred call.
+				pe.stack = debug.Stack()
+			}
+			err = pe
 		}
 	}()
 	return fn(ctx, call)
@@ -2014,6 +2059,12 @@ type handlerMark struct {
 	// err is the error the handler last returned (nil: none, or it
 	// never returned).
 	err error
+	// wantStack, when set, is asked once a panic is recovered: true
+	// under the development detail level with content on, and the
+	// containment keeps the panicking goroutine's stack (the
+	// weft.panic event, layers.go). Never asked on a call that does
+	// not panic, so the default path pays nothing.
+	wantStack func() bool
 }
 
 func (m *handlerMark) note(p any) {

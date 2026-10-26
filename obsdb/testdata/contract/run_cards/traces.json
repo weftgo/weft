@@ -2705,6 +2705,12 @@
                   }
                 },
                 {
+                  "key": "weft.attempt.layer",
+                  "value": {
+                    "stringValue": "retry"
+                  }
+                },
+                {
                   "key": "weft.attempt.wait_ms",
                   "value": {
                     "intValue": "1"

@@ -760,6 +760,41 @@ type Nested = core.Nested
 // drop: a recorded stream must replay exactly what was emitted.
 func UnmarshalEvent(b []byte) (Event, error) { return core.UnmarshalEvent(b) }
 
+// MiddlewareInfo describes one middleware layer — or one hook — for
+// the manifest: what it is and how it is set, never what it saw.
+// A model middleware's wrapper may describe itself with the optional
+//
+//	interface{ Describe() MiddlewareInfo }
+//
+// convention, as mw.Retry, mw.Fallback, mw.Log and mw.RepairJSON do; a
+// layer that does not is named by its type. A tool middleware is a
+// function and cannot carry a method: it is named by the function
+// (runtime.FuncForPC), with its source position when it is not one of
+// weft's own. Params carry configuration only — counts, durations,
+// model names — never a secret or a closure's captured value.
+type MiddlewareInfo = core.MiddlewareInfo
+
+// ToolReporter is the reporting path from the tool chain into the
+// call's own record (ADR 0016's A8 path, the tool side of Reporter): a
+// ToolMiddleware tells the call's execute_tool span what it decided,
+// which the loop cannot see from outside the chain. Reporting only
+// (ADR 0006): a report changes no result, no error and no denial. A
+// report never returns an error, never blocks and never panics into
+// the caller. The zero ToolReporter, and the one ToolReportFromContext
+// returns outside a loop-dispatched tool call, discards every report;
+// it is safe for concurrent use. The last report of a kind wins.
+type ToolReporter = core.ToolReporter
+
+// ToolReportFromContext returns the reporter of the tool call whose
+// context ctx is (or derives from): the loop puts one on the context it
+// hands the tool chain. Outside one — Agent.CallTool, a model call, a
+// bare context — it is a no-op ToolReporter, never nil.
+func ToolReportFromContext(ctx context.Context) ToolReporter { return core.ToolReportFromContext(ctx) }
+
+// RepairInfo is one tool call whose arguments a model middleware
+// repaired before the loop saw them (mw.RepairJSON).
+type RepairInfo = core.RepairInfo
+
 // Manifest renders the agents as their `weft.json` document: one
 // generated, committed, diffable description of every agent and tool.
 // Studio, docs, review, and compatibility checks read a file instead of
@@ -1214,6 +1249,10 @@ type AttemptInfo = core.AttemptInfo
 // layer sent to a backup model rather than the one asked.
 const AttemptLayerFallback = core.AttemptLayerFallback
 
+// AttemptLayerRetry is AttemptInfo.Layer for a request a retry layer
+// sent again after a failed try of the same model.
+const AttemptLayerRetry = core.AttemptLayerRetry
+
 // RawPair is one attempt's wire exchange: the request as sent and the
 // response as received, as the reporter holds them (ADR 0028 §12). The
 // bytes are content (the request carries the prompt). A reporter fills
@@ -1291,6 +1330,18 @@ func ApproveBy(callID, by, grantID string) RunOption { return core.ApproveBy(cal
 // marked weft.tool.denied with weft.tool.denied_kind denied or
 // no_decision (never the reason, which is the transcript's).
 func Deny(callID, reason string) RunOption { return core.Deny(callID, reason) }
+
+// DenyBy is Deny naming what refused the call, as ApproveBy names what
+// approved one: by "grant" with grantID the standing refusal that
+// decided (weft/thread passes it when a deny grant matched). Reporting
+// only: the call is denied exactly as Deny denies it, and its
+// zero-length execute_tool span carries weft.tool.denied_by "grant" and
+// weft.grant.id; any other by — or none, a plain Deny — reads
+// weft.tool.denied_by "approval", the approval boundary's refusal. Ids
+// and enums, never the reason.
+func DenyBy(callID, reason, by, grantID string) RunOption {
+	return core.DenyBy(callID, reason, by, grantID)
+}
 
 // Resolve resumes a pending call with a result computed outside the
 // process — the human-as-tool-executor shape: run the query in prod,

@@ -69,8 +69,8 @@ describe("the Story's cards tell the whole truth (U25)", () => {
     expect(all(el, "[data-weft-rq-attempt]").map((b) => b.textContent)).toEqual(
       [
         "attempt 1 · 503 · Service Unavailable: overloaded",
-        "attempt 2 · 503 · Service Unavailable: overloaded · waited 1 ms",
-        "attempt 3 · waited 1 ms",
+        "attempt 2 · retry · 503 · Service Unavailable: overloaded · waited 1 ms",
+        "attempt 3 · retry · waited 1 ms",
       ]
     )
   })

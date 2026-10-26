@@ -1752,7 +1752,14 @@ func (s *Session) danglingDecisionsLocked(denyUndecided bool, onBehalf string) [
 			}
 			opts = append(opts, core.ApproveBy(c.ID, by, grant))
 		case OutcomeDeny:
-			opts = append(opts, core.Deny(c.ID, d.Reason))
+			// A deny grant's refusal names its grant on the call's
+			// denied span (weft.tool.denied_by grant, weft.grant.id):
+			// reporting only, the denial is Deny's.
+			if by, grant := s.approvalSourceLocked(d); by == approvedByGrant {
+				opts = append(opts, core.DenyBy(c.ID, d.Reason, by, grant))
+			} else {
+				opts = append(opts, core.Deny(c.ID, d.Reason))
+			}
 		case OutcomeResolve:
 			opts = append(opts, core.Resolve(c.ID, d.Content))
 		case OutcomeResolveError:

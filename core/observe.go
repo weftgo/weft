@@ -598,6 +598,10 @@ type toolStartFacts struct {
 	// approvedBy and grantID are an approved call's provenance
 	// (ApproveBy), "" when the decision named none.
 	approvedBy, grantID string
+	// argsRepaired says a model middleware repaired the call's
+	// arguments before the loop saw them (Reporter.Repair):
+	// weft.tool.args_repaired.
+	argsRepaired bool
 }
 
 func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, facts toolStartFacts) (context.Context, func(res ToolResultPart, park string, fail toolFailure, cut int, retry retryMark, end time.Time)) {
@@ -632,6 +636,9 @@ func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, f
 		if facts.queue > 0 {
 			attrs = append(attrs, attrToolQueueMS.Int64(ceilMS(facts.queue)))
 		}
+		if facts.argsRepaired {
+			attrs = append(attrs, attrToolArgsRepaired.Bool(true))
+		}
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}()
@@ -658,11 +665,25 @@ func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, f
 				span.SetAttributes(attrToolPending.Bool(true), attrToolPendingSource.String(park))
 			case err != nil:
 				span.SetAttributes(semconv.ErrorTypeKey.String(errType))
-				if names := nestFromContext(ctx).pendingNames(); names != "" {
+				n := nestFromContext(ctx)
+				if names := n.pendingNames(); names != "" {
 					span.SetAttributes(attrSubagentPending.String(names))
+				}
+				// What a tool layer reported deciding (ToolReporter):
+				// the refusing layer, the error kind a layer hid.
+				if by, masked := n.layerNotes(); by != "" || masked != "" {
+					if by != "" {
+						span.SetAttributes(attrToolDeniedBy.String(by))
+					}
+					if masked != "" {
+						span.SetAttributes(attrToolErrorMasked.String(masked))
+					}
 				}
 				if panicLayer != "" {
 					span.SetAttributes(attrPanicLayer.String(panicLayer))
+				}
+				if len(fail.panicStack) > 0 {
+					addPanicEvent(span, fail.panicStack)
 				}
 				if inputKind != "" {
 					span.SetAttributes(attrToolInputError.String(inputKind))
@@ -713,7 +734,10 @@ func (o *observer) tool(ctx context.Context, rec *recorder, c Call, seq int64, f
 // reason, which is the transcript's (ids and enums only on spans, ADR
 // 0016). The invoke_agent span's weft.run.denied still counts these
 // calls; a reader counts them there, not here (record contract §6).
-func (o *observer) deniedTool(ctx context.Context, rec *recorder, runID string, call ToolCallPart, kind string) {
+//
+// by is weft.tool.denied_by — "approval", or "grant" with grantID the
+// deny grant that decided (DenyBy).
+func (o *observer) deniedTool(ctx context.Context, rec *recorder, runID string, call ToolCallPart, kind, by, grantID string) {
 	now := time.Now()
 	_, span := o.startSpan(ctx, rec, spanName(semconv.GenAIOperationNameExecuteTool, call.Name),
 		trace.WithSpanKind(trace.SpanKindInternal), trace.WithTimestamp(now))
@@ -733,7 +757,11 @@ func (o *observer) deniedTool(ctx context.Context, rec *recorder, runID string, 
 			attrStepIndex.Int(0),
 			attrToolDenied.Bool(true),
 			attrToolDeniedKind.String(kind),
+			attrToolDeniedBy.String(by),
 			semconv.ErrorTypeKey.String(CodeDenied),
+		}
+		if grantID != "" {
+			attrs = append(attrs, attrGrantID.String(grantID))
 		}
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
@@ -994,6 +1022,11 @@ type recorder struct {
 	// mutex orders concurrent calls. Nil until a call is cut.
 	truncMu   sync.Mutex
 	truncated map[string]int
+	// repaired holds the calls a model middleware repaired the
+	// arguments of (noteRepaired), under truncMu until each call's span
+	// starts; anyRepaired keeps the common run off the lock.
+	repaired    map[string]bool
+	anyRepaired atomic.Bool
 	// denied counts the calls a resume denied (Deny, or no decision):
 	// they have no span and no event (ADR 0007), so the invoke_agent
 	// span's weft.run.denied is their one carrier.
@@ -1042,6 +1075,35 @@ func (r *recorder) noteTruncated(callID string, cut int) {
 	}
 	r.truncated[callID] = cut
 	r.truncMu.Unlock()
+}
+
+// noteRepaired remembers that a model middleware repaired a call's
+// arguments (Reporter.Repair) until the call's execute_tool span starts
+// (weft.tool.args_repaired). Nil-safe.
+func (r *recorder) noteRepaired(callID string) {
+	if r == nil {
+		return
+	}
+	r.truncMu.Lock()
+	if r.repaired == nil {
+		r.repaired = map[string]bool{}
+	}
+	r.repaired[callID] = true
+	r.anyRepaired.Store(true)
+	r.truncMu.Unlock()
+}
+
+// takeRepaired returns and forgets a call's repair mark. Nil-safe, and
+// lock-free while no call was repaired.
+func (r *recorder) takeRepaired(callID string) bool {
+	if r == nil || !r.anyRepaired.Load() {
+		return false
+	}
+	r.truncMu.Lock()
+	defer r.truncMu.Unlock()
+	ok := r.repaired[callID]
+	delete(r.repaired, callID)
+	return ok
 }
 
 // takeTruncated returns and forgets a call's cut, 0 when none.

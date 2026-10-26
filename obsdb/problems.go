@@ -42,8 +42,9 @@ type Problems struct {
 	// Truncated counts the tool results the result cap cut:
 	// execute_tool spans carrying weft.tool.truncated_bytes > 0.
 	Truncated int64
-	// Repaired counts the tool calls whose arguments the loop repaired:
-	// always 0 until the core reports weft.tool.args_repaired (U23.1).
+	// Repaired counts the tool calls whose arguments a model
+	// middleware repaired before the loop saw them (mw.RepairJSON):
+	// execute_tool spans carrying weft.tool.args_repaired true (U23.1).
 	Repaired int64
 	// TapPanics counts the observer panics the run contained — taps,
 	// OnMessages observers, a record the pipeline failed to build, and
@@ -84,6 +85,9 @@ const (
 	problemToolFailed     = "tool_failed"
 	problemDenied         = "denied"
 	problemTruncated      = "truncated"
+	// "repaired:<span>": a call whose arguments a model middleware
+	// repaired (U23.1; ClickHouse 0029).
+	problemRepaired = "repaired"
 	// "denied_approval:<span>:<n>": an invoke_agent span's
 	// weft.run.denied, keyed by its span like every other token.
 	problemDeniedApproval = "denied_approval"
@@ -123,11 +127,12 @@ func RunErrorType(errorType string) string {
 // by its chat span and index, so the fold counts the failed ones a later
 // attempt followed), a fallback layer's answer, an execute_tool span
 // that failed (tool_failed, or denied for error.type DENIED; none for
-// RETRY or a context error) or whose result the cap cut, and an
+// RETRY or a context error), whose result the cap cut or whose
+// arguments a middleware repaired, and an
 // invoke_agent span's weft.run.denied, weft.tap.panics and
 // weft.metadata.dropped. Nil for a span that contributes none. The
 // rules are restated in ClickHouse's traces view (migrations 0017,
-// 0018) and SQLite's backfills (0016, 0017); the conformance suite pins
+// 0018, 0029) and SQLite's backfills (0016, 0017); the conformance suite pins
 // all three agree.
 func SpanProblems(s Span) []string {
 	var out []string
@@ -167,6 +172,9 @@ func SpanProblems(s Span) []string {
 		}
 		if attrInt(s.Attrs, "weft.tool.truncated_bytes") > 0 {
 			out = append(out, key(problemTruncated))
+		}
+		if attrTrue(s.Attrs, "weft.tool.args_repaired") {
+			out = append(out, key(problemRepaired))
 		}
 	case op == "invoke_agent":
 		if n := attrInt(s.Attrs, "weft.run.denied"); n > 0 {
@@ -224,6 +232,8 @@ func CountProblems(tokens []string) Problems {
 			p.Denied++
 		case problemTruncated:
 			p.Truncated++
+		case problemRepaired:
+			p.Repaired++
 		case problemDeniedApproval:
 			if len(f) != 3 {
 				continue // U4's one-field form: re-derived, never counted

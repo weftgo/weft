@@ -84,6 +84,7 @@
       "provider": "wefttest",
       "outcome": "error",
       "error_type": "stream_idle",
+      "layer": "retry",
       "error": "weft: model stream idle timeout",
       "started": "(time)",
       "finished": "(time)",

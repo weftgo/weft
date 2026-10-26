@@ -165,6 +165,31 @@ func RawBodies(on bool) Option {
 	return optionFunc(func(c *config) { c.rawBodies = on })
 }
 
+// DevDetail turns on the development detail level (ADR 0016's
+// 2026-10-26 amendment): beside RawBodies, the record shows the whole
+// middleware onion. Each model call and tool call gets one "layer
+// <name>" span per WrapModel / WrapTools layer (weft.layer.name,
+// weft.layer.kind, weft.layer.index; error.type where the layer
+// returned an error), nested outer to inner under its chat or
+// execute_tool span, a weft.repair event carries the original
+// arguments mw.RepairJSON replaced (capped at 4 KiB), and a contained
+// tool or middleware panic's stack rides its execute_tool span as a
+// weft.panic event (16 KiB) — neither under content off. Off by default: a span per layer is 2–6 more spans per
+// call for a signal most calls do not need. Like RawBodies it is for
+// development only — it takes effect only when the pipeline starts
+// under the dev gate (WEFT_ENV=dev read unless NoEnv, or DevMode);
+// otherwise Start logs one WARN ("otel: DevDetail ignored: …") and the
+// pipeline behaves as without it — and only the Local and Studio
+// destinations with content on receive the detail: an OTLP, Datadog,
+// Langfuse or Exporters destination gets the run without its layer
+// spans and without the original arguments. The gate is the pipeline's
+// LoggerProvider marker (LoggerProvider.DevDetail), which the core asks:
+// pass Pipeline.LoggerProvider() to weft.LoggerProvider, or rely on
+// Install's global registration.
+func DevDetail() Option {
+	return optionFunc(func(c *config) { c.devDetail = true })
+}
+
 // NoGlobal leaves the OTel globals alone (Start only; Install always
 // registers). For tests and dependency-injected programs. It isolates
 // the globals only: it does not stop the discovery file's read — a

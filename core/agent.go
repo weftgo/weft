@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -657,6 +658,15 @@ type Agent struct {
 	// tapPanics counts tap invocations that panicked and were contained;
 	// read with TapPanics.
 	tapPanics atomic.Int64
+	// base is the model New was given, before WrapModel: the manifest's
+	// walk of the chain stops there, and the development detail level's
+	// chain (detailModel) is built over it.
+	base Model
+	// detailOnce builds detailed, the WrapModel chain with a layer span
+	// boundary outside each layer, the first time a run under the
+	// development detail level asks (layers.go).
+	detailOnce sync.Once
+	detailed   Model
 }
 
 // New builds an Agent. Nil models panic — including typed nils such as
@@ -709,6 +719,7 @@ func New(m Model, opts ...Option) *Agent {
 	a.obs.elog = a.obs.resolveLogger(lp, &a.tapPanics)
 	a.instructionsHash = hashText(a.system)
 	// The model chain is built once, here: first registered = outermost.
+	a.base = a.model
 	for i := len(a.modelMW) - 1; i >= 0; i-- {
 		a.model = a.modelMW[i](a.model)
 		if isNilModel(a.model) {

@@ -103,7 +103,14 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
 // a no-op outside a run's model call; mw.Retry/mw.Fallback use it, adapters may
 // (AttemptInfo.Layer: weft.AttemptLayerFallback on mw.Fallback's backup request,
 // the span's weft.attempt.layer — what a reader's fallbacks counter keys on;
-// AttemptInfo.Wait / .HTTPStatus: weft.attempt.wait_ms, http.response.status_code — mw.Retry fills both).
+// AttemptInfo.Wait / .HTTPStatus: weft.attempt.wait_ms, http.response.status_code — mw.Retry fills both;
+// weft.AttemptLayerRetry marks mw.Retry's retried requests). .Repair(weft.RepairInfo{…}) reports
+// arguments a model middleware repaired (mw.RepairJSON: a weft.repair event on chat, the call's
+// weft.tool.args_repaired). Inside the tool chain, weft.ToolReportFromContext(ctx).Denied(by) /
+// .Masked(err) say what a tool layer decided (weft.tool.denied_by — mw.Allow "allow" —
+// weft.tool.error_masked — mw.MapErrors, the hidden error's kind); a no-op outside a dispatched call.
+// The onion is in the manifest: model_middleware / tool_middleware outer to inner and hooks;
+// a model layer may describe itself with the optional Describe() weft.MiddlewareInfo (U23.1).
 // An adapter declares how a thinking level goes out with the optional method
 // ThinkingWire(weft.ThinkingConfig) string (the request record's thinking.wire, O16; found by Unwrap).
 
@@ -594,6 +601,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //        otel.RawBodies(true),  // dev only (WEFT_ENV=dev, or otel.DevMode() — its code-side twin, what an isolated NoEnv() test pipeline needs, one INFO when it opens the gate, overruled by an explicit WEFT_ENV≠dev; else one WARN naming the cause; the gate is the pipeline provider's RawBodies() marker —
 //                               // pass p.LoggerProvider() or rely on Install's global; a stock SDK provider never records raw bodies): each attempt's provider
 //                               // wire request/response as a weft.raw record, Local/Studio only, credentials stripped, 256 KiB per body (ADR 0028 §12)
+//        otel.DevDetail(),      // dev only, gated as RawBodies (LoggerProvider.DevDetail the marker): one "layer <name>" span per
+//                               // WrapModel/WrapTools layer per call (weft.layer.*) and a repair's original args, Local/Studio
+//                               // with content on only; never by default (U23.1)
 //    )()
 //    p, err := otel.Start(ctx, opts...)               // Install with errors; otel.NoGlobal() for tests
 //    // + otel.Slog() (an Install option, U11.1): slog.Default bridged — every line logged on a

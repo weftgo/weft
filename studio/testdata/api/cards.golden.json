@@ -3240,6 +3240,7 @@
             "gen_ai.request.model": "script",
             "http.response.status_code": 503,
             "weft.attempt.index": 2,
+            "weft.attempt.layer": "retry",
             "weft.attempt.wait_ms": 1,
             "weft.run.id": "r_retry",
             "weft.step.index": 0
@@ -3263,6 +3264,7 @@
             "gen_ai.request.model": "script",
             "gen_ai.response.model": "script",
             "weft.attempt.index": 3,
+            "weft.attempt.layer": "retry",
             "weft.attempt.wait_ms": 1,
             "weft.run.id": "r_retry",
             "weft.step.index": 0
@@ -3446,6 +3448,7 @@
             "provider": "wefttest",
             "outcome": "error",
             "error_type": "model_error",
+            "layer": "retry",
             "http_status": 503,
             "wait_ms": 1,
             "error": "503 Service Unavailable: overloaded",
@@ -3459,6 +3462,7 @@
             "model": "script",
             "provider": "wefttest",
             "outcome": "ok",
+            "layer": "retry",
             "wait_ms": 1,
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",

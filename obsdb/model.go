@@ -431,6 +431,14 @@ var nonMetaAttr = map[string]struct{}{
 	"session.id":                               {},
 	"user.id":                                  {},
 	"error.type":                               {},
+	// U23.1: the onion recorded — what a tool layer decided on the
+	// execute_tool span, and a development detail layer span's names.
+	"weft.tool.denied_by":     {},
+	"weft.tool.error_masked":  {},
+	"weft.tool.args_repaired": {},
+	"weft.layer.name":         {},
+	"weft.layer.kind":         {},
+	"weft.layer.index":        {},
 }
 
 // NonMetaKeys lists, sorted, the record/span contract keys MetaOf

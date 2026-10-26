@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -64,6 +65,35 @@ type fallbackModel struct {
 
 func (m *fallbackModel) Info() core.ModelInfo { return core.InfoOf(m.chain[0]) }
 
+// Describe names the layer for the manifest (core.MiddlewareInfo): the
+// backups, in order, as provider/model, and whether a custom predicate
+// (FallbackWhen) decides.
+func (m *fallbackModel) Describe() core.MiddlewareInfo {
+	names := make([]string, 0, len(m.chain)-1)
+	for _, b := range m.chain[1:] {
+		names = append(names, modelName(core.InfoOf(b)))
+	}
+	p := map[string]string{"models": strings.Join(names, ", ")}
+	if reflect.ValueOf(m.when).Pointer() != reflect.ValueOf(defaultFallback).Pointer() {
+		p["when"] = "custom"
+	}
+	return core.MiddlewareInfo{Name: "mw.Fallback", Params: p}
+}
+
+// modelName renders a model for a layer's description: provider/name,
+// or the one that is set.
+func modelName(i core.ModelInfo) string {
+	switch {
+	case i.Provider != "" && i.Name != "":
+		return i.Provider + "/" + i.Name
+	case i.Name != "":
+		return i.Name
+	case i.Provider != "":
+		return i.Provider
+	}
+	return "unnamed"
+}
+
 // Unwrap declares the primary — the chain's first model, the same one
 // Info names — so a caller walking with core.Unwrap sees the chain's
 // face, not its backups.
@@ -72,17 +102,14 @@ func (m *fallbackModel) Unwrap() core.Model { return m.chain[0] }
 func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return func(yield func(core.ModelEvent, error) bool) {
 		for i, model := range m.chain {
-			layer := ""
-			if i > 0 {
-				layer = core.AttemptLayerFallback
-			}
-			// The wait an enclosing Retry slept before this try belongs to
-			// the chain's first request alone; a backup is sent at once.
-			actx, wait := withWait(ctx, 0), time.Duration(0)
+			// The wait an enclosing Retry slept before this try, and its
+			// retry mark, belong to the chain's first request alone; a
+			// backup is sent at once, as a fallback.
+			actx, t := withTry(ctx, try{}), try{layer: core.AttemptLayerFallback}
 			if i == 0 {
-				actx, wait = ctx, waitOf(ctx)
+				actx, t = ctx, tryOf(ctx)
 			}
-			yielded, failed := replay(actx, model, attemptRequest(req), layer, wait, yield)
+			yielded, failed := replay(actx, model, attemptRequest(req), t, yield)
 			if failed == nil {
 				return
 			}
@@ -103,11 +130,10 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 // request, however Retry, Fallback and reporting adapters compose. It
 // returns whether any event reached the consumer and the stream error,
 // if one ended it. A consumer that stops early is reported as yielded
-// with no error. layer is the report's AttemptInfo.Layer ("" for the
-// primary), wait its AttemptInfo.Wait (the backoff slept before this
-// request); the report carries the HTTP status HTTPStatus finds on the
-// attempt's error.
-func replay(ctx context.Context, model core.Model, req core.ModelRequest, layer string, wait time.Duration, yield func(core.ModelEvent, error) bool) (bool, error) {
+// with no error. t is the report's AttemptInfo.Layer ("" for a first
+// try) and Wait (the backoff slept before this request); the report
+// carries the HTTP status HTTPStatus finds on the attempt's error.
+func replay(ctx context.Context, model core.Model, req core.ModelRequest, t try, yield func(core.ModelEvent, error) bool) (bool, error) {
 	if reportsItself(model) {
 		return stream(ctx, model, req, yield)
 	}
@@ -117,7 +143,7 @@ func replay(ctx context.Context, model core.Model, req core.ModelRequest, layer 
 	ask, _ := RetryAfter(failed, end)
 	status, _ := HTTPStatus(failed)
 	core.ReportFromContext(ctx).Attempt(core.AttemptInfo{Model: info.Name, Provider: info.Provider,
-		Start: start, End: end, Err: failed, RetryAfter: ask, Layer: layer, Wait: wait, HTTPStatus: status})
+		Start: start, End: end, Err: failed, RetryAfter: ask, Layer: t.layer, Wait: t.wait, HTTPStatus: status})
 	return yielded, failed
 }
 
@@ -178,22 +204,30 @@ func attemptRequest(req core.ModelRequest) core.ModelRequest {
 	return req
 }
 
-// waitKey carries the backoff Retry slept before a try to the layer
-// that reports it, when that is a Fallback beneath it (a self-reporting
-// model Retry stays silent over) or a Retry nested further down, whose
-// first try keeps it; a Fallback's backups are given 0.
-type waitKey struct{}
-
-func withWait(ctx context.Context, d time.Duration) context.Context {
-	if d <= 0 && waitOf(ctx) == 0 {
-		return ctx
-	}
-	return context.WithValue(ctx, waitKey{}, d)
+// try is what the layer that made a request knows of it for its
+// report: the backoff slept before it (AttemptInfo.Wait) and the layer
+// that sent it (AttemptInfo.Layer: retry, fallback, "" for a first try).
+type try struct {
+	wait  time.Duration
+	layer string
 }
 
-func waitOf(ctx context.Context) time.Duration {
-	d, _ := ctx.Value(waitKey{}).(time.Duration)
-	return d
+// tryKey carries a Retry's try to the layer that reports it, when that
+// is a Fallback beneath it (a self-reporting model Retry stays silent
+// over) or a Retry nested further down, whose first try keeps it; a
+// Fallback's backups are given their own.
+type tryKey struct{}
+
+func withTry(ctx context.Context, t try) context.Context {
+	if t == (try{}) && tryOf(ctx) == (try{}) {
+		return ctx
+	}
+	return context.WithValue(ctx, tryKey{}, t)
+}
+
+func tryOf(ctx context.Context) try {
+	t, _ := ctx.Value(tryKey{}).(try)
+	return t
 }
 
 // maxUnwrap bounds reportsItself's walk: a chain deeper than this is
@@ -262,6 +296,9 @@ type logModel struct {
 }
 
 func (m *logModel) Info() core.ModelInfo { return core.InfoOf(m.next) }
+
+// Describe names the layer for the manifest (core.MiddlewareInfo).
+func (m *logModel) Describe() core.MiddlewareInfo { return core.MiddlewareInfo{Name: "mw.Log"} }
 
 // Unwrap declares the model the log lines are about (the Unwrap
 // convention, beside Info).

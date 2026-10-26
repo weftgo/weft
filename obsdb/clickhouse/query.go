@@ -2323,6 +2323,11 @@ var contractKeys = []string{
 	// UX-B-14: an approved call's provenance (core.ApproveBy), span
 	// attributes on execute_tool (the same restatement).
 	"weft.tool.approved_by", "weft.grant.id",
+	// U23.1: the onion recorded — a tool layer's decisions on
+	// execute_tool and a development detail layer span's names, span
+	// attributes (migration 0029's restatement of the traces view).
+	"weft.tool.denied_by", "weft.tool.error_masked", "weft.tool.args_repaired",
+	"weft.layer.name", "weft.layer.kind", "weft.layer.index",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

@@ -734,6 +734,12 @@
                   }
                 },
                 {
+                  "key": "weft.tool.denied_by",
+                  "value": {
+                    "stringValue": "approval"
+                  }
+                },
+                {
                   "key": "error.type",
                   "value": {
                     "stringValue": "DENIED"

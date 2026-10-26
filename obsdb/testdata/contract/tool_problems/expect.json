@@ -115,7 +115,8 @@
           "step": 3,
           "seq": 7,
           "status": "error",
-          "error_type": "DENIED"
+          "error_type": "DENIED",
+          "denied_by": "allow"
         }
       ],
       "holes": []

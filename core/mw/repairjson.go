@@ -32,6 +32,11 @@ type repairModel struct{ next core.Model }
 
 func (m *repairModel) Info() core.ModelInfo { return core.InfoOf(m.next) }
 
+// Describe names the layer for the manifest (core.MiddlewareInfo).
+func (m *repairModel) Describe() core.MiddlewareInfo {
+	return core.MiddlewareInfo{Name: "mw.RepairJSON"}
+}
+
 // Unwrap declares the model whose JSON it repairs (the Unwrap
 // convention, beside Info).
 func (m *repairModel) Unwrap() core.Model { return m.next }
@@ -44,7 +49,12 @@ func (m *repairModel) Stream(ctx context.Context, req core.ModelRequest) iter.Se
 				return
 			}
 			if call, ok := ev.(core.ModelToolCall); ok && !json.Valid(call.Args) {
-				if fixed, ok := repairJSON(string(call.Args)); ok {
+				if fixed, kind, ok := repairJSONKind(string(call.Args)); ok {
+					// Reported on the run's record (core.Reporter.Repair:
+					// the chat span's weft.repair event, the call's
+					// weft.tool.args_repaired) — reporting only.
+					core.ReportFromContext(ctx).Repair(core.RepairInfo{
+						CallID: call.ID, Kind: kind, Original: call.Args, Repaired: []byte(fixed)})
 					call.Args = json.RawMessage(fixed)
 					ev = call
 				}
@@ -69,6 +79,23 @@ func (m *repairModel) Stream(ctx context.Context, req core.ModelRequest) iter.Se
 // payload (0.18.0's strings.TrimSpace took it, and the tool got
 // "prix" for "prix\u00a0").
 func repairJSON(s string) (string, bool) {
+	fixed, _, ok := repairJSONKind(s)
+	return fixed, ok
+}
+
+// The repair kinds RepairJSON reports (core.RepairInfo.Kind).
+const (
+	repairFence        = "fence"
+	repairUnterminated = "unterminated"
+	repairBoth         = "fence+unterminated"
+	repairTrim         = "trim"
+)
+
+// repairJSONKind is repairJSON with the kind of repair it made: a fence
+// stripped, open values closed, both, or only whitespace trimmed (or an
+// empty argument made {}).
+func repairJSONKind(s string) (string, string, bool) {
+	fenced := false
 	s = trimOutside(s)
 	// Markdown fences: ```json ... ```, ```javascript ... ```, ``` ... ```.
 	// A language tag is letters followed by whitespace or the newline;
@@ -83,16 +110,27 @@ func repairJSON(s string) (string, bool) {
 		}
 		rest = strings.TrimSuffix(trimOutside(rest), "```")
 		s = trimOutside(rest)
+		fenced = true
+	}
+	kind := repairTrim
+	if fenced {
+		kind = repairFence
 	}
 	if s == "" {
-		return "{}", true
+		return "{}", kind, true
 	}
 	if json.Valid([]byte(s)) {
-		return s, true
+		return s, kind, true
 	}
 	// Close what is open — the state machine the OutputDecoder's
 	// prefix salvage shares (internal/jsonclose).
-	return jsonclose.Close(s)
+	if fenced {
+		kind = repairBoth
+	} else {
+		kind = repairUnterminated
+	}
+	closed, ok := jsonclose.Close(s)
+	return closed, kind, ok
 }
 
 // trimOutside trims the whitespace around s that no JSON string holds:

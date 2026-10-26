@@ -52,6 +52,29 @@ type nest struct {
 	// execute_tool span). Written by the handler, read by the span's
 	// end — on another goroutine when the call timed out.
 	pending atomic.Pointer[string]
+	// callID is the call this nest belongs to: ToolReportFromContext
+	// answers only for it. deniedBy and masked are what a tool layer
+	// reported (ToolReporter, layers.go) — weft.tool.denied_by and
+	// weft.tool.error_masked on the call's execute_tool span. Written by
+	// the chain, read by the span's end.
+	callID   string
+	deniedBy atomic.Pointer[string]
+	masked   atomic.Pointer[string]
+}
+
+// layerNotes returns what the call's tool layers reported, "" for none.
+// Nil-safe.
+func (n *nest) layerNotes() (deniedBy, masked string) {
+	if n == nil {
+		return "", ""
+	}
+	if p := n.deniedBy.Load(); p != nil {
+		deniedBy = *p
+	}
+	if p := n.masked.Load(); p != nil {
+		masked = *p
+	}
+	return deniedBy, masked
 }
 
 // notePending records the parked child's pending calls by tool name.

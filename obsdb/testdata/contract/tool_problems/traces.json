@@ -708,6 +708,12 @@
                   "value": {
                     "stringValue": "DENIED"
                   }
+                },
+                {
+                  "key": "weft.tool.denied_by",
+                  "value": {
+                    "stringValue": "allow"
+                  }
                 }
               ],
               "endTimeUnixNano": "1790846220016000000",

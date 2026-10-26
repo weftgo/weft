@@ -134,6 +134,22 @@ type retryModel struct {
 
 func (m *retryModel) Info() core.ModelInfo { return core.InfoOf(m.next) }
 
+// Describe names the layer and its settings for the manifest
+// (core.MiddlewareInfo): the retry budget, the backoff's base and cap,
+// the retry-after bound, and whether a custom Classifier decides.
+func (m *retryModel) Describe() core.MiddlewareInfo {
+	p := map[string]string{
+		"max_retries": strconv.Itoa(m.cfg.maxRetries),
+		"base_delay":  m.cfg.baseDelay.String(),
+		"max_delay":   m.cfg.maxDelay.String(),
+		"max_wait":    m.cfg.maxWait.String(),
+	}
+	if reflect.ValueOf(m.cfg.classify).Pointer() != reflect.ValueOf(Retryable).Pointer() {
+		p["classifier"] = "custom"
+	}
+	return core.MiddlewareInfo{Name: "mw.Retry", Params: p}
+}
+
 // ReportsAttempts marks Retry as reporting its own attempts (one per
 // try), so a Fallback around it stays silent.
 func (m *retryModel) ReportsAttempts() bool { return true }
@@ -144,12 +160,13 @@ func (m *retryModel) Unwrap() core.Model { return m.next }
 
 func (m *retryModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return func(yield func(core.ModelEvent, error) bool) {
-		// Slept before this try (AttemptInfo.Wait). The first try keeps
-		// what an enclosing Retry slept before this request — a Retry
-		// nested under a Fallback under a Retry must not clear it.
-		wait := waitOf(ctx)
+		// Slept before this try (AttemptInfo.Wait) and the layer that
+		// sent it (retry, after the first). The first try keeps what an
+		// enclosing Retry knew of this request — a Retry nested under a
+		// Fallback under a Retry must not clear it.
+		t := tryOf(ctx)
 		for attempt := 0; ; attempt++ {
-			yielded, failed := replay(withWait(ctx, wait), m.next, attemptRequest(req), "", wait, yield)
+			yielded, failed := replay(withTry(ctx, t), m.next, attemptRequest(req), t, yield)
 			if failed == nil {
 				return
 			}
@@ -177,7 +194,7 @@ func (m *retryModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq
 				yield(nil, ctx.Err())
 				return
 			}
-			wait = delay
+			t = try{wait: delay, layer: core.AttemptLayerRetry}
 		}
 	}
 }

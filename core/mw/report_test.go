@@ -40,7 +40,7 @@ func (h *attemptLines) Handle(_ context.Context, r slog.Record) error {
 // reporter numbers the attempts 1..n. A request Fallback sends to a
 // backup carries layer fallback (AttemptInfo.Layer; the attempt span's
 // weft.attempt.layer, what a reader's fallbacks counter keys on); a
-// primary's try, first or retried, carries none.
+// try Retry sends again carries layer retry (U23.1); a first try none.
 func TestRetryAndFallbackReportOneAttemptPerRequest(t *testing.T) {
 	type want struct{ attempt, err, retryAfter, layer string }
 	cases := []struct {
@@ -55,7 +55,7 @@ func TestRetryAndFallbackReportOneAttemptPerRequest(t *testing.T) {
 				fb, rt := mw.Fallback(backup), mw.Retry(mw.BaseDelay(0), mw.MaxRetries(2))
 				return func(next core.Model) core.Model { return fb(rt(next)) }
 			},
-			want: []want{{"1", "429: boom", "1ms", ""}, {"2", "503: boom", "", ""}, {"3", "503: boom", "", ""}, {"4", "", "", "fallback"}},
+			want: []want{{"1", "429: boom", "1ms", ""}, {"2", "503: boom", "", "retry"}, {"3", "503: boom", "", "retry"}, {"4", "", "", "fallback"}},
 		},
 		{
 			// Retry outside Fallback: each try runs the chain — primary

@@ -12,7 +12,7 @@
 
 /** A kind's words: the chip's text, its one-line hint, its tone. */
 import { ordinalOf, plural } from "./format"
-import { MCP_FAILURE, deniedWord } from "./onion"
+import { MCP_FAILURE, attrStr as factStr, deniedWord } from "./onion"
 
 export interface KindWords {
   word: string
@@ -407,7 +407,6 @@ interface FactSpan {
   attrs: Record<string, unknown>
 }
 
-const factStr = (v: unknown) => (typeof v === "string" && v ? v : undefined)
 const factNum = (v: unknown) => {
   return ordinalOf(typeof v === "string" ? Number(v) : v)
 }

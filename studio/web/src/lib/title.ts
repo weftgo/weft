@@ -179,19 +179,9 @@ export function contentOff(r: TitledRun): boolean {
   )
 }
 
-/** runTitle titles a run: its prompt_preview's first line, else its
- * agent (with NO_CONTENT beside it when content was off), else
- * NO_CONTENT, else its id. */
-export function runTitle(r: TitledRun): Title {
-  const p = clip(r.prompt_preview ?? "", Infinity)
-  if (p) return { text: p, full: r.prompt_preview ?? p, kind: "prompt" }
-  const off = contentOff(r)
-  if (r.agent) {
-    const text = off ? `${r.agent} · ${NO_CONTENT}` : r.agent
-    return { text, full: text, kind: "agent" }
-  }
-  if (off) return { text: NO_CONTENT, full: NO_CONTENT, kind: "absent" }
-  return { text: r.id, full: r.id, kind: "id" }
+/** turnLabel is a session turn's short name, "t3"; "" off a session. */
+export function turnLabel(r: { turn?: number }): string {
+  return r.turn ? `t${r.turn}` : ""
 }
 
 /** sessionTitle titles a session: its title (thread's
@@ -215,11 +205,6 @@ export function sessionTitle(
   if (s.content_off || (first && contentOff(first)))
     return { text: NO_CONTENT, full: NO_CONTENT, kind: "absent" }
   return { text: s.id, full: s.id, kind: "id" }
-}
-
-/** turnLabel is a session turn's short name, "t3"; "" off a session. */
-export function turnLabel(r: { turn?: number }): string {
-  return r.turn ? `t${r.turn}` : ""
 }
 
 /** resumeOf says a turn resumes the one before it: that turn parked
@@ -252,6 +237,21 @@ export function turnTitle(
     full: `${text}\n${r.prompt_preview ?? ""}`.trim(),
     kind: "resume",
   }
+}
+
+/** runTitle titles a run: its prompt_preview's first line, else its
+ * agent (with NO_CONTENT beside it when content was off), else
+ * NO_CONTENT, else its id. */
+export function runTitle(r: TitledRun): Title {
+  const p = clip(r.prompt_preview ?? "", Infinity)
+  if (p) return { text: p, full: r.prompt_preview ?? p, kind: "prompt" }
+  const off = contentOff(r)
+  if (r.agent) {
+    const text = off ? `${r.agent} · ${NO_CONTENT}` : r.agent
+    return { text, full: text, kind: "agent" }
+  }
+  if (off) return { text: NO_CONTENT, full: NO_CONTENT, kind: "absent" }
+  return { text: r.id, full: r.id, kind: "id" }
 }
 
 /** traceTitle titles a trace list row (UX-A-39): its top run's agent

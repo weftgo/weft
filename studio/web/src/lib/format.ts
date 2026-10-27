@@ -3,32 +3,20 @@
 // render these in Geist Mono (plan §5.4).
 import type { Usage } from "./api"
 
-/** "just now" / "4m ago" / "2h ago" / "3d ago" / "Sep 12". */
-export function relativeTime(iso: string, now: number = Date.now()): string {
-  const then = Date.parse(iso)
-  if (Number.isNaN(then)) return "—"
-  const s = Math.max(0, Math.round((now - then) / 1000))
-  if (s < 45) return "just now"
-  const m = Math.round(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.round(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.round(h / 24)
-  if (d < 14) return `${d}d ago`
-  return new Date(then).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  })
-}
-
-/** "UTC", "UTC+2", "UTC-5:30" — the offset a local stamp was rendered
- * in. offsetMinutes is Date#getTimezoneOffset's value (UTC − local). */
-export function zoneLabel(offsetMinutes: number): string {
-  if (!offsetMinutes) return "UTC"
-  const abs = Math.abs(offsetMinutes)
-  const h = Math.floor(abs / 60)
-  const m = abs % 60
-  return `UTC${offsetMinutes < 0 ? "+" : "-"}${h}${m ? `:${String(m).padStart(2, "0")}` : ""}`
+/** tokenPair is the one token format both surfaces write (U21.1,
+ * UX-F-16): "60 in · 30 out" — compact ("12.4k in · 3.1k out"), or
+ * with exact the whole counts ("12,400 in · 3,100 out"). A missing
+ * side is 0. */
+export function tokenPair(
+  input: number | undefined,
+  output: number | undefined,
+  exact = false
+): string {
+  const n = (v: number | undefined) => {
+    const x = Number.isFinite(v) ? (v as number) : 0
+    return exact ? x.toLocaleString("en-US") : tokens(x)
+  }
+  return `${n(input)} in · ${n(output)} out`
 }
 
 /** "2026-09-28 09:00:12 UTC+2" — the absolute stamp shown on hover:
@@ -61,6 +49,14 @@ export function duration(started: string, finished: string | null): string {
   return spanMs(b - a)
 }
 
+/** byteSize is a byte count in words: "92 B", "12.3 KB" — or, with
+ * i = "i", "12.3 KiB" (a badge's: lib/honesty.ts's kib). */
+export function byteSize(n: number, i = ""): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} K${i}B`
+  return `${(n / (1024 * 1024)).toFixed(1)} M${i}B`
+}
+
 /** A run whose agent has no name (UX-A-26): one word on every page —
  * the run header, the runs list, the run tree, a subagent row — drawn
  * muted, with UNNAMED_AGENT_HINT on hover. */
@@ -78,10 +74,48 @@ export const plural = (k: number, one: string, many = one + "s") =>
 export const UNNAMED_AGENT = "unnamed agent"
 export const UNNAMED_AGENT_HINT = "the agent has no name: set weft.Name(…)"
 
-/** A step count in words, "1 step" / "2 steps": the panel's turn row
- * and picker, the run header, a subagent row — one helper (W7-prep). */
-export function stepCount(n: number): string {
-  return plural(n, "step")
+/** "12.4k / 3.1k" — token counts stay compact; exact values on hover. */
+export function tokens(n: number): string {
+  if (!Number.isFinite(n)) return "—"
+  const abs = Math.abs(n)
+  if (abs >= 999_950) return `${(n / 1_000_000).toFixed(1)}M`
+  if (abs >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
+}
+
+/** "just now" / "4m ago" / "2h ago" / "3d ago" / "Sep 12". */
+export function relativeTime(iso: string, now: number = Date.now()): string {
+  const then = Date.parse(iso)
+  if (Number.isNaN(then)) return "—"
+  const s = Math.max(0, Math.round((now - then) / 1000))
+  if (s < 45) return "just now"
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.round(h / 24)
+  if (d < 14) return `${d}d ago`
+  return new Date(then).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  })
+}
+
+/** How long a still-running run has been going, against now. */
+export function elapsed(started: string, now: number = Date.now()): string {
+  const a = Date.parse(started)
+  if (Number.isNaN(a) || now < a) return "—"
+  return spanMs(now - a)
+}
+
+/** "UTC", "UTC+2", "UTC-5:30" — the offset a local stamp was rendered
+ * in. offsetMinutes is Date#getTimezoneOffset's value (UTC − local). */
+export function zoneLabel(offsetMinutes: number): string {
+  if (!offsetMinutes) return "UTC"
+  const abs = Math.abs(offsetMinutes)
+  const h = Math.floor(abs / 60)
+  const m = abs % 60
+  return `UTC${offsetMinutes < 0 ? "+" : "-"}${h}${m ? `:${String(m).padStart(2, "0")}` : ""}`
 }
 
 /** A span of milliseconds in the tightest unit that still reads. */
@@ -100,38 +134,6 @@ export function spanMs(ms: number): string {
   return `${h}h${String(m % 60).padStart(2, "0")}m`
 }
 
-/** How long a still-running run has been going, against now. */
-export function elapsed(started: string, now: number = Date.now()): string {
-  const a = Date.parse(started)
-  if (Number.isNaN(a) || now < a) return "—"
-  return spanMs(now - a)
-}
-
-/** "12.4k / 3.1k" — token counts stay compact; exact values on hover. */
-export function tokens(n: number): string {
-  if (!Number.isFinite(n)) return "—"
-  const abs = Math.abs(n)
-  if (abs >= 999_950) return `${(n / 1_000_000).toFixed(1)}M`
-  if (abs >= 1000) return `${(n / 1000).toFixed(1)}k`
-  return String(n)
-}
-
-/** tokenPair is the one token format both surfaces write (U21.1,
- * UX-F-16): "60 in · 30 out" — compact ("12.4k in · 3.1k out"), or
- * with exact the whole counts ("12,400 in · 3,100 out"). A missing
- * side is 0. */
-export function tokenPair(
-  input: number | undefined,
-  output: number | undefined,
-  exact = false
-): string {
-  const n = (v: number | undefined) => {
-    const x = Number.isFinite(v) ? (v as number) : 0
-    return exact ? x.toLocaleString("en-US") : tokens(x)
-  }
-  return `${n(input)} in · ${n(output)} out`
-}
-
 /** tokenTotal is one total of tokens, where a cell has room for one
  * number (an experiment's grid cell): "15 tokens", compact. The rule
  * (U21.1-fix): a split of input and output is always tokenPair's
@@ -148,10 +150,8 @@ export function usageSummary(u: Usage): string {
   return tokenPair(u.input_tokens, u.output_tokens, true)
 }
 
-/** byteSize is a byte count in words: "92 B", "12.3 KB" — or, with
- * i = "i", "12.3 KiB" (a badge's: lib/honesty.ts's kib). */
-export function byteSize(n: number, i = ""): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} K${i}B`
-  return `${(n / (1024 * 1024)).toFixed(1)} M${i}B`
+/** A step count in words, "1 step" / "2 steps": the panel's turn row
+ * and picker, the run header, a subagent row — one helper (W7-prep). */
+export function stepCount(n: number): string {
+  return plural(n, "step")
 }

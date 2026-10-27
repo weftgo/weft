@@ -1214,6 +1214,17 @@ function get<T>(path: string): Promise<T> {
   return request<T>("GET", path)
 }
 
+function asMessages(raw: unknown): Message[] {
+  if (!Array.isArray(raw)) return []
+  const out: Message[] = []
+  for (const m of raw as unknown[]) {
+    if (typeof m !== "object" || m === null) continue
+    const msg = m as Message
+    out.push(Array.isArray(msg.content) ? msg : { ...msg, content: [] })
+  }
+  return out
+}
+
 /** A transcript's messages arrive as raw JSON — a stored record body,
  * whatever it held: coerce the document so every batch is a list of
  * messages and every message's content a list of parts. A body that
@@ -1240,17 +1251,6 @@ export function asTranscript(doc: RawTranscript): Transcript {
       }
     }),
   }
-}
-
-function asMessages(raw: unknown): Message[] {
-  if (!Array.isArray(raw)) return []
-  const out: Message[] = []
-  for (const m of raw as unknown[]) {
-    if (typeof m !== "object" || m === null) continue
-    const msg = m as Message
-    out.push(Array.isArray(msg.content) ? msg : { ...msg, content: [] })
-  }
-  return out
 }
 
 // ── Query options ──────────────────────────────────────────────────

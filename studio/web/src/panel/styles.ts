@@ -121,6 +121,7 @@ export const PANEL_CSS = `
 .weft-narrow .weft-turns { width: auto; border-right: none; max-height: 30%; }
 .weft-narrow .weft-rows { display: none; }
 .weft-narrow .weft-head { flex-wrap: wrap; white-space: normal; }
+.weft-narrow [data-weft-stats], .weft-narrow [data-weft-cost-total] { display: none; }
 
 .weft-fab {
   position: fixed; z-index: var(--weft-z, 2147483000);

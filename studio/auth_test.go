@@ -142,6 +142,13 @@ func TestPanelTokenMint(t *testing.T) {
 			t.Errorf("%s: %d, want 400", req, code)
 		}
 	}
+	// An unknown key is a 400 that names it and the playground flag,
+	// never a read token minted in silence (UX-D-27).
+	code, body = mintToken(t, h, "srv", `{"public_id":"pub_orders","scope":"playground"}`)
+	if code != http.StatusBadRequest || !strings.Contains(body, `unknown field \"scope\"`) ||
+		!strings.Contains(body, `\"playground\": true`) {
+		t.Errorf("unknown field: %d %s, want a 400 naming scope and \"playground\": true", code, body)
+	}
 	// Without the route (no token configured) the mint is a 404.
 	if code, _ := mintToken(t, Handler(DB(fixtureDB(t))), "", `{"public_id":"x"}`); code != http.StatusNotFound {
 		t.Errorf("mint without a token configured: %d", code)

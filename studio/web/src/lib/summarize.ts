@@ -250,6 +250,9 @@ export function eventSummary(ev: WireEvent, width = 96): string {
 
 /** The run facts a step's verdict reads (a run row or document). */
 export interface AnswerRun {
+  /** The run row's model (or the doc's): the panel's Story names it as
+   * the turn row does (UX-D-24). */
+  model?: { provider: string; name: string }
   status?: string
   err?: string
   stopped_by?: string
@@ -384,32 +387,6 @@ export interface SentFacts {
 export const SENT_NOT_RECORDED = "— no request record for this step"
 export const SENT_UNCHANGED = "unchanged since the step before"
 
-/** sentLine is "5 messages (1 new) · 1 tool offered · unchanged since
- * the step before" — or the marks the step carries, which the Request
- * tab explains (its chips: changed by PrepareStep, …). */
-export function sentLine(s: SentFacts | undefined): string {
-  if (!s) return SENT_NOT_RECORDED
-  const fresh =
-    s.prevCount !== undefined && s.count >= s.prevCount
-      ? ` (${s.count - s.prevCount} new)`
-      : ""
-  const marks = [
-    s.promptChanged ? CHIP_PROMPT_CHANGED : "",
-    s.catalogChanged ? CHIP_CATALOG : "",
-  ].filter(Boolean)
-  return [
-    `${count(s.count, "message")}${fresh}`,
-    `${count(s.tools, "tool")} offered`,
-    marks.length
-      ? marks.join(" · ")
-      : s.prevCount !== undefined
-        ? SENT_UNCHANGED
-        : "",
-  ]
-    .filter(Boolean)
-    .join(" · ")
-}
-
 /** repliedLine is the model's reply in a line: its words, the calls it
  * asked for, or why there is none. */
 export function repliedLine(step: AnswerStep, running = false): string {
@@ -422,10 +399,6 @@ export function repliedLine(step: AnswerStep, running = false): string {
   if (!step.finish) return running ? "— (not yet)" : "— (no reply recorded)"
   return "— (no text, no calls)"
 }
-
-/** A max_tokens step's calls (rule 11): counted apart, never as
- * "never finished" — the loop chose not to run them. */
-export const NOT_EXECUTED = "not executed"
 
 /** toolsLine is what the step's calls did: "2 ran · 1 error", "1
  * never finished", "1 not executed" (a max_tokens cut), "1 awaiting a
@@ -464,6 +437,10 @@ export function toolsLine(
     .join(" · ")
 }
 
+/** A max_tokens step's calls (rule 11): counted apart, never as
+ * "never finished" — the loop chose not to run them. */
+export const NOT_EXECUTED = "not executed"
+
 /** thenLine is what came after the step: the next step, or how the
  * run ended there (lib/stopped-by.ts's end card, at this step). */
 export function thenLine(
@@ -475,4 +452,30 @@ export function thenLine(
   if (run.status === "running") return "running…"
   // The last step drawn is where the run ended: its end card names it.
   return endCard(run, step.index) ?? `■ ${run.status || "ended"}`
+}
+
+/** sentLine is "5 messages (1 new) · 1 tool offered · unchanged since
+ * the step before" — or the marks the step carries, which the Request
+ * tab explains (its chips: changed by PrepareStep, …). */
+export function sentLine(s: SentFacts | undefined): string {
+  if (!s) return SENT_NOT_RECORDED
+  const fresh =
+    s.prevCount !== undefined && s.count >= s.prevCount
+      ? ` (${s.count - s.prevCount} new)`
+      : ""
+  const marks = [
+    s.promptChanged ? CHIP_PROMPT_CHANGED : "",
+    s.catalogChanged ? CHIP_CATALOG : "",
+  ].filter(Boolean)
+  return [
+    `${count(s.count, "message")}${fresh}`,
+    `${count(s.tools, "tool")} offered`,
+    marks.length
+      ? marks.join(" · ")
+      : s.prevCount !== undefined
+        ? SENT_UNCHANGED
+        : "",
+  ]
+    .filter(Boolean)
+    .join(" · ")
 }

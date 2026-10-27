@@ -94,34 +94,14 @@ export interface RunOverride {
 
 const OVERRIDE = "weft.override."
 
-/** overrideOf reads the run's own invoke_agent span (by weft.run.id; a
- * subagent child's span in the same trace is not this run's) for the
- * override fingerprint. Undefined when the run carries none. */
-export function overrideOf(
-  spans: Span[] | undefined,
-  runId: string
-): RunOverride | undefined {
-  const span = spans?.find(
-    (s) =>
-      s.attrs["gen_ai.operation.name"] === "invoke_agent" &&
-      s.attrs["weft.run.id"] === runId
-  )
-  if (!span) return undefined
-  const fields: string[] = []
-  let hash: string | undefined
-  for (const [k, v] of Object.entries(span.attrs)) {
-    if (!k.startsWith(OVERRIDE)) continue
-    const name = k.slice(OVERRIDE.length)
-    if (name === "hash") hash = typeof v === "string" ? v : String(v)
-    else fields.push(name)
-  }
-  if (!hash && fields.length === 0) return undefined
-  const ins = span.attrs[`${OVERRIDE}instructions`]
-  return {
-    hash,
-    instructions: ins === true || ins === "true",
-    fields: fields.sort(),
-  }
+/** The prompt text a row carries, when the record is here — and
+ * parsed: a derived record (its body did not parse; obsdb's
+ * PromptRecordOf keeps the hash, not the text) is no text to diff. */
+export function promptText(row: RequestRow | undefined): string | undefined {
+  const p = row?.prompt
+  if (!row || !p || isHoleRef(p))
+    return row && !row.system_hash ? "" : undefined
+  return p.content === "derived" ? undefined : p.text
 }
 
 /** overrideParallelism is the run's weft.override.parallelism (its own
@@ -152,6 +132,36 @@ export interface Registered {
   verified: boolean
 }
 
+/** overrideOf reads the run's own invoke_agent span (by weft.run.id; a
+ * subagent child's span in the same trace is not this run's) for the
+ * override fingerprint. Undefined when the run carries none. */
+export function overrideOf(
+  spans: Span[] | undefined,
+  runId: string
+): RunOverride | undefined {
+  const span = spans?.find(
+    (s) =>
+      s.attrs["gen_ai.operation.name"] === "invoke_agent" &&
+      s.attrs["weft.run.id"] === runId
+  )
+  if (!span) return undefined
+  const fields: string[] = []
+  let hash: string | undefined
+  for (const [k, v] of Object.entries(span.attrs)) {
+    if (!k.startsWith(OVERRIDE)) continue
+    const name = k.slice(OVERRIDE.length)
+    if (name === "hash") hash = typeof v === "string" ? v : String(v)
+    else fields.push(name)
+  }
+  if (!hash && fields.length === 0) return undefined
+  const ins = span.attrs[`${OVERRIDE}instructions`]
+  return {
+    hash,
+    instructions: ins === true || ins === "true",
+    fields: fields.sort(),
+  }
+}
+
 /** registeredAgent picks the manifest's agent for a run: the one with
  * the run's own manifest hash, else the one with its name (unverified
  * unless the file source lists that name under the run's hash). */
@@ -179,33 +189,6 @@ export function registeredAgent(
   return { agent: named, verified: listed }
 }
 
-/** sha256Hex is the lowercase hex sha256 of the UTF-8 bytes — the
- * encoding every ADR 0028 hash uses. Undefined where the page has no
- * WebCrypto (an insecure, non-loopback origin). */
-export async function sha256Hex(text: string): Promise<string | undefined> {
-  const subtle = (globalThis.crypto as Crypto | undefined)?.subtle
-  if (!subtle) return undefined
-  const sum = await subtle.digest("SHA-256", new TextEncoder().encode(text))
-  return Array.from(new Uint8Array(sum), (b) =>
-    b.toString(16).padStart(2, "0")
-  ).join("")
-}
-
-/** composeSystem mirrors core/loop.go's: the instructions, then each
- * offered tool's PromptSnippet, paragraphs apart. */
-export function composeSystem(
-  instructions: string,
-  snippets: string[]
-): string {
-  let out = instructions
-  for (const s of snippets) {
-    if (!s) continue
-    if (out.length > 0) out += "\n\n"
-    out += s
-  }
-  return out
-}
-
 /** The offered tools' PromptSnippets in offer order, from the
  * registered agent; undefined when the manifest does not know the
  * agent or any offered tool (a ToolSource tool is never in it). */
@@ -219,6 +202,41 @@ export function snippetsOf(
   )
   if (names.some((n) => !byName.has(n))) return undefined
   return names.map((n) => byName.get(n) ?? "")
+}
+
+/**
+ * toolSetMayExplain says whether a system hash that moved between two
+ * steps could be the tool set's doing rather than a PrepareStep: the
+ * offered names differ and the verified agent cannot show that every
+ * tool added or dropped carries no PromptSnippet — or, the same set
+ * reordered, that no offered tool carries one (a ToolSource tool is
+ * never in the manifest; an unverified manifest decides nothing).
+ */
+export function toolSetMayExplain(
+  before: string[],
+  after: string[],
+  reg: Registered | undefined
+): boolean {
+  const a = new Set(before)
+  const b = new Set(after)
+  const changed = [
+    ...before.filter((n) => !b.has(n)),
+    ...after.filter((n) => !a.has(n)),
+  ]
+  if (changed.length === 0) {
+    // The same set: unchanged unless reordered — and offer order is
+    // snippet order in composeSystem, so a reorder moves the hash
+    // unless the verified agent shows no offered tool has a snippet.
+    const reordered =
+      before.length !== after.length || before.some((n, i) => n !== after[i])
+    if (!reordered) return false
+    if (!reg?.verified) return true
+    const all = snippetsOf(after, reg.agent)
+    return all === undefined || all.some(Boolean)
+  }
+  if (!reg?.verified) return true
+  const snippets = snippetsOf(changed, reg.agent)
+  return snippets === undefined || snippets.some(Boolean)
 }
 
 /**
@@ -263,14 +281,70 @@ export function proposalOf(
   }
 }
 
-/** The prompt text a row carries, when the record is here — and
- * parsed: a derived record (its body did not parse; obsdb's
- * PromptRecordOf keeps the hash, not the text) is no text to diff. */
-export function promptText(row: RequestRow | undefined): string | undefined {
-  const p = row?.prompt
-  if (!row || !p || isHoleRef(p))
-    return row && !row.system_hash ? "" : undefined
-  return p.content === "derived" ? undefined : p.text
+/** sha256Hex is the lowercase hex sha256 of the UTF-8 bytes — the
+ * encoding every ADR 0028 hash uses. Undefined where the page has no
+ * WebCrypto (an insecure, non-loopback origin). */
+export async function sha256Hex(text: string): Promise<string | undefined> {
+  const subtle = (globalThis.crypto as Crypto | undefined)?.subtle
+  if (!subtle) return undefined
+  const sum = await subtle.digest("SHA-256", new TextEncoder().encode(text))
+  return Array.from(new Uint8Array(sum), (b) =>
+    b.toString(16).padStart(2, "0")
+  ).join("")
+}
+
+/** composeSystem mirrors core/loop.go's: the instructions, then each
+ * offered tool's PromptSnippet, paragraphs apart. */
+export function composeSystem(
+  instructions: string,
+  snippets: string[]
+): string {
+  let out = instructions
+  for (const s of snippets) {
+    if (!s) continue
+    if (out.length > 0) out += "\n\n"
+    out += s
+  }
+  return out
+}
+
+/** What a step's prompt diff is against. */
+export interface PromptBaseline {
+  /** "previous": the previous recorded step's prompt; "registered":
+   * the agent's registered instructions (composed with the offered
+   * tools' snippets when the manifest names them). */
+  kind: "previous" | "registered"
+  /** The previous step's ordinal (kind "previous"). */
+  step?: number
+  text: string
+  /** The baseline's own record was cut by the recorder. */
+  truncated?: boolean
+  /** kind "registered": the manifest's agent is the run's version. */
+  verified?: boolean
+  /** kind "registered": the run replaced its instructions. */
+  overridden?: boolean
+}
+
+/** The previous recorded step's last row, for each step that has one. */
+export function previousRows(rows: RequestRow[]): Map<number, RequestRow> {
+  const sorted = [...rows].sort((a, b) => a.step - b.step || a.index - b.index)
+  const out = new Map<number, RequestRow>()
+  let prev: RequestRow | undefined
+  for (const r of sorted) {
+    if (prev && prev.step !== r.step && !out.has(r.step)) out.set(r.step, prev)
+    if (!prev || prev.step !== r.step || r.index > prev.index) prev = r
+  }
+  return out
+}
+
+/** The diff's caption. */
+export function baselineCaption(b: PromptBaseline): string {
+  if (b.kind === "previous") return `diff vs step ${b.step}`
+  if (!b.verified)
+    return "diff vs weft.json's instructions — not verified for this run"
+  return b.overridden
+    ? "diff vs the registered instructions (overridden for this run)"
+    : "diff vs the registered instructions"
 }
 
 /**
@@ -315,80 +389,6 @@ export async function composedFromInstructions(
   if (!text.endsWith(`\n\n${tail}`)) return false
   const h = await sha256Hex(text.slice(0, text.length - tail.length - 2))
   return h === undefined ? undefined : h === instructionsHash
-}
-
-/** What a step's prompt diff is against. */
-export interface PromptBaseline {
-  /** "previous": the previous recorded step's prompt; "registered":
-   * the agent's registered instructions (composed with the offered
-   * tools' snippets when the manifest names them). */
-  kind: "previous" | "registered"
-  /** The previous step's ordinal (kind "previous"). */
-  step?: number
-  text: string
-  /** The baseline's own record was cut by the recorder. */
-  truncated?: boolean
-  /** kind "registered": the manifest's agent is the run's version. */
-  verified?: boolean
-  /** kind "registered": the run replaced its instructions. */
-  overridden?: boolean
-}
-
-/** The diff's caption. */
-export function baselineCaption(b: PromptBaseline): string {
-  if (b.kind === "previous") return `diff vs step ${b.step}`
-  if (!b.verified)
-    return "diff vs weft.json's instructions — not verified for this run"
-  return b.overridden
-    ? "diff vs the registered instructions (overridden for this run)"
-    : "diff vs the registered instructions"
-}
-
-/**
- * toolSetMayExplain says whether a system hash that moved between two
- * steps could be the tool set's doing rather than a PrepareStep: the
- * offered names differ and the verified agent cannot show that every
- * tool added or dropped carries no PromptSnippet — or, the same set
- * reordered, that no offered tool carries one (a ToolSource tool is
- * never in the manifest; an unverified manifest decides nothing).
- */
-export function toolSetMayExplain(
-  before: string[],
-  after: string[],
-  reg: Registered | undefined
-): boolean {
-  const a = new Set(before)
-  const b = new Set(after)
-  const changed = [
-    ...before.filter((n) => !b.has(n)),
-    ...after.filter((n) => !a.has(n)),
-  ]
-  if (changed.length === 0) {
-    // The same set: unchanged unless reordered — and offer order is
-    // snippet order in composeSystem, so a reorder moves the hash
-    // unless the verified agent shows no offered tool has a snippet.
-    const reordered =
-      before.length !== after.length || before.some((n, i) => n !== after[i])
-    if (!reordered) return false
-    if (!reg?.verified) return true
-    const all = snippetsOf(after, reg.agent)
-    return all === undefined || all.some(Boolean)
-  }
-  if (!reg?.verified) return true
-  const snippets = snippetsOf(changed, reg.agent)
-  return snippets === undefined || snippets.some(Boolean)
-}
-
-/** The previous recorded step's last row, for each step that has one. */
-export function previousRows(rows: RequestRow[]): Map<number, RequestRow> {
-  const sorted = [...rows].sort((a, b) => a.step - b.step || a.index - b.index)
-  const out = new Map<number, RequestRow>()
-  let prev: RequestRow | undefined
-  for (const r of sorted) {
-    if (prev && prev.step !== r.step && !out.has(r.step)) out.set(r.step, prev)
-    if (!prev || prev.step !== r.step || r.index > prev.index) prev = r
-  }
-  return out
 }
 
 /** What one request sent as messages: the count the record keeps and,

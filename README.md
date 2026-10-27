@@ -539,8 +539,12 @@ token and a fixed `--token` / `WEFT_STUDIO_TOKEN` stay out of the log;
 `#token=` only for a token generated for a database with no file), the
 app's pid, and the first runtime that registered with
 this Studio within five seconds — else `no runtime registered yet (the
-app needs runtime.Install; WEFT_ENV=dev is set)` and a later line when
-one does. A Studio bound to every interface (`--addr 0.0.0.0:7331`) is
+app needs runtime.Install; WEFT_ENV=dev is set), or the app links its
+own embedded Studio` and a later line when one does. With no browser
+opened (`--open=false`, the default off a terminal) and a bare link,
+one line first says where the token is: `studio: token:
+<db>.token (weft open --with-token)`, or the fixed token's flag and
+variable. A Studio bound to every interface (`--addr 0.0.0.0:7331`) is
 handed to the app, and printed, as `127.0.0.1`.
 
 Reuse follows the port policy, whose probe carries the fixed token

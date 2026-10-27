@@ -327,6 +327,19 @@ describe("the panel's script tag (C2: never by its file name)", () => {
     expect(readConfig().publicId).toBe("pub_first")
   })
 
+  it("two data-weft tags: the module's own (its src is import.meta.url) wins over the first (UX-D-28)", () => {
+    script(
+      { "data-weft": "", "data-endpoint": "https://first.example/studio" },
+      "/a/one.js"
+    )
+    const own = script(
+      { "data-weft": "", "data-endpoint": "https://own.example/studio" },
+      selfURL
+    )
+    expect(findPanelScript()).toBe(own)
+    expect(readConfig().endpoint).toBe("https://own.example/studio/")
+  })
+
   it("the running classic script (document.currentScript) is the panel's, whatever it is called", async () => {
     script({ "data-weft": "", "data-public-id": "pub_other" }, "/other.js")
     const mine = script({ "data-public-id": "pub_mine" }, "/cdn/x9f.js")

@@ -136,6 +136,8 @@ describe("C3's Done line: the studio-local page without data-public-id", () => {
       "no conversation detected on this page"
     )
     expect(text(el, ".weft-detect")).toContain("detect: headers")
+    // The footer names the rung that chose the scope (UX-D-23).
+    expect(text(el, ".weft-footer")).toMatch(/^scope: none · /)
     // The page's own chat surface: one turn, one fetch.
     const res = await window.fetch("/run", {
       method: "POST",
@@ -145,6 +147,7 @@ describe("C3's Done line: the studio-local page without data-public-id", () => {
     await settle()
     expect(text(el, ".weft-title")).toContain("pub_demo")
     expect(selected(el)).toBe("r_1") // pinned, though r_2 is newer
+    expect(text(el, ".weft-footer")).toMatch(/^scope: header from \/run · /)
     expect(studio.gets("runs/r_1/transcript")).toHaveLength(1)
     expect(studio.posts("/run")).toHaveLength(1)
     expect(el.detectedScopes().map((d) => [d.key, d.scope.run])).toEqual([

@@ -228,29 +228,6 @@ export interface ContentAttrs {
 /** kib is a byte count as a badge says it: "92 B", "12.3 KiB". */
 export const kib = (n: number): string => byteSize(n, "i")
 
-/** contentHoles reads an event's attrs: a recorder cap's cut is
- * truncated (with the bytes), a content-off chain's mark — or the
- * core's own capture-off mark, "none" — is stripped. Redaction is not
- * marked by weft's pipeline, so redacted never comes from here. */
-export function contentHoles(attrs: unknown): HoleMark[] {
-  if (typeof attrs !== "object" || attrs === null) return []
-  const a = attrs as Record<string, unknown>
-  const out: HoleMark[] = []
-  const mark = a["weft.content"]
-  if (mark === "stripped" || mark === "none") out.push({ hole: "stripped" })
-  if (mark === "redacted") out.push({ hole: "redacted" })
-  const cut = Number(a["weft.content.truncated_bytes"])
-  if (Number.isFinite(cut) && cut > 0)
-    out.push({ hole: "truncated", bytes: cut })
-  return out
-}
-
-/** resultCapReason is the result_cap cause's words with the bytes a
- * tool's result cap cut (the loop's model-visible marker). */
-export function resultCapReason(bytes: number): string {
-  return `${CAUSES.truncated?.result_cap.reason ?? ""} (${kib(bytes)} cut)`
-}
-
 /** mergeHoles is the union of hole lists: one mark per badge (the first
  * one's words), truncated's bytes summed, in the table's order — an
  * unknown badge after the table's. */
@@ -273,6 +250,14 @@ export function mergeHoles(...lists: (HoleMark[] | undefined)[]): HoleMark[] {
     return i < 0 ? HOLE_ORDER.length : i
   }
   return [...by.values()].sort((a, b) => rank(a.hole) - rank(b.hole))
+}
+
+/** derivedWords is the stock_spans badge's reason and fix as one line
+ * — a disabled verb's title and accessible text (save as test, the
+ * replay verbs) on a derived run. */
+export function derivedWords(): string {
+  const w = holeWords(DERIVED_HOLE)
+  return `${w.reason}${w.fix ? ` — fix: ${w.fix}` : ""}`
 }
 
 /** holeWords is what a badge says: its label — truncated with bytes
@@ -396,12 +381,73 @@ export function derivedUsageUnknown(
   return !u || (u.input_tokens === 0 && u.output_tokens === 0)
 }
 
-/** derivedWords is the stock_spans badge's reason and fix as one line
- * — a disabled verb's title and accessible text (save as test, the
- * replay verbs) on a derived run. */
-export function derivedWords(): string {
-  const w = holeWords(DERIVED_HOLE)
-  return `${w.reason}${w.fix ? ` — fix: ${w.fix}` : ""}`
+/** refusalWords is the read-only line's message and fix in the
+ * server's words (appturn.go's appRefusal): a 403 already answered (refused), a plain Generate,
+ * a subagent's child run, a thread/pool child's turn, a session
+ * without a public id (appturn.go),
+ * a read-scoped token (auth.go), a failed meta read, a Studio without
+ * the playground (meta.capabilities_off's reason), a failed session or
+ * runtimes read — said as such, never a verdict — else appturn.go's four
+ * cases: one of the service connected without Sessions; none connected
+ * but an opted-in one gone (appGone: disconnected); none known and this app's own link dialled another
+ * Studio (facts.link, meta.runtime_link); else the link is closed. */
+export function refusalWords(
+  kind: ParkedKind,
+  row: AppRow,
+  runtimes: readonly RuntimeLike[] | null | undefined,
+  readToken: boolean,
+  refused?: { error?: string; fix?: string },
+  rtErr?: string,
+  facts?: AppGateFacts
+): { words: string; fix: string } {
+  if (refused?.fix)
+    return { words: refused.error ?? APP_OWNED, fix: refused.fix }
+  if (kind === "plain") return { words: APP_RUN, fix: APP_RUN_FIX }
+  if (kind === "child")
+    return {
+      words: `${SUBAGENT_CALL} ${row.parent_run_id ?? ""}`.trimEnd(),
+      fix: "",
+    }
+  if (kind === "pool-child") return { words: poolChildWords(row), fix: "" }
+  if (kind === "no-public-id")
+    return { words: noPublicIDWords(row.id), fix: APP_PUBLIC_ID_FIX }
+  if (readToken) return { words: READ_TOKEN, fix: "" }
+  // A failed read is no verdict: the server never said the link is closed.
+  if (facts?.metaError)
+    return { words: `${CAPS_UNREAD}: ${facts.metaError}`, fix: "" }
+  if (facts?.capabilities && !facts.capabilities.includes("playground")) {
+    const off = facts.capabilities_off?.playground
+    return {
+      words: `${APP_OWNED}: ${PLAYGROUND_OFF}`,
+      fix: off
+        ? off.replace(/^the playground is off:\s*/, "")
+        : PLAYGROUND_OFF_FIX,
+    }
+  }
+  if (facts?.sessionError)
+    return { words: `${SESSION_UNREAD}: ${facts.sessionError}`, fix: "" }
+  if (rtErr) return { words: `${RUNTIMES_UNREAD}: ${rtErr}`, fix: "" }
+  const svc = row.service || "(none recorded)"
+  // The opted-in app gone wins over another process of the service
+  // connected without Sessions (UX-H-14): restart it, not "set Sessions".
+  const gone = appGone(runtimes, row.service)
+  if (gone) return gone
+  if (!live(runtimes, row.service, false)) {
+    const url = facts?.link?.in_process ? "" : facts?.link?.studio_url
+    return url
+      ? {
+          words: `${APP_OWNED}: no runtime of service ${svc} is connected here — the app's link dialled ${url}`,
+          fix: APP_ELSEWHERE_FIX,
+        }
+      : {
+          words: `${APP_OWNED}: no runtime of service ${svc} is connected`,
+          fix: APP_LINK_FIX,
+        }
+  }
+  return {
+    words: `${APP_OWNED}: run ${row.id} is the app's own, and no connected runtime of its service ${svc} acts on the app's sessions`,
+    fix: `set runtime.Sessions(resolver) at runtime.Install in the app (service ${svc}): its turns then take approvals and steer`,
+  }
 }
 
 /** rowHoles is a run row's holes: a run document's children[] row
@@ -423,45 +469,80 @@ export function rowHoles(row: {
   return mergeHoles(out)
 }
 
-/**
- * statusHoles is what a run's header adds to the run document's holes,
- * one rule on both surfaces (the run page's header, the panel's turn):
- * interrupted from the row's status, max_tokens from its stop reason,
- * and the event positions the walk found missing — a gap only once the
- * run is over and settled (status known and not isLive): while it runs
- * or settles a missing position may still be in flight, and the run
- * page says so in a banner instead. The run document's own counted gap
- * (cause events_lost, "N of M events were lost") is listed first by
- * the callers, so its words win the merge.
- */
-export function statusHoles(r: {
-  status?: string
-  stop_reason?: string
-  gaps?: number[]
-  settling?: boolean
-}): HoleMark[] {
+/** contentHoles reads an event's attrs: a recorder cap's cut is
+ * truncated (with the bytes), a content-off chain's mark — or the
+ * core's own capture-off mark, "none" — is stripped. Redaction is not
+ * marked by weft's pipeline, so redacted never comes from here. */
+export function contentHoles(attrs: unknown): HoleMark[] {
+  if (typeof attrs !== "object" || attrs === null) return []
+  const a = attrs as Record<string, unknown>
   const out: HoleMark[] = []
-  if (r.status === "interrupted") out.push({ hole: "interrupted" })
-  const gaps = Array.isArray(r.gaps) ? r.gaps : []
-  if (gaps.length && r.status && !isLive(r))
-    out.push({
-      hole: "gap",
-      reason: `${plural(gaps.length, "event")} missing (${gaps.length === 1 ? "position" : "positions"} ${gaps.slice(0, 8).join(", ")}${gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,
-    })
-  if (r.stop_reason === "max_tokens") out.push({ hole: "max_tokens" })
+  const mark = a["weft.content"]
+  if (mark === "stripped" || mark === "none") out.push({ hole: "stripped" })
+  if (mark === "redacted") out.push({ hole: "redacted" })
+  const cut = Number(a["weft.content.truncated_bytes"])
+  if (Number.isFinite(cut) && cut > 0)
+    out.push({ hole: "truncated", bytes: cut })
   return out
 }
 
-/** isLive says a run's records may still arrive: it reads running, or
- * it is settling (api.go's runRow.settling, docs/record-contract.md §6
- * — its root span stored, so its status already reads succeeded or
- * failed, its run_finish not, heard from within 30 s). Every tail,
- * poll and done check on both surfaces reads it, never status ===
- * "running" alone: a run opened in that window is still followed. */
-export function isLive(
-  r: { status?: string; settling?: boolean } | null | undefined
-): boolean {
-  return !!r && (r.status === "running" || r.settling === true)
+/** parkedKind gates the verbs. Its decision table, first match wins:
+ *
+ *   row                                         kind and where it is decided
+ *   weft.playground                             experiment — its result pane
+ *   Subagent child: id `<parent_run_id>/…`      child — the parent turn's
+ *                                               SUBAGENT_PENDING call
+ *   pool child: meta weft.session.parent set    pool-child — the parent session
+ *     and either no parent run id (p.Submit     (ADR 0022 §7), never its own;
+ *     outside a run stamps none; then           no verb, no fix
+ *     whatever its id) or its own session's
+ *     `<session>-tN` (the delegating call's
+ *     child)
+ *   nested Generate: a parent run id, no        plain — the app resumes it
+ *     `<parent>/` prefix, not its own             (core merges a run's ctx
+ *     session's `<session>-tN` — with or          metadata into every run
+ *     without weft.session.parent: under a        started under it, so a
+ *     pool child's turn it inherits that key      run nested in a pool
+ *     too, and is still no pool child            child's tool handler
+ *                                                  inherits weft.session.parent,
+ *                                                  session and public id)
+ *   ordinary turn: no parent run id, or its     the session path below (a
+ *     own session's `<session>-tN` (a Send       session's Send inside a tool
+ *     inside a tool handler)                     handler is decidable there)
+ *
+ * The session path: outside a thread session the app resumes the run
+ * (plain); a session without a public id cannot be resolved by
+ * runtime.Sessions (no-public-id); a later turn of its session resumed
+ * it (resumed, next); else decide only while a connected runtime of the
+ * run's own service registered runtime.Sessions (what appturn.go routes
+ * by), read-only otherwise. */
+export function parkedKind(
+  row: AppRow | null | undefined,
+  runtimes: readonly RuntimeLike[] | null | undefined,
+  next?: string
+): ParkedKind {
+  if (row?.playground) return "experiment"
+  // Only core's Subagent child parks onto its parent as SUBAGENT_PENDING
+  // (pricing.go's subagents() tells it apart the same way).
+  if (subagentRun(row)) return "child"
+  // weft.session.parent rides ctx like any run metadata (core's
+  // mergeMetadata): a run that merely inherited it under a pool child's
+  // turn is linked to a run (its caller since U14, its parent before)
+  // and its id is not its own session's turn.
+  if (poolParent(row) && !childRun(row)) return "pool-child"
+  if (childRun(row)) return "plain"
+  if (!row?.session_id) return "plain"
+  if (!row.public_id) return "no-public-id"
+  if (next) return "resumed"
+  return live(runtimes, row.service, true) ? "decide" : "read-only"
+}
+
+/** usageKnown says whether a run row's usage is a number to show: the
+ * record sets it only when the run ends (run_finish, the run span's
+ * end), so a running row's zeros are "not yet" and an interrupted
+ * one's are "never" (its badge says why) — neither is 0 tokens. */
+export function usageKnown(status: string): boolean {
+  return status === "succeeded" || status === "failed"
 }
 
 /** The header's note while a run settles (both surfaces): its status
@@ -470,12 +551,38 @@ export const SETTLING_WORD = "settling"
 export const SETTLING_HINT =
   "the run's root span is stored and its last records may still arrive (up to 30 s): the story can stop short until they land"
 
-/** usageKnown says whether a run row's usage is a number to show: the
- * record sets it only when the run ends (run_finish, the run span's
- * end), so a running row's zeros are "not yet" and an interrupted
- * one's are "never" (its badge says why) — neither is 0 tokens. */
-export function usageKnown(status: string): boolean {
-  return status === "succeeded" || status === "failed"
+/** appVerbWords is one app-turn verb's line under its call, the same
+ * on both surfaces: in flight ("queued…"), the decision's word
+ * (approved, denied, resolved — lib/decisions.ts's DONE) or
+ * "steered" for a steer (with the turn the finished command names, when
+ * it is another run), or the runtime's rejection / the route's refusal
+ * word for word (bad) — "(no reason given)" when the row carries none.
+ * verb names which; absent, a verb that carries a decision is one (both
+ * surfaces send every decision with it, a steer never). */
+export function appVerbWords(
+  v: {
+    state: string
+    decision?: string
+    error?: string
+    fix?: string
+    run?: string
+  },
+  runID: string,
+  verb: "decide" | "steer" = v.decision ? "decide" : "steer"
+): { text: string; bad: boolean; resumed?: string } {
+  if (v.state === "finished")
+    return {
+      text:
+        verb === "steer" ? "steered" : (DONE[v.decision ?? ""] ?? "decided"),
+      bad: false,
+      ...(v.run && v.run !== runID ? { resumed: v.run } : {}),
+    }
+  const bad = ["refused", "rejected", "failed", "lost"].includes(v.state)
+  if (!bad) return { text: `${v.state}…`, bad }
+  return {
+    text: `${v.state}${v.error ? `: ${v.error}` : " (no reason given)"}${v.fix ? ` — fix: ${v.fix}` : ""}`,
+    bad,
+  }
 }
 
 /** USAGE_AT_FINISH is what a running child's usage reads. */
@@ -506,30 +613,17 @@ export const APP_OWNED = "app-owned turn · read-only"
 /** appturn.go's fix when no runtime of the service is connected. */
 export const APP_LINK_FIX =
   "open the runtime link in the app: WEFT_ENV=dev (or runtime.Enabled(true)) at runtime.Install, with runtime.Sessions(resolver)"
-/** An opted-in app whose runtime is gone (U20.2, UX-H-14): no runtime
- * of the run's service is connected, but one that registered
- * runtime.Sessions is listed disconnected (the first, /api/runtimes'
- * newest seen) — the app stopped, or Studio restarted under it and it
- * is not back yet (/runtimes says which). Never "add runtime.Sessions"
- * or "open the link": appturn.go's appGoneWords, last seen to the
- * second, in UTC. null while a Sessions runtime of the service is
- * connected (appturn.go never refuses then). */
-export function appGone(
-  rts: readonly RuntimeLike[] | null | undefined,
-  service: string | undefined
-): { words: string; fix: string } | null {
-  const rt = rts?.find(
-    (r) =>
-      service && r.connected === false && r.sessions && r.service === service
-  )
-  // A connected Sessions runtime of the service (a restart under a new
-  // id, a stale registration beside it) acts: nothing is gone.
-  return rt && !live(rts, service, true)
-    ? {
-        words: `${APP_OWNED}: the app's runtime ${rt.id} of service ${service} disconnected${rt.last_seen ? ` — last seen ${new Date(rt.last_seen).toISOString().slice(0, 19)}Z` : ""}`,
-        fix: "restart the app: its runtime link registers again",
-      }
-    : null
+
+/** isLive says a run's records may still arrive: it reads running, or
+ * it is settling (api.go's runRow.settling, docs/record-contract.md §6
+ * — its root span stored, so its status already reads succeeded or
+ * failed, its run_finish not, heard from within 30 s). Every tail,
+ * poll and done check on both surfaces reads it, never status ===
+ * "running" alone: a run opened in that window is still followed. */
+export function isLive(
+  r: { status?: string; settling?: boolean } | null | undefined
+): boolean {
+  return !!r && (r.status === "running" || r.settling === true)
 }
 /** The playground header's reading of the app's own turns while the
  * opted-in app is gone (U20.2-fix, UX-H-14): appGone's words and fix,
@@ -661,19 +755,30 @@ interface AppRow {
 export const poolParent = (
   row: { meta?: Record<string, string> } | null | undefined
 ) => row?.meta?.["weft.session.parent"] ?? ""
-
-/** ownTurn: the row's id is a turn of its own session — thread/turn.go's
- * `<session>-t<n>`, nothing after it. A Subagent child
- * (`<session>-t1/0/call`) and a Generate that inherited the session id
- * through core's ctx metadata (an id of its own) are not. */
-export function ownTurn(
-  row: { id?: string; session_id?: string } | null | undefined
-): boolean {
-  const s = row?.session_id
-  const id = row?.id
-  return (
-    !!s && !!id?.startsWith(`${s}-t`) && /^\d+$/.test(id.slice(s.length + 2))
+/** An opted-in app whose runtime is gone (U20.2, UX-H-14): no runtime
+ * of the run's service is connected, but one that registered
+ * runtime.Sessions is listed disconnected (the first, /api/runtimes'
+ * newest seen) — the app stopped, or Studio restarted under it and it
+ * is not back yet (/runtimes says which). Never "add runtime.Sessions"
+ * or "open the link": appturn.go's appGoneWords, last seen to the
+ * second, in UTC. null while a Sessions runtime of the service is
+ * connected (appturn.go never refuses then). */
+export function appGone(
+  rts: readonly RuntimeLike[] | null | undefined,
+  service: string | undefined
+): { words: string; fix: string } | null {
+  const rt = rts?.find(
+    (r) =>
+      service && r.connected === false && r.sessions && r.service === service
   )
+  // A connected Sessions runtime of the service (a restart under a new
+  // id, a stale registration beside it) acts: nothing is gone.
+  return rt && !live(rts, service, true)
+    ? {
+        words: `${APP_OWNED}: the app's runtime ${rt.id} of service ${service} disconnected${rt.last_seen ? ` — last seen ${new Date(rt.last_seen).toISOString().slice(0, 19)}Z` : ""}`,
+        fix: "restart the app: its runtime link registers again",
+      }
+    : null
 }
 
 /** subagentRun: a core Subagent's child — its id under its parent's
@@ -713,55 +818,10 @@ const live = (
       (!sessions || r.sessions === true)
   )
 
-/** parkedKind gates the verbs. Its decision table, first match wins:
- *
- *   row                                         kind and where it is decided
- *   weft.playground                             experiment — its result pane
- *   Subagent child: id `<parent_run_id>/…`      child — the parent turn's
- *                                               SUBAGENT_PENDING call
- *   pool child: meta weft.session.parent set    pool-child — the parent session
- *     and either no parent run id (p.Submit     (ADR 0022 §7), never its own;
- *     outside a run stamps none; then           no verb, no fix
- *     whatever its id) or its own session's
- *     `<session>-tN` (the delegating call's
- *     child)
- *   nested Generate: a parent run id, no        plain — the app resumes it
- *     `<parent>/` prefix, not its own             (core merges a run's ctx
- *     session's `<session>-tN` — with or          metadata into every run
- *     without weft.session.parent: under a        started under it, so a
- *     pool child's turn it inherits that key      run nested in a pool
- *     too, and is still no pool child            child's tool handler
- *                                                  inherits weft.session.parent,
- *                                                  session and public id)
- *   ordinary turn: no parent run id, or its     the session path below (a
- *     own session's `<session>-tN` (a Send       session's Send inside a tool
- *     inside a tool handler)                     handler is decidable there)
- *
- * The session path: outside a thread session the app resumes the run
- * (plain); a session without a public id cannot be resolved by
- * runtime.Sessions (no-public-id); a later turn of its session resumed
- * it (resumed, next); else decide only while a connected runtime of the
- * run's own service registered runtime.Sessions (what appturn.go routes
- * by), read-only otherwise. */
-export function parkedKind(
-  row: AppRow | null | undefined,
-  runtimes: readonly RuntimeLike[] | null | undefined,
-  next?: string
-): ParkedKind {
-  if (row?.playground) return "experiment"
-  // Only core's Subagent child parks onto its parent as SUBAGENT_PENDING
-  // (pricing.go's subagents() tells it apart the same way).
-  if (subagentRun(row)) return "child"
-  // weft.session.parent rides ctx like any run metadata (core's
-  // mergeMetadata): a run that merely inherited it under a pool child's
-  // turn is linked to a run (its caller since U14, its parent before)
-  // and its id is not its own session's turn.
-  if (poolParent(row) && !childRun(row)) return "pool-child"
-  if (childRun(row)) return "plain"
-  if (!row?.session_id) return "plain"
-  if (!row.public_id) return "no-public-id"
-  if (next) return "resumed"
-  return live(runtimes, row.service, true) ? "decide" : "read-only"
+/** resultCapReason is the result_cap cause's words with the bytes a
+ * tool's result cap cut (the loop's model-visible marker). */
+export function resultCapReason(bytes: number): string {
+  return `${CAUSES.truncated?.result_cap.reason ?? ""} (${kib(bytes)} cut)`
 }
 
 /** linkedRun is the run a row was started from: its Subagent parent,
@@ -769,6 +829,65 @@ export function parkedKind(
 export const linkedRun = (
   row: { parent_run_id?: string; caller_run_id?: string } | null | undefined
 ) => row?.parent_run_id || row?.caller_run_id || ""
+
+/**
+ * statusHoles is what a run's header adds to the run document's holes,
+ * one rule on both surfaces (the run page's header, the panel's turn):
+ * interrupted from the row's status, max_tokens from its stop reason,
+ * and the event positions the walk found missing — a gap only once the
+ * run is over and settled (status known and not isLive): while it runs
+ * or settles a missing position may still be in flight, and the run
+ * page says so in a banner instead. The run document's own counted gap
+ * (cause events_lost, "N of M events were lost") is listed first by
+ * the callers, so its words win the merge.
+ */
+export function statusHoles(r: {
+  status?: string
+  stop_reason?: string
+  gaps?: number[]
+  settling?: boolean
+}): HoleMark[] {
+  const out: HoleMark[] = []
+  if (r.status === "interrupted") out.push({ hole: "interrupted" })
+  const gaps = Array.isArray(r.gaps) ? r.gaps : []
+  if (gaps.length && r.status && !isLive(r))
+    out.push({
+      hole: "gap",
+      reason: `${plural(gaps.length, "event")} missing (${gaps.length === 1 ? "position" : "positions"} ${gaps.slice(0, 8).join(", ")}${gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,
+    })
+  if (r.stop_reason === "max_tokens") out.push({ hole: "max_tokens" })
+  return out
+}
+
+/** What the surface knows of the Studio and the session beyond the
+ * runtimes: meta's capabilities (absent while unread: no verdict), its
+ * capabilities_off, and a failed meta or session read. */
+export interface AppGateFacts {
+  /** meta.runtime_link: this process's runtime link (U20.2). */
+  link?: { studio_url?: string; in_process?: boolean }
+  capabilities?: readonly string[]
+  capabilities_off?: Record<string, string>
+  metaError?: string
+  sessionError?: string
+}
+
+/** appTurn: the run page reads the gate's facts (the session, the
+ * runtimes) for this row — a turn parkedKind sends down the session
+ * path, with a session and a public id; never a child of either kind,
+ * a nested Generate or an experiment. */
+export const appTurn = (row: AppRow) => {
+  const k = parkedKind(row, null)
+  return (
+    (k === "read-only" || k === "decide") && !!row.session_id && !!row.public_id
+  )
+}
+
+/** A pool child's line: POOL_CHILD, the parent session's id and, when
+ * it ran under a delegating call, POOL_CHILD_TURN and that turn. Never
+ * POOL_CHILD alone: the kind is weft.session.parent's, so a session id
+ * always follows. */
+export const poolChildWords = (row: AppRow) =>
+  `${POOL_CHILD} ${poolParent(row)}${linkedRun(row) ? ` ${POOL_CHILD_TURN} ${linkedRun(row)}` : ""}`
 
 /** nextTurn is the turn after row in its session (the smallest later
  * turn number among runs): a parked turn with one was resumed. */
@@ -810,105 +929,6 @@ export function nextTurn(
   return best?.id
 }
 
-/** What the surface knows of the Studio and the session beyond the
- * runtimes: meta's capabilities (absent while unread: no verdict), its
- * capabilities_off, and a failed meta or session read. */
-export interface AppGateFacts {
-  /** meta.runtime_link: this process's runtime link (U20.2). */
-  link?: { studio_url?: string; in_process?: boolean }
-  capabilities?: readonly string[]
-  capabilities_off?: Record<string, string>
-  metaError?: string
-  sessionError?: string
-}
-
-/** appTurn: the run page reads the gate's facts (the session, the
- * runtimes) for this row — a turn parkedKind sends down the session
- * path, with a session and a public id; never a child of either kind,
- * a nested Generate or an experiment. */
-export const appTurn = (row: AppRow) => {
-  const k = parkedKind(row, null)
-  return (
-    (k === "read-only" || k === "decide") && !!row.session_id && !!row.public_id
-  )
-}
-
-/** A pool child's line: POOL_CHILD, the parent session's id and, when
- * it ran under a delegating call, POOL_CHILD_TURN and that turn. Never
- * POOL_CHILD alone: the kind is weft.session.parent's, so a session id
- * always follows. */
-export const poolChildWords = (row: AppRow) =>
-  `${POOL_CHILD} ${poolParent(row)}${linkedRun(row) ? ` ${POOL_CHILD_TURN} ${linkedRun(row)}` : ""}`
-
-/** refusalWords is the read-only line's message and fix in the
- * server's words (appturn.go's appRefusal): a 403 already answered (refused), a plain Generate,
- * a subagent's child run, a thread/pool child's turn, a session
- * without a public id (appturn.go),
- * a read-scoped token (auth.go), a failed meta read, a Studio without
- * the playground (meta.capabilities_off's reason), a failed session or
- * runtimes read — said as such, never a verdict — else appturn.go's four
- * cases: one of the service connected without Sessions; none connected
- * but an opted-in one gone (appGone: disconnected); none known and this app's own link dialled another
- * Studio (facts.link, meta.runtime_link); else the link is closed. */
-export function refusalWords(
-  kind: ParkedKind,
-  row: AppRow,
-  runtimes: readonly RuntimeLike[] | null | undefined,
-  readToken: boolean,
-  refused?: { error?: string; fix?: string },
-  rtErr?: string,
-  facts?: AppGateFacts
-): { words: string; fix: string } {
-  if (refused?.fix)
-    return { words: refused.error ?? APP_OWNED, fix: refused.fix }
-  if (kind === "plain") return { words: APP_RUN, fix: APP_RUN_FIX }
-  if (kind === "child")
-    return {
-      words: `${SUBAGENT_CALL} ${row.parent_run_id ?? ""}`.trimEnd(),
-      fix: "",
-    }
-  if (kind === "pool-child") return { words: poolChildWords(row), fix: "" }
-  if (kind === "no-public-id")
-    return { words: noPublicIDWords(row.id), fix: APP_PUBLIC_ID_FIX }
-  if (readToken) return { words: READ_TOKEN, fix: "" }
-  // A failed read is no verdict: the server never said the link is closed.
-  if (facts?.metaError)
-    return { words: `${CAPS_UNREAD}: ${facts.metaError}`, fix: "" }
-  if (facts?.capabilities && !facts.capabilities.includes("playground")) {
-    const off = facts.capabilities_off?.playground
-    return {
-      words: `${APP_OWNED}: ${PLAYGROUND_OFF}`,
-      fix: off
-        ? off.replace(/^the playground is off:\s*/, "")
-        : PLAYGROUND_OFF_FIX,
-    }
-  }
-  if (facts?.sessionError)
-    return { words: `${SESSION_UNREAD}: ${facts.sessionError}`, fix: "" }
-  if (rtErr) return { words: `${RUNTIMES_UNREAD}: ${rtErr}`, fix: "" }
-  const svc = row.service || "(none recorded)"
-  // The opted-in app gone wins over another process of the service
-  // connected without Sessions (UX-H-14): restart it, not "set Sessions".
-  const gone = appGone(runtimes, row.service)
-  if (gone) return gone
-  if (!live(runtimes, row.service, false)) {
-    const url = facts?.link?.in_process ? "" : facts?.link?.studio_url
-    return url
-      ? {
-          words: `${APP_OWNED}: no runtime of service ${svc} is connected here — the app's link dialled ${url}`,
-          fix: APP_ELSEWHERE_FIX,
-        }
-      : {
-          words: `${APP_OWNED}: no runtime of service ${svc} is connected`,
-          fix: APP_LINK_FIX,
-        }
-  }
-  return {
-    words: `${APP_OWNED}: run ${row.id} is the app's own, and no connected runtime of its service ${svc} acts on the app's sessions`,
-    fix: `set runtime.Sessions(resolver) at runtime.Install in the app (service ${svc}): its turns then take approvals and steer`,
-  }
-}
-
 /** The line the read-only block draws. */
 export const refusalLine = (w: { words: string; fix: string }) =>
   w.fix ? `${w.words} — fix: ${w.fix}` : w.words
@@ -919,36 +939,16 @@ export const refusalLine = (w: { words: string; fix: string }) =>
  * verb. */
 export const refusalHead = (w: { words: string }) => w.words.split(/: | — /)[0]
 
-/** appVerbWords is one app-turn verb's line under its call, the same
- * on both surfaces: in flight ("queued…"), the decision's word
- * (approved, denied, resolved — lib/decisions.ts's DONE) or
- * "steered" for a steer (with the turn the finished command names, when
- * it is another run), or the runtime's rejection / the route's refusal
- * word for word (bad) — "(no reason given)" when the row carries none.
- * verb names which; absent, a verb that carries a decision is one (both
- * surfaces send every decision with it, a steer never). */
-export function appVerbWords(
-  v: {
-    state: string
-    decision?: string
-    error?: string
-    fix?: string
-    run?: string
-  },
-  runID: string,
-  verb: "decide" | "steer" = v.decision ? "decide" : "steer"
-): { text: string; bad: boolean; resumed?: string } {
-  if (v.state === "finished")
-    return {
-      text:
-        verb === "steer" ? "steered" : (DONE[v.decision ?? ""] ?? "decided"),
-      bad: false,
-      ...(v.run && v.run !== runID ? { resumed: v.run } : {}),
-    }
-  const bad = ["refused", "rejected", "failed", "lost"].includes(v.state)
-  if (!bad) return { text: `${v.state}…`, bad }
-  return {
-    text: `${v.state}${v.error ? `: ${v.error}` : " (no reason given)"}${v.fix ? ` — fix: ${v.fix}` : ""}`,
-    bad,
-  }
+/** ownTurn: the row's id is a turn of its own session — thread/turn.go's
+ * `<session>-t<n>`, nothing after it. A Subagent child
+ * (`<session>-t1/0/call`) and a Generate that inherited the session id
+ * through core's ctx metadata (an id of its own) are not. */
+export function ownTurn(
+  row: { id?: string; session_id?: string } | null | undefined
+): boolean {
+  const s = row?.session_id
+  const id = row?.id
+  return (
+    !!s && !!id?.startsWith(`${s}-t`) && /^\d+$/.test(id.slice(s.length + 2))
+  )
 }

@@ -43,24 +43,6 @@ export function diffLines(before: string, after: string): DiffRow[] {
   return out
 }
 
-/** diffSummary is the one-line form the panel shows under the result:
- * "+ N − M" against the source turn (§3's `diff vs t3:` line). */
-export function diffSummary(rows: DiffRow[]): string {
-  const add = rows.filter((r) => r.kind === "add").length
-  const del = rows.filter((r) => r.kind === "del").length
-  if (!add && !del) return "identical"
-  return `+${add} −${del}`
-}
-
-/** The LCS table's side past which a diff is not drawn (2,000 lines on
- * each side, after the common ends are trimmed: 4M cells). */
-export const DIFF_CAP = 2000
-
-/** A bounded diff: the rows, or — past the cap — the sizes of the
- * middle that differs, for a "too large to diff" note. */
-export type BoundedDiff =
-  { rows: DiffRow[] } | { tooLarge: { before: number; after: number } }
-
 /** diffLinesBounded is diffLines with the common leading and trailing
  * lines trimmed before the LCS (a prompt rewrite is usually local),
  * and the middle capped at `cap` lines a side. */
@@ -99,4 +81,22 @@ export function diffLinesBounded(
       ...same(a.slice(a.length - tail)),
     ],
   }
+}
+
+/** The LCS table's side past which a diff is not drawn (2,000 lines on
+ * each side, after the common ends are trimmed: 4M cells). */
+export const DIFF_CAP = 2000
+
+/** A bounded diff: the rows, or — past the cap — the sizes of the
+ * middle that differs, for a "too large to diff" note. */
+export type BoundedDiff =
+  { rows: DiffRow[] } | { tooLarge: { before: number; after: number } }
+
+/** diffSummary is the one-line form the panel shows under the result:
+ * "+ N − M" against the source turn (§3's `diff vs t3:` line). */
+export function diffSummary(rows: DiffRow[]): string {
+  const add = rows.filter((r) => r.kind === "add").length
+  const del = rows.filter((r) => r.kind === "del").length
+  if (!add && !del) return "identical"
+  return `+${add} −${del}`
 }

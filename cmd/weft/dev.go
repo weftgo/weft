@@ -162,6 +162,8 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 
 	if *open {
 		openBrowser(out, uiLink(st.addr, st.token))
+	} else if line := tokenLine(st, fixedToken(*token) != ""); line != "" {
+		_, _ = fmt.Fprintln(out, line)
 	}
 
 	var changes <-chan string
@@ -360,6 +362,23 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	return r, nil
 }
 
+// tokenLine says where the UI's token is (UX-D-25) when no browser
+// opened with it and the link does not carry it: the database's stable
+// token file (weft open --with-token prints the signed-in link), or the
+// fixed token the flag or the environment set. "" when the link carries
+// the token (one generated for this process) or there is none.
+func tokenLine(st *devStudioRun, fixed bool) string {
+	switch {
+	case st.token == "" || strings.Contains(st.link, "#token="):
+		return ""
+	case fixed:
+		return "studio: token: the one --token / WEFT_STUDIO_TOKEN set"
+	case st.dbPath != "" && readTokenFile(tokenPath(st.dbPath)) == st.token:
+		return "studio: token: " + tokenPath(st.dbPath) + " (weft open --with-token)"
+	}
+	return ""
+}
+
 // loopbackAddr is addr with an unspecified host (0.0.0.0, ::, empty)
 // replaced by 127.0.0.1: where a client on this machine dials it.
 func loopbackAddr(addr string) string {
@@ -539,7 +558,7 @@ func (d *devLoop) announce(pid int, before map[string]int) *oneLine {
 				return
 			case <-deadline.C:
 				printed = true
-				_, _ = fmt.Fprintln(d.out, head+"no runtime registered yet (the app needs runtime.Install; WEFT_ENV=dev is set)")
+				_, _ = fmt.Fprintln(d.out, head+"no runtime registered yet (the app needs runtime.Install; WEFT_ENV=dev is set), or the app links its own embedded Studio")
 			case <-time.After(devPoll):
 			}
 		}

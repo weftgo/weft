@@ -277,40 +277,13 @@ export function callLabel(name: string, args: unknown, max = 48): string {
   return `${name}(${inner})`
 }
 
-/** ownMessages is the run's own messages (the input record left out),
- * each tagged with the step it counts toward: the batch's stored step
- * when every batch carries one and the input flag, else numbered by
- * order — each assistant message opens the next step, what precedes
- * the first is step 0's (editFieldsOf's rule, below). */
-export function ownMessages(
-  batches: TranscriptBatch[]
-): { step: number; m: Message }[] {
-  const placed = placeBatches(batches)
-  const list = Array.isArray(batches) ? batches : []
-  const stored =
-    list.length > 0 &&
-    list.every(
-      (b) =>
-        typeof b.step === "number" &&
-        b.step >= 0 &&
-        typeof b.input === "boolean"
-    )
-  const tagged: { step: number; m: Message }[] = []
-  for (const [i, b] of placed.entries()) {
-    const flag = list[i]?.input
-    const input = typeof flag === "boolean" ? flag : b.input
-    if (input) continue
-    for (const m of b.messages)
-      tagged.push({ step: stored ? (list[i].step as number) : -1, m })
-  }
-  if (!stored) {
-    let at = -1
-    for (const t of tagged) {
-      if (t.m.role === "assistant") at++
-      t.step = Math.max(at, 0)
-    }
-  }
-  return tagged
+/** labLacksDefaults: the registration carries no option-lab defaults
+ * — the server's own test (tool_choice mode unset). /api/runtimes
+ * omits them only when Studio itself predates the field; a current
+ * Studio fills an old runtime's in (its caps, tool_choice auto), and
+ * then the server's 400 is the one that says so, shown verbatim. */
+export function labLacksDefaults(agent: Pick<AgentView, "defaults">): boolean {
+  return !agent.defaults?.tool_choice.mode
 }
 
 /** A compaction view's place (the transcript?step answer's, or the
@@ -662,15 +635,6 @@ export interface LabProblem {
   message: string
 }
 
-/** labLacksDefaults: the registration carries no option-lab defaults
- * — the server's own test (tool_choice mode unset). /api/runtimes
- * omits them only when Studio itself predates the field; a current
- * Studio fills an old runtime's in (its caps, tool_choice auto), and
- * then the server's 400 is the one that says so, shown verbatim. */
-export function labLacksDefaults(agent: Pick<AgentView, "defaults">): boolean {
-  return !agent.defaults?.tool_choice.mode
-}
-
 /** The hand-off's lab= and edits= (the panel's "compare in Studio",
  * lib/links.ts): the lab's set knobs and the edit list as JSON, so the
  * same experiment opens in Studio as the same command. */
@@ -679,6 +643,34 @@ export function labHandoff(lab: LabFields | undefined): string | undefined {
     ([, v]) => (v as string | string[]).length
   )
   return set.length ? JSON.stringify(Object.fromEntries(set)) : undefined
+}
+
+/** labDefault is the agent's default for a knob as the form shows it,
+ * greyed: "" when the registration reports none. */
+export function labDefault(
+  key: keyof LabFields,
+  d: AgentDefaults | undefined
+): string {
+  if (!d) return ""
+  switch (key) {
+    case "stop":
+      return (d.stop ?? []).join("\n")
+    case "tool_choice":
+      return d.tool_choice.mode
+    case "tool_choice_name":
+      return d.tool_choice.name ?? ""
+    case "park_on":
+    case "only_tools":
+      return ""
+  }
+  const v = (d as unknown as Record<string, unknown>)[key]
+  // A 0 cap is no bound (the server refuses a raise only over a cap > 0).
+  if (
+    (key === "max_steps" || key === "parallelism") &&
+    !(typeof v === "number" && v > 0)
+  )
+    return ""
+  return typeof v === "number" ? String(v) : ""
 }
 export const editsHandoff = (list: ReplayEdit[]): string | undefined =>
   list.length ? JSON.stringify(list) : undefined
@@ -750,32 +742,30 @@ export function editsFromHandoff(s: string | undefined): ReplayEdit[] {
     : []
 }
 
-/** labDefault is the agent's default for a knob as the form shows it,
- * greyed: "" when the registration reports none. */
-export function labDefault(
+/** labOn: the knob is an override (it differs from the agent's
+ * default and would be sent) — the form draws it in colour. */
+export function labOn(
+  lab: LabFields | undefined,
   key: keyof LabFields,
   d: AgentDefaults | undefined
-): string {
-  if (!d) return ""
-  switch (key) {
-    case "stop":
-      return (d.stop ?? []).join("\n")
-    case "tool_choice":
-      return d.tool_choice.mode
-    case "tool_choice_name":
-      return d.tool_choice.name ?? ""
-    case "park_on":
-    case "only_tools":
-      return ""
-  }
-  const v = (d as unknown as Record<string, unknown>)[key]
-  // A 0 cap is no bound (the server refuses a raise only over a cap > 0).
-  if (
-    (key === "max_steps" || key === "parallelism") &&
-    !(typeof v === "number" && v > 0)
-  )
-    return ""
-  return typeof v === "number" ? String(v) : ""
+): boolean {
+  if (!lab) return false
+  const v = lab[key]
+  if (Array.isArray(v)) return v.length > 0
+  if (key === "stop")
+    return stopsOf(v).length > 0 && stopsOf(v).join("\n") !== labDefault(key, d)
+  if (key === "tool_choice")
+    return (
+      v !== "" &&
+      !(
+        v === labDefault(key, d) &&
+        (v !== "named" ||
+          lab.tool_choice_name === labDefault("tool_choice_name", d))
+      )
+    )
+  if (key === "tool_choice_name") return false
+  const def = labDefault(key, d)
+  return v.trim() !== "" && !(def !== "" && Number(def) === Number(v))
 }
 
 /** stopsOf splits the stop field: one sequence per line, empty lines
@@ -949,28 +939,38 @@ export function labProblems(
   ).problems
 }
 
-/** labOn: the knob is an override (it differs from the agent's
- * default and would be sent) — the form draws it in colour. */
-export function labOn(
-  lab: LabFields | undefined,
-  key: keyof LabFields,
-  d: AgentDefaults | undefined
-): boolean {
-  if (!lab) return false
-  const v = lab[key]
-  if (Array.isArray(v)) return v.length > 0
-  if (key === "stop")
-    return stopsOf(v).length > 0 && stopsOf(v).join("\n") !== labDefault(key, d)
-  if (key === "tool_choice")
-    return (
-      v !== "" &&
-      !(
-        v === labDefault(key, d) &&
-        (v !== "named" ||
-          lab.tool_choice_name === labDefault("tool_choice_name", d))
-      )
+/** ownMessages is the run's own messages (the input record left out),
+ * each tagged with the step it counts toward: the batch's stored step
+ * when every batch carries one and the input flag, else numbered by
+ * order — each assistant message opens the next step, what precedes
+ * the first is step 0's (editFieldsOf's rule, below). */
+export function ownMessages(
+  batches: TranscriptBatch[]
+): { step: number; m: Message }[] {
+  const placed = placeBatches(batches)
+  const list = Array.isArray(batches) ? batches : []
+  const stored =
+    list.length > 0 &&
+    list.every(
+      (b) =>
+        typeof b.step === "number" &&
+        b.step >= 0 &&
+        typeof b.input === "boolean"
     )
-  if (key === "tool_choice_name") return false
-  const def = labDefault(key, d)
-  return v.trim() !== "" && !(def !== "" && Number(def) === Number(v))
+  const tagged: { step: number; m: Message }[] = []
+  for (const [i, b] of placed.entries()) {
+    const flag = list[i]?.input
+    const input = typeof flag === "boolean" ? flag : b.input
+    if (input) continue
+    for (const m of b.messages)
+      tagged.push({ step: stored ? (list[i].step as number) : -1, m })
+  }
+  if (!stored) {
+    let at = -1
+    for (const t of tagged) {
+      if (t.m.role === "assistant") at++
+      t.step = Math.max(at, 0)
+    }
+  }
+  return tagged
 }

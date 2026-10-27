@@ -651,7 +651,9 @@ func (s *Server) servePanelTokens(w http.ResponseWriter, r *http.Request) {
 		TTL        string            `json:"ttl"`
 		Playground bool              `json:"playground"`
 	}
-	if !decodeBody(w, r, "body must be JSON", &req) {
+	// An unknown key ({"scope":"playground"}) is a 400 naming the
+	// fields, never a read token minted in silence (UX-D-27).
+	if !decodeStrict(w, r, `body must be JSON with public_id, tags, ttl and playground ("playground": true mints a playground token)`, &req) {
 		return
 	}
 	if req.PublicID == "" && len(req.Tags) == 0 {

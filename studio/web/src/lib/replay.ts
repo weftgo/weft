@@ -91,6 +91,169 @@ function classWords(
 const SUBSTITUTED =
   "substituted from the recorded result when the call repeats, else parked"
 
+/** The breakpoints a runtime parks on for this agent (its stored set,
+ * restricted to the agent's tools). */
+export function breakpointsFor(
+  runtime: Pick<RuntimeView, "breakpoints"> | undefined,
+  agent: Pick<AgentView, "tools"> | undefined
+): string[] {
+  const have = new Set((agent?.tools ?? []).map((t) => t.name))
+  return (runtime?.breakpoints ?? []).filter((t) => have.has(t))
+}
+
+/** A whole, non-negative number, or 0. */
+function pos(n: number): number {
+  return Number.isInteger(n) && n >= 0 ? n : 0
+}
+
+/** edit this result and replay: step `step`'s call `callID` is the
+ * field the drawer opens on, the next step run fresh — from_step =
+ * step + 1. The field starts empty, the recording beside it (UX-C-05:
+ * an edit equal to the recording is not an edit, so none is seeded —
+ * the drawer opens on a plain replay, engine scripted, until the user
+ * types); the field reads the recording from the transcript. */
+export function editResultAndReplay(step: number, callID: string): ReplayDraft {
+  const at = pos(step)
+  return {
+    verb: "edit_result",
+    fromStep: at + 1,
+    edits: [],
+    thread: "ephemeral",
+    input: "",
+    focus: "edit",
+    at: { step: at, callID },
+  }
+}
+
+// ── The verbs (plan F1) ────────────────────────────────────────────
+// Each opens the drawer pre-filled; both surfaces build the same
+// command from it. from_step — and every edit's step — is the step
+// ORDINAL: the stored weft.step.index, the n of runs/{id}/steps/{n} and
+// of a run link's ?step=. studio/edits.go's cutTranscriptAtStep and the
+// runtime's cutAt cut at the first assistant message whose stored index
+// is ≥ from_step (numbering by order is only the fallback for records
+// without a stored step, where order is the ordinal). A card sends its
+// own step.index — a fold with a gap shifts nothing.
+
+export type ReplayVerb =
+  "from_step" | "edit_result" | "edit_prompt" | "rerun" | "continue" | "edit"
+
+/** One transcript edit on the kept prefix (lib/edits.ts: the five
+ * kinds, the wire both clients' buildRunBody send). step is the step
+ * ordinal, as from_step. */
+export type { ReplayEdit } from "./edits"
+
+/** The drawer's pre-filled state for one verb. */
+export interface ReplayDraft {
+  verb: ReplayVerb
+  /** source.from_step: the step ordinal run fresh. */
+  fromStep: number
+  edits: ReplayEdit[]
+  /** The system prompt to start from, when the verb pre-fills one
+   * (edit the prompt: the step's own system text); undefined = the
+   * registered prompt. */
+  instructions?: string
+  thread: "ephemeral" | "fork"
+  /** The input (only at from_step 0; "" = the source turn's own). */
+  input: string
+  /** The field the drawer opens on. */
+  focus?: "prompt" | "edit" | "input"
+  /** The kept field focus "edit" names (edit this result: its step and
+   * call). */
+  at?: { step: number; callID: string }
+}
+
+/** replay from this step: steps 0..n-1 kept, step n run fresh. */
+export function replayFromStep(n: number): ReplayDraft {
+  return {
+    verb: "from_step",
+    fromStep: pos(n),
+    edits: [],
+    thread: "ephemeral",
+    input: "",
+  }
+}
+
+/** edit the prompt and replay: step n run fresh under an edited system
+ * prompt, pre-filled with the text the step was called with. */
+export function editPromptAndReplay(
+  n: number,
+  systemText?: string
+): ReplayDraft {
+  return {
+    verb: "edit_prompt",
+    fromStep: pos(n),
+    edits: [],
+    ...(systemText !== undefined ? { instructions: systemText } : {}),
+    thread: "ephemeral",
+    input: "",
+    focus: "prompt",
+  }
+}
+
+/** edit the transcript and replay (plan F2): the Story's in-place
+ * editor opened the drawer; from_step is what its edits imply
+ * (lib/edits.ts's impliedFromStep), the edits come as they are made. */
+export function editTranscript(
+  fromStep: number,
+  edits: ReplayEdit[] = []
+): ReplayDraft {
+  return {
+    verb: "edit",
+    fromStep: pos(fromStep),
+    edits,
+    thread: "ephemeral",
+    input: "",
+  }
+}
+
+/** re-run: the whole turn again (from_step 0, the source's own input). */
+export function rerun(): ReplayDraft {
+  return {
+    verb: "rerun",
+    fromStep: 0,
+    edits: [],
+    thread: "ephemeral",
+    input: "",
+  }
+}
+
+/** continue here with a new message: a fork — a new session with
+ * lineage whose next turn is the message typed in the drawer. */
+export function continueHere(): ReplayDraft {
+  return {
+    verb: "continue",
+    fromStep: 0,
+    edits: [],
+    thread: "fork",
+    input: "",
+    focus: "input",
+  }
+}
+
+/**
+ * allowRefusals names the tools for which side_effects "allow" is
+ * refused (403) — studio/playground.go's walk: every REGISTERED tool
+ * left on (tools_enabled, or all of them) that is neither opted in by
+ * AllowSideEffects, nor vouched safe, nor the Output submission. The
+ * step's catalog is for display; the command is judged on this set.
+ * Empty outside allow mode.
+ */
+export function allowRefusals(
+  agent: Pick<AgentView, "tools"> | null | undefined,
+  mode: SideEffectsMode,
+  toolsEnabled?: string[]
+): string[] {
+  if (mode !== "allow" || !agent) return []
+  const on = toolsEnabled?.length ? new Set(toolsEnabled) : null
+  return agent.tools
+    .filter((t) => !on || on.has(t.name))
+    .filter(
+      (t) => !t.allow && t.side_effects !== "safe" && t.name !== OUTPUT_TOOL
+    )
+    .map((t) => t.name)
+}
+
 /**
  * replayVerdicts is the ack preview's list: per tool, whether its calls
  * run, are substituted from the record, park, or are not offered — and
@@ -174,169 +337,6 @@ export function replayVerdicts(input: VerdictInput): ToolVerdict[] {
   })
 }
 
-/**
- * allowRefusals names the tools for which side_effects "allow" is
- * refused (403) — studio/playground.go's walk: every REGISTERED tool
- * left on (tools_enabled, or all of them) that is neither opted in by
- * AllowSideEffects, nor vouched safe, nor the Output submission. The
- * step's catalog is for display; the command is judged on this set.
- * Empty outside allow mode.
- */
-export function allowRefusals(
-  agent: Pick<AgentView, "tools"> | null | undefined,
-  mode: SideEffectsMode,
-  toolsEnabled?: string[]
-): string[] {
-  if (mode !== "allow" || !agent) return []
-  const on = toolsEnabled?.length ? new Set(toolsEnabled) : null
-  return agent.tools
-    .filter((t) => !on || on.has(t.name))
-    .filter(
-      (t) => !t.allow && t.side_effects !== "safe" && t.name !== OUTPUT_TOOL
-    )
-    .map((t) => t.name)
-}
-
-/** The breakpoints a runtime parks on for this agent (its stored set,
- * restricted to the agent's tools). */
-export function breakpointsFor(
-  runtime: Pick<RuntimeView, "breakpoints"> | undefined,
-  agent: Pick<AgentView, "tools"> | undefined
-): string[] {
-  const have = new Set((agent?.tools ?? []).map((t) => t.name))
-  return (runtime?.breakpoints ?? []).filter((t) => have.has(t))
-}
-
-// ── The verbs (plan F1) ────────────────────────────────────────────
-// Each opens the drawer pre-filled; both surfaces build the same
-// command from it. from_step — and every edit's step — is the step
-// ORDINAL: the stored weft.step.index, the n of runs/{id}/steps/{n} and
-// of a run link's ?step=. studio/edits.go's cutTranscriptAtStep and the
-// runtime's cutAt cut at the first assistant message whose stored index
-// is ≥ from_step (numbering by order is only the fallback for records
-// without a stored step, where order is the ordinal). A card sends its
-// own step.index — a fold with a gap shifts nothing.
-
-export type ReplayVerb =
-  "from_step" | "edit_result" | "edit_prompt" | "rerun" | "continue" | "edit"
-
-/** One transcript edit on the kept prefix (lib/edits.ts: the five
- * kinds, the wire both clients' buildRunBody send). step is the step
- * ordinal, as from_step. */
-export type { ReplayEdit } from "./edits"
-
-/** The drawer's pre-filled state for one verb. */
-export interface ReplayDraft {
-  verb: ReplayVerb
-  /** source.from_step: the step ordinal run fresh. */
-  fromStep: number
-  edits: ReplayEdit[]
-  /** The system prompt to start from, when the verb pre-fills one
-   * (edit the prompt: the step's own system text); undefined = the
-   * registered prompt. */
-  instructions?: string
-  thread: "ephemeral" | "fork"
-  /** The input (only at from_step 0; "" = the source turn's own). */
-  input: string
-  /** The field the drawer opens on. */
-  focus?: "prompt" | "edit" | "input"
-  /** The kept field focus "edit" names (edit this result: its step and
-   * call). */
-  at?: { step: number; callID: string }
-}
-
-/** A whole, non-negative number, or 0. */
-function pos(n: number): number {
-  return Number.isInteger(n) && n >= 0 ? n : 0
-}
-
-/** replay from this step: steps 0..n-1 kept, step n run fresh. */
-export function replayFromStep(n: number): ReplayDraft {
-  return {
-    verb: "from_step",
-    fromStep: pos(n),
-    edits: [],
-    thread: "ephemeral",
-    input: "",
-  }
-}
-
-/** edit this result and replay: step `step`'s call `callID` is the
- * field the drawer opens on, the next step run fresh — from_step =
- * step + 1. The field starts empty, the recording beside it (UX-C-05:
- * an edit equal to the recording is not an edit, so none is seeded —
- * the drawer opens on a plain replay, engine scripted, until the user
- * types); the field reads the recording from the transcript. */
-export function editResultAndReplay(step: number, callID: string): ReplayDraft {
-  const at = pos(step)
-  return {
-    verb: "edit_result",
-    fromStep: at + 1,
-    edits: [],
-    thread: "ephemeral",
-    input: "",
-    focus: "edit",
-    at: { step: at, callID },
-  }
-}
-
-/** edit the prompt and replay: step n run fresh under an edited system
- * prompt, pre-filled with the text the step was called with. */
-export function editPromptAndReplay(
-  n: number,
-  systemText?: string
-): ReplayDraft {
-  return {
-    verb: "edit_prompt",
-    fromStep: pos(n),
-    edits: [],
-    ...(systemText !== undefined ? { instructions: systemText } : {}),
-    thread: "ephemeral",
-    input: "",
-    focus: "prompt",
-  }
-}
-
-/** edit the transcript and replay (plan F2): the Story's in-place
- * editor opened the drawer; from_step is what its edits imply
- * (lib/edits.ts's impliedFromStep), the edits come as they are made. */
-export function editTranscript(
-  fromStep: number,
-  edits: ReplayEdit[] = []
-): ReplayDraft {
-  return {
-    verb: "edit",
-    fromStep: pos(fromStep),
-    edits,
-    thread: "ephemeral",
-    input: "",
-  }
-}
-
-/** re-run: the whole turn again (from_step 0, the source's own input). */
-export function rerun(): ReplayDraft {
-  return {
-    verb: "rerun",
-    fromStep: 0,
-    edits: [],
-    thread: "ephemeral",
-    input: "",
-  }
-}
-
-/** continue here with a new message: a fork — a new session with
- * lineage whose next turn is the message typed in the drawer. */
-export function continueHere(): ReplayDraft {
-  return {
-    verb: "continue",
-    fromStep: 0,
-    edits: [],
-    thread: "fork",
-    input: "",
-    focus: "input",
-  }
-}
-
 /** stepPositionOf is the from_step a step of the run sends: its own
  * ordinal (from_step IS the ordinal — see above), or -1 when the run
  * has no step of that ordinal. It never shifts a number: a fold that
@@ -346,17 +346,6 @@ export function stepPositionOf(
   ordinal: number
 ): number {
   return stepIndexes.includes(ordinal) ? ordinal : -1
-}
-
-/** transcriptStepCount is the server's stepCount (studio/edits.go):
- * one past the last step ordinal holding an assistant message. A
- * from_step at or past it has nothing fresh to answer (400). */
-export function transcriptStepCount(
-  assistantOrdinals: readonly number[]
-): number {
-  let n = 0
-  for (const o of assistantOrdinals) if (o + 1 > n) n = o + 1
-  return n
 }
 
 /** endsInAnsweredCalls is studio/edits.go's (and the runtime's) rule
@@ -428,6 +417,17 @@ export function tokenClaimsOf(
   } catch {
     return {}
   }
+}
+
+/** transcriptStepCount is the server's stepCount (studio/edits.go):
+ * one past the last step ordinal holding an assistant message. A
+ * from_step at or past it has nothing fresh to answer (400). */
+export function transcriptStepCount(
+  assistantOrdinals: readonly number[]
+): number {
+  let n = 0
+  for (const o of assistantOrdinals) if (o + 1 > n) n = o + 1
+  return n
 }
 
 /** canReplay: the replay verbs are offered when the server reports the

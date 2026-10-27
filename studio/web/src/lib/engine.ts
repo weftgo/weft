@@ -123,35 +123,6 @@ export function runEngineWords(r: Pick<RunRow, "model">): string {
   return RAN_WORDS.live(m || ENGINE_WORDS.ownModel)
 }
 
-/** scriptedBlock is why the scripted engine cannot answer, "" when it
- * can: the server's refusals first (studio/playground.go), then what
- * would miss the recorded key. */
-function scriptedBlock(f: EngineFacts): string {
-  const n = f.fromStep
-  if (!f.source) return "no source run to replay"
-  if (f.fromStep > 0 && f.steps !== undefined && n >= f.steps)
-    return `the source never answered step ${n}`
-  const what = f.edits
-    ? `your edit changes step ${n}'s request`
-    : f.prompt
-      ? "a changed prompt"
-      : f.model
-        ? "a model override"
-        : f.fork
-          ? "a fork's new message"
-          : f.input
-            ? "a new input"
-            : f.keyed.length
-              ? `${f.keyed.join(", ")} changed`
-              : ""
-  if (what) return what + ENGINE_WORDS.changed
-  // The preview's key check (U18.1): the server's own sentence.
-  const k = f.keyMatch
-  return k?.ok === false
-    ? k.message || `no recorded answer for step ${k.step ?? n}`
-    : ""
-}
-
 /** liveEstimate is the live engine's cost line: the source's usage
  * from from_step on at its model's price — never $0 for an unknown. */
 function liveEstimate(f: EngineFacts): { estimate: string; usd: string } {
@@ -197,6 +168,35 @@ export function engineChoice(f: EngineFacts): EngineChoice {
       ...liveEstimate(f),
     },
   }
+}
+
+/** scriptedBlock is why the scripted engine cannot answer, "" when it
+ * can: the server's refusals first (studio/playground.go), then what
+ * would miss the recorded key. */
+function scriptedBlock(f: EngineFacts): string {
+  const n = f.fromStep
+  if (!f.source) return "no source run to replay"
+  if (f.fromStep > 0 && f.steps !== undefined && n >= f.steps)
+    return `the source never answered step ${n}`
+  const what = f.edits
+    ? `your edit changes step ${n}'s request`
+    : f.prompt
+      ? "a changed prompt"
+      : f.model
+        ? "a model override"
+        : f.fork
+          ? "a fork's new message"
+          : f.input
+            ? "a new input"
+            : f.keyed.length
+              ? `${f.keyed.join(", ")} changed`
+              : ""
+  if (what) return what + ENGINE_WORDS.changed
+  // The preview's key check (U18.1): the server's own sentence.
+  const k = f.keyMatch
+  return k?.ok === false
+    ? k.message || `no recorded answer for step ${k.step ?? n}`
+    : ""
 }
 
 /** engineOf is the engine the command sends: the user's pick, else the

@@ -11,7 +11,7 @@ import { attemptLabel, msText } from "./attempts"
 import { decidedCall, outcomeOf } from "./decisions"
 import type { FoldedRun, TranscriptBatch } from "./events"
 import { plural, tokens } from "./format"
-import { effectsOf } from "./onion"
+import { attrNum as num, attrStr as str, effectsOf } from "./onion"
 import type { CallEffects } from "./onion"
 import { AWAITING, turnTag } from "./status"
 
@@ -24,12 +24,6 @@ interface SpanLike {
   status_message?: string
   /** Optional: a foreign or hand-made span may carry none. */
   attrs?: Attrs
-}
-
-const str = (v: unknown) => (typeof v === "string" && v ? v : undefined)
-const num = (v: unknown) => {
-  const n = typeof v === "string" ? Number(v) : v
-  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : undefined
 }
 
 /** One call's execution facts (UX-S2-06, UX-H-18, UX-S3-15), from its
@@ -77,33 +71,6 @@ export function callFactsOf(
   return out
 }
 
-/** execLine is a tool card's header facts: "12 ms / 50 ms limit ·
- * queued 3 ms" — the limit it ran under beside its wall time, the wait
- * for its turn. Null when the span says nothing. (The run page adds the
- * tool's origin, the tools record's source, when it is not local.) */
-export function execLine(f?: CallFacts): string | null {
-  const out: string[] = []
-  const lim = f?.limitMs ? `${msText(f.limitMs)} limit` : ""
-  if (f?.ms !== undefined)
-    out.push(lim ? `${msText(f.ms)} / ${lim}` : msText(f.ms))
-  else if (lim) out.push(lim)
-  if (f?.queueMs) out.push(`queued ${msText(f.queueMs)}`)
-  return out.length ? out.join(" · ") : null
-}
-
-/** A parked call's words (UX-S3-12, UX-H-18): never "never completed"
- * — an approval gate, a debugger's breakpoint, a park rule. */
-export const BREAKPOINT = "paused at breakpoint"
-/** A ParkSource's park that no debugger is known to have set:
- * ParkSource is a general option (ADR 0030), runtime.Breakpoints() one
- * source of it. */
-export const BY_SOURCE = "paused by ParkSource"
-const PARKED: Record<string, string | undefined> = {
-  park_on: "ParkOn",
-  park_all_except: "ParkAllExcept",
-  middleware: "middleware",
-}
-
 /** parkWord reads why a call parked: a ParkSource's park is a
  * breakpoint on a playground run (weft.playground, the row's
  * playground) or when the page knows the run's runtime registered
@@ -137,6 +104,35 @@ export function parkWord(
   if (p === "park_on" && bp && `,${bp},`.includes(`,${tool},`))
     return BREAKPOINT
   return PARKED[p] ? `${AWAITING} · ${PARKED[p]}` : AWAITING
+}
+
+/** A parked call's words (UX-S3-12, UX-H-18): never "never completed"
+ * — an approval gate, a debugger's breakpoint, a park rule. */
+export const BREAKPOINT = "paused at breakpoint"
+/** A ParkSource's park that no debugger is known to have set:
+ * ParkSource is a general option (ADR 0030), runtime.Breakpoints() one
+ * source of it. */
+export const BY_SOURCE = "paused by ParkSource"
+const PARKED: Record<string, string | undefined> = {
+  park_on: "ParkOn",
+  park_all_except: "ParkAllExcept",
+  middleware: "middleware",
+}
+
+/** The attempt span of (run, step, attempt n). */
+export function attemptSpan(
+  spans: SpanLike[] | null | undefined,
+  runId: string,
+  step: number,
+  n: number
+): SpanLike | undefined {
+  return spans?.find(
+    ({ name, attrs: a }) =>
+      name === "attempt" &&
+      a?.["weft.run.id"] === runId &&
+      a["weft.step.index"] === step &&
+      a["weft.attempt.index"] === n
+  )
 }
 
 /** ownBreakpoints says a run's service has a runtime that registered
@@ -194,22 +190,6 @@ export const CHILD_HINT: Record<string, string> = {
   timeout: "the delegation's Timeout passed; the child was abandoned",
 }
 
-/** The attempt span of (run, step, attempt n). */
-export function attemptSpan(
-  spans: SpanLike[] | null | undefined,
-  runId: string,
-  step: number,
-  n: number
-): SpanLike | undefined {
-  return spans?.find(
-    ({ name, attrs: a }) =>
-      name === "attempt" &&
-      a?.["weft.run.id"] === runId &&
-      a["weft.step.index"] === step &&
-      a["weft.attempt.index"] === n
-  )
-}
-
 /** attemptCause is an attempt's why and wait (UX-S2-02): "503 ·
  * overloaded · waited 1.2 s" — the HTTP status, the provider's error
  * text (clipped), the backoff slept before it. Null when none is
@@ -225,6 +205,20 @@ export function attemptCause(a: {
   const e = a.error?.slice(a.error.startsWith(s) ? s.length : 0).trim()
   if (e) out.push(e.length > 60 ? `${e.slice(0, 59)}…` : e)
   if (a.wait_ms) out.push(`waited ${msText(a.wait_ms)}`)
+  return out.length ? out.join(" · ") : null
+}
+
+/** execLine is a tool card's header facts: "12 ms / 50 ms limit ·
+ * queued 3 ms" — the limit it ran under beside its wall time, the wait
+ * for its turn. Null when the span says nothing. (The run page adds the
+ * tool's origin, the tools record's source, when it is not local.) */
+export function execLine(f?: CallFacts): string | null {
+  const out: string[] = []
+  const lim = f?.limitMs ? `${msText(f.limitMs)} limit` : ""
+  if (f?.ms !== undefined)
+    out.push(lim ? `${msText(f.ms)} / ${lim}` : msText(f.ms))
+  else if (lim) out.push(lim)
+  if (f?.queueMs) out.push(`queued ${msText(f.queueMs)}`)
   return out.length ? out.join(" · ") : null
 }
 
@@ -256,22 +250,27 @@ export function attemptTag(
   )
 }
 
+/** fileWords is a file part as a chip (UX-S1-13): "file image/png ·
+ * url", "file text/plain · 14 B" — the media type and size, never the
+ * bytes. */
+export function fileWords(p: {
+  media_type?: string
+  data?: string
+  url?: string
+}): string {
+  const d = p.data?.replace(/=+$/, "")
+  const size = d
+    ? `${Math.floor((d.length * 3) / 4)} B`
+    : p.url
+      ? "url"
+      : "no data"
+  return `file ${p.media_type || "?"} · ${size}`
+}
+
 /** preparedChip is the step's PrepareStep chip (O9, UX-E-14): the parts
  * its PrepareStep chain changed, from the request record's prepared. */
 export function preparedChip(p: string[] | undefined): string | null {
   return p?.length ? `PrepareStep: ${p.join(", ")}` : null
-}
-
-/** thinkingWords is the request's thinking with the adapter's wire
- * (O16, UX-S2-09): "low → reasoning_effort". */
-export function thinkingWords(t?: {
-  level: string
-  budget?: number
-  wire?: string
-}): string {
-  return t
-    ? `${t.level}${t.budget ? ` · budget ${t.budget}` : ""}${t.wire ? ` → ${t.wire}` : ""}`
-    : "adapter default"
 }
 
 /** overrideTitle names an experiment's overridden knobs (UX-S5b-03):
@@ -330,21 +329,16 @@ export function paramsOverride(v: unknown): string | null {
   return `replaced whole: ${out.join(", ") || "every knob the adapter's default"}`
 }
 
-/** fileWords is a file part as a chip (UX-S1-13): "file image/png ·
- * url", "file text/plain · 14 B" — the media type and size, never the
- * bytes. */
-export function fileWords(p: {
-  media_type?: string
-  data?: string
-  url?: string
+/** thinkingWords is the request's thinking with the adapter's wire
+ * (O16, UX-S2-09): "low → reasoning_effort". */
+export function thinkingWords(t?: {
+  level: string
+  budget?: number
+  wire?: string
 }): string {
-  const d = p.data?.replace(/=+$/, "")
-  const size = d
-    ? `${Math.floor((d.length * 3) / 4)} B`
-    : p.url
-      ? "url"
-      : "no data"
-  return `file ${p.media_type || "?"} · ${size}`
+  return t
+    ? `${t.level}${t.budget ? ` · budget ${t.budget}` : ""}${t.wire ? ` → ${t.wire}` : ""}`
+    : "adapter default"
 }
 
 /** attachmentsOf lists the file parts of the turn's prompt — the last

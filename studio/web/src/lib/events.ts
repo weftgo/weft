@@ -165,30 +165,125 @@ export function foldMore(
   return feed
 }
 
+/**
+ * applyTranscript overlays the finished words onto a fold: the sinks
+ * do not store deltas (S4.3/S4.7), so a run loaded from history has
+ * no text_delta events — its text and tool arguments come from the
+ * messages records instead. Each of the run's own assistant messages
+ * lands on the step its batch joined (placeBatches: the stored step;
+ * the input record's history is never the run's), and a message's
+ * tool-call parts carry the arguments the model finally sent. A step
+ * filled from a batch placed by inference is marked `derived`; a batch
+ * whose step the fold does not hold (its events not loaded, or lost)
+ * is kept on `view.unplaced`, never dropped. By
+ * default it only fills steps whose text is still empty (a running run
+ * keeps what the deltas streamed). With `replace` — a run that is over
+ * — the transcript's words win over streamed ones: deltas are
+ * live-only, so text streamed across a dropped connection has a hole
+ * the transcript does not, and a live tail must end where a reload
+ * starts.
+ */
+export function applyTranscript(
+  view: FoldedRun,
+  batches: TranscriptBatch[],
+  opts?: { replace?: boolean }
+): FoldedRun {
+  const replace = opts?.replace === true
+  // The view's steps and calls are the feed's own objects (result()
+  // copies the list, not the steps): the overlay writes onto clones,
+  // so a delta folded afterwards appends to the streamed text, never
+  // to the transcript's. The returned view is a new object; the one
+  // passed in is left as it was.
+  const out: FoldedRun = { ...view, steps: [...view.steps], unplaced: [] }
+  const unplaced: PlacedBatch[] = []
+  const cloned = new Set<FoldedStep>()
+  const own = (at: number): FoldedStep => {
+    const st = out.steps[at]
+    if (cloned.has(st)) return st
+    const copy: FoldedStep = {
+      ...st,
+      toolCalls: st.toolCalls.map((c) => ({ ...c })),
+    }
+    cloned.add(copy)
+    out.steps[at] = copy
+    return copy
+  }
+  for (const b of placeBatches(batches)) {
+    if (b.input) continue
+    const at = out.steps.findIndex((s) => s.index === b.step)
+    if (at < 0) {
+      unplaced.push(b)
+      continue
+    }
+    const step = own(at)
+    for (const msg of b.messages) {
+      if (msg.role !== "assistant") continue
+      if (b.derived) step.derived = true
+      const words = messageText(msg)
+      if (words && (replace || !step.text)) step.text = words
+      const reasoning = msg.content
+        .filter(
+          (p): p is Extract<Part, { type: "reasoning" }> =>
+            (p as Part | null)?.type === "reasoning" &&
+            typeof (p as { text?: unknown }).text === "string"
+        )
+        .map((p) => p.text)
+        .join("")
+      if (reasoning && (replace || !step.reasoning)) step.reasoning = reasoning
+      for (const part of msg.content) {
+        if ((part as Part | null)?.type !== "tool_call") continue
+        const tc = part as ToolCallPart
+        const call = step.toolCalls.find((c) => c.callId === tc.id)
+        // A content-stripped tool_start carries null args: the
+        // transcript's are the ones the model sent.
+        if (call && call.args == null && tc.args != null) call.args = tc.args
+        // A max_tokens step's calls never ran (rule 11): no event
+        // carries them — the transcript does, cut where the output
+        // stopped (UX-S1-03).
+        if (!call && step.finish?.reason === "max_tokens")
+          step.toolCalls.push({
+            callId: tc.id,
+            name: tc.name,
+            args: tc.args,
+            streamedArgs: "",
+            state: "done",
+            startPos: step.from,
+            unrun: true,
+          })
+      }
+    }
+    // Their "not executed" results, from the step's tool message.
+    for (const msg of b.messages)
+      for (const part of msg.role === "tool" ? msg.content : []) {
+        const r = part as Extract<Part, { type: "tool_result" }> | null
+        const call =
+          r?.type === "tool_result"
+            ? step.toolCalls.find((c) => c.unrun && c.callId === r.call_id)
+            : undefined
+        if (call && r)
+          call.result = { content: String(r.content), isError: !!r.is_error }
+      }
+  }
+  out.unplaced = unplaced
+  return out
+}
+
+/** callState is what the UI shows for a call that never finished:
+ * "running" while the run is live; "never" on a run that ended
+ * without the call closing (crash or the repair case) — rendered
+ * honestly, never as complete.
+ */
+export function callState(
+  call: FoldedToolCall,
+  runStatus: string
+): "running" | "done" | "never" {
+  if (call.state === "done") return "done"
+  return runStatus === "running" ? "running" : "never"
+}
+
 /** A wire string, or "" when the field is missing or not a string. */
 function text(v: unknown): string {
   return typeof v === "string" ? v : ""
-}
-
-/** A step index off the wire, or the fallback when it is not one. */
-function stepIndex(v: unknown, fallback: number): number {
-  return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : fallback
-}
-
-/** The event's usage, zeros when it carries none. */
-/** posInt: a measured millisecond count (whole, above 0 — 0 means
- * "not measured", ADR 0016's A4 note). */
-function posInt(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v) && v > 0
-}
-
-function usageOf(u: Usage | undefined): Usage {
-  const o = typeof u === "object" ? u : null
-  return {
-    ...o,
-    input_tokens: o?.input_tokens ?? 0,
-    output_tokens: o?.output_tokens ?? 0,
-  }
 }
 
 export function newFold(): FoldFeed {
@@ -366,65 +461,16 @@ export function newFold(): FoldFeed {
   }
 }
 
-/**
- * linkView stamps a run's subagent runs onto a folded view's calls: a
- * child's parent_call_id names the parent's tool call (S4.3). The
- * page calls it on every view it renders (the fold itself knows
- * nothing about the run's children — they are data, not events), and
- * the subagent block fetches each child's events on expand.
- */
-export function linkView(
-  view: FoldedRun,
-  children: { id: string; parent_call_id: string; parent_run_id?: string }[]
-): FoldedRun {
-  // Call ids may repeat across steps (core/loop.go) — and within a
-  // resumed run's step 0, the resumed call beside the model's own —
-  // which is why a child's id carries the step: <parent>/<step>/<call
-  // id>, or <parent>/resume/<call id> for a resumed call. Children
-  // whose id names a step link first, inside that step, to a call the
-  // loop started there (not a resumed one) where there is one; the
-  // rest then take a resumed call with their id where there is one,
-  // else the first unlinked. No call is linked twice.
-  //
-  // The view's steps and calls are the feed's own objects (result()
-  // copies the list, not the calls) and the page links on every
-  // render, so a pass starts from no links: a call keeps no child a
-  // previous pass gave it, and a child already linked is never handed
-  // to the next free call with its id.
-  for (const st of view.steps) for (const c of st.toolCalls) delete c.childRunId
-  const named = new Map<(typeof children)[number], FoldedStep>()
-  for (const child of children) {
-    if (!child.parent_call_id) continue
-    const step = view.steps.find(
-      (s) =>
-        child.id ===
-        `${child.parent_run_id || view.runId}/${s.index}/${child.parent_call_id}`
-    )
-    if (step) named.set(child, step)
-  }
-  const link = (
-    child: (typeof children)[number],
-    steps: FoldedStep[],
-    resumed: boolean
-  ) => {
-    if (
-      view.steps.some((st) =>
-        st.toolCalls.some((c) => c.childRunId === child.id)
-      )
-    )
-      return
-    const free = steps.flatMap((st) =>
-      st.toolCalls.filter(
-        (c) => c.callId === child.parent_call_id && !c.childRunId
-      )
-    )
-    const call = free.find((c) => Boolean(c.resumed) === resumed) ?? free.at(0)
-    if (call) call.childRunId = child.id
-  }
-  for (const [child, step] of named) link(child, [step], false)
-  for (const child of children)
-    if (child.parent_call_id && !named.has(child)) link(child, view.steps, true)
-  return view
+/** The event's usage, zeros when it carries none. */
+/** posInt: a measured millisecond count (whole, above 0 — 0 means
+ * "not measured", ADR 0016's A4 note). */
+function posInt(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0
+}
+
+/** A step index off the wire, or the fallback when it is not one. */
+function stepIndex(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : fallback
 }
 
 /** A transcript batch as the fold reads it: its messages, and the
@@ -458,21 +504,13 @@ function messagesOf(b: TranscriptBatch | null | undefined): Message[] {
   return out
 }
 
-/** The text parts of a message, joined. Files and other parts are not
- * rendered — the words are the turn. */
-function messageText(
-  m: { content: Part[] } | null | undefined,
-  sep = ""
-): string {
-  const parts: unknown = m?.content
-  if (!Array.isArray(parts)) return ""
-  return (parts as (Part | null)[])
-    .filter(
-      (p): p is Extract<Part, { type: "text" }> =>
-        p?.type === "text" && typeof p.text === "string"
-    )
-    .map((p) => p.text)
-    .join(sep)
+function usageOf(u: Usage | undefined): Usage {
+  const o = typeof u === "object" ? u : null
+  return {
+    ...o,
+    input_tokens: o?.input_tokens ?? 0,
+    output_tokens: o?.output_tokens ?? 0,
+  }
 }
 
 /** A batch placed: the step it joined and whether it is the run's
@@ -484,6 +522,16 @@ export interface PlacedBatch {
   input: boolean
   derived: boolean
   messages: Message[]
+}
+
+/** runHoles is what the run header badges: the run document's own
+ * (api.go's runHoles: not_recorded, interrupted, derived, stripped,
+ * gap) and the fold's (the recorder's cuts on any event). */
+export function runHoles(
+  doc: { holes?: HoleMark[] } | null | undefined,
+  view: FoldedRun
+): HoleMark[] {
+  return mergeHoles(Array.isArray(doc?.holes) ? doc.holes : [], view.holes)
 }
 
 /**
@@ -558,18 +606,6 @@ export function splitTranscript(batches: TranscriptBatch[]): {
   return { input, produced }
 }
 
-/** The words the run was asked: the last user text it was fed (the
- * turn's own prompt — earlier user messages are history). */
-export function turnPrompt(batches: TranscriptBatch[]): string | null {
-  const { input } = splitTranscript(batches)
-  for (let i = input.length - 1; i >= 0; i--) {
-    if (input[i].role !== "user") continue
-    const words = messageText(input[i], "\n")
-    if (words) return words
-  }
-  return null
-}
-
 /** The run's own assistant texts, in order — its reply, never the
  * history it was fed. */
 export function producedTexts(batches: TranscriptBatch[]): string[] {
@@ -585,107 +621,16 @@ export function producedText(batches: TranscriptBatch[]): string {
   return producedTexts(batches).join("\n")
 }
 
-/**
- * applyTranscript overlays the finished words onto a fold: the sinks
- * do not store deltas (S4.3/S4.7), so a run loaded from history has
- * no text_delta events — its text and tool arguments come from the
- * messages records instead. Each of the run's own assistant messages
- * lands on the step its batch joined (placeBatches: the stored step;
- * the input record's history is never the run's), and a message's
- * tool-call parts carry the arguments the model finally sent. A step
- * filled from a batch placed by inference is marked `derived`; a batch
- * whose step the fold does not hold (its events not loaded, or lost)
- * is kept on `view.unplaced`, never dropped. By
- * default it only fills steps whose text is still empty (a running run
- * keeps what the deltas streamed). With `replace` — a run that is over
- * — the transcript's words win over streamed ones: deltas are
- * live-only, so text streamed across a dropped connection has a hole
- * the transcript does not, and a live tail must end where a reload
- * starts.
- */
-export function applyTranscript(
-  view: FoldedRun,
-  batches: TranscriptBatch[],
-  opts?: { replace?: boolean }
-): FoldedRun {
-  const replace = opts?.replace === true
-  // The view's steps and calls are the feed's own objects (result()
-  // copies the list, not the steps): the overlay writes onto clones,
-  // so a delta folded afterwards appends to the streamed text, never
-  // to the transcript's. The returned view is a new object; the one
-  // passed in is left as it was.
-  const out: FoldedRun = { ...view, steps: [...view.steps], unplaced: [] }
-  const unplaced: PlacedBatch[] = []
-  const cloned = new Set<FoldedStep>()
-  const own = (at: number): FoldedStep => {
-    const st = out.steps[at]
-    if (cloned.has(st)) return st
-    const copy: FoldedStep = {
-      ...st,
-      toolCalls: st.toolCalls.map((c) => ({ ...c })),
-    }
-    cloned.add(copy)
-    out.steps[at] = copy
-    return copy
+/** The words the run was asked: the last user text it was fed (the
+ * turn's own prompt — earlier user messages are history). */
+export function turnPrompt(batches: TranscriptBatch[]): string | null {
+  const { input } = splitTranscript(batches)
+  for (let i = input.length - 1; i >= 0; i--) {
+    if (input[i].role !== "user") continue
+    const words = messageText(input[i], "\n")
+    if (words) return words
   }
-  for (const b of placeBatches(batches)) {
-    if (b.input) continue
-    const at = out.steps.findIndex((s) => s.index === b.step)
-    if (at < 0) {
-      unplaced.push(b)
-      continue
-    }
-    const step = own(at)
-    for (const msg of b.messages) {
-      if (msg.role !== "assistant") continue
-      if (b.derived) step.derived = true
-      const words = messageText(msg)
-      if (words && (replace || !step.text)) step.text = words
-      const reasoning = msg.content
-        .filter(
-          (p): p is Extract<Part, { type: "reasoning" }> =>
-            (p as Part | null)?.type === "reasoning" &&
-            typeof (p as { text?: unknown }).text === "string"
-        )
-        .map((p) => p.text)
-        .join("")
-      if (reasoning && (replace || !step.reasoning)) step.reasoning = reasoning
-      for (const part of msg.content) {
-        if ((part as Part | null)?.type !== "tool_call") continue
-        const tc = part as ToolCallPart
-        const call = step.toolCalls.find((c) => c.callId === tc.id)
-        // A content-stripped tool_start carries null args: the
-        // transcript's are the ones the model sent.
-        if (call && call.args == null && tc.args != null) call.args = tc.args
-        // A max_tokens step's calls never ran (rule 11): no event
-        // carries them — the transcript does, cut where the output
-        // stopped (UX-S1-03).
-        if (!call && step.finish?.reason === "max_tokens")
-          step.toolCalls.push({
-            callId: tc.id,
-            name: tc.name,
-            args: tc.args,
-            streamedArgs: "",
-            state: "done",
-            startPos: step.from,
-            unrun: true,
-          })
-      }
-    }
-    // Their "not executed" results, from the step's tool message.
-    for (const msg of b.messages)
-      for (const part of msg.role === "tool" ? msg.content : []) {
-        const r = part as Extract<Part, { type: "tool_result" }> | null
-        const call =
-          r?.type === "tool_result"
-            ? step.toolCalls.find((c) => c.unrun && c.callId === r.call_id)
-            : undefined
-        if (call && r)
-          call.result = { content: String(r.content), isError: !!r.is_error }
-      }
-  }
-  out.unplaced = unplaced
-  return out
+  return null
 }
 
 /**
@@ -724,27 +669,29 @@ export function stepHoles(
   )
 }
 
-/** runHoles is what the run header badges: the run document's own
- * (api.go's runHoles: not_recorded, interrupted, derived, stripped,
- * gap) and the fold's (the recorder's cuts on any event). */
-export function runHoles(
-  doc: { holes?: HoleMark[] } | null | undefined,
-  view: FoldedRun
-): HoleMark[] {
-  return mergeHoles(Array.isArray(doc?.holes) ? doc.holes : [], view.holes)
+/** The text parts of a message, joined. Files and other parts are not
+ * rendered — the words are the turn. */
+function messageText(
+  m: { content: Part[] } | null | undefined,
+  sep = ""
+): string {
+  const parts: unknown = m?.content
+  if (!Array.isArray(parts)) return ""
+  return (parts as (Part | null)[])
+    .filter(
+      (p): p is Extract<Part, { type: "text" }> =>
+        p?.type === "text" && typeof p.text === "string"
+    )
+    .map((p) => p.text)
+    .join(sep)
 }
 
-/** callState is what the UI shows for a call that never finished:
- * "running" while the run is live; "never" on a run that ended
- * without the call closing (crash or the repair case) — rendered
- * honestly, never as complete.
- */
-export function callState(
-  call: FoldedToolCall,
-  runStatus: string
-): "running" | "done" | "never" {
-  if (call.state === "done") return "done"
-  return runStatus === "running" ? "running" : "never"
+export function truncation(content: string): Truncation | null {
+  const bytes = TRUNCATED_BYTES.exec(content)
+  if (bytes) return { kind: "bytes", bytes: Number(bytes[1]) }
+  const call = TRUNCATED_CALL.exec(content)
+  if (call) return { kind: "call", tool: call[1] }
+  return null
 }
 
 // ── Truncation honesty (B9) ───────────────────────────────────────
@@ -768,10 +715,63 @@ export const UNRUN_CALL_REASON =
 export type Truncation =
   { kind: "bytes"; bytes: number } | { kind: "call"; tool: string }
 
-export function truncation(content: string): Truncation | null {
-  const bytes = TRUNCATED_BYTES.exec(content)
-  if (bytes) return { kind: "bytes", bytes: Number(bytes[1]) }
-  const call = TRUNCATED_CALL.exec(content)
-  if (call) return { kind: "call", tool: call[1] }
-  return null
+/**
+ * linkView stamps a run's subagent runs onto a folded view's calls: a
+ * child's parent_call_id names the parent's tool call (S4.3). The
+ * page calls it on every view it renders (the fold itself knows
+ * nothing about the run's children — they are data, not events), and
+ * the subagent block fetches each child's events on expand.
+ */
+export function linkView(
+  view: FoldedRun,
+  children: { id: string; parent_call_id: string; parent_run_id?: string }[]
+): FoldedRun {
+  // Call ids may repeat across steps (core/loop.go) — and within a
+  // resumed run's step 0, the resumed call beside the model's own —
+  // which is why a child's id carries the step: <parent>/<step>/<call
+  // id>, or <parent>/resume/<call id> for a resumed call. Children
+  // whose id names a step link first, inside that step, to a call the
+  // loop started there (not a resumed one) where there is one; the
+  // rest then take a resumed call with their id where there is one,
+  // else the first unlinked. No call is linked twice.
+  //
+  // The view's steps and calls are the feed's own objects (result()
+  // copies the list, not the calls) and the page links on every
+  // render, so a pass starts from no links: a call keeps no child a
+  // previous pass gave it, and a child already linked is never handed
+  // to the next free call with its id.
+  for (const st of view.steps) for (const c of st.toolCalls) delete c.childRunId
+  const named = new Map<(typeof children)[number], FoldedStep>()
+  for (const child of children) {
+    if (!child.parent_call_id) continue
+    const step = view.steps.find(
+      (s) =>
+        child.id ===
+        `${child.parent_run_id || view.runId}/${s.index}/${child.parent_call_id}`
+    )
+    if (step) named.set(child, step)
+  }
+  const link = (
+    child: (typeof children)[number],
+    steps: FoldedStep[],
+    resumed: boolean
+  ) => {
+    if (
+      view.steps.some((st) =>
+        st.toolCalls.some((c) => c.childRunId === child.id)
+      )
+    )
+      return
+    const free = steps.flatMap((st) =>
+      st.toolCalls.filter(
+        (c) => c.callId === child.parent_call_id && !c.childRunId
+      )
+    )
+    const call = free.find((c) => Boolean(c.resumed) === resumed) ?? free.at(0)
+    if (call) call.childRunId = child.id
+  }
+  for (const [child, step] of named) link(child, [step], false)
+  for (const child of children)
+    if (child.parent_call_id && !named.has(child)) link(child, view.steps, true)
+  return view
 }

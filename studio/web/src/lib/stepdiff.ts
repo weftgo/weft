@@ -29,7 +29,7 @@
 // N-way is N−1 two-way responses against the same base run a (the
 // E3 split): nWayView lays them out side by side.
 import type { Usage } from "./api"
-import { HOLES, isHole, mergeHoles } from "./honesty"
+import { CAUSES, HOLES, isHole, mergeHoles } from "./honesty"
 import type { HoleMark } from "./honesty"
 import { tokenPair } from "./format"
 
@@ -227,18 +227,6 @@ export const SOURCE_ROW = {
   notCompared: "not compared: the source could not be read",
 } as const
 
-/** rowNote is a sibling row's note ("" for any other row). */
-export function rowNote(
-  row: Pick<DiffRowDoc, "kept_by" | "a" | "b">,
-  state: RowState
-): string {
-  if (!row.kept_by) return ""
-  return SOURCE_ROW.note(
-    row.kept_by,
-    !row.a || !row.b ? SOURCE_ROW.notCompared : ROW_WORDS[state]
-  )
-}
-
 /** rowState reads a row from its cells: kept or missing when every
  * cell is, else changed (the server's flag) or same. */
 export function rowState(
@@ -250,6 +238,12 @@ export function rowState(
   return changed ? "changed" : "same"
 }
 
+/** sideHoles is a side's holes as badges: the server's words, in the
+ * table's order. */
+export function sideHoles(side: DiffSide | null): HoleMark[] {
+  return side ? mergeHoles(list(side.holes)) : []
+}
+
 /** The cost cell's reason when the server marked a side's usage not
  * comparable (a derived run's, a pre-A1 run's, a gap's): cost follows
  * usage, so two priced figures are not compared either. */
@@ -259,17 +253,8 @@ export const COST_FOLLOWS_USAGE = `cost follows usage: ${CELL_REASONS.unknown}`
  * side with no request record) as none: never a throw. */
 const list = <T>(v: T[] | undefined): T[] => v ?? []
 
-/** cellOf reads one column of one row as the server compared it. */
-export function cellOf(row: DiffRowDoc, col: DiffColumn): CellState {
-  if (row.kept) return "kept"
-  // A sibling row whose source could not be read: not compared.
-  if (row.kept_by && (!row.a || !row.b)) return "unknown"
-  const changes = list(row.changes)
-  if (!row.a || !row.b || changes.includes("missing")) return "missing"
-  if (list(row.unknown).includes(col)) return "unknown"
-  if (changes.includes(col)) return "changed"
-  if (list(row.differs).includes(col)) return "differs"
-  return "same"
+function clip(s: string, n = CELL_CHARS): string {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s
 }
 
 // ── Marks ─────────────────────────────────────────────────────────
@@ -301,6 +286,31 @@ const MARK_WORDS: Record<string, { label: string; title: string }> = {
   error: { label: "error", title: "this step ended in an error" },
 }
 
+/** cellOf reads one column of one row as the server compared it. */
+export function cellOf(row: DiffRowDoc, col: DiffColumn): CellState {
+  if (row.kept) return "kept"
+  // A sibling row whose source could not be read: not compared.
+  if (row.kept_by && (!row.a || !row.b)) return "unknown"
+  const changes = list(row.changes)
+  if (!row.a || !row.b || changes.includes("missing")) return "missing"
+  if (list(row.unknown).includes(col)) return "unknown"
+  if (changes.includes(col)) return "changed"
+  if (list(row.differs).includes(col)) return "differs"
+  return "same"
+}
+
+/** rowNote is a sibling row's note ("" for any other row). */
+export function rowNote(
+  row: Pick<DiffRowDoc, "kept_by" | "a" | "b">,
+  state: RowState
+): string {
+  if (!row.kept_by) return ""
+  return SOURCE_ROW.note(
+    row.kept_by,
+    !row.a || !row.b ? SOURCE_ROW.notCompared : ROW_WORDS[state]
+  )
+}
+
 /** markChip is one mark's chip. */
 export function markChip(mark: string): MarkChip {
   if (isHole(mark)) {
@@ -316,11 +326,10 @@ export function markChip(mark: string): MarkChip {
   return { mark, label: w?.label ?? mark, title: w?.title ?? mark }
 }
 
-/** sideHoles is a side's holes as badges: the server's words, in the
- * table's order. */
-export function sideHoles(side: DiffSide | null): HoleMark[] {
-  return side ? mergeHoles(list(side.holes)) : []
-}
+// ── Cell words ────────────────────────────────────────────────────
+
+/** The longest a cell's value is drawn; the rest is "…". */
+export const CELL_CHARS = 160
 
 /** docHoles is the response's own holes: a truncated diff is the
  * response_cap cause (the step cap, nothing lost). */
@@ -330,15 +339,6 @@ export function docHoles(doc: Pick<DiffDoc, "holes">): HoleMark[] {
       h.hole === "truncated" && !h.cause ? { ...h, cause: "response_cap" } : h
     )
   )
-}
-
-// ── Cell words ────────────────────────────────────────────────────
-
-/** The longest a cell's value is drawn; the rest is "…". */
-export const CELL_CHARS = 160
-
-function clip(s: string, n = CELL_CHARS): string {
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s
 }
 
 function argsText(args: unknown): string {
@@ -662,3 +662,18 @@ export function nWayView(docs: DiffDoc[]): NWayView {
     aligned: docs.some((d) => !!d.aligned),
   }
 }
+
+/** UNTRACED is the panel's one line for a replay its runtime ran
+ * without a tracer (UX-D-40): said once in the step compare's head,
+ * never a not_recorded badge on each of the replay's steps. */
+export const UNTRACED = "replay ran without tracing"
+
+/** noSpans: a side's hole is not_recorded for want of spans (obsdb's
+ * words: "recorded without a tracer"). */
+export const noSpans = (h: HoleMark) =>
+  h.reason === CAUSES.not_recorded?.no_spans.reason
+
+/** untraced: every step of the compared run (b) carries noSpans. */
+export const untraced = (v: StepDiffView) =>
+  v.rows.some((r) => r.b.side) &&
+  v.rows.every((r) => !r.b.side || r.b.holes.some(noSpans))

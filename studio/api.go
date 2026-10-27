@@ -74,7 +74,22 @@ const maxBody = 4 << 20
 // client itself on failure: 413 for a body over the limit, 400 for
 // anything that does not decode. what names the body in the message.
 func decodeBody(w http.ResponseWriter, r *http.Request, what string, v any) bool {
-	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(v)
+	return decodeWith(w, r, what, v, false)
+}
+
+// decodeStrict is decodeBody refusing a field v does not name (UX-D-27):
+// a misspelled key is a 400 that names it, never a default applied in
+// silence.
+func decodeStrict(w http.ResponseWriter, r *http.Request, what string, v any) bool {
+	return decodeWith(w, r, what, v, true)
+}
+
+func decodeWith(w http.ResponseWriter, r *http.Request, what string, v any, strict bool) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
+	if strict {
+		dec.DisallowUnknownFields()
+	}
+	err := dec.Decode(v)
 	if err == nil {
 		return true
 	}

@@ -15,11 +15,17 @@ import { msText } from "./attempts"
 import { plural } from "./format"
 
 type Attrs = Record<string, unknown>
+/** str (exported as attrStr) is a span attribute's non-empty string,
+ * else undefined; one body for the lib modules that read attributes
+ * (U30.1's trim). */
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined)
+/** num (exported as attrNum) is a span attribute's non-negative finite
+ * number (a numeric string read as one), else undefined. */
 const num = (v: unknown) => {
   const n = typeof v === "string" ? Number(v) : v
   return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : undefined
 }
+export { str as attrStr, num as attrNum }
 
 // ── A call's effects: the tool row's chips (both renderers) ────────
 
@@ -58,14 +64,14 @@ export function effectChips(f?: CallEffects, origin = false): string[] {
 export const EFFECT_HINT =
   "what a tool layer did to this call: ✋ the layer that refused it, ⇣ the error kind a layer hid, ✎ arguments a model layer repaired — the drawer's onion names each layer"
 
-/** effectsOf reads an execute_tool span's attributes. */
-export function effectsOf(a: Attrs): CallEffects {
-  return {
-    deniedBy: str(a["weft.tool.denied_by"]),
-    masked: str(a["weft.tool.error_masked"]),
-    repaired: a["weft.tool.args_repaired"] === true || undefined,
-    origin: str(a["weft.tool.origin"]),
-  }
+/** fxChips is stepChips' words from the three counts (the panel's
+ * lean path reads the counts straight off the spans). */
+function fxChips(retried: number, fellBack: boolean, repaired: number) {
+  const out: string[] = []
+  if (retried) out.push(`↻ retry ×${retried}`)
+  if (fellBack) out.push("⇄ fallback")
+  if (repaired) out.push(`✎ repaired ${plural(repaired, "arg")}`)
+  return out
 }
 
 // ── MCP identity (O8) ──────────────────────────────────────────────
@@ -445,35 +451,6 @@ export function stepChips(f: ModelCallFacts): string[] {
   )
 }
 
-/** fxChips is stepChips' words from the three counts (the panel's
- * lean path reads the counts straight off the spans). */
-function fxChips(retried: number, fellBack: boolean, repaired: number) {
-  const out: string[] = []
-  if (retried) out.push(`↻ retry ×${retried}`)
-  if (fellBack) out.push("⇄ fallback")
-  if (repaired) out.push(`✎ repaired ${plural(repaired, "arg")}`)
-  return out
-}
-
-/** The chat span's step and run (a model call is a step of its run). */
-const isChat = (s: OnionSpan) =>
-  s.attrs?.["gen_ai.operation.name"] === "chat" &&
-  s.attrs["weft.chat.role"] === undefined
-
-/** chatSpanOf finds a run's model call of one step. */
-export function chatSpanOf<TSpan extends OnionSpan>(
-  spans: readonly TSpan[] | null | undefined,
-  runId: string,
-  step: number
-): TSpan | undefined {
-  return spans?.find(
-    (s) =>
-      isChat(s) &&
-      s.attrs?.["weft.run.id"] === runId &&
-      num(s.attrs["weft.step.index"]) === step
-  )
-}
-
 /** stepEffectsOf indexes a run's model calls' chips by step
  * (stepChips): the story's step header. Steps with none are absent. */
 export function stepEffectsOf(
@@ -498,6 +475,35 @@ export function stepEffectsOf(
     if (step !== undefined && chips.length) out.set(step, chips)
   }
   return out
+}
+
+/** The chat span's step and run (a model call is a step of its run). */
+const isChat = (s: OnionSpan) =>
+  s.attrs?.["gen_ai.operation.name"] === "chat" &&
+  s.attrs["weft.chat.role"] === undefined
+
+/** chatSpanOf finds a run's model call of one step. */
+export function chatSpanOf<TSpan extends OnionSpan>(
+  spans: readonly TSpan[] | null | undefined,
+  runId: string,
+  step: number
+): TSpan | undefined {
+  return spans?.find(
+    (s) =>
+      isChat(s) &&
+      s.attrs?.["weft.run.id"] === runId &&
+      num(s.attrs["weft.step.index"]) === step
+  )
+}
+
+/** effectsOf reads an execute_tool span's attributes. */
+export function effectsOf(a: Attrs): CallEffects {
+  return {
+    deniedBy: str(a["weft.tool.denied_by"]),
+    masked: str(a["weft.tool.error_masked"]),
+    repaired: a["weft.tool.args_repaired"] === true || undefined,
+    origin: str(a["weft.tool.origin"]),
+  }
 }
 
 /** The step chips' hover. */

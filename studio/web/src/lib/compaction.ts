@@ -22,14 +22,6 @@ export function isSessionMarker(c: RunCompaction): boolean {
   return c.scope === "session"
 }
 
-/** The run's compactions as the document gave them; [] for a document
- * without the field (a Studio older than A9.2). */
-export function compactionsOf(
-  doc: { compactions?: RunCompaction[] } | null | undefined
-): RunCompaction[] {
-  return Array.isArray(doc?.compactions) ? doc.compactions : []
-}
-
 /**
  * compactionLine is the marker's words:
  *   - session: "12 messages compacted into 2 · 8.1k → 1.2k tokens"
@@ -49,6 +41,14 @@ export function compactionLine(c: RunCompaction): string {
   if (c.replaced === 0)
     return `${plural(c.entries, "message")} inserted by PrepareStep`
   return `${plural(c.replaced, "message")} rewritten into ${c.entries} by PrepareStep`
+}
+
+/** The run's compactions as the document gave them; [] for a document
+ * without the field (a Studio older than A9.2). */
+export function compactionsOf(
+  doc: { compactions?: RunCompaction[] } | null | undefined
+): RunCompaction[] {
+  return Array.isArray(doc?.compactions) ? doc.compactions : []
 }
 
 /** The session marker's label: ADR 0028 §8 files it under the run that

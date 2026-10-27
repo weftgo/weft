@@ -21,21 +21,6 @@ function morph(o: Node, n: Node): void {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.value !== b.value)
     a.value = b.value
   if (a.tagName === "INPUT" && a.checked !== b.checked) a.checked = b.checked
-}
-
-/** option appends one <option> to sel and returns it: its words, its
- * attributes in the order given (value among them), and — when given —
- * its selectedness, set before it joins the list. */
-export function option(
-  sel: HTMLElement,
-  text: string,
-  attrs: Record<string, string>,
-  selected?: boolean
-): HTMLOptionElement {
-  const o = el("option", "", text, attrs) as HTMLOptionElement
-  if (selected !== undefined) o.selected = selected
-  sel.append(o)
-  return o
 } // DOM construction for the panel: tiny helpers over the standard
 // APIs — no framework, no virtual DOM (the Dv0 decision, §11 Q1); a
 // keyed patch (D3) instead of a rebuild.
@@ -55,6 +40,22 @@ export function el(
   else if (Array.isArray(textOrChildren))
     for (const c of textOrChildren) n.append(c)
   if (attrs) for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v)
+  return n
+}
+
+/** on attaches a handler the patch carries to the node kept on
+ * screen; the handler gets that live node, never a discarded build. */
+export function on(
+  n: HTMLElement,
+  type: string,
+  fn: Handler,
+  capture = false
+): HTMLElement {
+  const m = ((n as Live)._on ??= {})
+  const k = capture ? `${type}!` : type
+  if (!(k in m))
+    n.addEventListener(type, (e) => (n as Live)._on?.[k]?.(e, n), capture)
+  m[k] = fn
   return n
 }
 
@@ -79,28 +80,6 @@ export const h = (
 
 type Handler = (e: Event, n: HTMLElement) => void
 type Live = Node & { _on?: Record<string, Handler | undefined> }
-
-/** on attaches a handler the patch carries to the node kept on
- * screen; the handler gets that live node, never a discarded build. */
-export function on(
-  n: HTMLElement,
-  type: string,
-  fn: Handler,
-  capture = false
-): HTMLElement {
-  const m = ((n as Live)._on ??= {})
-  const k = capture ? `${type}!` : type
-  if (!(k in m))
-    n.addEventListener(type, (e) => (n as Live)._on?.[k]?.(e, n), capture)
-  m[k] = fn
-  return n
-}
-
-const keyOf = (n: Node) =>
-  n.nodeType === 1 ? (n as Element).getAttribute("data-key") : null
-const like = (a: Node, b: Node) =>
-  a.nodeName === b.nodeName && keyOf(a) === keyOf(b)
-const cls = (n: Node) => (n.nodeType === 1 ? (n as Element).className : "")
 
 /** patch makes parent's children next, reusing what matches. */
 export function patch(parent: Node, next: Node[]): void {
@@ -146,6 +125,27 @@ export function patch(parent: Node, next: Node[]): void {
     else parent.insertBefore(t, ref)
     if (o) morph(o, n)
   }
+}
+
+const keyOf = (n: Node) =>
+  n.nodeType === 1 ? (n as Element).getAttribute("data-key") : null
+const like = (a: Node, b: Node) =>
+  a.nodeName === b.nodeName && keyOf(a) === keyOf(b)
+const cls = (n: Node) => (n.nodeType === 1 ? (n as Element).className : "")
+
+/** option appends one <option> to sel and returns it: its words, its
+ * attributes in the order given (value among them), and — when given —
+ * its selectedness, set before it joins the list. */
+export function option(
+  sel: HTMLElement,
+  text: string,
+  attrs: Record<string, string>,
+  selected?: boolean
+): HTMLOptionElement {
+  const o = el("option", "", text, attrs) as HTMLOptionElement
+  if (selected !== undefined) o.selected = selected
+  sel.append(o)
+  return o
 }
 
 /** clear removes a node's children in one go. */

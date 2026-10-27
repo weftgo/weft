@@ -859,6 +859,27 @@ describe("the keyboard (only inside the panel, except Alt+W)", () => {
     expect(el.shadowRoot!.activeElement).toBe(d())
   })
 
+  it("J / K mark the step being read on the Story tab and announce it (UX-D-30)", async () => {
+    fakeStudio(twoTurns())
+    const el = await open()
+    key(dock(el), { key: "J" })
+    await settle()
+    const marked = (n: number) =>
+      ($(el, `.weft-step[data-weft-step="${n}"]`) as HTMLElement).style.outline
+    expect(marked(0)).toContain("solid")
+    expect(marked(1)).toBe("")
+    expect(text(el, '[data-key="said"]')).toBe("step 0")
+    key(dock(el), { key: "J" })
+    await settle()
+    expect(marked(0)).toBe("")
+    expect(marked(1)).toContain("solid")
+    expect(text(el, '[data-key="said"]')).toBe("step 1")
+    key(dock(el), { key: "K" })
+    await settle()
+    expect(marked(0)).toContain("solid")
+    expect(text(el, '[data-key="said"]')).toBe("step 0")
+  })
+
   it("g s opens the selected turn and step in Studio (lib/links.ts), in a new tab", async () => {
     fakeStudio(twoTurns())
     const opened = vi.fn()

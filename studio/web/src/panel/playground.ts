@@ -191,43 +191,6 @@ export interface TurnWords {
   calls: string[]
 }
 
-// ── A turn's words ────────────────────────────────────────────────
-// A run's first messages record is its INPUT (ADR 0024 D1) —
-// everything it was fed: for turn 2+ of a session the whole
-// conversation so far, for a continued or resumed experiment the kept
-// prefix. lib/events' splitTranscript draws that line (one rule, two
-// clients — V6); the panel reads the turn's prompt and its words
-// through it.
-
-function textOf(m: Message): string {
-  return m.content
-    .filter(
-      (p: Part | null): p is Extract<Part, { type: "text" }> =>
-        p?.type === "text"
-    )
-    .map((p) => p.text)
-    .join("")
-}
-
-/** callLine is the tool-call diff's line: name(args). */
-export function callLine(name: string, args: unknown): string {
-  let a = ""
-  if (args !== undefined) {
-    try {
-      a = stringify(args) ?? ""
-    } catch {
-      a = "?"
-    }
-  }
-  return `${name}(${a})`
-}
-
-/** turnPromptOf is the turn's own prompt — the last user message the
- * run was fed, not the earlier turns' prompts it was fed along with. */
-export function turnPromptOf(t: Transcript | null): string {
-  return t ? (turnPrompt(t.batches) ?? "") : ""
-}
-
 /** turnWordsOf is the whole turn as the model spoke it: the assistant
  * messages after the input's last user message (the steps a continued
  * run kept, the legs a substitute chain already ran) and every one the
@@ -250,6 +213,37 @@ export function turnWordsOf(t: Transcript | null): TurnWords | null {
     for (const p of m.content as (Part | null)[])
       if (p?.type === "tool_call") calls.push(callLine(p.name, p.args))
   return { text: said.map(textOf).filter(Boolean).join("\n"), calls }
+}
+
+/** callLine is the tool-call diff's line: name(args). */
+export function callLine(name: string, args: unknown): string {
+  let a = ""
+  if (args !== undefined) {
+    try {
+      a = stringify(args) ?? ""
+    } catch {
+      a = "?"
+    }
+  }
+  return `${name}(${a})`
+}
+
+// ── A turn's words ────────────────────────────────────────────────
+// A run's first messages record is its INPUT (ADR 0024 D1) —
+// everything it was fed: for turn 2+ of a session the whole
+// conversation so far, for a continued or resumed experiment the kept
+// prefix. lib/events' splitTranscript draws that line (one rule, two
+// clients — V6); the panel reads the turn's prompt and its words
+// through it.
+
+function textOf(m: Message): string {
+  return m.content
+    .filter(
+      (p: Part | null): p is Extract<Part, { type: "text" }> =>
+        p?.type === "text"
+    )
+    .map((p) => p.text)
+    .join("")
 }
 
 /** foldedWords reads the same words off a fold (no transcript). */
@@ -309,6 +303,12 @@ function overridesOf(draft: ExperimentDraft) {
   if (draft.model && !sameModel(draft.model, draft.own)) o.model = draft.model
   if (draft.thinking) o.thinking = draft.thinking
   return Object.assign(o, labOf(draft).overrides)
+}
+
+/** turnPromptOf is the turn's own prompt — the last user message the
+ * run was fed, not the earlier turns' prompts it was fed along with. */
+export function turnPromptOf(t: Transcript | null): string {
+  return t ? (turnPrompt(t.batches) ?? "") : ""
 }
 
 /** engineFor is the drawer's engine choice: lib/engine.ts's factsOf

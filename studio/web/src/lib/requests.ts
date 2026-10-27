@@ -50,9 +50,11 @@ export function hasWire(
   return row.raw != null
 }
 
-/** shortHash is a hash as a chip shows it. */
-export function shortHash(h: string): string {
-  return h.length > 12 ? h.slice(0, 12) : h
+/** paramsLine is paramFields on one line (the panel's). */
+export function paramsLine(row: RequestRow): string {
+  return paramFields(row)
+    .map(([k, v]) => `${k} ${v}`)
+    .join(" · ")
 }
 
 /** paramFields is the request's params, every field named, as text:
@@ -76,11 +78,13 @@ export function paramFields(row: RequestRow): [string, string][] {
   ]
 }
 
-/** paramsLine is paramFields on one line (the panel's). */
-export function paramsLine(row: RequestRow): string {
-  return paramFields(row)
-    .map(([k, v]) => `${k} ${v}`)
-    .join(" · ")
+/** A step past the request pages the panel reads (MAX_REQUEST_PAGES ×
+ * REQUEST_PAGE): the record is whole, the panel read its first n. */
+export function requestCappedWords(n: number): { reason: string; fix: string } {
+  return {
+    reason: `the panel reads a run's first ${n} requests; this step's are past them`,
+    fix: "open the run in Studio (⤢)",
+  }
 }
 
 /** The request section's not_recorded label: the honesty table's
@@ -94,13 +98,9 @@ export const REQUEST_NOT_RECORDED_LABEL =
 export const REQUEST_NO_RECORD_REASON =
   "this step ran, but no request record names it"
 
-/** A step past the request pages the panel reads (MAX_REQUEST_PAGES ×
- * REQUEST_PAGE): the record is whole, the panel read its first n. */
-export function requestCappedWords(n: number): { reason: string; fix: string } {
-  return {
-    reason: `the panel reads a run's first ${n} requests; this step's are past them`,
-    fix: "open the run in Studio (⤢)",
-  }
+/** shortHash is a hash as a chip shows it. */
+export function shortHash(h: string): string {
+  return h.length > 12 ? h.slice(0, 12) : h
 }
 
 /** The Request pane's words both surfaces share (E1): a messages

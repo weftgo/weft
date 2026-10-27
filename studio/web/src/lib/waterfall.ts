@@ -139,21 +139,6 @@ export function instantMs(iso: string): number {
   return base + frac
 }
 
-/** A duration in ms in the tightest unit that reads: 15µs, 9.5ms,
- * 120ms, 7.7s (lib/format.ts's spanMs from 100ms up). The unit is
- * chosen on the rounded value: 999.6µs reads 1.0ms, 99.96ms 100ms. */
-export function took(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "—"
-  const us = Math.round(ms * 1000)
-  if (us < 1000) return `${us}µs`
-  const r = Math.round(ms * 10) / 10
-  return r < 100 ? `${r.toFixed(1)}ms` : spanMs(ms)
-}
-
-/** A stream position as text: an expanded child's positions are scaled
- * into its tool's range, so they keep one decimal at most. */
-const pos = (v: number) => +v.toFixed(1)
-
 /** A row's extent as text: its duration on the time scale, its
  * position range on the order scale. */
 export function extent(row: WaterfallRow, scale: Scale): string {
@@ -161,6 +146,86 @@ export function extent(row: WaterfallRow, scale: Scale): string {
   if (scale === "time") return row.took === null ? "…" : took(row.took)
   return `#${pos(row.start)}–${row.took === null ? "" : pos(row.start + row.took)}`
 }
+
+/** A stream position as text: an expanded child's positions are scaled
+ * into its tool's range, so they keep one decimal at most. */
+const pos = (v: number) => +v.toFixed(1)
+
+/** The earliest parseable start, in epoch ms; NaN when none parses.
+ * A loop, not Math.min(...spread): a large trace overflows the
+ * argument stack. */
+export function earliestStart(timed: readonly TimedSpan[]): number {
+  let t0 = NaN
+  for (const s of timed) {
+    const t = instantMs(s.start)
+    if (Number.isFinite(t) && !(t >= t0)) t0 = t
+  }
+  return t0
+}
+
+// ── Attributes ─────────────────────────────────────────────────────
+
+/** A span's attributes; {} for a span that arrived without any (a
+ * hand-built or foreign one: the type promises them, the wire may not). */
+export function attrsOf(s: TimedSpan | undefined): Record<string, unknown> {
+  return (s as { attrs?: Record<string, unknown> } | undefined)?.attrs ?? {}
+}
+
+/** An attempt's key from its model call's key. */
+export const attemptKey = (model: string, n: number) =>
+  `${model.replace(/:m$/, "")}:a${n}`
+
+type Keys = ReturnType<typeof rowKeys>
+
+// ── The generic span tree ──────────────────────────────────────────
+
+export interface TreeNode {
+  span: TimedSpan
+  /** The parent's span id, when the parent is in the set. */
+  parent?: string
+  depth: number
+}
+
+/** A span's identity: span ids are unique within a trace only. */
+export const spanRef = (s: TimedSpan, id = s.span_id) => `${s.trace_id}/${id}`
+
+/** The span's GenAI operation; the name's first word for spans that
+ * carry none ("invoke_agent planner"). */
+export function opOf(s: TimedSpan): string {
+  return str(attrsOf(s)["gen_ai.operation.name"]) ?? s.name.split(" ")[0]
+}
+
+/** The first finish reason: a list, or the list as a JSON string (the
+ * ClickHouse fallback map), or one reason. */
+function finishOf(v: unknown): string | undefined {
+  if (typeof v === "string" && v.startsWith("["))
+    try {
+      v = JSON.parse(v)
+    } catch {
+      /* the string itself */
+    }
+  return Array.isArray(v) ? str(v[0]) : str(v)
+}
+
+/** The time axis's domain: [0, the latest end] in milliseconds. */
+export function timeDomain(timed: readonly TimedSpan[]): [number, number] {
+  const t0 = earliestStart(timed)
+  if (!Number.isFinite(t0)) return [0, 1]
+  let hi = 1
+  for (const s of timed) {
+    const end = instantMs(s.end)
+    if (Number.isFinite(end) && end - t0 > hi) hi = end - t0
+  }
+  return [0, hi]
+}
+
+function stepGist(names: string[], text: string | undefined): string {
+  if (names.length)
+    return `${plural(names.length, "tool")}: ${names.join(", ")}`
+  return text ? quote(text) : ""
+}
+
+export const str = (v: unknown) => (typeof v === "string" ? v : undefined)
 
 // ── Keys ───────────────────────────────────────────────────────────
 
@@ -193,119 +258,6 @@ export function rowKeys(run: string, qualify: boolean) {
   }
 }
 
-/** An attempt's key from its model call's key. */
-export const attemptKey = (model: string, n: number) =>
-  `${model.replace(/:m$/, "")}:a${n}`
-
-type Keys = ReturnType<typeof rowKeys>
-
-// ── The generic span tree ──────────────────────────────────────────
-
-export interface TreeNode {
-  span: TimedSpan
-  /** The parent's span id, when the parent is in the set. */
-  parent?: string
-  depth: number
-}
-
-/** A span's identity: span ids are unique within a trace only. */
-export const spanRef = (s: TimedSpan, id = s.span_id) => `${s.trace_id}/${id}`
-
-/** The earliest parseable start, in epoch ms; NaN when none parses.
- * A loop, not Math.min(...spread): a large trace overflows the
- * argument stack. */
-export function earliestStart(timed: readonly TimedSpan[]): number {
-  let t0 = NaN
-  for (const s of timed) {
-    const t = instantMs(s.start)
-    if (Number.isFinite(t) && !(t >= t0)) t0 = t
-  }
-  return t0
-}
-
-/**
- * spanTree orders spans as a tree: a span, then its whole subtree,
- * siblings by start, whatever order the API returned. A span whose
- * parent is not in the set (the same trace's) is a root; a parent
- * chain that loops (a span naming itself, two naming each other —
- * ingest stores what it is sent) is cut where the walk would revisit,
- * so every span appears exactly once and no consumer can loop on
- * `parent`. Iterative: a deep trace must not overflow the stack.
- */
-export function spanTree(timed: readonly TimedSpan[]): TreeNode[] {
-  const t0 = earliestStart(timed)
-  const startOf = (s: TimedSpan) => {
-    const t = instantMs(s.start)
-    return Number.isFinite(t) && Number.isFinite(t0) ? t - t0 : 0
-  }
-  const byID = new Map<string, TimedSpan>()
-  for (const s of timed) if (!byID.has(spanRef(s))) byID.set(spanRef(s), s)
-  const kids = new Map<string, TimedSpan[]>()
-  const roots: TimedSpan[] = []
-  for (const s of timed) {
-    const p = s.parent_span_id && spanRef(s, s.parent_span_id)
-    if (p && s.parent_span_id !== s.span_id && byID.has(p)) {
-      const list = kids.get(p)
-      if (list) list.push(s)
-      else kids.set(p, [s])
-    } else roots.push(s)
-  }
-  const byStart = (a: TimedSpan, b: TimedSpan) => startOf(a) - startOf(b)
-  const out: TreeNode[] = []
-  const placed = new Set<TimedSpan>()
-  const walk = (start: TimedSpan[]) => {
-    const stack: TreeNode[] = [...start]
-      .sort(byStart)
-      .reverse()
-      .map((span) => ({ span, depth: 0 }))
-    for (let n = stack.pop(); n; n = stack.pop()) {
-      if (placed.has(n.span)) continue
-      placed.add(n.span)
-      out.push(n)
-      const children = (kids.get(spanRef(n.span)) ?? []).slice().sort(byStart)
-      for (let i = children.length - 1; i >= 0; i--)
-        stack.push({
-          span: children[i],
-          parent: n.span.span_id,
-          depth: n.depth + 1,
-        })
-    }
-  }
-  walk(roots)
-  // Whatever no root reaches sits on a parent cycle: each remaining
-  // span opens its own tree (the cycle is cut at the revisit).
-  for (const s of timed) if (!placed.has(s)) walk([s])
-  return out
-}
-
-/** The time axis's domain: [0, the latest end] in milliseconds. */
-export function timeDomain(timed: readonly TimedSpan[]): [number, number] {
-  const t0 = earliestStart(timed)
-  if (!Number.isFinite(t0)) return [0, 1]
-  let hi = 1
-  for (const s of timed) {
-    const end = instantMs(s.end)
-    if (Number.isFinite(end) && end - t0 > hi) hi = end - t0
-  }
-  return [0, hi]
-}
-
-// ── Attributes ─────────────────────────────────────────────────────
-
-/** A span's attributes; {} for a span that arrived without any (a
- * hand-built or foreign one: the type promises them, the wire may not). */
-export function attrsOf(s: TimedSpan | undefined): Record<string, unknown> {
-  return (s as { attrs?: Record<string, unknown> } | undefined)?.attrs ?? {}
-}
-
-export const str = (v: unknown) => (typeof v === "string" ? v : undefined)
-
-export function int(v: unknown): number | undefined {
-  if (typeof v === "number" && Number.isInteger(v)) return v
-  if (typeof v === "string" && /^\d+$/.test(v)) return Number(v)
-  return undefined
-}
-
 /** A boolean attribute; ClickHouse's fallback map stores "true". */
 export const bool = (v: unknown) => v === true || v === "true"
 
@@ -314,22 +266,15 @@ export const bool = (v: unknown) => v === true || v === "true"
 export const resumedCall = (a: Record<string, unknown>) =>
   bool(a["weft.tool.approved"]) || bool(a["weft.tool.denied"])
 
-/** The first finish reason: a list, or the list as a JSON string (the
- * ClickHouse fallback map), or one reason. */
-function finishOf(v: unknown): string | undefined {
-  if (typeof v === "string" && v.startsWith("["))
-    try {
-      v = JSON.parse(v)
-    } catch {
-      /* the string itself */
-    }
-  return Array.isArray(v) ? str(v[0]) : str(v)
+export function int(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isInteger(v)) return v
+  if (typeof v === "string" && /^\d+$/.test(v)) return Number(v)
+  return undefined
 }
 
-/** The span's GenAI operation; the name's first word for spans that
- * carry none ("invoke_agent planner"). */
-export function opOf(s: TimedSpan): string {
-  return str(attrsOf(s)["gen_ai.operation.name"]) ?? s.name.split(" ")[0]
+function spanStatus(s: TimedSpan): RowStatus {
+  if (s.status === "error") return "error"
+  return bool(attrsOf(s)["weft.tool.pending"]) ? "pending" : "ok"
 }
 
 // ── Gists ──────────────────────────────────────────────────────────
@@ -341,10 +286,23 @@ const quote = (s: string) => `“${clip(s, GIST)}”`
 /** A ToolError renders "CODE: message" — the code is the error. */
 const CODED = /^([A-Z][A-Z0-9_]+): /
 
-function stepGist(names: string[], text: string | undefined): string {
-  if (names.length)
-    return `${plural(names.length, "tool")}: ${names.join(", ")}`
-  return text ? quote(text) : ""
+/** Marks the critical path (the chain that set the run's length):
+ * from a row's end backwards, the child that ends last, then the one
+ * that ended last before that child started, and so on — serial steps
+ * all mark, of overlapping calls only the one that ended last; then
+ * the same inside each marked child. */
+function markCritical(root: Node) {
+  for (const st = [root]; st.length;) {
+    const n = st.pop()!
+    n.critical = true
+    const kids = [...n.kids].sort((a, b) => endOf(b) - endOf(a))
+    let bound = Infinity
+    for (const k of kids)
+      if (endOf(k) <= bound) {
+        st.push(k)
+        bound = k.start
+      }
+  }
 }
 
 // ── Rows ───────────────────────────────────────────────────────────
@@ -469,42 +427,63 @@ const toolRow = (
         : undefined),
   })
 
-/** Assigns lanes greedily: a call takes the first lane free at its
- * start. Sets the step's lane count (its widest concurrency). */
-function assignLanes(step: Node) {
-  const tools = step.kids.filter((t) => t.kind === "tool")
-  if (!tools.length) return
-  const ends: number[] = []
-  for (const t of tools.sort((a, b) => a.start - b.start)) {
-    let i = ends.findIndex((e) => e <= t.start)
-    if (i < 0) i = ends.push(0) - 1
-    ends[i] = endOf(t)
-    t.lane = i + 1
+/**
+ * spanTree orders spans as a tree: a span, then its whole subtree,
+ * siblings by start, whatever order the API returned. A span whose
+ * parent is not in the set (the same trace's) is a root; a parent
+ * chain that loops (a span naming itself, two naming each other —
+ * ingest stores what it is sent) is cut where the walk would revisit,
+ * so every span appears exactly once and no consumer can loop on
+ * `parent`. Iterative: a deep trace must not overflow the stack.
+ */
+export function spanTree(timed: readonly TimedSpan[]): TreeNode[] {
+  const t0 = earliestStart(timed)
+  const startOf = (s: TimedSpan) => {
+    const t = instantMs(s.start)
+    return Number.isFinite(t) && Number.isFinite(t0) ? t - t0 : 0
   }
-  step.lanes = ends.length
+  const byID = new Map<string, TimedSpan>()
+  for (const s of timed) if (!byID.has(spanRef(s))) byID.set(spanRef(s), s)
+  const kids = new Map<string, TimedSpan[]>()
+  const roots: TimedSpan[] = []
+  for (const s of timed) {
+    const p = s.parent_span_id && spanRef(s, s.parent_span_id)
+    if (p && s.parent_span_id !== s.span_id && byID.has(p)) {
+      const list = kids.get(p)
+      if (list) list.push(s)
+      else kids.set(p, [s])
+    } else roots.push(s)
+  }
+  const byStart = (a: TimedSpan, b: TimedSpan) => startOf(a) - startOf(b)
+  const out: TreeNode[] = []
+  const placed = new Set<TimedSpan>()
+  const walk = (start: TimedSpan[]) => {
+    const stack: TreeNode[] = [...start]
+      .sort(byStart)
+      .reverse()
+      .map((span) => ({ span, depth: 0 }))
+    for (let n = stack.pop(); n; n = stack.pop()) {
+      if (placed.has(n.span)) continue
+      placed.add(n.span)
+      out.push(n)
+      const children = (kids.get(spanRef(n.span)) ?? []).slice().sort(byStart)
+      for (let i = children.length - 1; i >= 0; i--)
+        stack.push({
+          span: children[i],
+          parent: n.span.span_id,
+          depth: n.depth + 1,
+        })
+    }
+  }
+  walk(roots)
+  // Whatever no root reaches sits on a parent cycle: each remaining
+  // span opens its own tree (the cycle is cut at the revisit).
+  for (const s of timed) if (!placed.has(s)) walk([s])
+  return out
 }
 
 const endOf = (n: WaterfallRow) =>
   n.took === null ? Infinity : n.start + n.took
-
-/** Marks the critical path (the chain that set the run's length):
- * from a row's end backwards, the child that ends last, then the one
- * that ended last before that child started, and so on — serial steps
- * all mark, of overlapping calls only the one that ended last; then
- * the same inside each marked child. */
-function markCritical(root: Node) {
-  for (const st = [root]; st.length;) {
-    const n = st.pop()!
-    n.critical = true
-    const kids = [...n.kids].sort((a, b) => endOf(b) - endOf(a))
-    let bound = Infinity
-    for (const k of kids)
-      if (endOf(k) <= bound) {
-        st.push(k)
-        bound = k.start
-      }
-  }
-}
 
 /** The rows in tree order. A key met twice (a call id a step repeats,
  * spans ingest stored twice) yields to the span's own t: key, else a
@@ -527,6 +506,21 @@ function flatten(root: Node, rootRun: string): WaterfallRow[] {
       stack.push([sorted[i], depth + 1, key])
   }
   return out
+}
+
+/** Assigns lanes greedily: a call takes the first lane free at its
+ * start. Sets the step's lane count (its widest concurrency). */
+function assignLanes(step: Node) {
+  const tools = step.kids.filter((t) => t.kind === "tool")
+  if (!tools.length) return
+  const ends: number[] = []
+  for (const t of tools.sort((a, b) => a.start - b.start)) {
+    let i = ends.findIndex((e) => e <= t.start)
+    if (i < 0) i = ends.push(0) - 1
+    ends[i] = endOf(t)
+    t.lane = i + 1
+  }
+  step.lanes = ends.length
 }
 
 // ── The time scale ─────────────────────────────────────────────────
@@ -577,11 +571,6 @@ function place(span: TimedSpan, t0: number): Placed | undefined {
   return Number.isFinite(a) && Number.isFinite(b) && b >= a
     ? { span, start: a - t0, took: b - a }
     : undefined
-}
-
-function spanStatus(s: TimedSpan): RowStatus {
-  if (s.status === "error") return "error"
-  return bool(attrsOf(s)["weft.tool.pending"]) ? "pending" : "ok"
 }
 
 function timeRows(input: WaterfallInput): WaterfallModel {
@@ -1157,6 +1146,17 @@ export function waterfallRows(
     "time"
     ? timeRows(input)
     : orderRows(input)
+}
+
+/** A duration in ms in the tightest unit that reads: 15µs, 9.5ms,
+ * 120ms, 7.7s (lib/format.ts's spanMs from 100ms up). The unit is
+ * chosen on the rounded value: 999.6µs reads 1.0ms, 99.96ms 100ms. */
+export function took(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—"
+  const us = Math.round(ms * 1000)
+  if (us < 1000) return `${us}µs`
+  const r = Math.round(ms * 10) / 10
+  return r < 100 ? `${r.toFixed(1)}ms` : spanMs(ms)
 }
 
 // ── Words ──────────────────────────────────────────────────────────

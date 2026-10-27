@@ -37,20 +37,11 @@ export const kindOf = (e: ReplayEdit): EditKind =>
 export const editKey = (e: ReplayEdit): string =>
   `${kindOf(e)}:${e.step}:${e.callID ?? ""}:${e.index ?? 0}`
 
-/** wireEdits is §5.1's transcript_edits: kind always sent, each kind
- * with the fields it takes and no other (studio/edits.go's editKindOf
- * refuses the rest), args an object. */
-export function wireEdits(list: ReplayEdit[]): unknown[] {
-  return list.map((e) => {
-    const kind = kindOf(e)
-    const w: Record<string, unknown> = { kind, step: e.step }
-    if (kind === "tool_result" || kind === "tool_args") w.call_id = e.callID
-    if (kind === "tool_result") w.tool_result = e.toolResult
-    else if (kind === "tool_args") w.args = e.args
-    else w.content = e.content
-    if (kind === "user" && e.index) w.index = e.index
-    return w
-  })
+/** editable: the target is one a replay can keep — the from_step it
+ * implies (impliedFromStep) within the server's bound (max: the
+ * highest from_step it accepts; null: unknown, nothing offered). */
+export function editable(target: ReplayEdit, max: number | null): boolean {
+  return max !== null && target.step >= 0 && impliedFromStep([target]) <= max
 }
 
 /** putEdit replaces the edit on e's target, appends it, or (value
@@ -76,17 +67,6 @@ export function impliedFromStep(list: ReplayEdit[]): number {
   return list.length ? Math.max(n, 1) : 0
 }
 
-/** editable: the target is one a replay can keep — the from_step it
- * implies (impliedFromStep) within the server's bound (max: the
- * highest from_step it accepts; null: unknown, nothing offered). */
-export function editable(target: ReplayEdit, max: number | null): boolean {
-  return max !== null && target.step >= 0 && impliedFromStep([target]) <= max
-}
-
-/** The line that holds Run while a fork carries edits (both surfaces). */
-export const FORK_EDITS =
-  "transcript edits belong to an ephemeral replay; a fork starts at step 0 — set Write to: nowhere (ephemeral) or drop the edits"
-
 /** editsProblem holds Run while a draft's edits cannot travel: they go
  * only with from_step > 0, so a draft at step 0 is refused, never sent
  * without them (both surfaces). */
@@ -102,22 +82,77 @@ export function editsProblem(
     : null
 }
 
-/** The edit's line in the drawer's list: its kind and its place. */
-export function editLine(e: ReplayEdit): string {
-  const k = kindOf(e)
-  const at = k === "insert" ? `before step ${e.step}` : `step ${e.step}`
-  const who = e.callID
-    ? ` · ${e.callID}`
-    : k === "user" && e.index
-      ? ` · #${e.index}`
-      : ""
-  // Defensive: a hand-built edit may lack its field or carry another type.
-  const v = String(
-    (k === "tool_args"
-      ? JSON.stringify(e.args)
-      : (e.toolResult ?? e.content)) ?? ""
-  )
-  return `${k} · ${at}${who} → ${v.length > 60 ? `${v.slice(0, 59)}…` : v}`
+/** The line that holds Run while a fork carries edits (both surfaces). */
+export const FORK_EDITS =
+  "transcript edits belong to an ephemeral replay; a fork starts at step 0 — set Write to: nowhere (ephemeral) or drop the edits"
+
+/** lossy names the first number the browser cannot carry as written:
+ * past the doubles' exact integers (9007199254740993 would be sent as
+ * …992) or out of range (1e400 would be sent as null). */
+function lossy(path: string, v: unknown): string {
+  const at = (k: string) => (path ? `${path}.${k}` : k)
+  if (v instanceof Number) {
+    const lit = (v as unknown as Num).lit
+    const n = +v
+    if (!Number.isFinite(n))
+      return `field "${path}": the number ${lit ?? n} is out of range here: write it as a string`
+    if (lit && /^-?\d+$/.test(lit) && BigInt(lit) !== BigInt(n))
+      return `field "${path}": the number ${lit} would be sent as ${BigInt(n).toString()} (past the exact integers JSON keeps here): write it as a string or a smaller number`
+    return ""
+  }
+  if (v && typeof v === "object")
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      const m = lossy(at(k), x)
+      if (m) return m
+    }
+  return ""
+}
+
+/** editMarks reads the run's weft.edits (meta): its tokens, and how many
+ * the 1024-byte cap left out ("+N more"). None on a child run: it
+ * inherits its parent's mark, and its own transcript was not edited. */
+export function editMarks(
+  row:
+    | {
+        id?: string
+        session_id?: string
+        meta?: Record<string, string>
+        parent_run_id?: string
+        caller_run_id?: string
+      }
+    | null
+    | undefined
+): { marks: EditMark[]; more: number } {
+  const v = childRun(row) ? "" : (row?.meta?.["weft.edits"] ?? "")
+  const marks: EditMark[] = []
+  let more = 0
+  for (const tok of v ? v.split(",") : []) {
+    const m = /^\+(\d+) more$/.exec(tok)
+    if (m) {
+      more = Number(m[1])
+      continue
+    }
+    // A call id may hold ":" itself: the step is the first segment,
+    // the kind the last, the call id what lies between.
+    const parts = tok.split(":")
+    const step = Number(parts[0])
+    const last = parts[parts.length - 1]
+    if (!parts[0] || !Number.isInteger(step) || parts.length < 2) continue
+    if ((last === "args" || last === "result") && parts.length > 2)
+      marks.push({ step, what: last, callID: parts.slice(1, -1).join(":") })
+    else if (
+      parts.length === 2 &&
+      (last === "reply" || last === "insert" || last === "user")
+    )
+      marks.push(
+        last === "user"
+          ? { step, what: "user", index: 0 }
+          : { step, what: last }
+      )
+    else if (parts.length === 3 && parts[1] === "user")
+      marks.push({ step, what: "user", index: Number(last) })
+  }
+  return { marks, more }
 }
 
 /** One user message of a step as the user edit counts them (studio/
@@ -135,25 +170,6 @@ const textOf = (m: Message) =>
     .filter((p) => p?.type === "text")
     .map((p) => (p as { text: string }).text)
     .join("")
-
-export function userMessagesOf(batches: TranscriptBatch[]): UserMessage[] {
-  const out: UserMessage[] = []
-  const placed = placeBatches(batches)
-  const input = placed.filter((b) => b.input).flatMap((b) => b.messages)
-  const last = input.at(-1)
-  if (last?.role === "user") out.push({ step: 0, index: 0, text: textOf(last) })
-  for (const b of placed) {
-    if (b.input) continue
-    for (const m of b.messages)
-      if (m.role === "user")
-        out.push({
-          step: b.step,
-          index: out.filter((u) => u.step === b.step).length,
-          text: textOf(m),
-        })
-  }
-  return out
-}
 
 /** schemaOf is the input schema the run's records hold for tool: the
  * LAST catalog of the run that names it (steps in order, rows in
@@ -176,6 +192,22 @@ export function schemaOf(
       if (t?.schema) out = t.schema
     }
   return out
+}
+
+/** wireEdits is §5.1's transcript_edits: kind always sent, each kind
+ * with the fields it takes and no other (studio/edits.go's editKindOf
+ * refuses the rest), args an object. */
+export function wireEdits(list: ReplayEdit[]): unknown[] {
+  return list.map((e) => {
+    const kind = kindOf(e)
+    const w: Record<string, unknown> = { kind, step: e.step }
+    if (kind === "tool_result" || kind === "tool_args") w.call_id = e.callID
+    if (kind === "tool_result") w.tool_result = e.toolResult
+    else if (kind === "tool_args") w.args = e.args
+    else w.content = e.content
+    if (kind === "user" && e.index) w.index = e.index
+    return w
+  })
 }
 
 // ── The editor's schema check ─────────────────────────────────────
@@ -294,28 +326,6 @@ function walk(path: string, s: Schema, v: unknown): string {
   return ""
 }
 
-/** lossy names the first number the browser cannot carry as written:
- * past the doubles' exact integers (9007199254740993 would be sent as
- * …992) or out of range (1e400 would be sent as null). */
-function lossy(path: string, v: unknown): string {
-  const at = (k: string) => (path ? `${path}.${k}` : k)
-  if (v instanceof Number) {
-    const lit = (v as unknown as Num).lit
-    const n = +v
-    if (!Number.isFinite(n))
-      return `field "${path}": the number ${lit ?? n} is out of range here: write it as a string`
-    if (lit && /^-?\d+$/.test(lit) && BigInt(lit) !== BigInt(n))
-      return `field "${path}": the number ${lit} would be sent as ${BigInt(n).toString()} (past the exact integers JSON keeps here): write it as a string or a smaller number`
-    return ""
-  }
-  if (v && typeof v === "object")
-    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-      const m = lossy(at(k), x)
-      if (m) return m
-    }
-  return ""
-}
-
 /** checkArgs reads an args edit: the object to send, or the refusal in
  * the loop's words. A tool with no recorded schema needs an object.
  * unchecked: this engine gave no number literals (JSON.parse source
@@ -354,6 +364,25 @@ export function checkArgs(
   }
 }
 
+export function userMessagesOf(batches: TranscriptBatch[]): UserMessage[] {
+  const out: UserMessage[] = []
+  const placed = placeBatches(batches)
+  const input = placed.filter((b) => b.input).flatMap((b) => b.messages)
+  const last = input.at(-1)
+  if (last?.role === "user") out.push({ step: 0, index: 0, text: textOf(last) })
+  for (const b of placed) {
+    if (b.input) continue
+    for (const m of b.messages)
+      if (m.role === "user")
+        out.push({
+          step: b.step,
+          index: out.filter((u) => u.step === b.step).length,
+          text: textOf(m),
+        })
+  }
+  return out
+}
+
 // ── The mark (weft.edits) ─────────────────────────────────────────
 
 /** One token of a replayed run's weft.edits (source coordinates). */
@@ -385,53 +414,6 @@ export const MARK_CHIPS: Record<EditMark["what"], string> = {
   insert: "inserted",
 }
 
-/** editMarks reads the run's weft.edits (meta): its tokens, and how many
- * the 1024-byte cap left out ("+N more"). None on a child run: it
- * inherits its parent's mark, and its own transcript was not edited. */
-export function editMarks(
-  row:
-    | {
-        id?: string
-        session_id?: string
-        meta?: Record<string, string>
-        parent_run_id?: string
-        caller_run_id?: string
-      }
-    | null
-    | undefined
-): { marks: EditMark[]; more: number } {
-  const v = childRun(row) ? "" : (row?.meta?.["weft.edits"] ?? "")
-  const marks: EditMark[] = []
-  let more = 0
-  for (const tok of v ? v.split(",") : []) {
-    const m = /^\+(\d+) more$/.exec(tok)
-    if (m) {
-      more = Number(m[1])
-      continue
-    }
-    // A call id may hold ":" itself: the step is the first segment,
-    // the kind the last, the call id what lies between.
-    const parts = tok.split(":")
-    const step = Number(parts[0])
-    const last = parts[parts.length - 1]
-    if (!parts[0] || !Number.isInteger(step) || parts.length < 2) continue
-    if ((last === "args" || last === "result") && parts.length > 2)
-      marks.push({ step, what: last, callID: parts.slice(1, -1).join(":") })
-    else if (
-      parts.length === 2 &&
-      (last === "reply" || last === "insert" || last === "user")
-    )
-      marks.push(
-        last === "user"
-          ? { step, what: "user", index: 0 }
-          : { step, what: last }
-      )
-    else if (parts.length === 3 && parts[1] === "user")
-      marks.push({ step, what: "user", index: Number(last) })
-  }
-  return { marks, more }
-}
-
 /** markLine is a token's place in words. */
 export function markLine(m: EditMark): string {
   return m.what === "insert"
@@ -441,6 +423,24 @@ export function markLine(m: EditMark): string {
       : m.what === "user"
         ? `step ${m.step} · user message${m.index ? ` #${m.index}` : ""}`
         : `step ${m.step} · reply`
+}
+
+/** The edit's line in the drawer's list: its kind and its place. */
+export function editLine(e: ReplayEdit): string {
+  const k = kindOf(e)
+  const at = k === "insert" ? `before step ${e.step}` : `step ${e.step}`
+  const who = e.callID
+    ? ` · ${e.callID}`
+    : k === "user" && e.index
+      ? ` · #${e.index}`
+      : ""
+  // Defensive: a hand-built edit may lack its field or carry another type.
+  const v = String(
+    (k === "tool_args"
+      ? JSON.stringify(e.args)
+      : (e.toolResult ?? e.content)) ?? ""
+  )
+  return `${k} · ${at}${who} → ${v.length > 60 ? `${v.slice(0, 59)}…` : v}`
 }
 
 /** markedPart is what the replay's input holds for a call token. The

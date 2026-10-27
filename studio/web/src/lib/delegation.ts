@@ -127,18 +127,23 @@ export const RUNS_TREE = {
 /** The two kinds of child, and the plain caller-linked run. */
 export type ChildKind = "subagent" | "delegated" | "started"
 
-/** childKind names a run a tool call started: a core Subagent child
- * (its id under its parent's), a thread/pool child session's turn
- * (weft.session.parent and an id that is its own session's
- * <session>-t<n>), else a run the call started. */
-export function childKind(row: {
-  id: string
-  session_id?: string
-  parent_run_id?: string
-  meta?: Record<string, string>
-}): ChildKind {
-  if (subagentRun(row)) return "subagent"
-  return poolParent(row) && ownTurn(row) ? "delegated" : "started"
+/** storyChildren is the rows a run's story links to its tool calls
+ * (linkView): its children (subagent runs) and the runs its calls
+ * started (caller_linked, U14 — a delegated session's turn, a nested
+ * Generate), each joined on its call id (caller_call_id as the
+ * parent_call_id linkView reads); the block words each by childKind. */
+export function storyChildren<
+  TRow extends {
+    id: string
+    parent_call_id: string
+    caller_call_id?: string
+  },
+>(doc: { children: readonly TRow[]; caller_linked?: readonly TRow[] }): TRow[] {
+  const linked = (doc.caller_linked ?? []).map((r) => ({
+    ...r,
+    parent_call_id: r.caller_call_id ?? "",
+  }))
+  return [...doc.children, ...linked]
 }
 
 /** The chip and eyebrow words per kind, singular and plural. */
@@ -315,21 +320,16 @@ export const LINEAGE_KEYS: readonly string[] = [
 /** A session's turn count in words. */
 export const turnsWord = (n: number) => `${n} ${n === 1 ? "turn" : "turns"}`
 
-/** storyChildren is the rows a run's story links to its tool calls
- * (linkView): its children (subagent runs) and the runs its calls
- * started (caller_linked, U14 — a delegated session's turn, a nested
- * Generate), each joined on its call id (caller_call_id as the
- * parent_call_id linkView reads); the block words each by childKind. */
-export function storyChildren<
-  TRow extends {
-    id: string
-    parent_call_id: string
-    caller_call_id?: string
-  },
->(doc: { children: readonly TRow[]; caller_linked?: readonly TRow[] }): TRow[] {
-  const linked = (doc.caller_linked ?? []).map((r) => ({
-    ...r,
-    parent_call_id: r.caller_call_id ?? "",
-  }))
-  return [...doc.children, ...linked]
+/** childKind names a run a tool call started: a core Subagent child
+ * (its id under its parent's), a thread/pool child session's turn
+ * (weft.session.parent and an id that is its own session's
+ * <session>-t<n>), else a run the call started. */
+export function childKind(row: {
+  id: string
+  session_id?: string
+  parent_run_id?: string
+  meta?: Record<string, string>
+}): ChildKind {
+  if (subagentRun(row)) return "subagent"
+  return poolParent(row) && ownTurn(row) ? "delegated" : "started"
 }

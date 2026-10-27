@@ -169,24 +169,6 @@ export function decisionLine(
   return decisionWords(c, d) + (to ? ` → ${to}` : "")
 }
 
-/** decisionWords is decisionLine without the turn (the devtools
- * panel draws that one as its own button). */
-export function decisionWords(c: DecidedCall, d: DecisionDoc): string {
-  const o = outcomeOf(c.outcome)
-  const who = decider(c, d)
-  const parts = c.approved_by
-    ? [
-        `${o.icon} ${o.word}${who && ` by ${who}`}`,
-        `${OUTCOME.approved.word} by ${c.approved_by}`,
-      ]
-    : [`${o.icon} ${o.word}`, who]
-  // An expired row says "expired" once: thread's reason opens with it.
-  const why =
-    c.outcome === "expired" ? c.reason?.replace(/^expired: /, "") : c.reason
-  if (why) parts.push(`'${why}'`)
-  return parts.filter(Boolean).join(" · ")
-}
-
 /** How and when: "via signed · key k_alice · grant e_… · <time>" — the
  * decision's own time when a record names one, else the resume's start;
  * time the surface's clock (Studio's absoluteTime, local with its zone;
@@ -247,10 +229,6 @@ export function decidedResult(
       : ""
 }
 
-/** decidedCall finds one parked call's decision in a block. */
-export const decidedCall = (d: DecisionDoc | undefined, id?: string) =>
-  d?.calls.find((c) => c.call_id === id)
-
 /** withoutDecided drops from a resume's steps the pre-step calls (the
  * fold's resumed calls, executed before step 0's model call) the
  * resumed card lists — never inside step 0 — and only those: a call the
@@ -274,6 +252,28 @@ export function withoutDecided<
         : { ...s, toolCalls: s.toolCalls.filter(keep) }
     ),
   }
+}
+
+/** decidedCall finds one parked call's decision in a block. */
+export const decidedCall = (d: DecisionDoc | undefined, id?: string) =>
+  d?.calls.find((c) => c.call_id === id)
+
+/** decisionWords is decisionLine without the turn (the devtools
+ * panel draws that one as its own button). */
+export function decisionWords(c: DecidedCall, d: DecisionDoc): string {
+  const o = outcomeOf(c.outcome)
+  const who = decider(c, d)
+  const parts = c.approved_by
+    ? [
+        `${o.icon} ${o.word}${who && ` by ${who}`}`,
+        `${OUTCOME.approved.word} by ${c.approved_by}`,
+      ]
+    : [`${o.icon} ${o.word}`, who]
+  // An expired row says "expired" once: thread's reason opens with it.
+  const why =
+    c.outcome === "expired" ? c.reason?.replace(/^expired: /, "") : c.reason
+  if (why) parts.push(`'${why}'`)
+  return parts.filter(Boolean).join(" · ")
 }
 
 /** requestExpiries is each parked call's request expiry (UX-B-41):

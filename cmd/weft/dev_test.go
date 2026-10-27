@@ -248,7 +248,23 @@ func TestDevEnvAndOneLine(t *testing.T) {
 					t.Errorf("a fixed token's line %q: want the bare URL", line[0])
 				}
 			}
-			if want := "no runtime registered yet (the app needs runtime.Install; WEFT_ENV=dev is set)"; line[3] != want {
+			// UX-D-25: no browser opened (stdout is no terminal) and a
+			// bare link: one line says where the token is, never the token.
+			wantTok := map[string]string{
+				"stable":    "studio: token: " + db + ".token (weft open --with-token)",
+				"fixed":     "studio: token: the one --token / WEFT_STUDIO_TOKEN set",
+				"generated": "",
+			}[c.name]
+			var gotTok string
+			for _, l := range strings.Split(d.out.String(), "\n") {
+				if strings.HasPrefix(l, "studio: token: ") {
+					gotTok = l
+				}
+			}
+			if gotTok != wantTok {
+				t.Errorf("token line %q, want %q", gotTok, wantTok)
+			}
+			if want := "no runtime registered yet (the app needs runtime.Install; WEFT_ENV=dev is set), or the app links its own embedded Studio"; line[3] != want {
 				t.Errorf("runtime part %q, want %q", line[3], want)
 			}
 

@@ -499,9 +499,9 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     ).toBeTruthy()
     expect(main).toContain("2 events missing")
     expect(main).toContain("content not captured by this app")
-    expect(text(el, ".weft-footer")).toContain(
-      "prompts, args and results from your app, via your Studio"
-    )
+    // The footer names the rung that chose the scope (UX-D-23).
+    expect(text(el, ".weft-footer")).toMatch(/^scope: explicit · /)
+    expect(text(el, ".weft-footer")).not.toContain("via your Studio")
     // The footer's content line (D5) names the cause the record marks.
     expect(text(el, ".weft-footer")).toContain("content off · otel.NoContent()")
   })

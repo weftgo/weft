@@ -6,7 +6,10 @@
 // Request tab's chips, diff and trees, and (E3.2) the experiment's
 // step compare table, and (F3.2) the option lab with an override, a
 // refusal and the named tool picker, and (P7-fix3) the editable fields
-// at rest with axe's name rule checked by hand — in both themes (D2),
+// at rest with axe's name rule checked by hand, and (UX-D-29) the
+// fallback with "how to scope" open, an app turn's refused verbs
+// (F4.3), the conversation switcher and the app turn's steer box — in
+// both themes (D2),
 // with axe's default rules; the budget is zero violations. jsdom has
 // no layout, so the rules that need one (color-contrast, and
 // label-content-name-mismatch's visible text) come back "incomplete",
@@ -16,7 +19,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { golden } from "../test/fake-studio"
+import { FakeStudio, golden } from "../test/fake-studio"
 import {
   DERIVED,
   derivedBodies,
@@ -24,7 +27,10 @@ import {
   derivedRows,
 } from "../test/derived-fixture"
 import {
+  $,
+  all,
   baseRoutes,
+  click,
   DIFF_META,
   fakeStudio,
   META,
@@ -40,6 +46,13 @@ import {
   transcript,
 } from "./testkit"
 import type { Route } from "./testkit"
+import {
+  APP_PUB,
+  PARKED,
+  runtimeRow,
+  serveAppTurn,
+} from "../test/appturn-fixture"
+import type { AppTurnOptions } from "../test/appturn-fixture"
 import { FILTER_MS } from "./tree"
 import type { WeftDevtools } from "./element"
 import {
@@ -394,6 +407,27 @@ function costRoutes(): Record<string, Route> {
   return r
 }
 
+/** UX-D-29: the app's own parked turn (src/test/appturn-fixture.ts),
+ * installed in place of routes and meta, and its turn opened. */
+const appTurn = (o: AppTurnOptions) => () =>
+  serveAppTurn(new FakeStudio(), o).install()
+async function openAppTurn(el: WeftDevtools) {
+  const row = () =>
+    all(el, ".weft-turn").find((b) =>
+      (b.getAttribute("data-weft-run") ?? "").includes(PARKED)
+    )
+  await vi.waitFor(() => expect(row()).toBeTruthy(), { timeout: 5_000 })
+  click(row())
+  await settle()
+  await vi.waitFor(
+    () =>
+      expect($(el, ".weft-main")?.textContent ?? "").not.toContain(
+        "checking for a runtime"
+      ),
+    { timeout: 5_000 }
+  )
+}
+
 const MODES: {
   name: string
   width: number
@@ -402,6 +436,12 @@ const MODES: {
   act?: (el: WeftDevtools) => Promise<void>
   routes?: () => Record<string, Route>
   meta?: unknown
+  /** Installs the fake Studio itself (routes and meta unused). */
+  install?: () => void
+  /** The page's URL at the mount (rung 4's ?weft_scope=). */
+  url?: string
+  /** Mounted without BASE's public id: the dev list's fallback. */
+  unscoped?: boolean
 }[] = [
   {
     name: "float, open",
@@ -563,6 +603,42 @@ const MODES: {
     meta: { ...META, capabilities: [...META.capabilities, "pricing"] },
   },
   {
+    name: "the fallback with how to scope open (UX-D-29)",
+    width: 1024,
+    attrs: { "data-open": "true" },
+    unscoped: true,
+    sel: ".weft-howto",
+    act: async (el) => {
+      click(all(el, "button").find((b) => b.textContent === "how to scope"))
+      await settle()
+    },
+  },
+  {
+    name: "an app turn's refused verbs, F4.3 (UX-D-29)",
+    width: 1024,
+    attrs: { "data-open": "true", "data-public-id": APP_PUB },
+    sel: '[data-weft-refused="app-owned"]',
+    install: appTurn({
+      runtimes: [runtimeRow({ sessions: false, breakpoints_own: false })],
+    }),
+    act: openAppTurn,
+  },
+  {
+    name: "the conversation switcher (UX-D-29)",
+    width: 1024,
+    attrs: { "data-open": "true" },
+    url: "/shop?weft_scope=pub_other",
+    sel: "select.weft-switch",
+  },
+  {
+    name: "an app turn's steer box (UX-D-29)",
+    width: 1024,
+    attrs: { "data-open": "true", "data-public-id": APP_PUB },
+    sel: "[data-weft-app-steer]",
+    install: appTurn({ running: true }),
+    act: openAppTurn,
+  },
+  {
     name: "badges, the cap line and the chips",
     width: 1024,
     attrs: { "data-open": "true", "data-position": "right-dock" },
@@ -595,15 +671,25 @@ describe("the axe budget: zero violations", () => {
     for (const m of MODES)
       it(`${m.name} (${theme})`, async () => {
         viewport(m.width, 768)
-        fakeStudio((m.routes ?? baseRoutes)(), m.meta ?? META)
-        const el = await mount({ ...BASE, ...m.attrs, ...themeAttrs })
-        await m.act?.(el)
-        expect(el.shadowRoot!.querySelector(m.sel)).not.toBeNull()
-        const { violations, incomplete } = await audit(el)
-        expect(violations, violations.join("\n")).toEqual([])
-        // What jsdom cannot judge is said, not passed: both need layout
-        // (an exact aria-label = text match is "incomplete" here too).
-        for (const id of incomplete) expect(LAYOUT_RULES).toContain(id)
+        const prev = location.href
+        if (m.url) history.pushState(null, "", m.url)
+        try {
+          if (m.install) m.install()
+          else fakeStudio((m.routes ?? baseRoutes)(), m.meta ?? META)
+          const base = m.unscoped
+            ? { "data-endpoint": BASE["data-endpoint"] }
+            : BASE
+          const el = await mount({ ...base, ...m.attrs, ...themeAttrs })
+          await m.act?.(el)
+          expect(el.shadowRoot!.querySelector(m.sel)).not.toBeNull()
+          const { violations, incomplete } = await audit(el)
+          expect(violations, violations.join("\n")).toEqual([])
+          // What jsdom cannot judge is said, not passed: both need layout
+          // (an exact aria-label = text match is "incomplete" here too).
+          for (const id of incomplete) expect(LAYOUT_RULES).toContain(id)
+        } finally {
+          history.pushState(null, "", prev)
+        }
         // A whole-panel axe run (the Raw tab's open tree) outlasts
         // vitest's 5 s default on a loaded machine (U34-fix3): the
         // budget is the violations, not the clock.

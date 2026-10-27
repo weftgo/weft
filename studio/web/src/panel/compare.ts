@@ -21,28 +21,11 @@ import {
   markerWords,
   stepDiffView,
   summaryWords,
+  noSpans,
+  UNTRACED,
+  untraced,
 } from "../lib/stepdiff"
 import { badge, holeBadges, holeLine } from "./badges"
-
-/** sideMarks is one side's marks and holes, labelled a or b. */
-function sideMarks(which: string, side: SideView): HTMLElement | null {
-  if (!side.marks.length && !side.holes.length) return null
-  const box = el("span", "weft-holes", `${which} `, {
-    "data-weft-diff-side": which,
-  })
-  for (const m of side.marks)
-    box.append(
-      m.hole
-        ? badge(m.hole)
-        : el("span", "weft-chip weft-tag", m.label, {
-            title: m.title,
-            "data-weft-diff-mark": m.mark,
-          })
-    )
-  const holes = holeBadges(side.holes)
-  if (holes) box.append(holes)
-  return box
-}
 
 /** stepDiffBlock draws one diff: the summary, a marker per changed
  * step, the table, the response's own holes, and the hand-off to
@@ -62,6 +45,10 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
     el("div", "weft-diff-h", [`steps vs source: ${summaryWords(v)} `, link])
   )
   for (const h of v.holes) box.append(holeLine(h))
+  // A replay run without a tracer: said once, its words in the title.
+  const nt = untraced(v)
+  if (nt)
+    box.append(badge("not_recorded", { cause: "no_spans", label: UNTRACED }))
   if (v.markers.length) {
     const list = el("ul", "weft-diff-markers", "", {
       "aria-label": "changed steps",
@@ -115,7 +102,7 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
       ["a", r.a],
       ["b", r.b],
     ] as const) {
-      const marks = sideMarks(which, side)
+      const marks = sideMarks(which, side, which === "b" && nt)
       if (marks) th.append(marks)
     }
     tr.append(th)
@@ -144,5 +131,31 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
   }
   table.append(body)
   box.append(table)
+  return box
+}
+
+/** sideMarks is one side's marks and holes, labelled a or b — less
+ * the no_spans hole the head already says once (skip: UX-D-40). */
+function sideMarks(
+  which: string,
+  { marks, holes: all }: SideView,
+  skip?: boolean
+): HTMLElement | null {
+  const holes = skip ? all.filter((h) => !noSpans(h)) : all
+  if (!marks.length && !holes.length) return null
+  const box = el("span", "weft-holes", `${which} `, {
+    "data-weft-diff-side": which,
+  })
+  for (const m of marks)
+    box.append(
+      m.hole
+        ? badge(m.hole)
+        : el("span", "weft-chip weft-tag", m.label, {
+            title: m.title,
+            "data-weft-diff-mark": m.mark,
+          })
+    )
+  const hb = holeBadges(holes)
+  if (hb) box.append(hb)
   return box
 }

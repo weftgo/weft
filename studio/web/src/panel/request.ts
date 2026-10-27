@@ -154,6 +154,22 @@ interface Facts {
 /** The diffs drawn, by row: a redraw diffs nothing again. */
 const diffMemo = new WeakMap<RequestRow, { base: string; diff: BoundedDiff }>()
 
+function remember(key: string, v: boolean | null | "pending") {
+  composedCache.set(key, v)
+  if (composedCache.size > COMPOSED_MAX)
+    composedCache.delete(composedCache.keys().next().value!)
+}
+
+const DIFF_MARK = { add: "+ ", del: "− ", same: "  " }
+
+/** stepsOf: every step the turn ran or the record names, in order —
+ * the tab's picker, and what J/K walk while it is open. */
+export function stepsOf(t: TurnView, req: PanelRequests | null): number[] {
+  const s = new Set<number>(t.folded.steps.map((x) => x.index))
+  for (const k of req?.steps.keys() ?? []) s.add(k)
+  return [...s].sort((a, b) => a - b)
+}
+
 function diffView(
   r: RequestRow,
   base: PromptBaseline,
@@ -198,27 +214,6 @@ function diffView(
       )
     )
   return box
-}
-
-const DIFF_MARK = { add: "+ ", del: "− ", same: "  " }
-
-/** A toggle the user opened, kept in the element's open keys. */
-function toggle(
-  d: RequestTabDeps,
-  key: string,
-  label: (open: boolean) => string
-): [HTMLElement, boolean] {
-  const open = d.keys.has(key)
-  const b = el("button", "weft-btn weft-rq-more", label(open), {
-    type: "button",
-    "aria-expanded": String(open),
-  })
-  on(b, "click", () => {
-    if (d.keys.has(key)) d.keys.delete(key)
-    else d.keys.add(key)
-    d.redraw()
-  })
-  return [b, open]
 }
 
 function messagesView(d: RequestTabDeps, r: RequestRow, step: number): Node[] {
@@ -426,21 +421,6 @@ function promptView(
   return out
 }
 
-/** A tool's policy chips (the Studio pane's ToolChips). */
-function toolChips(t: ToolEntry): HTMLElement {
-  const box = el("div", "weft-holes")
-  for (const c of [
-    `timeout ${t.timeout_ms > 0 ? `${t.timeout_ms}ms` : "none"}`,
-    `approval ${t.approval ? "required" : "no"}`,
-    `replay ${t.replay || "never"}`,
-    `result cap ${t.max_result_bytes > 0 ? bytes(t.max_result_bytes) : "off"}`,
-    t.sequential ? "sequential" : "",
-    `source ${t.source || "?"}`,
-  ])
-    if (c) box.append(el("span", "weft-chip", c))
-  return box
-}
-
 function catalogView(
   d: RequestTabDeps,
   r: RequestRow,
@@ -529,25 +509,6 @@ const sentMemo = new WeakMap<
   { tr: unknown; comps: unknown; running: boolean; m: MessagesSent }
 >()
 
-/** stepsOf: every step the turn ran or the record names, in order —
- * the tab's picker, and what J/K walk while it is open. */
-export function stepsOf(t: TurnView, req: PanelRequests | null): number[] {
-  const s = new Set<number>(t.folded.steps.map((x) => x.index))
-  for (const k of req?.steps.keys() ?? []) s.add(k)
-  return [...s].sort((a, b) => a - b)
-}
-
-function cut(r: RequestRow | undefined): boolean {
-  const p = r?.prompt
-  return !!p && !isHoleRef(p) && p.truncated_bytes > 0
-}
-
-function remember(key: string, v: boolean | null | "pending") {
-  composedCache.set(key, v)
-  if (composedCache.size > COMPOSED_MAX)
-    composedCache.delete(composedCache.keys().next().value!)
-}
-
 /** picker is a row of pressed/unpressed buttons (the steps, a step's
  * attempts). */
 function picker(
@@ -577,6 +538,25 @@ function picker(
     box.append(b)
   }
   return box
+}
+
+/** A toggle the user opened, kept in the element's open keys. */
+function toggle(
+  d: RequestTabDeps,
+  key: string,
+  label: (open: boolean) => string
+): [HTMLElement, boolean] {
+  const open = d.keys.has(key)
+  const b = el("button", "weft-btn weft-rq-more", label(open), {
+    type: "button",
+    "aria-expanded": String(open),
+  })
+  on(b, "click", () => {
+    if (d.keys.has(key)) d.keys.delete(key)
+    else d.keys.add(key)
+    d.redraw()
+  })
+  return [b, open]
 }
 
 /** renderRequestTab is the Request tab's panel content. */
@@ -777,4 +757,24 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
       )
     )
   return box
+}
+
+/** A tool's policy chips (the Studio pane's ToolChips). */
+function toolChips(t: ToolEntry): HTMLElement {
+  const box = el("div", "weft-holes")
+  for (const c of [
+    `timeout ${t.timeout_ms > 0 ? `${t.timeout_ms}ms` : "none"}`,
+    `approval ${t.approval ? "required" : "no"}`,
+    `replay ${t.replay || "never"}`,
+    `result cap ${t.max_result_bytes > 0 ? bytes(t.max_result_bytes) : "off"}`,
+    t.sequential ? "sequential" : "",
+    `source ${t.source || "?"}`,
+  ])
+    if (c) box.append(el("span", "weft-chip", c))
+  return box
+}
+
+function cut(r: RequestRow | undefined): boolean {
+  const p = r?.prompt
+  return !!p && !isHoleRef(p) && p.truncated_bytes > 0
 }

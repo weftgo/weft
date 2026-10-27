@@ -25,6 +25,61 @@ declare global {
   }
 }
 
+/** boot is the entry's whole effect. */
+function boot(): void {
+  // The custom element, defined exactly once per page (the script tag
+  // twice, a hot reload: the first definition stands).
+  if (!customElements.get("weft-devtools")) {
+    customElements.define("weft-devtools", WeftDevtools)
+  }
+  // A script that runs while the page is still parsing (an async
+  // module, a classic include in <head>) decides once the markup is
+  // all there: the page's own <weft-devtools> may come later in the
+  // body, and a second copy of the script decides after the first —
+  // one panel either way, never a dock beside the page's markup.
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      () => {
+        try {
+          mountOrWatch()
+        } catch {
+          // fail silent
+        }
+      },
+      { once: true }
+    )
+    return
+  }
+  mountOrWatch()
+}
+
+/** mountOrWatch is the §5.3 mount decision over the parsed page. */
+function mountOrWatch(): void {
+  // window.__WEFT__ is watched whatever is mounted now: an element
+  // without an explicit data-public-id — markup mounted later
+  // included — is scoped by it, one with an explicit id never is.
+  watchWeft()
+  const cfg = readConfig()
+  if (document.querySelector("weft-devtools")) return // the page's markup upgrades itself
+  if (cfg.auto || debugForced()) mountDock()
+}
+
+// The dock mount decision (§5.3): markup in the page always upgrades
+// through the definition above; without markup the panel mounts when
+// data-auto is not "false", or the debug override forces it on. The
+// element itself merges the script tag's attributes (readConfig), so
+// the dock needs no attributes copied over.
+function mountDock(): void {
+  const dock = document.createElement("weft-devtools")
+  // This node is the panel's own: where Studio does not answer it is
+  // removed (§5.3). Markup the page wrote is never removed.
+  ;(dock as WeftDevtools).autoMounted = true
+  // The decision runs once the page is parsed (boot), so <body> is
+  // there — unless the page has none (a frameset): no dock.
+  ;(document.body as HTMLElement | null)?.append(dock)
+}
+
 /** watchWeft installs the §5.2 setter: a single-page app reassigns
  * window.__WEFT__ = { publicId } when the user switches conversations
  * and every mounted panel rescopes — every <weft-devtools> connected
@@ -86,61 +141,6 @@ function watchWeft(): void {
   } catch {
     // A sealed page cannot be watched; the attribute path still works.
   }
-}
-
-// The dock mount decision (§5.3): markup in the page always upgrades
-// through the definition above; without markup the panel mounts when
-// data-auto is not "false", or the debug override forces it on. The
-// element itself merges the script tag's attributes (readConfig), so
-// the dock needs no attributes copied over.
-function mountDock(): void {
-  const dock = document.createElement("weft-devtools")
-  // This node is the panel's own: where Studio does not answer it is
-  // removed (§5.3). Markup the page wrote is never removed.
-  ;(dock as WeftDevtools).autoMounted = true
-  // The decision runs once the page is parsed (boot), so <body> is
-  // there — unless the page has none (a frameset): no dock.
-  ;(document.body as HTMLElement | null)?.append(dock)
-}
-
-/** boot is the entry's whole effect. */
-function boot(): void {
-  // The custom element, defined exactly once per page (the script tag
-  // twice, a hot reload: the first definition stands).
-  if (!customElements.get("weft-devtools")) {
-    customElements.define("weft-devtools", WeftDevtools)
-  }
-  // A script that runs while the page is still parsing (an async
-  // module, a classic include in <head>) decides once the markup is
-  // all there: the page's own <weft-devtools> may come later in the
-  // body, and a second copy of the script decides after the first —
-  // one panel either way, never a dock beside the page's markup.
-  if (document.readyState === "loading") {
-    document.addEventListener(
-      "DOMContentLoaded",
-      () => {
-        try {
-          mountOrWatch()
-        } catch {
-          // fail silent
-        }
-      },
-      { once: true }
-    )
-    return
-  }
-  mountOrWatch()
-}
-
-/** mountOrWatch is the §5.3 mount decision over the parsed page. */
-function mountOrWatch(): void {
-  // window.__WEFT__ is watched whatever is mounted now: an element
-  // without an explicit data-public-id — markup mounted later
-  // included — is scoped by it, one with an explicit id never is.
-  watchWeft()
-  const cfg = readConfig()
-  if (document.querySelector("weft-devtools")) return // the page's markup upgrades itself
-  if (cfg.auto || debugForced()) mountDock()
 }
 
 // A page the panel cannot run in (no custom elements, a sealed

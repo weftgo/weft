@@ -70,21 +70,6 @@ export function mayProposeWith(
 ): boolean {
   return capabilities.includes("proposals") && tokenScopeOf(token) === ""
 }
-
-/** mayExportTestWith: the verb is drawn under capability "export" for
- * any identity but a read-scoped panel token (export.go refuses it the
- * wefttest format: fixtures carry prompts). */
-export function mayExportTestWith(
-  capabilities: readonly string[],
-  token: string
-): boolean {
-  return capabilities.includes("export") && tokenScopeOf(token) !== "read"
-}
-
-export const SAVE_TEST_LABEL = "save as test"
-export const SAVE_TEST_TITLE =
-  "download this run as a wefttest replay test (a zip: <agent>_replay_test.go + testdata) — Studio writes nothing to your files"
-export const KEEP_PROMPT_LABEL = "keep as prompt"
 /** keepEditedTitle is the title of keep as prompt over an edited
  * prompt — the playground card's and the panel drawer's alike: it
  * proposes to agent where the identity may (mayProposeWith), else it
@@ -100,6 +85,38 @@ export function keepEditedTitle(
   return mayProposeWith(capabilities, token)
     ? `copy the edited prompt and propose it as ${agent}'s instructions (shown on the Agents page beside the registered ones)`
     : `copy the edited prompt${capabilities.includes("proposals") ? ` — ${PROPOSAL_NEEDS_DEV}` : ""}`
+}
+
+export const SAVE_TEST_LABEL = "save as test"
+export const SAVE_TEST_TITLE =
+  "download this run as a wefttest replay test (a zip: <agent>_replay_test.go + testdata) — Studio writes nothing to your files"
+export const KEEP_PROMPT_LABEL = "keep as prompt"
+
+/** keepPromptWords is keep as prompt's line (the panel bundles this
+ * one alone: it has no save-as-test fetch or withdraw of its own). */
+export function keepPromptWords(o: KeepPrompt): {
+  title: string
+  tone: SaveTone
+} {
+  const copied = o.copied
+    ? "copied"
+    : "copy failed — the browser refused the clipboard"
+  if (o.proposal === "proposed")
+    return {
+      title: `${copied} · proposed as ${o.agent}'s instructions (see Agents)`,
+      tone: o.copied ? "success" : "info",
+    }
+  if (o.proposal === "refused")
+    return {
+      title: `${copied} · proposal refused: ${o.message ?? ""}`,
+      tone: "error",
+    }
+  // No agent: copy alone — no proposal to need a token for.
+  if (!o.agent) return { title: copied, tone: o.copied ? "success" : "error" }
+  return {
+    title: `${copied} · ${PROPOSAL_NEEDS_DEV}`,
+    tone: o.copied ? "info" : "error",
+  }
 }
 
 /** What a panel token (or a Studio without proposals) is told. */
@@ -197,29 +214,12 @@ export function saveWords(o: SaveOutcome): { title: string; tone: SaveTone } {
   }
 }
 
-/** keepPromptWords is keep as prompt's line (the panel bundles this
- * one alone: it has no save-as-test fetch or withdraw of its own). */
-export function keepPromptWords(o: KeepPrompt): {
-  title: string
-  tone: SaveTone
-} {
-  const copied = o.copied
-    ? "copied"
-    : "copy failed — the browser refused the clipboard"
-  if (o.proposal === "proposed")
-    return {
-      title: `${copied} · proposed as ${o.agent}'s instructions (see Agents)`,
-      tone: o.copied ? "success" : "info",
-    }
-  if (o.proposal === "refused")
-    return {
-      title: `${copied} · proposal refused: ${o.message ?? ""}`,
-      tone: "error",
-    }
-  // No agent: copy alone — no proposal to need a token for.
-  if (!o.agent) return { title: copied, tone: o.copied ? "success" : "error" }
-  return {
-    title: `${copied} · ${PROPOSAL_NEEDS_DEV}`,
-    tone: o.copied ? "info" : "error",
-  }
+/** mayExportTestWith: the verb is drawn under capability "export" for
+ * any identity but a read-scoped panel token (export.go refuses it the
+ * wefttest format: fixtures carry prompts). */
+export function mayExportTestWith(
+  capabilities: readonly string[],
+  token: string
+): boolean {
+  return capabilities.includes("export") && tokenScopeOf(token) !== "read"
 }

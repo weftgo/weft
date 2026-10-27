@@ -57,6 +57,18 @@ const clamp = (v: number, lo: number, hi: number) =>
 const vw = () => window.innerWidth || 1024
 const vh = () => window.innerHeight || 768
 
+/** pillPlace is where the pill sits: the float's corner (the half of
+ * the viewport its box is in), a dock's side. */
+export function pillPlace(l: Layout): string {
+  if (l.mode === "float")
+    return l.x + l.w / 2 < vw() / 2 ? "bottom-left" : "bottom-right"
+  return l.side === "left"
+    ? "bottom-left"
+    : l.side === "top"
+      ? "top-right"
+      : "bottom-right"
+}
+
 /** storage is localStorage, or null where reading it throws. */
 function storage(): Storage | null {
   try {
@@ -104,6 +116,15 @@ export function readStore(): Partial<Layout> {
   }
 }
 
+/** The fields that place the panel: stored only once the user placed
+ * it (toggled, moved, resized, re-docked), so until then the page's
+ * data-* attributes keep deciding. */
+export const PLACE = ["mode", "side", "open", "hidden", "x", "y", "w", "h", "d"]
+
+/** placedIn: a stored layout carries a placement. */
+export const placedIn = (st: Partial<Layout>) =>
+  PLACE.some((k) => Object.hasOwn(st, k))
+
 /** initialLayout is what the data-* attributes say (data-position,
  * data-open, data-mode), before storage. */
 export function initialLayout(
@@ -135,15 +156,6 @@ export function initialLayout(
   return l
 }
 
-/** The fields that place the panel: stored only once the user placed
- * it (toggled, moved, resized, re-docked), so until then the page's
- * data-* attributes keep deciding. */
-export const PLACE = ["mode", "side", "open", "hidden", "x", "y", "w", "h", "d"]
-
-/** placedIn: a stored layout carries a placement. */
-export const placedIn = (st: Partial<Layout>) =>
-  PLACE.some((k) => Object.hasOwn(st, k))
-
 /** writeStore writes the layout under STORE_KEY (its placement only
  * when placed); a private window (or a full quota) just forgets. */
 export function writeStore(l: Layout, placed: boolean): void {
@@ -156,6 +168,9 @@ export function writeStore(l: Layout, placed: boolean): void {
     // forgotten: the panel still works
   }
 }
+
+/** horizontal: docked on the left or right (sized by width). */
+export const horizontal = (side: Side) => side === "left" || side === "right"
 
 /** migrateDebug moves localStorage.weft_debug=1 into the key (debug)
  * and drops the old one; reports whether the switch is on. */
@@ -176,24 +191,6 @@ export function migrateDebug(): boolean {
     // stays, and still forces the panel on
   }
   return old || readStore().debug === true
-}
-
-/** horizontal: docked on the left or right (sized by width). */
-export const horizontal = (side: Side) => side === "left" || side === "right"
-
-/** clampLayout fits the box to the viewport: the float between its
- * minimum and the viewport minus GAP, inside the viewport; the dock
- * the same along its axis. */
-export function clampLayout(l: Layout): void {
-  const W = vw()
-  const H = vh()
-  l.w = clamp(l.w, Math.min(MIN_W, W - GAP), W - GAP)
-  l.h = clamp(l.h, Math.min(MIN_H, H - GAP), H - GAP)
-  l.x = clamp(l.x, 0, W - l.w)
-  l.y = clamp(l.y, 0, H - l.h)
-  const along = horizontal(l.side) ? W : H
-  const min = horizontal(l.side) ? MIN_W : MIN_H
-  l.d = clamp(l.d, Math.min(min, along - GAP), along - GAP)
 }
 
 /** Geometry is what the dock element is given: its classes, its
@@ -233,16 +230,19 @@ export function geometry(l: Layout): Geometry {
   }
 }
 
-/** pillPlace is where the pill sits: the float's corner (the half of
- * the viewport its box is in), a dock's side. */
-export function pillPlace(l: Layout): string {
-  if (l.mode === "float")
-    return l.x + l.w / 2 < vw() / 2 ? "bottom-left" : "bottom-right"
-  return l.side === "left"
-    ? "bottom-left"
-    : l.side === "top"
-      ? "top-right"
-      : "bottom-right"
+/** clampLayout fits the box to the viewport: the float between its
+ * minimum and the viewport minus GAP, inside the viewport; the dock
+ * the same along its axis. */
+export function clampLayout(l: Layout): void {
+  const W = vw()
+  const H = vh()
+  l.w = clamp(l.w, Math.min(MIN_W, W - GAP), W - GAP)
+  l.h = clamp(l.h, Math.min(MIN_H, H - GAP), H - GAP)
+  l.x = clamp(l.x, 0, W - l.w)
+  l.y = clamp(l.y, 0, H - l.h)
+  const along = horizontal(l.side) ? W : H
+  const min = horizontal(l.side) ? MIN_W : MIN_H
+  l.d = clamp(l.d, Math.min(min, along - GAP), along - GAP)
 }
 
 /** The custom property data-push's padding goes through. */

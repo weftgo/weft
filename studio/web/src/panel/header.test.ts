@@ -164,7 +164,11 @@ describe("the empty states (UX-F-33)", () => {
     fakeStudio(empty())
     const el = await mount()
     expect(text(el, "[data-weft-stats]")).toBe("0 runs · —")
-    expect(text(el, ".weft-turns")).toContain("no runs yet — run your app")
+    // An explicit public id with no run (UX-D-37): it may be a wrong
+    // one — said, with the rung that named it.
+    expect(text(el, ".weft-splash")).toBe(
+      "Studio has no runs for pub_orders yet — check the id (scope: explicit)"
+    )
     expect(text(el, ".weft-main")).not.toContain("select a turn")
   })
 

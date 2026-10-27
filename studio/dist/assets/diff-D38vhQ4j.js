@@ -1,0 +1,7 @@
+function e(e,t){let n=e.split(`
+`),r=t.split(`
+`),i=Array.from({length:n.length+1},()=>Array(r.length+1).fill(0));for(let e=n.length-1;e>=0;e--)for(let t=r.length-1;t>=0;t--)i[e][t]=n[e]===r[t]?i[e+1][t+1]+1:Math.max(i[e+1][t],i[e][t+1]);let a=[],o=0,s=0;for(;o<n.length&&s<r.length;)n[o]===r[s]?(a.push({kind:`same`,text:n[o]}),o++,s++):i[o+1][s]>=i[o][s+1]?(a.push({kind:`del`,text:n[o]}),o++):(a.push({kind:`add`,text:r[s]}),s++);for(;o<n.length;o++)a.push({kind:`del`,text:n[o]});for(;s<r.length;s++)a.push({kind:`add`,text:r[s]});return a}function t(t,r,i=n){let a=t.split(`
+`),o=r.split(`
+`),s=0;for(;s<a.length&&s<o.length&&a[s]===o[s];)s++;let c=0;for(;c<a.length-s&&c<o.length-s&&a[a.length-1-c]===o[o.length-1-c];)c++;let l=a.slice(s,a.length-c),u=o.slice(s,o.length-c);if(l.length>i||u.length>i)return{tooLarge:{before:a.length,after:o.length}};let d=e=>e.map(e=>({kind:`same`,text:e})),f=l.length===0?u.map(e=>({kind:`add`,text:e})):u.length===0?l.map(e=>({kind:`del`,text:e})):e(l.join(`
+`),u.join(`
+`));return{rows:[...d(a.slice(0,s)),...f,...d(a.slice(a.length-c))]}}var n=2e3;function r(e){let t=e.filter(e=>e.kind===`add`).length,n=e.filter(e=>e.kind===`del`).length;return!t&&!n?`identical`:`+${t} −${n}`}export{t as n,r,e as t};

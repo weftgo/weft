@@ -6,10 +6,10 @@
 //   2. the <weft-devtools> element's own data-* attributes;
 //   3. <meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto|global|mode|push|z-index|theme">;
 //   4. the panel's <script> tag's data-* attributes: the running
-//      classic script (document.currentScript), else the first script
-//      carrying data-weft (any src — a renamed or proxied bundle), else
-//      the script whose src resolves to the module's own URL
-//      (import.meta.url) — never a tag for its generic data-* words;
+//      classic script (document.currentScript), else the script whose
+//      src resolves to the module's own URL (import.meta.url), else the
+//      first script carrying data-weft (any src — a renamed or proxied
+//      bundle) — never a tag for its generic data-* words;
 //   5. <script directory>/panel-config.json (B3), asked only when no
 //      rung above named an endpoint, for the endpoint alone (never a
 //      token, never another origin) — resolveEndpoint in element.ts's
@@ -29,13 +29,13 @@
 // ?weft_scope= / #weft_scope= (rung 4, urlScope) comes next, then the
 // marker and header rungs (markers.ts, detect.ts) — each supplies a
 // scope only when no rung above it names one.
-import { tokenClaimsOf, tokenScopeOf } from "../lib/replay"
 import { parseScope, serializeScope } from "../lib/scope"
 import { migrateDebug } from "./layout"
+import { isLoopback } from "./detect"
 import { themeSetting } from "./theme"
 import type { ThemeSetting } from "./theme"
 import type { Scope } from "../lib/scope"
-import { isLoopback } from "./detect"
+import { tokenClaimsOf, tokenScopeOf } from "../lib/replay"
 
 /** data-position — where the dock sits (mount's option). */
 export type PanelPosition = "bottom-right" | "bottom-left" | "right-dock"
@@ -118,23 +118,19 @@ export interface MountOptions {
 export type DetectSetting =
   "" | "headers" | "markers" | "headers,markers" | "off"
 
-/** detectSetting reads a data-detect value: "off" wherever it is
- * named (the author asked for less), else the rungs it names (headers,
- * markers, comma-separated, either order, empty words skipped); a
- * value naming anything else is unset — the defaults apply. */
-export function detectSetting(v: string | null | undefined): DetectSetting {
-  const words = new Set(
-    String(v ?? "")
-      .toLowerCase()
-      .split(",")
-      .map((w) => w.trim())
-      .filter(Boolean)
-  )
-  if (words.has("off")) return "off"
-  const h = words.delete("headers")
-  const m = words.delete("markers")
-  if (words.size) return ""
-  return h && m ? "headers,markers" : h ? "headers" : m ? "markers" : ""
+/** normalize turns a raw endpoint into a base URL with a trailing
+ * slash, or "" when it is not http(s). Never throws: the element reads
+ * its configuration inside custom-element callbacks, where a throw
+ * lands in the host page's error handler. */
+function normalize(raw: string, base: string): string {
+  try {
+    const url = new URL(raw, base)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return ""
+    if (!url.pathname.endsWith("/")) url.pathname += "/"
+    return url.toString()
+  } catch {
+    return ""
+  }
 }
 
 const POSITIONS: PanelPlacement[] = [
@@ -215,6 +211,25 @@ const entry = {
   })(),
 }
 
+/** detectSetting reads a data-detect value: "off" wherever it is
+ * named (the author asked for less), else the rungs it names (headers,
+ * markers, comma-separated, either order, empty words skipped); a
+ * value naming anything else is unset — the defaults apply. */
+export function detectSetting(v: string | null | undefined): DetectSetting {
+  const words = new Set(
+    String(v ?? "")
+      .toLowerCase()
+      .split(",")
+      .map((w) => w.trim())
+      .filter(Boolean)
+  )
+  if (words.has("off")) return "off"
+  const h = words.delete("headers")
+  const m = words.delete("markers")
+  if (words.size) return ""
+  return h && m ? "headers,markers" : h ? "headers" : m ? "markers" : ""
+}
+
 /** viaPackage reports whether the bundle runs as the npm entry's import. */
 export function viaPackage(): boolean {
   return entry.npm
@@ -223,59 +238,6 @@ export function viaPackage(): boolean {
 /** setViaPackage sets it (the element class's npmEntry setter). */
 export function setViaPackage(v: boolean): void {
   entry.npm = v
-}
-
-/** The panel's own <script> tag (rung 4): document.currentScript when
- * the bundle ran as a classic script; else the first script carrying
- * data-weft, in document order (any src: a renamed bundle, a proxy);
- * else the script whose src resolves to the module's own URL
- * (import.meta.url). Never the file name, and never a tag because it
- * carries a generic data-* attribute: a third-party widget's
- * data-endpoint or data-token is not the panel's configuration.
- * Imported through the npm entry (viaPackage) only data-weft counts:
- * the running script and the module's own URL are the app's bundle
- * then, whose directory is not Studio's and whose data-* attributes
- * are the app's — the endpoint default stays the page's directory. */
-export function findPanelScript(): HTMLScriptElement | null {
-  const npm = entry.npm
-  if (!npm && bootScript?.isConnected) return bootScript
-  try {
-    const tagged =
-      document.querySelector<HTMLScriptElement>("script[data-weft]")
-    if (tagged) return tagged
-    if (npm || !selfURL) return null
-    for (const s of Array.from(
-      document.querySelectorAll<HTMLScriptElement>("script[src]")
-    )) {
-      try {
-        if (
-          new URL(s.getAttribute("src") ?? "", document.baseURI).href ===
-          selfURL
-        )
-          return s
-      } catch {
-        // an unparsable src is not the panel's
-      }
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-/** normalize turns a raw endpoint into a base URL with a trailing
- * slash, or "" when it is not http(s). Never throws: the element reads
- * its configuration inside custom-element callbacks, where a throw
- * lands in the host page's error handler. */
-function normalize(raw: string, base: string): string {
-  try {
-    const url = new URL(raw, base)
-    if (url.protocol !== "http:" && url.protocol !== "https:") return ""
-    if (!url.pathname.endsWith("/")) url.pathname += "/"
-    return url.toString()
-  } catch {
-    return ""
-  }
 }
 
 /** scriptDir is the script's own origin + directory (rung 6) — what
@@ -289,6 +251,20 @@ function scriptDir(script: HTMLScriptElement | null): string {
   } catch {
     return ""
   }
+}
+
+/** scopeOption is mount's scope option in its string form (a Scope
+ * object serialised; anything else is unset). */
+function scopeOption(v: unknown): string | undefined {
+  if (typeof v === "string") return v
+  if (v && typeof v === "object" && typeof (v as Scope).publicId === "string") {
+    try {
+      return serializeScope(v as Scope)
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
 }
 
 /** weftScope reads window.__WEFT__: its scope (the serialised form, or
@@ -313,18 +289,41 @@ export function weftScope(): Scope {
 /** A rung: the raw value it sets for a field, or null when it sets none. */
 type Rung = (f: Field) => string | null
 
-/** scopeOption is mount's scope option in its string form (a Scope
- * object serialised; anything else is unset). */
-function scopeOption(v: unknown): string | undefined {
-  if (typeof v === "string") return v
-  if (v && typeof v === "object" && typeof (v as Scope).publicId === "string") {
-    try {
-      return serializeScope(v as Scope)
-    } catch {
-      return undefined
-    }
+/** The panel's own <script> tag (rung 4): document.currentScript when
+ * the bundle ran as a classic script; else the script whose src
+ * resolves to the module's own URL (import.meta.url) — its own tag
+ * before another's data-weft, so two tags on a page each read their
+ * own (UX-D-28); else the first script carrying data-weft, in document
+ * order (any src: a renamed bundle, a proxy). Never the file name, and
+ * never a tag because it
+ * carries a generic data-* attribute: a third-party widget's
+ * data-endpoint or data-token is not the panel's configuration.
+ * Imported through the npm entry (viaPackage) only data-weft counts:
+ * the running script and the module's own URL are the app's bundle
+ * then, whose directory is not Studio's and whose data-* attributes
+ * are the app's — the endpoint default stays the page's directory. */
+export function findPanelScript(): HTMLScriptElement | null {
+  const npm = entry.npm
+  if (!npm && bootScript?.isConnected) return bootScript
+  try {
+    if (!npm && selfURL)
+      for (const s of Array.from(
+        document.querySelectorAll<HTMLScriptElement>("script[src]")
+      )) {
+        try {
+          if (
+            new URL(s.getAttribute("src") ?? "", document.baseURI).href ===
+            selfURL
+          )
+            return s
+        } catch {
+          // an unparsable src is not the panel's
+        }
+      }
+    return document.querySelector<HTMLScriptElement>("script[data-weft]")
+  } catch {
+    return null
   }
-  return undefined
 }
 
 function metaRung(): Rung {
@@ -345,6 +344,26 @@ const attrRung =
   (n: Element | null | undefined): Rung =>
   (f) =>
     n?.getAttribute(`data-${f}`) ?? null
+
+/** urlParam is the first weft_scope=… of a query or fragment string
+ * (its leading ? or # dropped; split on both ? and &, so a hash
+ * router's own query — #/chat?weft_scope=… — is read and a value ends
+ * at the next ?), URL-decoded once — "+" stays "+" (the scope's own
+ * form percent-encodes it), a malformed escape is kept as written;
+ * null when the string carries none. */
+function urlParam(part: string, name = URL_SCOPE_PARAM): string | null {
+  for (const pair of part.replace(/^[?#]/, "").split(/[?&]/)) {
+    const at = pair.indexOf("=")
+    if ((at < 0 ? pair : pair.slice(0, at)) !== name) continue
+    const v = at < 0 ? "" : pair.slice(at + 1)
+    try {
+      return decodeURIComponent(v)
+    } catch {
+      return v
+    }
+  }
+  return null
+}
 
 /** discoverEndpoint is rung 5: GET <script directory>/panel-config.json
  * (B3's document: {endpoint, version, capabilities}, never a token) and
@@ -477,6 +496,49 @@ export function readConfig(
   }
 }
 
+/** markerRungOn is the DOM-marker rung's switch (plan C3.3): it reads
+ * attributes only, so it is the production rung — on by default
+ * everywhere except a page off loopback under a read-scoped panel
+ * token (C5); data-detect naming "markers" turns it on there too,
+ * "off" turns it off. */
+export function markerRungOn(
+  cfg: Pick<PanelConfig, "detect" | "token">,
+  page: string = pageURL.href()
+): boolean {
+  if (cfg.detect === "off") return false
+  if (cfg.detect.includes("markers")) return true
+  return isLoopback(page) || tokenScope(cfg.token) !== "read"
+}
+
+/** pageURL is where the rung switches read the page's URL (default
+ * location.href) — one object, so a test can stand the panel on a page
+ * off loopback, which jsdom's location cannot be moved to. */
+export const pageURL = { href: (): string => location.href }
+
+/** The page URL's scope parameter (detection rung 4, plan C3.4). */
+export const URL_SCOPE_PARAM = "weft_scope"
+
+/** headerRungOn is the header rung's switch (plan §13.3): data-detect
+ * "headers" turns it on anywhere and "off" turns it off; by default it
+ * is on only where the host has said so by its setup — the page AND
+ * the endpoint on loopback, with no token (setup A) or the dev/server
+ * token (setup B), never under a panel token (weft_pt., setup C). A
+ * production page pointed at a loopback endpoint is not patched by
+ * default; every other page's window.fetch is never touched. page is
+ * the page's URL (default location.href). */
+export function headerRungOn(
+  cfg: Pick<PanelConfig, "detect" | "endpoint" | "token">,
+  page: string = pageURL.href()
+): boolean {
+  if (cfg.detect === "off") return false
+  if (cfg.detect.includes("headers")) return true
+  return (
+    isLoopback(page) &&
+    isLoopback(cfg.endpoint) &&
+    !cfg.token.startsWith("weft_pt.")
+  )
+}
+
 function optionsRung(opts: MountOptions | null | undefined): Rung {
   return (f) => {
     if (!opts) return null
@@ -512,69 +574,6 @@ export function weftPublicId(): string {
   } catch {
     return ""
   }
-}
-
-/** pageURL is where the rung switches read the page's URL (default
- * location.href) — one object, so a test can stand the panel on a page
- * off loopback, which jsdom's location cannot be moved to. */
-export const pageURL = { href: (): string => location.href }
-
-/** The page URL's scope parameter (detection rung 4, plan C3.4). */
-export const URL_SCOPE_PARAM = "weft_scope"
-
-/** urlParam is the first weft_scope=… of a query or fragment string
- * (its leading ? or # dropped; split on both ? and &, so a hash
- * router's own query — #/chat?weft_scope=… — is read and a value ends
- * at the next ?), URL-decoded once — "+" stays "+" (the scope's own
- * form percent-encodes it), a malformed escape is kept as written;
- * null when the string carries none. */
-function urlParam(part: string, name = URL_SCOPE_PARAM): string | null {
-  for (const pair of part.replace(/^[?#]/, "").split(/[?&]/)) {
-    const at = pair.indexOf("=")
-    if ((at < 0 ? pair : pair.slice(0, at)) !== name) continue
-    const v = at < 0 ? "" : pair.slice(at + 1)
-    try {
-      return decodeURIComponent(v)
-    } catch {
-      return v
-    }
-  }
-  return null
-}
-
-/** headerRungOn is the header rung's switch (plan §13.3): data-detect
- * "headers" turns it on anywhere and "off" turns it off; by default it
- * is on only where the host has said so by its setup — the page AND
- * the endpoint on loopback, with no token (setup A) or the dev/server
- * token (setup B), never under a panel token (weft_pt., setup C). A
- * production page pointed at a loopback endpoint is not patched by
- * default; every other page's window.fetch is never touched. page is
- * the page's URL (default location.href). */
-export function headerRungOn(
-  cfg: Pick<PanelConfig, "detect" | "endpoint" | "token">,
-  page: string = pageURL.href()
-): boolean {
-  if (cfg.detect === "off") return false
-  if (cfg.detect.includes("headers")) return true
-  return (
-    isLoopback(page) &&
-    isLoopback(cfg.endpoint) &&
-    !cfg.token.startsWith("weft_pt.")
-  )
-}
-
-/** markerRungOn is the DOM-marker rung's switch (plan C3.3): it reads
- * attributes only, so it is the production rung — on by default
- * everywhere except a page off loopback under a read-scoped panel
- * token (C5); data-detect naming "markers" turns it on there too,
- * "off" turns it off. */
-export function markerRungOn(
-  cfg: Pick<PanelConfig, "detect" | "token">,
-  page: string = pageURL.href()
-): boolean {
-  if (cfg.detect === "off") return false
-  if (cfg.detect.includes("markers")) return true
-  return isLoopback(page) || tokenScope(cfg.token) !== "read"
 }
 
 export { isLoopback }

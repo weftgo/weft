@@ -484,31 +484,10 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
   return link
 }
 
-/** runPage is runLink without the raw view's state and the replay
- * drawer's (the devtools panel writes neither, so its bundle carries
- * neither): the same keys, in the same order, for every option it
- * takes. */
-export function runPage(
-  id: string,
-  opts: Omit<RunLinkOptions, "raw" | "replay"> = {}
-): RunLink {
-  const step = ordinal(opts.step)
-  const search: RunSearch = {}
-  // Key order is the URL's order: step first, then the view.
-  if (step !== undefined) search.step = step
-  if (opts.view && opts.view !== "waterfall") search.view = opts.view
-  if (step !== undefined && (opts.pane === "request" || opts.pane === "wire"))
-    search.pane = opts.pane
-  if (opts.call && (opts.resumed || step !== undefined))
-    search.sel = `c:${opts.resumed ? "resume" : String(step)}:${opts.call}`
-  else if (opts.span) search.sel = `t:${opts.span}`
-  else if (opts.sel) search.sel = opts.sel
-  if (opts.tab) search.tab = opts.tab
-  if (opts.scale === "time" || opts.scale === "order" || opts.scale === "graph")
-    search.scale = opts.scale
-  const t = ordinal(opts.t)
-  if (t !== undefined) search.t = t
-  return { to: "/runs/$id", params: { id }, search }
+/** runsParam is ?b= for these ids: one comma list, or the array when
+ * an id holds a comma (a comma list would split it). */
+export function runsParam(b: string[]): string | string[] {
+  return b.some((x) => x.includes(",")) ? b : b.join()
 }
 
 /** logsLink is a step's hand-off to its app log lines (U11.2): the
@@ -552,16 +531,25 @@ export function rawFromSearch(search: Record<string, unknown>): RawLinkState {
   return { q, hide, ev: ordinal(search.ev as number | undefined) }
 }
 
-/** conversationLink is a public id's conversation page (U16): every
- * run carrying it, experiments nested — the page for a public id with
- * no thread session as much as one with. */
-export function conversationLink(publicId: string): ConversationLink {
-  return { to: "/conversations/$id", params: { id: publicId }, search: {} }
+/** A search value as the router writes it (TanStack's default
+ * stringifySearch): a string that would parse as JSON is quoted, so
+ * it reads back as the same string; numbers are written bare. */
+function searchValue(v: unknown): string {
+  if (typeof v === "string") {
+    try {
+      JSON.parse(v)
+      return JSON.stringify(v)
+    } catch {
+      return v
+    }
+  }
+  return typeof v === "object" ? JSON.stringify(v) : String(v)
 }
 
-/** sessionLink is a session's page (its timeline). */
-export function sessionLink(id: string): SessionLink {
-  return { to: "/sessions/$id", params: { id }, search: {} }
+/** href is a link as an absolute URL under a Studio base (the panel's
+ * endpoint: the Studio mount, ending in "/"). */
+export function href(base: string, link: StudioLink): string {
+  return new URL(path(link), base).toString()
 }
 
 /** sessionViewLink is a session's page in a view, optionally with one
@@ -624,10 +612,14 @@ export function traceLink(
   return link
 }
 
-/** tracePage is a trace's page alone: traceLink with no option (the
- * devtools panel's, whose bundle so carries no other). */
-export function tracePage(id: string): TraceLink {
-  return { to: "/traces/$id", params: { id }, search: {} }
+/** runsLink is the runs list under these filters (empty values are
+ * dropped: a link never carries a cleared chip). */
+export function runsLink(search: RunsSearch = {}): RunsLink {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(search))
+    if (v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0))
+      out[k] = v
+  return { to: "/runs", search: out }
 }
 
 /** traceSelectionLink is a trace's page with a row selected by its
@@ -642,14 +634,31 @@ export function traceSelectionLink(
     : link
 }
 
-/** runsLink is the runs list under these filters (empty values are
- * dropped: a link never carries a cleared chip). */
-export function runsLink(search: RunsSearch = {}): RunsLink {
-  const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(search))
-    if (v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0))
-      out[k] = v
-  return { to: "/runs", search: out }
+/** runPage is runLink without the raw view's state and the replay
+ * drawer's (the devtools panel writes neither, so its bundle carries
+ * neither): the same keys, in the same order, for every option it
+ * takes. */
+export function runPage(
+  id: string,
+  opts: Omit<RunLinkOptions, "raw" | "replay"> = {}
+): RunLink {
+  const step = ordinal(opts.step)
+  const search: RunSearch = {}
+  // Key order is the URL's order: step first, then the view.
+  if (step !== undefined) search.step = step
+  if (opts.view && opts.view !== "waterfall") search.view = opts.view
+  if (step !== undefined && (opts.pane === "request" || opts.pane === "wire"))
+    search.pane = opts.pane
+  if (opts.call && (opts.resumed || step !== undefined))
+    search.sel = `c:${opts.resumed ? "resume" : String(step)}:${opts.call}`
+  else if (opts.span) search.sel = `t:${opts.span}`
+  else if (opts.sel) search.sel = opts.sel
+  if (opts.tab) search.tab = opts.tab
+  if (opts.scale === "time" || opts.scale === "order" || opts.scale === "graph")
+    search.scale = opts.scale
+  const t = ordinal(opts.t)
+  if (t !== undefined) search.t = t
+  return { to: "/runs/$id", params: { id }, search }
 }
 
 /** tracesLink is the trace list under these filters. */
@@ -662,31 +671,6 @@ export function tracesLink(search: TracesSearch = {}): TracesLink {
   return { to: "/traces", search: out }
 }
 
-/** settingsLink is the Settings page (plan H4); with a provider/model,
- * its pricing table with a row prefilled for it (U7's "price this
- * model…"). */
-export function settingsLink(price?: string): SettingsLink {
-  return { to: "/settings", search: price ? { price } : {} }
-}
-
-/** connectLink is the Settings page's connect card (U21.2's connect
- * lines: an app, a page, a coding agent to this Studio) — where the
- * panel's empty list sends a first run (U21.3, UX-F-11). */
-export function connectLink(): SettingsLink {
-  return { to: "/settings", search: {}, hash: "settings-connect" }
-}
-
-/** conceptLink is the Settings page's Concepts section (U21.2): with a
- * glossary key (lib/glossary.ts TERMS), that term's entry — where a
- * <Term> tooltip's "more ›" goes. */
-export function conceptLink(term?: string): SettingsLink {
-  return {
-    to: "/settings",
-    search: {},
-    hash: term ? `concept-${term}` : "concepts",
-  }
-}
-
 /** runtimesLink is the runtimes page (U20.1): every "Runs in" line
  * and every "not registered" refusal links here — with runtime=, that
  * runtime's card; with agent=, why no connected runtime registers it. */
@@ -696,24 +680,29 @@ export function runtimesLink(
   return { to: "/runtimes", search }
 }
 
-/** playgroundLink is the playground with the hand-off carried over
- * (in the fragment). An empty hand-off is the bare playground. */
-export function playgroundLink(
-  handoff: PlaygroundHandoff = {}
-): PlaygroundLink {
-  const p = new URLSearchParams()
-  for (const [k, v] of Object.entries(handoff) as [
-    keyof PlaygroundHandoff,
-    unknown,
-  ][]) {
-    if (v === undefined || v === "") continue
-    if (k === "step" && ordinal(v as number) === undefined) continue
-    p.set(k, String(v))
-  }
-  const hash = p.toString()
-  return hash
-    ? { to: "/playground", search: {}, hash }
-    : { to: "/playground", search: {} }
+/** conversationLink is a public id's conversation page (U16): every
+ * run carrying it, experiments nested — the page for a public id with
+ * no thread session as much as one with. */
+export function conversationLink(publicId: string): ConversationLink {
+  return { to: "/conversations/$id", params: { id: publicId }, search: {} }
+}
+
+/** sessionLink is a session's page (its timeline). */
+export function sessionLink(id: string): SessionLink {
+  return { to: "/sessions/$id", params: { id }, search: {} }
+}
+
+/** tracePage is a trace's page alone: traceLink with no option (the
+ * devtools panel's, whose bundle so carries no other). */
+export function tracePage(id: string): TraceLink {
+  return { to: "/traces/$id", params: { id }, search: {} }
+}
+
+/** settingsLink is the Settings page (plan H4); with a provider/model,
+ * its pricing table with a row prefilled for it (U7's "price this
+ * model…"). */
+export function settingsLink(price?: string): SettingsLink {
+  return { to: "/settings", search: price ? { price } : {} }
 }
 
 /** matrixLink is the playground's multi-source matrix over these runs
@@ -804,14 +793,15 @@ export function pickOf(v: unknown): string[] {
     .slice(-2)
 }
 
-/** liveLink is the live page filtered (?q=) and narrowed to one agent. */
-export function liveLink(
-  search: { q?: string; agent?: string } = {}
-): LiveLink {
-  const out: LiveLink["search"] = {}
-  if (search.q) out.q = search.q
-  if (search.agent) out.agent = search.agent
-  return { to: "/live", search: out }
+/** conceptLink is the Settings page's Concepts section (U21.2): with a
+ * glossary key (lib/glossary.ts TERMS), that term's entry — where a
+ * <Term> tooltip's "more ›" goes. */
+export function conceptLink(term?: string): SettingsLink {
+  return {
+    to: "/settings",
+    search: {},
+    hash: term ? `concept-${term}` : "concepts",
+  }
 }
 
 /** HANDOFF is the panel's words for its hand-offs to the Studio-only
@@ -823,9 +813,11 @@ export const HANDOFF = {
   replays: (n: number) => `${plural(n, "replay")} in Studio ⤢`,
 }
 
-/** agentsLink is the agents page with one agent's card opened. */
-export function agentsLink(agent?: string): AgentsLink {
-  return { to: "/agents", search: agent ? { agent } : {} }
+/** connectLink is the Settings page's connect card (U21.2's connect
+ * lines: an app, a page, a coding agent to this Studio) — where the
+ * panel's empty list sends a first run (U21.3, UX-F-11). */
+export function connectLink(): SettingsLink {
+  return { to: "/settings", search: {}, hash: "settings-connect" }
 }
 
 /** experimentsLink is the saved experiments' list. */
@@ -851,10 +843,39 @@ export function playgroundShareLink(state: string): PlaygroundLink {
   return { to: "/playground", search: {}, hash: `state=${state}` }
 }
 
-/** runsParam is ?b= for these ids: one comma list, or the array when
- * an id holds a comma (a comma list would split it). */
-export function runsParam(b: string[]): string | string[] {
-  return b.some((x) => x.includes(",")) ? b : b.join()
+/** playgroundLink is the playground with the hand-off carried over
+ * (in the fragment). An empty hand-off is the bare playground. */
+export function playgroundLink(
+  handoff: PlaygroundHandoff = {}
+): PlaygroundLink {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(handoff) as [
+    keyof PlaygroundHandoff,
+    unknown,
+  ][]) {
+    if (v === undefined || v === "") continue
+    if (k === "step" && ordinal(v as number) === undefined) continue
+    p.set(k, String(v))
+  }
+  const hash = p.toString()
+  return hash
+    ? { to: "/playground", search: {}, hash }
+    : { to: "/playground", search: {} }
+}
+
+/** liveLink is the live page filtered (?q=) and narrowed to one agent. */
+export function liveLink(
+  search: { q?: string; agent?: string } = {}
+): LiveLink {
+  const out: LiveLink["search"] = {}
+  if (search.q) out.q = search.q
+  if (search.agent) out.agent = search.agent
+  return { to: "/live", search: out }
+}
+
+/** agentsLink is the agents page with one agent's card opened. */
+export function agentsLink(agent?: string): AgentsLink {
+  return { to: "/agents", search: agent ? { agent } : {} }
 }
 
 /** compareLink is the step-aligned compare of a base run with others
@@ -873,34 +894,6 @@ export function compareLink(
   const n = ordinal(step)
   if (n !== undefined) search.step = n
   return { to: "/compare", search }
-}
-
-/** A search value as the router writes it (TanStack's default
- * stringifySearch): a string that would parse as JSON is quoted, so
- * it reads back as the same string; numbers are written bare. */
-function searchValue(v: unknown): string {
-  if (typeof v === "string") {
-    try {
-      JSON.parse(v)
-      return JSON.stringify(v)
-    } catch {
-      return v
-    }
-  }
-  return typeof v === "object" ? JSON.stringify(v) : String(v)
-}
-
-/** path renders a link's route path with its params encoded, relative
- * (no leading "/") so it resolves under the Studio mount. */
-export function path(link: StudioLink): string {
-  let p = link.to.replace(/^\//, "")
-  if ("params" in link) p = p.replace("$id", encodeURIComponent(link.params.id))
-  const q = new URLSearchParams()
-  for (const [k, v] of Object.entries(link.search))
-    if (v !== undefined) q.set(k, searchValue(v))
-  const qs = q.toString()
-  const hash = "hash" in link && link.hash ? `#${link.hash}` : ""
-  return `${p}${qs ? `?${qs}` : ""}${hash}`
 }
 
 /** Search keys a copied link never carries: credentials, a panel
@@ -937,10 +930,17 @@ export function canonical(url: string | URL): string {
   return u.toString()
 }
 
-/** href is a link as an absolute URL under a Studio base (the panel's
- * endpoint: the Studio mount, ending in "/"). */
-export function href(base: string, link: StudioLink): string {
-  return new URL(path(link), base).toString()
+/** path renders a link's route path with its params encoded, relative
+ * (no leading "/") so it resolves under the Studio mount. */
+export function path(link: StudioLink): string {
+  let p = link.to.replace(/^\//, "")
+  if ("params" in link) p = p.replace("$id", encodeURIComponent(link.params.id))
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(link.search))
+    if (v !== undefined) q.set(k, searchValue(v))
+  const qs = q.toString()
+  const hash = "hash" in link && link.hash ? `#${link.hash}` : ""
+  return `${p}${qs ? `?${qs}` : ""}${hash}`
 }
 
 // ── Save as test (plan F6) ──────────────────────────────────────────

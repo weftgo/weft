@@ -354,8 +354,11 @@ that imports the ClickHouse driver — for any language's OTel app: UI +
 ingest + the playground + a dev token on `127.0.0.1:7331`,
 `--db sqlite://path` or `clickhouse://user:pass@host:9000/db`
 ([studio/README.md](studio/README.md)). The in-page devtools panel
-is also on npm as `@weftgo/devtools`, for bundled apps with no
-`<script>` tag: `npm install @weftgo/devtools`, then
+is also packaged as `@weftgo/devtools`, for bundled apps with no
+`<script>` tag — **not published to npm yet**: build the tarball
+(`make devtools-npm`, then `npm pack` in `studio/web/npm`) and install
+that, or use the script tag (`/studio/panel.js`) or the release asset
+`panel-vX.Y.Z.js` ([its README](studio/web/npm/README.md)); then
 `import { mount } from "@weftgo/devtools"; mount({ enabled: import.meta.env.DEV })`.
 
 ```go
@@ -365,9 +368,13 @@ mux.Handle("/studio/", http.StripPrefix("/studio",
 
 ```sh
 go install github.com/weftgo/weft/cmd/weft@latest
-weft studio --db sqlite://.weft/dev.db            # OTel app: point
-OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 # its exporter here
+weft studio --db sqlite://.weft/dev.db            # OTel app: point its exporter here, over OTLP/HTTP
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 OTEL_METRICS_EXPORTER=none OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true opentelemetry-instrument python app.py
 ```
+
+Studio's receiver takes OTLP/HTTP only (`/v1/traces`, `/v1/logs`); a
+stock `invoke_agent` span makes a run and `gen_ai.conversation.id`
+groups runs into a session ([record-contract §9](docs/record-contract.md#9-deriving-a-run-from-stock-spans)).
 
 #### The `weft` command
 

@@ -996,16 +996,8 @@ func TestRecordContractDocNames(t *testing.T) {
 	// readers spell them, except the two mirrors below.
 	code["session.id"], code["user.id"] = true, true
 
-	tick := regexp.MustCompile("`([^`\n]+)`")
-	name := regexp.MustCompile(`^(?:weft|gen_ai)\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*(\.\*)?$`)
-	inDoc := map[string]bool{}
-	for _, m := range tick.FindAllSubmatch(doc, -1) {
-		s := strings.TrimSpace(string(m[1]))
-		s, _, _ = strings.Cut(s, " ") // `weft.content = stripped`
-		if !name.MatchString(s) {
-			continue
-		}
-		inDoc[s] = true
+	inDoc := docAttrNames(doc)
+	for s := range inDoc {
 		if fam, ok := strings.CutSuffix(s, ".*"); ok {
 			found := false
 			for k := range code {
@@ -1034,6 +1026,89 @@ func TestRecordContractDocNames(t *testing.T) {
 	}
 	if len(inDoc) < 60 {
 		t.Errorf("the doc names %d attributes; the parse found too few to trust", len(inDoc))
+	}
+}
+
+// docAttrNames is every weft.* and gen_ai.* name docs/record-contract.md
+// spells in backticks (a `weft.x.*` family as written; the first word
+// of `weft.content = stripped`).
+func docAttrNames(doc []byte) map[string]bool {
+	tick := regexp.MustCompile("`([^`\n]+)`")
+	name := regexp.MustCompile(`^(?:weft|gen_ai)\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*(\.\*)?$`)
+	inDoc := map[string]bool{}
+	for _, m := range tick.FindAllSubmatch(doc, -1) {
+		s := strings.TrimSpace(string(m[1]))
+		s, _, _ = strings.Cut(s, " ")
+		if name.MatchString(s) {
+			inDoc[s] = true
+		}
+	}
+	return inDoc
+}
+
+// migrationOnlyNames are attribute names a migration materialises that
+// no emitter writes and no reader reads, each with why it is not a
+// backticked contract name (TestRecordContractDocNames would refuse a
+// name no code spells). The doc must still mention each, in plain text.
+var migrationOnlyNames = map[string]string{
+	"weft.prompt.id":      "ClickHouse 0001's PromptId column, a leftover: §1 says no emitter writes it and no reader reads it",
+	"weft.prompt.version": "ClickHouse 0001's PromptVersion column, a leftover: §1 says no emitter writes it and no reader reads it",
+}
+
+// TestRecordContractMigrationNames pins the stores' schemas to
+// docs/record-contract.md (UX-E-55): every weft.* or gen_ai.* attribute
+// name a SQLite or ClickHouse migration spells in a string literal —
+// a materialised column, a backfill, a view's filter — is a name the doc
+// gives in backticks, or one migrationOnlyNames lists with its reason
+// and the doc mentions anyway. A prefix (a LIKE 'weft.thread.%' pattern,
+// spelt with its trailing dot) is not a name and is skipped.
+func TestRecordContractMigrationNames(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "docs", "record-contract.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inDoc := docAttrNames(doc)
+	lit := regexp.MustCompile(`['"]((?:weft|gen_ai)\.[A-Za-z0-9_.-]*[A-Za-z0-9_-])['"]`)
+	seen := map[string]bool{}
+	for _, dir := range []string{"sqlite/migrations", "clickhouse/migrations"} {
+		files, err := filepath.Glob(filepath.Join(dir, "*.sql"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(files) == 0 {
+			t.Fatalf("no migrations under obsdb/%s", dir)
+		}
+		for _, f := range files {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range lit.FindAllSubmatch(b, -1) {
+				k := string(m[1])
+				seen[k] = true
+				if inDoc[k] {
+					continue
+				}
+				if why, ok := migrationOnlyNames[k]; ok {
+					if !bytes.Contains(doc, []byte(k)) {
+						t.Errorf("obsdb/%s spells %q (%s), and docs/record-contract.md does not mention it", f, k, why)
+					}
+					continue
+				}
+				t.Errorf("obsdb/%s spells %q, which docs/record-contract.md does not name", f, k)
+			}
+		}
+	}
+	for k := range migrationOnlyNames {
+		if !seen[k] {
+			t.Errorf("migrationOnlyNames lists %q, which no migration spells: drop it", k)
+		}
+		if inDoc[k] {
+			t.Errorf("migrationOnlyNames lists %q, which the doc names in backticks: drop it", k)
+		}
+	}
+	if len(seen) < 60 {
+		t.Errorf("the migrations spell %d attribute names; the parse found too few to trust", len(seen))
 	}
 }
 

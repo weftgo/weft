@@ -1,5 +1,13 @@
 # @weftgo/devtools
 
+**Not published to npm yet** — `npm install @weftgo/devtools` answers
+E404 until a later release publishes it. Until then, use the script tag
+(`/studio/panel.js`, which `studio.Handler` serves), the GitHub release
+asset (`panel-vX.Y.Z.js` with its `.sha256`, attached to every weft
+release), or build this package: `make devtools-npm` in the weft
+repository, then `npm pack` in `studio/web/npm` and install the tarball
+(`npm install --save-dev ./weftgo-devtools-X.Y.Z.tgz`).
+
 The weft devtools panel for apps that bundle everything and ship no
 `<script>` tags (Vite, Next, SvelteKit, Nuxt). It is a second way to
 get the same panel, not the main one. The main install is the Go
@@ -23,9 +31,14 @@ asset's. Beside it you get a small typed ES module and three helpers.
 
 ## Install
 
+Today, from the tarball you built (above):
+
 ```sh
-npm install --save-dev @weftgo/devtools
+npm install --save-dev /path/to/weftgo-devtools-X.Y.Z.tgz
 ```
+
+Once the package is published, the registry install will be
+`npm install --save-dev @weftgo/devtools`.
 
 ```ts
 // Client code (the panel defines a custom element at import time):
@@ -151,5 +164,7 @@ the same file as `/studio/panel.js`, with `panel.js.sha256` beside it.
 It is minified and no sourcemap ships; its source is `studio/web/src/panel`
 in the weft repository.
 It is built in the weft repository by `make devtools-npm`, which runs
-the build, checks the hash and lists the tarball. Publishing is done by
-hand at release time.
+the build, checks the hash and lists the tarball's contents (`npm pack
+--dry-run`); `npm pack` in `studio/web/npm` writes the tarball. The
+package is not published to npm yet: publishing is a later, separate
+decision, done by hand, never by the build.

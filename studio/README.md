@@ -64,8 +64,17 @@ link (`weft/runtime`: Go only today; non-Go clients are backlog I2):
 go install github.com/weftgo/weft/cmd/weft@latest
 weft studio                            # UI + OTLP + SQLite + playground + dev token on 127.0.0.1:7331
 ./my-go-app                            # otel.Install() finds it through the discovery file
-OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 python app.py
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 OTEL_METRICS_EXPORTER=none OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true opentelemetry-instrument python app.py
 ```
+
+The receiver is OTLP/HTTP only (`POST /v1/traces` and `POST /v1/logs`
+at the root, protobuf or JSON; no gRPC, no metrics): the endpoint is
+the bare origin, to which the exporter adds `/v1/traces` and `/v1/logs`
+itself, and Python's exporter, which defaults to gRPC, needs
+`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` (the JS one defaults to it).
+A stock `invoke_agent` span makes a run, and `gen_ai.conversation.id`
+groups runs into a session ([record-contract §9](../docs/record-contract.md#9-deriving-a-run-from-stock-spans));
+any other span is a trace (`/traces`).
 
 The dev token is stable per database — `<db>.token` beside the SQLite
 file, 0600, never printed (`--rotate-token` renews it;
@@ -379,6 +388,13 @@ One script tag puts the run loop in the corner of your own page —
 `/panel.js` is served by the same handler:
 
     <script type="module" src="/studio/panel.js" data-weft data-scope="pub_…"></script>
+
+A backend that is not Go serves the same file from the GitHub release
+asset (`panel-vX.Y.Z.js` with its `.sha256`, attached to every weft
+release). A bundled app with no `<script>` tag uses the
+`@weftgo/devtools` package — **not published to npm yet**: build its
+tarball with `make devtools-npm` and `npm pack` in `studio/web/npm`
+([`studio/web/npm/README.md`](web/npm/README.md)).
 
 Against a Studio that wants a token — setup B, `weft studio`, whose
 token is in `<db>.token` (`weft open --with-token` prints a signed-in
@@ -1302,8 +1318,11 @@ the unbudgeted rows after it, as `budget.test.ts` pins). The per-item
 marks are evidence, not a gate; the build itself fails only over the
 cap (`vite.panel.config.ts`).
 
-The same file is on npm as `@weftgo/devtools`, for apps that bundle
-everything and ship no `<script>` tag (Vite, Next, SvelteKit). This
+The same file is packaged as `@weftgo/devtools`, for apps that bundle
+everything and ship no `<script>` tag (Vite, Next, SvelteKit) — not
+published to npm yet: build the tarball (`make devtools-npm`, then `npm
+pack` in `studio/web/npm`) and install it
+([`studio/web/npm/README.md`](web/npm/README.md)). This
 is a second delivery, not a replacement: the handler above is still the
 canonical install. `import "@weftgo/devtools"` loads the package's
 `panel.js`, which has the same sha256 as `/studio/panel.js` of the same

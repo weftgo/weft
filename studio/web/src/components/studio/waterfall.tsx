@@ -12,6 +12,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { shared, spacers } from "@/lib/virtual"
 import { ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react"
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { useMediaQuery } from "@/hooks/use-media-query"
 
 import type { Span, SpanTone } from "@/lib/trace"
 import { KIND_ICON, took } from "@/lib/waterfall"
@@ -94,8 +95,18 @@ function pct(v: number, [lo, hi]: [number, number]): number {
   return ((v - lo) / w) * 100
 }
 
-/** The tree's columns, its header row's too: name, track, figure. */
-const COLS = "grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_3.5rem]"
+/** The tree's columns, its header row's too: name, track, figure.
+ * Under COMPACT (U30.2, UX-A-21) two columns, name and figure, and the
+ * track a thin bar on its own line under them (dense flow puts each
+ * row's figure back beside its name): the bars stay at phone width. */
+const COLS =
+  "grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_3.5rem] max-[480px]:grid-flow-row-dense max-[480px]:grid-cols-[minmax(0,1fr)_3.5rem]"
+
+/** The width under which the tree draws its compact bars. */
+const COMPACT = "(max-width: 480px)"
+
+/** A compact row's height: the name line and the bar line. */
+const COMPACT_ROW_PX = 32
 
 export function Waterfall({
   spans,
@@ -222,12 +233,14 @@ export function Waterfall({
   }, [spans])
 
   const virtual = visible.length > VIRTUAL_ROWS
+  const compact = useMediaQuery(COMPACT)
+  const rowPx = compact ? COMPACT_ROW_PX : ROW_PX
   const scroller = useRef<HTMLDivElement>(null)
   const selIndex = virtual ? visible.findIndex((s) => s.id === selectedId) : -1
   const virt = useVirtualizer({
     count: virtual ? visible.length : 0,
     getScrollElement: () => scroller.current,
-    estimateSize: () => ROW_PX,
+    estimateSize: () => rowPx,
     paddingStart: AXIS_PX,
     scrollPaddingStart: AXIS_PX,
     overscan: 16,
@@ -263,6 +276,7 @@ export function Waterfall({
       ref={scroller}
       className={`waterfall overflow-auto rounded-lg border bg-background font-mono text-[11px] ${className}`}
       data-virtual={virtual ? "" : undefined}
+      data-compact={compact ? "" : undefined}
     >
       {/* The axis: a sticky header row outside the tree (axe
           aria-required-children: a tree owns treeitems alone), on the
@@ -312,7 +326,7 @@ export function Waterfall({
           </span>
         </div>
         <div
-          className="h-6 cursor-pointer border-b bg-secondary/80 backdrop-blur"
+          className="h-6 cursor-pointer border-b bg-secondary/80 backdrop-blur max-[480px]:col-span-2"
           onClick={seekAt}
           title={`${unit} position — click to seek`}
         >
@@ -364,7 +378,7 @@ export function Waterfall({
             <Fragment key={sp.id}>
               {gap > 0 ? (
                 <div
-                  className="col-span-3"
+                  className="col-span-3 max-[480px]:col-span-2"
                   style={{ height: gap }}
                   aria-hidden
                   data-spacer
@@ -390,7 +404,7 @@ export function Waterfall({
               >
                 <div
                   ref={selected ? selRef : undefined}
-                  className={`flex min-w-0 cursor-pointer items-center gap-1 border-b border-border/60 py-0.5 pr-2 ${cell(selected)} ${
+                  className={`flex min-w-0 cursor-pointer items-center gap-1 border-b border-border/60 py-0.5 pr-2 max-[480px]:h-6 max-[480px]:border-b-0 ${cell(selected)} ${
                     selected ? "shadow-[inset_2px_0_0_var(--thread)]" : ""
                   } ${revealed && !dim ? "" : "opacity-40"}`}
                   style={{ paddingLeft: `${0.4 + sp.depth * 0.8}rem` }}
@@ -478,7 +492,8 @@ export function Waterfall({
                   {trail?.(sp)}
                 </div>
                 <div
-                  className={`waterfall-track relative h-6 cursor-pointer border-b border-border/60 ${cell(selected)} ${dim ? "opacity-40" : ""}`}
+                  className={`waterfall-track relative h-6 cursor-pointer border-b border-border/60 max-[480px]:col-span-2 max-[480px]:h-2 ${cell(selected)} ${dim ? "opacity-40" : ""}`}
+                  data-track
                   onClick={seekAt}
                 >
                   <div
@@ -486,8 +501,8 @@ export function Waterfall({
                       sp.to === null ? "waterfall-open" : ""
                     } ${
                       sp.kind === "run" || sp.kind === "subagent"
-                        ? "top-2.5 h-1"
-                        : "top-1.5 h-3"
+                        ? "top-2.5 h-1 max-[480px]:top-0.5"
+                        : "top-1.5 h-3 max-[480px]:top-0 max-[480px]:h-1.5"
                     } ${
                       // The critical path (U8.2): a thin accent under the bar.
                       sp.critical ? "shadow-[0_2px_0_0_var(--thread)]" : ""
@@ -508,7 +523,7 @@ export function Waterfall({
                   ) : null}
                 </div>
                 <div
-                  className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums ${cell(selected)}`}
+                  className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums max-[480px]:h-6 max-[480px]:border-b-0 ${cell(selected)}`}
                   onClick={() => onSelect?.(sp)}
                   title={time ? `+${took(sp.from)}` : undefined}
                 >
@@ -530,7 +545,7 @@ export function Waterfall({
         })}
         {pads.after > 0 ? (
           <div
-            className="col-span-3"
+            className="col-span-3 max-[480px]:col-span-2"
             style={{ height: pads.after }}
             aria-hidden
             data-spacer

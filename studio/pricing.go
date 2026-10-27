@@ -617,6 +617,12 @@ type coster struct {
 type runCost struct {
 	own, delegated cost
 	id             string // the run's, named in a tally's reason
+	// split says the usage below is known: the children were read and
+	// the run has a core Subagent child (or one out of scope); ownUsage
+	// is the run's usage less theirs, delUsage its in-scope Subagent
+	// children's summed (each already its whole subtree's, rule 13).
+	split              bool
+	ownUsage, delUsage core.Usage
 }
 
 // total is own + delegated: the run's whole bill (search's sort key).
@@ -816,8 +822,11 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 	}
 	own := rec.Usage
 	var parts []runCost
-	for _, k := range subagents(rec.ID, all) {
+	var delUsage core.Usage
+	subs := subagents(rec.ID, all)
+	for _, k := range subs {
 		own = sub(own, k.Usage)
+		delUsage = delUsage.Add(k.Usage)
 		kc := c.cost(k)
 		kc.id = k.ID
 		parts = append(parts, kc)
@@ -832,10 +841,12 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 	if n := c.hiddenSubs[rec.ID]; n > 0 {
 		del = scopeCutDelegated(del, n, len(c.scope.Tags) > 0)
 	}
+	split := len(subs) > 0 || c.hiddenSubs[rec.ID] > 0
 	if why := usagePending(rec); why != "" {
+		// A running run carries no usage yet: no split to show.
 		return runCost{own: cost{badge: costUnknown, reason: why, cache: cacheOf(own)}, delegated: del}
 	}
-	return runCost{own: c.table.price(rec.Provider, rec.Model, own), delegated: del}
+	return runCost{own: c.table.price(rec.Provider, rec.Model, own), delegated: del, split: split, ownUsage: own, delUsage: delUsage}
 }
 
 // tally sums a set of runs' whole bills (each part's own + delegated)
@@ -983,6 +994,10 @@ func (c *coster) fill(out *runRow, rec obsdb.RunRow) {
 	rc := c.cost(rec)
 	out.costFields = rc.own.fields()
 	out.delegatedFields = rc.delegated.delegatedFields()
+	if rc.split {
+		own, del := rc.ownUsage, rc.delUsage
+		out.OwnUsage, out.DelegatedUsage = &own, &del
+	}
 	// The children the cost read (primed for a page, else read for this
 	// row): their count and failures ride on the row (H9), no read more.
 	// When that read failed (or only a set's part is held) the count is

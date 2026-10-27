@@ -1,0 +1,1 @@
+import{n as e}from"./rolldown-runtime-CbXtAM7H.js";import{pt as t,zs as n}from"./preload-helper-DOzZsTn2.js";var r=e(n(),1);function i(e){let n=t(e);(0,r.useEffect)(()=>{typeof document<`u`&&(document.title=n)},[n])}export{i as t};

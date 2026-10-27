@@ -176,23 +176,25 @@ func TestGoldensMatchARealRun(t *testing.T) {
 	}{
 		// U7: the fixture's subagent is unpriced (openai/kimi-k2.7-code);
 		// the real run's models are wefttest's, scripted: an exact $0.
-		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".children_count", ".meta.cwd", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".delegated_unpriced_models[]"}},
+		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".own_usage", ".delegated_usage", ".children[]", ".children_count", ".meta.cwd", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".delegated_unpriced_models[]"}},
 		// The run documents A9.2 pins from runs that compacted (a
 		// PrepareStep trim, thread's session marker): every field but the
 		// compactions themselves is the plain run's.
 		// The fixture's run reports attempts and a fallback (U4's
 		// problem counters); TestProblemCountersFromARealRun pins those
 		// fields from real runs that have them.
-		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".children_count", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".attempts_retried", ".fallbacks"}},
+		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".own_usage", ".delegated_usage", ".children[]", ".children_count", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".attempts_retried", ".fallbacks"}},
 		// The session marker's turn also carries its summarizer figure
 		// (UX-B-13, U15.1-fix); the plain real run is no session turn.
 		{"run-session-compacted.golden.json", "/api/runs/" + res.ID, []string{".compactions[]", ".summarizer"}},
-		{"runs.golden.json", "/api/runs", []string{".runs[].children_count", ".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
+		// own_usage / delegated_usage (U30.2): the real run delegates
+		// nothing; run-sub.golden.json pins the split from a delegating run.
+		{"runs.golden.json", "/api/runs", []string{".runs[].own_usage", ".runs[].delegated_usage", ".runs[].children_count", ".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
 		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd", ".runs[].cost_usd=<nil>", ".runs[].unpriced_models[]"}},
 		// Search (plan A7): run rows, prompt_preview included, from the
 		// real run's prompt "where is order 42?".
 		// The real run failed nothing: its error_class facet is empty.
-		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".facets.error_class[]", ".runs[].children_count", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
+		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".runs[].own_usage", ".runs[].delegated_usage", ".facets.error_class[]", ".runs[].children_count", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
 		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},
 		{"events-ok-paged.golden.json", "/api/runs/" + res.ID + "/events?after=2&limit=3", nil},
 		{"transcript-ok.golden.json", "/api/runs/" + res.ID + "/transcript", nil},

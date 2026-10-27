@@ -103,7 +103,8 @@ export const VIEW_KEYS: Readonly<Partial<Record<string, ViewName>>> = {
 /** The views, both surfaces' words (lib/links.ts's VIEWS). */
 export const KEY_VIEWS: KeyBinding = {
   keys: Object.keys(VIEW_KEYS),
-  action: "the story · waterfall · request · raw view (again: the view before it)",
+  action:
+    "the story · waterfall · request · raw view (again: the view before it)",
 }
 /** o: the run elsewhere — the panel's in Studio, Studio's in your app. */
 export const KEY_OPEN: KeyBinding = {
@@ -157,6 +158,11 @@ export const STUDIO_KEYMAP: readonly KeyBinding[] = [
   KEY_FILTER,
   KEY_ITEMS,
   { keys: ["enter"], action: "open the selected run", where: "runs" },
+  {
+    keys: ["x"],
+    action: "pick the selected run to compare (two or more: compare N)",
+    where: "runs",
+  },
   { ...KEY_VIEWS, where: "run" },
   { keys: ["l"], action: "the logs view", where: "run" },
   { ...KEY_OPEN, where: "run" },

@@ -10082,6 +10082,14 @@
       "prompt_preview": "delegate",
       "children_count": 1,
       "children_failed": 1,
+      "own_usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "delegated_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
       "children": [
         {
           "id": "r_subfail/0/w1",

@@ -152,6 +152,9 @@
 .run.cost_usd=float64
 .run.delegated_cost_known=bool
 .run.delegated_cost_usd=float64
+.run.delegated_usage.input_tokens=float64
+.run.delegated_usage.output_tokens=float64
+.run.delegated_usage{}
 .run.delta_count=float64
 .run.err=string
 .run.event_count=float64
@@ -174,6 +177,9 @@
 .run.model.name=string
 .run.model.provider=string
 .run.model{}
+.run.own_usage.input_tokens=float64
+.run.own_usage.output_tokens=float64
+.run.own_usage{}
 .run.parent_call_id=string
 .run.parent_run_id=string
 .run.pending=float64

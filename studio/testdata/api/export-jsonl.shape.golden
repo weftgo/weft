@@ -187,6 +187,9 @@
 <run>.run.cost_usd=float64
 <run>.run.delegated_cost_known=bool
 <run>.run.delegated_cost_usd=float64
+<run>.run.delegated_usage.input_tokens=float64
+<run>.run.delegated_usage.output_tokens=float64
+<run>.run.delegated_usage{}
 <run>.run.delta_count=float64
 <run>.run.err=string
 <run>.run.event_count=float64
@@ -206,6 +209,9 @@
 <run>.run.model.name=string
 <run>.run.model.provider=string
 <run>.run.model{}
+<run>.run.own_usage.input_tokens=float64
+<run>.run.own_usage.output_tokens=float64
+<run>.run.own_usage{}
 <run>.run.parent_call_id=string
 <run>.run.parent_run_id=string
 <run>.run.pending=float64

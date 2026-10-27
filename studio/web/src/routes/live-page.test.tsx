@@ -1033,6 +1033,23 @@ describe("H9: the tree, the minute and the attempt frames", () => {
     expect(
       rowOf("r_kid")!.querySelector("[data-depth]")!.getAttribute("data-depth")
     ).toBe("1")
+    // U30.2 (UX-A-18): the parent's counter, open while its child runs;
+    // a click folds it, and each row has its mini waterfall bar.
+    const fold = rowOf("r_dad")!.querySelector<HTMLElement>("[data-live-fold]")!
+    expect(fold.dataset.liveFold).toBe("open")
+    expect(fold.textContent).toBe("▾ +1 subagent")
+    expect(fold.getAttribute("aria-expanded")).toBe("true")
+    expect(document.querySelectorAll("[data-live-bar]")).toHaveLength(2)
+    fireEvent.click(fold)
+    await waitFor(() => expect(rowOf("r_kid")).toBeNull())
+    expect(
+      rowOf("r_dad")!.querySelector<HTMLElement>("[data-live-fold]")!
+        .textContent
+    ).toBe("▸ +1 subagent")
+    fireEvent.click(
+      rowOf("r_dad")!.querySelector<HTMLElement>("[data-live-fold]")!
+    )
+    await waitFor(() => expect(rowOf("r_kid")).toBeTruthy())
     const note = await waitFor(() => {
       const n = rowOf("r_dad")!.querySelector<HTMLElement>("[data-attempt]")
       expect(n).toBeTruthy()

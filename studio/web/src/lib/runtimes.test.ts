@@ -245,6 +245,26 @@ describe("the runtimes page's reading (U20.1)", () => {
     expect(breakpointsBy({ breakpoints_by: "store" })).toBe(
       "restored from Studio's store after a restart"
     )
+    // U30.2 (UX-A-33): the surface, and the time kept across a restart.
+    expect(
+      breakpointsBy({
+        breakpoints_by: "studio",
+        breakpoints_set_at: ago(120),
+        breakpoints_surface: "runtimes",
+      })
+    ).toMatch(/^set .+ through this Studio's runtimes page$/)
+    expect(
+      breakpointsBy({
+        breakpoints_by: "store",
+        breakpoints_set_at: ago(120),
+        breakpoints_surface: "api",
+      })
+    ).toMatch(
+      /^set .+ through the API \(PUT \/api\/runtimes\/\{id\}\/breakpoints\) · restored from Studio's store after a restart$/
+    )
+    expect(
+      breakpointsBy({ breakpoints_by: "studio", breakpoints_surface: "lab" })
+    ).toBe("set through this Studio (lab)")
     expect(breakpointsBy({})).toBe(BREAKPOINT_WORDS.setAtUnknown)
   })
 

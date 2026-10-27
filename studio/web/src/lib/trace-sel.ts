@@ -45,7 +45,7 @@ const runOf = (r: TraceRow) => str(attrsOf(r.timed?.span)["weft.run.id"])
 
 /** The trace's root run: the first invoke_agent row's, else the first
  * row's that carries a run id. */
-function rootRun(rows: readonly TraceRow[]): string {
+export function rootRun(rows: readonly TraceRow[]): string {
   const inv = rows.filter(
     (r) => attrsOf(r.timed?.span)["gen_ai.operation.name"] === "invoke_agent"
   )

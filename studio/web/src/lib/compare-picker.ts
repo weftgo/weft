@@ -110,3 +110,21 @@ export function splitRuns(v: unknown): unknown[] {
   }
   return v.includes(",") ? v.split(",") : [v]
 }
+
+/** The runs list's picks (U30.2, UX-A-16's remainder): a checkbox per
+ * row (x toggles the j/k-selected one), then "compare N" opens
+ * /compare with the first pick as the base and the rest beside it. */
+export const PICKS = {
+  row: (id: string) => `pick ${id} to compare`,
+  title: "pick runs to compare step by step (x picks the selected row)",
+  count: (n: number) => `${n} picked`,
+  compare: (n: number) => `compare ${n}`,
+  needTwo: "pick one more run to compare",
+  clear: "clear picks",
+} as const
+
+/** togglePick adds an id to the picks (kept in picking order: the
+ * first is the base) or takes it out. */
+export function togglePick(picks: readonly string[], id: string): string[] {
+  return picks.includes(id) ? picks.filter((x) => x !== id) : [...picks, id]
+}

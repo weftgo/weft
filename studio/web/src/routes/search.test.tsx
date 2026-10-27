@@ -752,7 +752,13 @@ describe("the ⌘K palette", () => {
     // A trace by its root span's name.
     type(input, "POST /chat")
     await waitFor(() =>
-      expect(kinds().some((k) => k.startsWith("trace:POST /chat"))).toBe(true)
+      expect(
+        [
+          ...document.querySelectorAll(
+            '[cmdk-item][data-palette-kind="trace"]'
+          ),
+        ].some((i) => i.textContent.includes("POST /chat"))
+      ).toBe(true)
     )
     // An experiment by name.
     type(input, "tone sweep")
@@ -1036,6 +1042,65 @@ describe("the ⌘K palette", () => {
     fireEvent.keyDown(input, { key: "Enter" })
     expect(router.state.location.pathname).toBe("/runs")
     expect(screen.getByPlaceholderText(PALETTE_PLACEHOLDER)).toBeTruthy()
+  })
+
+  it("finds a session and a trace by id prefix: exact matches, Enter opens the first (U30.2, UX-A-13)", async () => {
+    const sess = "5e55a0b1c2d3e4f5"
+    const trace = "7ace0d1e2f3a4b5c6d7e8f9a0b1c2d3e"
+    studio
+      .on("GET meta", meta(["search", "traces"]))
+      .on("GET runs", runs)
+      .on("GET search", {
+        total: 0,
+        runs: [],
+        sort: "started",
+        next_offset: null,
+      })
+      // The sessions search matches an id anywhere: a row holding the
+      // text mid-id is not exact.
+      .on("GET sessions", (req) => ({
+        ...sessions,
+        sessions: [
+          { ...sessions.sessions[0], id: sess },
+          { ...sessions.sessions[0], id: "aa5e55a0b1" },
+        ].filter(
+          (x) => !req.query.get("q") || x.id.includes(req.query.get("q")!)
+        ),
+      }))
+      .on("GET traces", (req) => ({
+        ...traces,
+        traces: req.query.get("id_prefix")
+          ? [{ ...traces.traces[0], trace_id: trace }]
+          : [],
+      }))
+    const { router } = renderApp("/runs")
+    await screen.findByText("r_ok")
+    const input = await open()
+    type(input, "5e55a0")
+    await waitFor(() =>
+      expect(
+        [
+          ...document.querySelectorAll<HTMLElement>(
+            '[data-palette-exact] [data-palette-kind="session"]'
+          ),
+        ].map((i) => i.dataset.paletteId)
+      ).toEqual([sess])
+    )
+    expect(kinds()[0]).toBe(`session:${sess}`)
+    type(input, "7ace0d1e")
+    await waitFor(() => expect(kinds()[0]).toBe(`trace:${trace}`))
+    expect(
+      studio
+        .calls("GET traces")
+        .some((r) => r.query.get("id_prefix") === "7ace0d1e")
+    ).toBe(true)
+    const selected = () =>
+      document.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]')
+    await waitFor(() => expect(selected()?.dataset.paletteId).toBe(trace))
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(`/traces/${trace}`)
+    )
   })
 
   it("finds an app-chosen public id with no pub_ prefix (P8-fix-b #1)", async () => {

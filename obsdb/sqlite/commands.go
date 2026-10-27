@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/internal/bpset"
 )
 
 // The playground link's records (plan I3, migration 0007): commands,
@@ -157,7 +158,7 @@ func (d *DB) Route(ctx context.Context, runID string) (_ obsdb.RunRoute, _ bool,
 }
 
 // PutBreakpoints replaces runtimeID's set whole.
-func (d *DB) PutBreakpoints(ctx context.Context, runtimeID string, tools []string) (err error) {
+func (d *DB) PutBreakpoints(ctx context.Context, runtimeID string, bp obsdb.BreakpointSet) (err error) {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
@@ -165,10 +166,7 @@ func (d *DB) PutBreakpoints(ctx context.Context, runtimeID string, tools []strin
 	if runtimeID == "" {
 		return fmt.Errorf("%w: breakpoints need a runtime id", obsdb.ErrInvalidCommand)
 	}
-	if tools == nil {
-		tools = []string{}
-	}
-	set, err := marshalJSON(tools)
+	set, err := bpset.Encode(bp)
 	if err != nil {
 		return err
 	}
@@ -179,27 +177,24 @@ func (d *DB) PutBreakpoints(ctx context.Context, runtimeID string, tools []strin
 }
 
 // Breakpoints answers runtimeID's stored set.
-func (d *DB) Breakpoints(ctx context.Context, runtimeID string) (_ []string, _ bool, err error) {
+func (d *DB) Breakpoints(ctx context.Context, runtimeID string) (_ obsdb.BreakpointSet, _ bool, err error) {
 	if err := d.checkOpen(); err != nil {
-		return nil, false, err
+		return obsdb.BreakpointSet{}, false, err
 	}
 	defer d.closedErr(&err)
 	var set string
 	err = d.reads.QueryRowContext(ctx, `SELECT tools FROM breakpoints WHERE runtime_id = ?`, runtimeID).Scan(&set)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, nil
+		return obsdb.BreakpointSet{}, false, nil
 	}
 	if err != nil {
-		return nil, false, err
+		return obsdb.BreakpointSet{}, false, err
 	}
-	tools := []string{}
-	if err := json.Unmarshal([]byte(set), &tools); err != nil {
-		return nil, false, err
+	bp, err := bpset.Decode(set)
+	if err != nil {
+		return obsdb.BreakpointSet{}, false, err
 	}
-	if tools == nil {
-		tools = []string{}
-	}
-	return tools, true, nil
+	return bp, true, nil
 }
 
 // PutRuntime upserts one runtime's registration whole.

@@ -223,12 +223,14 @@ func (rs *RuntimeServer) saveRouteLocked(runID, commandID string) {
 	})
 }
 
-// saveBreakpointsLocked writes the runtime's set. Caller holds mu.
-func (rs *RuntimeServer) saveBreakpointsLocked(id string, tools []string) {
+// saveBreakpointsLocked writes the runtime's set, with when and
+// through which surface Studio delivered it (U30.2: a restarted Studio
+// still says so). Caller holds mu.
+func (rs *RuntimeServer) saveBreakpointsLocked(id string, c *connected) {
 	if !rs.storing() {
 		return
 	}
-	set := append([]string{}, tools...)
+	set := obsdb.BreakpointSet{Tools: append([]string{}, c.breakpoints...), SetAt: c.breakpointsSetAt, SetBy: c.breakpointsSurface}
 	rs.writer.put(writeKey{"breakpoints", id}, false, func(ctx context.Context, st obsdb.CommandStore) error {
 		return st.PutBreakpoints(ctx, id, set)
 	})
@@ -403,7 +405,8 @@ func (rs *RuntimeServer) load() {
 		reg.RuntimeID = sr.ID
 		c := &connected{reg: reg, connectedSince: sr.Registered, lastSeen: sr.LastSeen, stored: sr.LastSeen, restored: true}
 		if bp, ok, err := rs.store.Breakpoints(ctx, sr.ID); err == nil && ok {
-			c.breakpoints, c.breakpointsBy = bp, BreakpointsByStore
+			c.breakpoints, c.breakpointsBy = bp.Tools, BreakpointsByStore
+			c.breakpointsSetAt, c.breakpointsSurface = bp.SetAt, bp.SetBy
 		}
 		rs.runtimes[sr.ID] = c
 	}

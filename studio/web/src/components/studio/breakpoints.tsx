@@ -42,9 +42,12 @@ export function Breakpoints({
   runtimeID,
   tools,
   stored,
+  surface = "runtimes",
 }: {
   runtimeID: string
   tools: string[]
+  /** The page it is on (U30.2, UX-A-33): the set's breakpoints_surface. */
+  surface?: string
   /** The runtime's stored set, as the runtimes view last read it. */
   stored?: string[]
 }) {
@@ -64,7 +67,7 @@ export function Breakpoints({
     setErr("")
     setSaving(true)
     try {
-      const out = await putBreakpoints(runtimeID, [...next].sort())
+      const out = await putBreakpoints(runtimeID, [...next].sort(), surface)
       setSet(new Set(out.tools ?? []))
     } catch (e) {
       setSet(prev)

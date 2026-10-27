@@ -229,7 +229,7 @@ func TestStoreQueueCap(t *testing.T) {
 			}
 		}
 	}()
-	if err := rs.SetBreakpoints("rt_cap", []string{"refund"}); err != nil {
+	if err := rs.SetBreakpoints("rt_cap", []string{"refund"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	var live []string

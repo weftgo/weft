@@ -14,16 +14,24 @@ package studio
 import (
 	"errors"
 	"net/http"
+	"regexp"
 
 	"github.com/weftgo/weft/obsdb"
 	linkruntime "github.com/weftgo/weft/studio/runtime"
 )
 
 // breakpointsRequest is PUT /api/runtimes/{id}/breakpoints: the tools
-// to break on (an empty set clears).
+// to break on (an empty set clears) and, optionally, the surface that
+// sends them (U30.2, UX-A-33: /api/runtimes' breakpoints_surface, "set
+// by <surface>"; absent reads "api"). The answer carries the tools
+// alone.
 type breakpointsRequest struct {
-	Tools []string `json:"tools"`
+	Tools   []string `json:"tools"`
+	Surface string   `json:"surface,omitempty"`
 }
+
+// surfaceRE is a surface name: a short lowercase word ("runtimes").
+var surfaceRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
 // serveBreakpoints is the rung-3 verb (capability `breakpoints`).
 func (s *Server) serveBreakpoints(rs *linkruntime.RuntimeServer) http.HandlerFunc {
@@ -62,7 +70,11 @@ func (s *Server) serveBreakpoints(rs *linkruntime.RuntimeServer) http.HandlerFun
 				return
 			}
 		}
-		if err := rs.SetBreakpoints(id, req.Tools); err != nil {
+		if req.Surface != "" && !surfaceRE.MatchString(req.Surface) {
+			badRequest(w, r, "surface must be a short lowercase word ([a-z][a-z0-9_-]{0,31}), e.g. runtimes")
+			return
+		}
+		if err := rs.SetBreakpoints(id, req.Tools, req.Surface); err != nil {
 			switch {
 			case errors.Is(err, linkruntime.ErrUnknownRuntime):
 				notFound(w, r, "unknown runtime "+id)

@@ -36,6 +36,7 @@ import {
 } from "@/lib/live-rows"
 import type { LiveRowView } from "@/lib/live-rows"
 import { attemptNote } from "@/lib/live-attempts"
+import { LIVE_TREE, foldLive, liveWindow, miniBar } from "@/lib/live-tree"
 import { runLink, sessionLink } from "@/lib/links"
 import { shortId } from "@/lib/title"
 import { notify } from "@/lib/notify"
@@ -200,6 +201,10 @@ export function LiveTable({
   canCancel: boolean
 }) {
   const priced = useCostCapable()
+  // The parents' folds (U30.2, UX-A-18): the reader's toggles, by run.
+  const [toggled, setToggled] = useState<Record<string, boolean>>({})
+  const folded = foldLive(rows, toggled)
+  const axis = liveWindow(rows, now)
   // A sent cancel, by run: when it was sent (Date.now()).
   const [cancelling, setCancelling] = useState<Partial<Record<string, number>>>(
     {}
@@ -287,8 +292,11 @@ export function LiveTable({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((v) => {
+        {folded.rows.map((v) => {
           const r = v.run
+          const fold = folded.folds[r.id] as
+            (typeof folded.folds)[string] | undefined
+          const bar = miniBar(v, axis, now)
           const step = stepText(v)
           const tok = tokensOf(v)
           const ttft = v.stats?.ttftMs ?? null
@@ -333,6 +341,27 @@ export function LiveTable({
                     {r.id}
                   </Link>
                   <DerivedChip row={r} />
+                  {fold ? (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded border px-1 font-mono text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                      aria-expanded={fold.open}
+                      aria-label={`${fold.open ? LIVE_TREE.hide : LIVE_TREE.show}: ${LIVE_TREE.more(fold.n)}`}
+                      title={fold.open ? LIVE_TREE.hide : LIVE_TREE.show}
+                      onClick={() =>
+                        setToggled((t) => ({ ...t, [r.id]: !fold.open }))
+                      }
+                      data-live-fold={fold.open ? "open" : "folded"}
+                    >
+                      {fold.open ? "▾" : "▸"} {LIVE_TREE.more(fold.n)}
+                      {!fold.open && fold.failed ? (
+                        <span className={statusClass(STATUS.failed.role).text}>
+                          {" "}
+                          · {LIVE_TREE.failed(fold.failed)}
+                        </span>
+                      ) : null}
+                    </button>
+                  ) : null}
                   {v.unreadable.length ? (
                     <HoleBadge
                       hole="gap"
@@ -342,6 +371,19 @@ export function LiveTable({
                     />
                   ) : null}
                 </div>
+                {bar ? (
+                  <div
+                    className="relative mt-1 h-1 w-full rounded-full bg-muted"
+                    title={LIVE_TREE.bar}
+                    aria-hidden
+                    data-live-bar
+                  >
+                    <span
+                      className={`absolute inset-y-0 rounded-full ${statusClass(statusOf(r, runsAll).role).dot}`}
+                      style={{ left: `${bar.left}%`, width: `${bar.width}%` }}
+                    />
+                  </div>
+                ) : null}
               </TableCell>
               <TableCell className="text-xs">{r.agent || "—"}</TableCell>
               <TableCell>

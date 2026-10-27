@@ -512,7 +512,9 @@ describe("Breakpoints", () => {
       "/api/runtimes/rt%201/breakpoints"
     )
     expect(init?.method).toBe("PUT")
-    expect(init?.body).toBe(JSON.stringify({ tools: ["refund"] }))
+    expect(init?.body).toBe(
+      JSON.stringify({ tools: ["refund"], surface: "runtimes" })
+    )
     await waitFor(() =>
       expect(screen.getByLabelText<HTMLInputElement>("refund").checked).toBe(
         true

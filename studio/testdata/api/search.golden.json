@@ -53,7 +53,15 @@
       "catalog_hash": "",
       "request_count": 0,
       "prompt_preview": "Where is order 42?",
-      "children_count": 1
+      "children_count": 1,
+      "own_usage": {
+        "input_tokens": 3,
+        "output_tokens": 1
+      },
+      "delegated_usage": {
+        "input_tokens": 9,
+        "output_tokens": 5
+      }
     },
     {
       "id": "r_ok",

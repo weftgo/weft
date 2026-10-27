@@ -295,10 +295,18 @@ describe("the run page and its trace (UX-A-17), the tree's holes", () => {
     renderApp(`/runs/${DIR}?sel=${encodeURIComponent(`s:${OPS}:0`)}`)
     await waitFor(() => expect(selected()).toEqual([`s:${OPS}:0`]))
     const a = document.querySelector<HTMLAnchorElement>("[data-trace-link]")!
-    expect(a.textContent).toBe("whole trace ↗")
+    expect(a.textContent).toBe("whole trace")
     const href = new URL(a.href, "http://x")
     expect(href.pathname).toMatch(/\/traces\/t1$/)
     expect(href.searchParams.get("sel")).toBe(`s:${OPS}:0`)
+    // U30.2: one switch, "this run" the current scope; the trace side
+    // remembers the run it came from.
+    expect(href.searchParams.get("run")).toBe(DIR)
+    expect(
+      document
+        .querySelector('[data-scope-switch="run"] [data-scope-side="run"]')
+        ?.getAttribute("aria-current")
+    ).toBe("page")
   })
 
   it("draws the tree's holes as badges; a child with no spans says so on its row", async () => {

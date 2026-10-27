@@ -128,6 +128,90 @@ describe("the compare page", () => {
     expect(await axeLines(document.querySelector("main")!)).toEqual([])
   })
 
+  it("changed only narrows to the changed steps and columns; the usage delta sums each side (U30.2, UX-A-16)", async () => {
+    const base = golden<DiffDoc>("diff")
+    const doc: DiffDoc = {
+      ...base,
+      steps: base.steps.map((r) =>
+        r.step === 4
+          ? {
+              ...r,
+              changed: true,
+              changes: ["usage"],
+              b: { ...r.b!, usage: { input_tokens: 10, output_tokens: 9 } },
+            }
+          : r
+      ),
+      summary: { ...base.summary, changed_steps: [3, 4] },
+    }
+    serve(["diff"], { "r_da|r_db": doc })
+    renderApp("/compare?a=r_da&b=r_db")
+    await waitFor(() =>
+      expect(document.querySelector("[data-step-diff]")).toBeTruthy()
+    )
+    expect(document.querySelector("[data-diff-count]")!.textContent).toBe(
+      "2 of 5 steps differ"
+    )
+    const usage = () =>
+      [...document.querySelectorAll("[data-usage-run]")].map(
+        (li) => li.textContent
+      )
+    expect(usage()).toEqual([
+      "usage r_da · base: 50 in → 25 out",
+      "usage r_db: 50 in → 29 out (±0 in · +4 out)",
+    ])
+    const steps = () =>
+      [...document.querySelectorAll("[data-step-diff] tbody tr")].map((tr) =>
+        tr.getAttribute("data-diff-step")
+      )
+    const cols = () =>
+      [
+        ...document.querySelectorAll(
+          '[data-step-diff] tbody tr:first-child [data-diff-run="r_db"][data-diff-cell]'
+        ),
+      ].map((td) => td.getAttribute("data-diff-cell"))
+    expect(steps()).toEqual(["0", "1", "2", "3", "4"])
+    expect(cols()).toEqual([
+      "system",
+      "tool_calls",
+      "tool_results",
+      "text",
+      "usage",
+    ])
+    const toggle = document.querySelector<HTMLButtonElement>(
+      "[data-diff-changed-only]"
+    )!
+    expect(toggle.getAttribute("aria-pressed")).toBe("false")
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute("aria-pressed")).toBe("true")
+    expect(steps()).toEqual(["3", "4"])
+    expect(cols()).toEqual(["tool_results", "usage"])
+    expect(await axeLines(document.querySelector("main")!)).toEqual([])
+    fireEvent.click(toggle)
+    expect(steps()).toEqual(["0", "1", "2", "3", "4"])
+  })
+
+  it("no step changed: the toggle is off and says so", async () => {
+    const base = golden<DiffDoc>("diff")
+    const same: DiffDoc = {
+      ...base,
+      steps: base.steps.map((r) => ({ ...r, changed: false, changes: [] })),
+      summary: { ...base.summary, changed_steps: [], first_changed: null },
+    }
+    serve(["diff"], { "r_da|r_db": same })
+    renderApp("/compare?a=r_da&b=r_db")
+    await waitFor(() =>
+      expect(document.querySelector("[data-step-diff]")).toBeTruthy()
+    )
+    expect(
+      document.querySelector<HTMLButtonElement>("[data-diff-changed-only]")!
+        .disabled
+    ).toBe(true)
+    expect(document.querySelector("[data-diff-count]")!.textContent).toBe(
+      "0 of 5 steps differ"
+    )
+  })
+
   it("N-way: one call per compared run against the same base, side by side", async () => {
     const base = golden<DiffDoc>("diff")
     // r_dc lost step 4 (a missing row), and kept step 3's result.

@@ -41,17 +41,20 @@ import {
   experimentsQuery,
   fetchRuns,
   fetchSearch,
+  fetchSessions,
   fetchTraces,
   metaQuery,
   runsQuery,
   sessionsQuery,
 } from "@/lib/api"
-import type { RunRow } from "@/lib/api"
+import type { RunRow, SessionRow, TraceRow } from "@/lib/api"
 import { toggleDensity } from "@/lib/density"
 import {
   acceptSelection,
   EXACT_VALUE,
   exactRows,
+  exactSessions,
+  exactTraces,
   lookupsOf,
   metaKeywords,
   movesSelection,
@@ -172,6 +175,24 @@ export function CommandPalette({
   })
   const sessions = useQuery({ ...sessionsQuery({}), enabled: open })
   const tracesOn = has("traces")
+  // A session and a trace by id prefix too (UX-A-13): the sessions
+  // search matches an id anywhere, exactSessions keeps the prefixed.
+  const sessKey = look.idPrefix ?? look.publicId
+  const sessByPrefix = useQuery({
+    queryKey: ["palette", "session_prefix", sessKey],
+    staleTime: 5_000,
+    queryFn: () =>
+      fetchSessions(
+        look.idPrefix ? { q: look.idPrefix } : { public_id: look.publicId }
+      ),
+    enabled: open && !!sessKey,
+  })
+  const traceByPrefix = useQuery({
+    queryKey: ["palette", "trace_prefix", look.idPrefix],
+    staleTime: 5_000,
+    queryFn: () => fetchTraces({ id_prefix: look.idPrefix, limit: 10 }),
+    enabled: open && tracesOn && !!look.idPrefix,
+  })
   const traces = useQuery({
     queryKey: ["traces", "palette"],
     staleTime: 5_000,
@@ -208,12 +229,20 @@ export function CommandPalette({
       })
     : []
   const exactIDs = new Set(exact.map((r) => r.id))
-  const tagHint = tagHintFor(look, exact.length, settled)
+  const exactSess = settled
+    ? exactSessions(look, sessByPrefix.data?.sessions)
+    : []
+  const exactSessIDs = new Set(exactSess.map((x) => x.id))
+  const exactTr =
+    settled && tracesOn ? exactTraces(look, traceByPrefix.data?.traces) : []
+  const exactTrIDs = new Set(exactTr.map((t) => t.trace_id))
+  const exactCount = exact.length + exactSess.length + exactTr.length
+  const tagHint = tagHintFor(look, exactCount, settled)
   const onSelection = (v: string) => {
     if (
       acceptSelection({
         text: input,
-        exactCount: exact.length,
+        exactCount,
         moved: moved.current,
       })
     )
@@ -252,6 +281,40 @@ export function CommandPalette({
     </CommandItem>
   )
 
+  const sessionItem = (x: SessionRow, isExact: boolean) => (
+    <CommandItem
+      key={x.id}
+      value={`${isExact ? EXACT_VALUE : ""}session:${x.id} ${x.public_id} ${x.agent}`}
+      keywords={[x.title, x.first_prompt].filter((k): k is string => !!k)}
+      onSelect={() => go(() => router.navigate(sessionLink(x.id)))}
+      data-palette-kind="session"
+      data-palette-id={x.id}
+    >
+      <MessagesSquare data-slot="icon" />
+      <PaletteTitle t={sessionTitle(x)} id={x.id} />
+      <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">
+        {x.public_id || x.agent}
+      </span>
+    </CommandItem>
+  )
+  const traceItem = (t: TraceRow, isExact: boolean) => (
+    <CommandItem
+      key={t.trace_id}
+      value={`${isExact ? EXACT_VALUE : ""}trace:${t.trace_id} ${t.root?.name ?? ""} ${t.service}`}
+      onSelect={() => go(() => router.navigate(traceLink(t.trace_id)))}
+      data-palette-kind="trace"
+      data-palette-id={t.trace_id}
+    >
+      <Network data-slot="icon" />
+      <span className="truncate text-xs">
+        {t.root?.name ?? "(no root span)"}
+      </span>
+      <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">
+        {t.trace_id.slice(0, 12)} · {t.service}
+      </span>
+    </CommandItem>
+  )
+
   return (
     <CommandDialog
       open={open}
@@ -283,9 +346,11 @@ export function CommandPalette({
           }}
         >
           <CommandEmpty>Nothing matches.</CommandEmpty>
-          {exact.length > 0 ? (
+          {exactCount > 0 ? (
             <CommandGroup heading="Exact match" data-palette-exact>
               {exact.map((r) => runItem(r, false, true))}
+              {exactSess.map((x) => sessionItem(x, true))}
+              {exactTr.map((t) => traceItem(t, true))}
             </CommandGroup>
           ) : null}
           <CommandGroup
@@ -315,45 +380,16 @@ export function CommandPalette({
             ) : null}
           </CommandGroup>
           <CommandGroup heading="Sessions">
-            {(sessions.data?.sessions ?? []).slice(0, 50).map((s) => (
-              <CommandItem
-                key={s.id}
-                value={`session:${s.id} ${s.public_id} ${s.agent}`}
-                keywords={[s.title, s.first_prompt].filter(
-                  (k): k is string => !!k
-                )}
-                onSelect={() => go(() => router.navigate(sessionLink(s.id)))}
-                data-palette-kind="session"
-                data-palette-id={s.id}
-              >
-                <MessagesSquare data-slot="icon" />
-                <PaletteTitle t={sessionTitle(s)} id={s.id} />
-                <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">
-                  {s.public_id || s.agent}
-                </span>
-              </CommandItem>
-            ))}
+            {(sessions.data?.sessions ?? [])
+              .filter((x) => !exactSessIDs.has(x.id))
+              .slice(0, 50)
+              .map((x) => sessionItem(x, false))}
           </CommandGroup>
           {tracesOn ? (
             <CommandGroup heading="Traces">
-              {(traces.data?.traces ?? []).map((t) => (
-                <CommandItem
-                  key={t.trace_id}
-                  value={`trace:${t.trace_id} ${t.root?.name ?? ""} ${t.service}`}
-                  onSelect={() =>
-                    go(() => router.navigate(traceLink(t.trace_id)))
-                  }
-                  data-palette-kind="trace"
-                >
-                  <Network data-slot="icon" />
-                  <span className="truncate text-xs">
-                    {t.root?.name ?? "(no root span)"}
-                  </span>
-                  <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">
-                    {t.trace_id.slice(0, 12)} · {t.service}
-                  </span>
-                </CommandItem>
-              ))}
+              {(traces.data?.traces ?? [])
+                .filter((t) => !exactTrIDs.has(t.trace_id))
+                .map((t) => traceItem(t, false))}
             </CommandGroup>
           ) : null}
           {experimentsOn ? (

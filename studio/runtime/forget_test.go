@@ -42,7 +42,7 @@ func TestBreakpointsByAndForget(t *testing.T) {
 	if v, _ := viewOf(rs, "rt_a"); v.BreakpointsBy != "" {
 		t.Errorf("an empty set's breakpoints_by = %q, want absent", v.BreakpointsBy)
 	}
-	if err := rs.SetBreakpoints("rt_a", []string{"refund"}); err != nil {
+	if err := rs.SetBreakpoints("rt_a", []string{"refund"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := viewOf(rs, "rt_a"); v.BreakpointsBy != BreakpointsByStudio || v.BreakpointsSetAt == nil {
@@ -146,7 +146,7 @@ func (g *gateStore) PutRuntime(ctx context.Context, r obsdb.StoredRuntime) error
 	g.wait()
 	return g.CommandStore.PutRuntime(ctx, r)
 }
-func (g *gateStore) PutBreakpoints(ctx context.Context, id string, tools []string) error {
+func (g *gateStore) PutBreakpoints(ctx context.Context, id string, tools obsdb.BreakpointSet) error {
 	g.wait()
 	return g.CommandStore.PutBreakpoints(ctx, id, tools)
 }
@@ -172,7 +172,7 @@ func TestForgetThenReregisterBeforeTheWriterDrains(t *testing.T) {
 			t.Cleanup(ts.Close)
 			register(t, mux(rs), regBody("rt_a"))
 			_, closeA := subscribe(t, rs, ts.URL, "rt_a", "")
-			if err := rs.SetBreakpoints("rt_a", []string{"refund"}); err != nil {
+			if err := rs.SetBreakpoints("rt_a", []string{"refund"}, ""); err != nil {
 				t.Fatal(err)
 			}
 			closeA()
@@ -205,7 +205,7 @@ func TestForgetThenReregisterBeforeTheWriterDrains(t *testing.T) {
 				t.Errorf("memory after forget + re-register = %+v (listed %v); want its own set, by runtime", v, ok)
 			}
 			ctx := context.Background()
-			if bp, ok, err := cs.Breakpoints(ctx, "rt_a"); err != nil || !ok || len(bp) != 1 || bp[0] != "lookup_order" {
+			if bp, ok, err := cs.Breakpoints(ctx, "rt_a"); err != nil || !ok || len(bp.Tools) != 1 || bp.Tools[0] != "lookup_order" {
 				t.Errorf("stored breakpoints = %v, %v, %v; want [lookup_order]", bp, ok, err)
 			}
 			found := false
@@ -224,5 +224,60 @@ func TestForgetThenReregisterBeforeTheWriterDrains(t *testing.T) {
 				t.Errorf("after a restart = %+v (listed %v); want rt_a with [lookup_order]", v, ok)
 			}
 		})
+	}
+}
+
+// TestBreakpointsSurfaceAndSetAtPersist (U30.2, UX-A-33): a set Studio
+// delivers carries when and through which surface ("api" when the PUT
+// named none), and both survive a Studio restart — the store keeps
+// them with the set; a clear keeps neither.
+func TestBreakpointsSurfaceAndSetAtPersist(t *testing.T) {
+	db, cs := openStore(t, filepath.Join(t.TempDir(), "weft.db"))
+	t.Cleanup(func() { _ = db.Close() })
+	rs := New(WithStore(cs))
+	ts := httptest.NewServer(mux(rs))
+	t.Cleanup(ts.Close)
+	register(t, mux(rs), regBody("rt_a"))
+	_, closeA := subscribe(t, rs, ts.URL, "rt_a", "")
+
+	if err := rs.SetBreakpoints("rt_a", []string{"refund"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := viewOf(rs, "rt_a"); v.BreakpointsSurface != BreakpointsSurfaceAPI {
+		t.Errorf("a PUT naming no surface: breakpoints_surface = %q, want api", v.BreakpointsSurface)
+	}
+	if err := rs.SetBreakpoints("rt_a", []string{"refund"}, "runtimes"); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := viewOf(rs, "rt_a")
+	if v.BreakpointsSurface != "runtimes" || v.BreakpointsSetAt == nil {
+		t.Fatalf("after PUT: surface %q, set_at %v; want runtimes and a time", v.BreakpointsSurface, v.BreakpointsSetAt)
+	}
+	at := *v.BreakpointsSetAt
+	closeA()
+	waitDisconnected(t, rs, "rt_a")
+	flush(t, rs)
+	rs.Close()
+
+	rs2 := New(WithStore(cs))
+	v2, ok := viewOf(rs2, "rt_a")
+	if !ok || v2.BreakpointsBy != BreakpointsByStore || v2.BreakpointsSurface != "runtimes" ||
+		v2.BreakpointsSetAt == nil || !v2.BreakpointsSetAt.Equal(at) {
+		t.Errorf("after a restart: %+v; want by store, surface runtimes, set_at %v", v2, at)
+	}
+	rs2.Close()
+
+	// A clear keeps no provenance: nothing is set.
+	rs3 := New(WithStore(cs))
+	ts3 := httptest.NewServer(mux(rs3))
+	t.Cleanup(ts3.Close)
+	register(t, mux(rs3), regBody("rt_a"))
+	_, close3 := subscribe(t, rs3, ts3.URL, "rt_a", "")
+	t.Cleanup(close3)
+	if err := rs3.SetBreakpoints("rt_a", nil, "runtimes"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := viewOf(rs3, "rt_a"); v.BreakpointsSetAt != nil || v.BreakpointsSurface != "" {
+		t.Errorf("a cleared set: set_at %v, surface %q; want neither", v.BreakpointsSetAt, v.BreakpointsSurface)
 	}
 }

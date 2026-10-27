@@ -18,6 +18,7 @@
 //     pattern), never a dead button.
 
 import { tokenScopeOf } from "./replay"
+import { exportPath } from "./saves"
 
 /** One export format the run page offers beside save as test. */
 export interface ExportFormat {
@@ -74,6 +75,47 @@ export function exportFormatsFor(
     return EXPORT_FORMATS.filter((f) => !f.prompts)
   return EXPORT_FORMATS
 }
+
+/** "copy as curl" (U30.2; UX-A-15's remainder): the export as a
+ * command line. It never carries a token — a token-walled Studio's
+ * command names $WEFT_STUDIO_TOKEN, the env var weft dev sets and the
+ * CLI reads — and -OJ saves under the server's own file name. */
+export const CURL = {
+  label: "copy as curl",
+  title:
+    "copy a curl command that downloads this export — it names $WEFT_STUDIO_TOKEN, never the token itself",
+  copied: "copied a curl command",
+  refused: "the browser refused the clipboard",
+} as const
+
+/** curlFor is that command for one format: the API base the page talks
+ * to (lib/api's apiBase, absolute), the route, &tree=1 when asked; the
+ * Authorization header only where the Studio walls its API. */
+export function curlFor(o: {
+  apiBase: string
+  runID: string
+  format: string
+  tree?: boolean
+  authRequired?: boolean
+}): string {
+  const url =
+    new URL(exportPath(o.runID, o.format), o.apiBase).toString() +
+    (o.tree ? "&tree=1" : "")
+  const auth = o.authRequired
+    ? ` -H "Authorization: Bearer $WEFT_STUDIO_TOKEN"`
+    : ""
+  return `curl -fsSL -OJ${auth} '${url.replaceAll("'", "%27")}'`
+}
+
+/** The run header's actions under NARROW (U30.2; UX-A-21's
+ * remainder): one "⋯ actions" disclosure instead of a row that wraps
+ * past the header at phone width. */
+export const RUN_MENU = {
+  label: "actions",
+  title:
+    "the run's actions: open in app, save as test, export, copy link, delete",
+  narrow: "(max-width: 480px)",
+} as const
 
 /** An export's outcome line (the toast). */
 export function exportWords(

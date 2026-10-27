@@ -993,6 +993,17 @@ func traceGroup(q obsdb.TraceQuery) (group, having string, args []any) {
 		where = append(where, `trace_id IN (SELECT trace_id FROM spans WHERE start_ns >= ?)`)
 		args = append(args, q.Since.UnixNano())
 	}
+	if q.IDPrefix != "" {
+		// RunQuery.IDPrefix's byte range on the trace id (the spans
+		// table's trace_id index).
+		if hi, ok := prefixEnd(q.IDPrefix); ok {
+			where = append(where, "trace_id >= ? AND trace_id < ?")
+			args = append(args, q.IDPrefix, hi)
+		} else {
+			where = append(where, "trace_id >= ? AND substr(CAST(trace_id AS BLOB), 1, ?) = CAST(? AS BLOB)")
+			args = append(args, q.IDPrefix, len(q.IDPrefix), q.IDPrefix)
+		}
+	}
 	for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
 		// A span carrying the pair: key and value bound (runsWhere's
 		// json_each rule — no key quoted into a JSON path).

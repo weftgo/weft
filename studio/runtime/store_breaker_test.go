@@ -73,7 +73,7 @@ func (b *blipStore) PutRoute(ctx context.Context, r obsdb.RunRoute) error {
 	return b.CommandStore.PutRoute(ctx, r)
 }
 
-func (b *blipStore) PutBreakpoints(ctx context.Context, id string, tools []string) error {
+func (b *blipStore) PutBreakpoints(ctx context.Context, id string, tools obsdb.BreakpointSet) error {
 	if err := b.gate("breakpoints:" + id); err != nil {
 		return err
 	}
@@ -138,7 +138,7 @@ func TestStoreBreaker(t *testing.T) {
 	nextRun(t, r)
 	ack(t, rs, Ack{CommandID: done.CommandID, State: "accepted", RunID: "pg_b"})
 	ack(t, rs, Ack{CommandID: done.CommandID, State: "finished", RunID: "pg_b", Status: "succeeded"})
-	if err := rs.SetBreakpoints("rt_b", []string{"refund"}); err != nil {
+	if err := rs.SetBreakpoints("rt_b", []string{"refund"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	window := mustEnqueue(t, rs, "rt_b", Command{Agent: "acme-support"})
@@ -176,7 +176,7 @@ func TestStoreBreaker(t *testing.T) {
 	if rt, ok, err := cs.Route(context.Background(), "pg_b"); err != nil || !ok || rt.RuntimeID != "rt_b" {
 		t.Errorf("stored route = %+v %v %v", rt, ok, err)
 	}
-	if bp, ok, _ := cs.Breakpoints(context.Background(), "rt_b"); !ok || !slices.Equal(bp, []string{"refund"}) {
+	if bp, ok, _ := cs.Breakpoints(context.Background(), "rt_b"); !ok || !slices.Equal(bp.Tools, []string{"refund"}) {
 		t.Errorf("stored breakpoints = %v %v", bp, ok)
 	}
 	if rows, _ := cs.Runtimes(context.Background()); len(rows) != 1 || rows[0].ID != "rt_b" {

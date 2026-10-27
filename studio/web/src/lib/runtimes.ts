@@ -280,25 +280,44 @@ export function registeredWeft(
   return rt?.weft_version ?? ""
 }
 
+/** The surface a set came through (breakpoints_surface, U30.2): the
+ * page's name, "api" a PUT that named none. */
+export const BREAKPOINTS_SURFACE: Record<string, string> = {
+  runtimes: "this Studio's runtimes page",
+  api: "the API (PUT /api/runtimes/{id}/breakpoints)",
+}
+
+/** surfaceWords is a surface in words; an unknown one by its name. */
+const surfaceWords = (s: string) =>
+  BREAKPOINTS_SURFACE[s] ?? `this Studio (${s})`
+
 /** Who set a runtime's breakpoints (breakpoints_by). */
 const BREAKPOINTS_BY = {
-  studio: (when?: string) =>
-    when ? `set ${when} through this Studio` : "set through this Studio",
+  studio: (when?: string, surface?: string) =>
+    `set${when ? ` ${when}` : ""} through ${surface ? surfaceWords(surface) : "this Studio"}`,
   runtime: () =>
     "set by an earlier Studio: the runtime's own registration carried it",
-  store: () => "restored from Studio's store after a restart",
+  store: (when?: string, surface?: string) =>
+    when
+      ? `set ${when} through ${surface ? surfaceWords(surface) : "this Studio"} · restored from Studio's store after a restart`
+      : "restored from Studio's store after a restart",
 }
 
 /** breakpointsBy says who set a runtime's non-empty set
- * (breakpoints_by, U20.1), else when this Studio did (an older
+ * (breakpoints_by, U20.1) — through which surface and when (U30.2:
+ * kept across a restart) — else when this Studio did (an older
  * Studio's breakpoints_set_at alone). */
 export function breakpointsBy(
-  rt: Pick<RuntimeView, "breakpoints_by" | "breakpoints_set_at">
+  rt: Pick<
+    RuntimeView,
+    "breakpoints_by" | "breakpoints_set_at" | "breakpoints_surface"
+  >
 ): string {
   const when = rt.breakpoints_set_at
     ? relativeTime(rt.breakpoints_set_at)
     : undefined
-  if (rt.breakpoints_by) return BREAKPOINTS_BY[rt.breakpoints_by](when)
+  if (rt.breakpoints_by)
+    return BREAKPOINTS_BY[rt.breakpoints_by](when, rt.breakpoints_surface)
   return when ? BREAKPOINT_WORDS.setAt(when) : BREAKPOINT_WORDS.setAtUnknown
 }
 

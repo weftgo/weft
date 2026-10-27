@@ -3,6 +3,7 @@ package obsdbtest
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,6 +158,13 @@ func traces(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"a scope tag and a public id", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b1"}, PublicID: "pub_conf"}, []string{}, 0},
 			{"two scope pairs", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b1", "weft.flow": "f_checkout"}}, []string{trD}, 1},
 			{"a scope tag no span carries", obsdb.TraceQuery{ScopeMeta: map[string]string{"arena.batch": "b2"}}, []string{}, 0},
+			// IDPrefix (UX-A-13, the ⌘K palette): bytes, no wildcard, no
+			// case folding.
+			{"an id prefix", obsdb.TraceQuery{IDPrefix: trB[:6]}, []string{trB}, 1},
+			{"a whole id", obsdb.TraceQuery{IDPrefix: trD}, []string{trD}, 1},
+			{"an id prefix is not folded", obsdb.TraceQuery{IDPrefix: strings.ToUpper(trB[:6])}, []string{}, 0},
+			{"an id prefix is no wildcard", obsdb.TraceQuery{IDPrefix: "%"}, []string{}, 0},
+			{"an id prefix and a service", obsdb.TraceQuery{IDPrefix: trB[:6], Service: "orphan-svc"}, []string{}, 0},
 		} {
 			got, err := db.Traces(ctx(), c.q)
 			if err != nil {

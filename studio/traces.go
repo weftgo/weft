@@ -199,7 +199,7 @@ var rootMissing = badgeFields{
 
 func (s *Server) serveTraces(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	query := obsdb.TraceQuery{Service: q.Get("service"), PublicID: q.Get("public_id"), Meta: tagParams(q)}
+	query := obsdb.TraceQuery{Service: q.Get("service"), PublicID: q.Get("public_id"), Meta: tagParams(q), IDPrefix: q.Get("id_prefix")}
 	if v := q.Get("not_run"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {

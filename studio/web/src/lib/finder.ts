@@ -3,8 +3,9 @@
 // every other item matches it.
 //
 //   - An id is never fuzzy-matched: a pasted id prefix is looked up on
-//     the server (GET /api/runs?id_prefix=…&all=1 — children included)
-//     and its rows rank first as exact matches; any such word is also
+//     the server (GET /api/runs?id_prefix=…&all=1 — children included —
+//     and, UX-A-13, a session's and a trace's: /api/sessions?q=,
+//     /api/traces?id_prefix=) and its rows rank first as exact matches; any such word is also
 //     looked up as a public id (GET /api/runs?public_id=…: an app picks
 //     its own, "pub_…" or "arena:run-1:rw.deep-delegation" alike); a
 //     tag (key=value) is GET /api/runs?tag.key=value. Each answer is
@@ -86,6 +87,35 @@ export function exactRows<TRow extends Row>(
     ;(found.tag ?? []).filter((r) => r.meta?.[key] === value).forEach(add)
   }
   return out
+}
+
+/** exactSessions is the sessions an id prefix or a public id names
+ * (UX-A-13): GET /api/sessions?q= matches the id anywhere (and titles,
+ * prompts, agents), so only a row whose id starts with the prefix — or
+ * whose public id is the text — is kept, the exact id first. */
+export function exactSessions<TRow extends { id: string; public_id?: string }>(
+  l: Lookups,
+  rows: TRow[] | undefined
+): TRow[] {
+  const p = l.idPrefix
+  const pub = l.publicId
+  if (!p && !pub) return []
+  const hit = (rows ?? []).filter(
+    (r) => (!!p && r.id.startsWith(p)) || (!!pub && r.public_id === pub)
+  )
+  return [...hit.filter((r) => r.id === p), ...hit.filter((r) => r.id !== p)]
+}
+
+/** exactTraces is the traces an id prefix names (UX-A-13: GET
+ * /api/traces?id_prefix=), each kept only when its id starts with the
+ * text. */
+export function exactTraces<TRow extends { trace_id: string }>(
+  l: Lookups,
+  rows: TRow[] | undefined
+): TRow[] {
+  const p = l.idPrefix
+  if (!p) return []
+  return (rows ?? []).filter((r) => r.trace_id.startsWith(p))
 }
 
 /** The value prefix of an exact match's item: it ranks first. */

@@ -293,9 +293,13 @@ type TraceQuery struct {
 	// carrying weft.run.id, and no derived run row of the trace — what
 	// Studio's /runs counts as "GenAI traces that are not runs".
 	NotRun bool
-	Since  time.Time // Start at or after; zero = no bound
-	Until  time.Time // Start before; zero = no bound
-	Before time.Time // cursor on Start; zero = newest
+	// IDPrefix keeps the traces whose id starts with it, byte for byte
+	// (RunQuery.IDPrefix's rule: no wildcard, no case folding) — the ⌘K
+	// palette's lookup of a pasted short trace id. "" any.
+	IDPrefix string
+	Since    time.Time // Start at or after; zero = no bound
+	Until    time.Time // Start before; zero = no bound
+	Before   time.Time // cursor on Start; zero = newest
 	// BeforeID, with Before, makes the cursor the pair (Start, TraceID),
 	// as RunQuery.BeforeID: pass TracePage.NextBeforeID. A late earlier
 	// span can re-list a trace on a later page (TracePage).

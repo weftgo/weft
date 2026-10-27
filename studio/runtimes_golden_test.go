@@ -59,7 +59,7 @@ func TestRuntimesGoldenMatchesARealRuntime(t *testing.T) {
 	// The PUT needs the runtime registered and its stream open.
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
 		req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/runtimes/"+runtimeIDOf(t, ts.URL)+"/breakpoints",
-			strings.NewReader(`{"tools":["refund"]}`))
+			strings.NewReader(`{"tools":["refund"],"surface":"runtimes"}`))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)

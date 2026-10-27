@@ -308,6 +308,54 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
     ])
   })
 
+  it("the scope switch (U30.2, UX-A-17): 'this run' goes back to the run it came from with the selection in that run's keys", async () => {
+    serve({
+      spans: [
+        ...weftSpans(),
+        span("a2", "invoke_agent researcher", "c0", {
+          "gen_ai.operation.name": "invoke_agent",
+          "weft.run.id": "r_child",
+        }),
+        chat("d0", 0, {}, { parent_span_id: "a2" }, "r_child"),
+      ],
+    })
+    const { router } = renderApp(
+      `/traces/${TRACE}?sel=${encodeURIComponent("s:r_child:0:m")}&run=r_child`
+    )
+    await waitFor(() => expect(selectedKey()).toBe("s:r_child:0:m"))
+    const sw = document.querySelector('[data-scope-switch="trace"]')!
+    expect(
+      sw
+        .querySelector('[data-scope-side="trace"]')!
+        .getAttribute("aria-current")
+    ).toBe("page")
+    const back = sw.querySelector<HTMLAnchorElement>('[data-scope-side="run"]')!
+    expect(back.getAttribute("href")).toBe("/runs/r_child?sel=s0%3Am")
+    // A selection on the trace keeps ?run=, so the switch still goes back.
+    fireEvent.click(link("c:1:call_1")!)
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        sel: "c:1:call_1",
+        run: "r_child",
+      })
+    )
+    // The root run's row, seen from the child's page: qualified.
+    await waitFor(() =>
+      expect(new URL(back.href, "http://x").searchParams.get("sel")).toBe(
+        `c:${RUN}:1:call_1`
+      )
+    )
+    // Without ?run=, "this run" is the trace's root run, its keys bare.
+    cleanup()
+    renderApp(`/traces/${TRACE}?sel=c:1:call_1`)
+    await waitFor(() => expect(selectedKey()).toBe("c:1:call_1"))
+    expect(
+      document
+        .querySelector('[data-scope-switch="trace"] [data-scope-side="run"]')!
+        .getAttribute("href")
+    ).toBe(`/runs/${RUN}?sel=c%3A1%3Acall_1`)
+  })
+
   it("a trace of non-weft spans keeps t:<span id> keys and says it holds no run", async () => {
     serve({
       spans: [

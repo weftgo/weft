@@ -281,6 +281,16 @@ type runRow struct {
 	// count above is not known — absent, it would read as "no
 	// subagents". Omitted when the count is known.
 	ChildrenUnknown bool `json:"children_unknown,omitempty"`
+	// OwnUsage and DelegatedUsage split Usage (the core's roll-up, rule
+	// 13) where the run delegated (U30.2, UX-A-19: the runs list's
+	// "60/30 +60/30"): its own model calls' usage — Usage less its core
+	// Subagent children's — and theirs, summed over the children this
+	// identity reads (a panel token's out-of-scope child is in neither:
+	// own excludes it, delegated does not name it). Read time, from the
+	// children read the cost makes; both omitted on a run with no
+	// Subagent child, a running run, or when that read failed.
+	OwnUsage       *core.Usage `json:"own_usage,omitempty"`
+	DelegatedUsage *core.Usage `json:"delegated_usage,omitempty"`
 	// Holes is set on a run document's children[] rows only (plan
 	// A10): each child's own runHoles, so the parent's page badges a
 	// content-off or interrupted child before its document is read.

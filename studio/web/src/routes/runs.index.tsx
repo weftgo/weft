@@ -77,7 +77,8 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { nest, RUNS_TREE } from "@/lib/delegation"
-import { runLink, tracesLink } from "@/lib/links"
+import { compareLink, runLink, tracesLink } from "@/lib/links"
+import { PICKS, togglePick } from "@/lib/compare-picker"
 import { NOT_RUN_DAYS, notRunTraces } from "@/lib/honesty"
 import type { RunsSearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -366,6 +367,11 @@ function RunsPage() {
   const agentInput = useRef<HTMLInputElement>(null)
   const listKey = JSON.stringify(search)
   useEffect(() => setSelected(-1), [listKey])
+  // The compare picks (U30.2, UX-A-16): checkboxes, x on the selected
+  // row, "compare N" → /compare (the first pick the base).
+  const diffable = has("diff")
+  const [picks, setPicks] = useState<string[]>([])
+  const pick = (id: string) => setPicks((p) => togglePick(p, id))
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -397,6 +403,13 @@ function RunsPage() {
         case "Escape":
           setSelected(-1)
           return
+        case "x": {
+          const run = selected >= 0 ? runs.at(selected) : undefined
+          if (!run || !diffable) return
+          e.preventDefault()
+          setPicks((p) => togglePick(p, run.id))
+          return
+        }
         case "Enter": {
           const run = selected >= 0 ? runs.at(selected) : undefined
           if (run) void router.navigate(runLink(run.id))
@@ -406,7 +419,7 @@ function RunsPage() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [runs, selected, router])
+  }, [runs, selected, router, diffable])
 
   const setSearch = (patch: Partial<RunsSearch>) =>
     void navigate({
@@ -841,6 +854,40 @@ function RunsPage() {
           {costCapable ? (
             <UnpricedNote rows={runs} more={page.hasNextPage} />
           ) : null}
+          {diffable && picks.length > 0 ? (
+            <div
+              className="flex flex-wrap items-center gap-2 font-mono text-[11px]"
+              role="group"
+              aria-label={PICKS.title}
+              data-picks
+            >
+              <span className="text-muted-foreground" aria-live="polite">
+                {PICKS.count(picks.length)}
+              </span>
+              {picks.length >= 2 ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() =>
+                    void router.navigate(compareLink(picks[0], picks.slice(1)))
+                  }
+                  data-picks-compare
+                >
+                  {PICKS.compare(picks.length)}
+                </Button>
+              ) : (
+                <span className="text-faint">{PICKS.needTwo}</span>
+              )}
+              <button
+                type="button"
+                className="text-thread-ink hover:underline"
+                onClick={() => setPicks([])}
+                data-picks-clear
+              >
+                {PICKS.clear}
+              </button>
+            </div>
+          ) : null}
           {/* UX-F-25: the skip link lands here, past the filter bar —
               the next Tab is the first row. */}
           <div
@@ -854,6 +901,8 @@ function RunsPage() {
               showCost={costCapable}
               depths={depths}
               listedAs={search.status}
+              picks={diffable ? picks : undefined}
+              onPick={pick}
               sort={{
                 active: sortKey,
                 server: caps.search,

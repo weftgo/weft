@@ -4,6 +4,8 @@ import {
   acceptSelection,
   EXACT_VALUE,
   exactRows,
+  exactSessions,
+  exactTraces,
   lookupsOf,
   metaKeywords,
   movesSelection,
@@ -117,5 +119,27 @@ describe("paletteFilter", () => {
     expect(
       paletteFilter("run:r1", "rw.x", metaKeywords({ scenario: "rw.x" }))
     ).toBeGreaterThan(0)
+  })
+})
+
+describe("exactSessions and exactTraces (U30.2, UX-A-13)", () => {
+  it("keeps a session whose id starts with the text or whose public id is it, the exact id first", () => {
+    const rows = [
+      { id: "aa5e55", public_id: "" },
+      { id: "5e55a0b1", public_id: "" },
+      { id: "5e55", public_id: "" },
+      { id: "s_x", public_id: "5e55" },
+    ]
+    expect(exactSessions(lookupsOf("5e55"), rows).map((r) => r.id)).toEqual([
+      "5e55",
+      "5e55a0b1",
+      "s_x",
+    ])
+    expect(exactSessions(lookupsOf("5e5"), rows)).toEqual([])
+  })
+  it("keeps a trace only when its id starts with the text", () => {
+    const rows = [{ trace_id: "7ace0d1e" }, { trace_id: "d7ace0d1" }]
+    expect(exactTraces(lookupsOf("7ace"), rows)).toEqual([rows[0]])
+    expect(exactTraces(lookupsOf("a=b"), rows)).toEqual([])
   })
 })

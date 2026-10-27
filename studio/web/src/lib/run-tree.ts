@@ -492,8 +492,3 @@ export function childStreamPolls(
  * missing. */
 export const gapNote = (n: number) =>
   `${n.toLocaleString("en-US")} ${n === 1 ? "event" : "events"} missing`
-
-/** The run page's link to the whole trace (UX-A-17). */
-export const TRACE_LINK = "whole trace ↗"
-export const TRACE_HINT =
-  "the OTel trace this run is in: every run and span of it, the selection kept"

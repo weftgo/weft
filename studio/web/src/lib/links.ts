@@ -261,6 +261,9 @@ export interface TraceSearch {
   /** The view: the span tree (the default, never written) or the
    * GenAI chat (G2). */
   view?: "chat"
+  /** The run the page's scope switch came from (U30.2,
+   * lib/scope-switch.ts): "this run" goes back to it. */
+  run?: string
 }
 
 export interface TraceLink {
@@ -643,12 +646,15 @@ export function runPage(
  * key (TraceSearch.sel) — the trace page's own links (plan H7). */
 export function traceSelectionLink(
   id: string,
-  opts: { sel?: string; view?: "tree" | "chat" } = {}
+  opts: { sel?: string; view?: "tree" | "chat"; run?: string } = {}
 ): TraceLink {
   const link = traceLink(id, { view: opts.view })
-  return opts.sel
-    ? { ...link, search: { sel: opts.sel, ...link.search } }
-    : link
+  const search: TraceSearch = {
+    ...(opts.sel ? { sel: opts.sel } : {}),
+    ...link.search,
+    ...(opts.run ? { run: opts.run } : {}),
+  }
+  return { ...link, search }
 }
 
 /** runsLink is the runs list under these filters (empty values are

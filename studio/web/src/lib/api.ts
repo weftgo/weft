@@ -210,6 +210,13 @@ export interface RunRow extends CostFields, DelegatedCostFields {
    * lib/delegation.ts draws "⑂ ?", never "no subagents". Absent when
    * the count is known, and from an older Studio. */
   children_unknown?: boolean
+  /** usage split where the run delegated (U30.2, UX-A-19; api.go's
+   * runRow): its own model calls' tokens, and its core Subagent
+   * children's summed. Both absent on a run with no Subagent child, a
+   * running run, when the children read failed, and from an older
+   * Studio — lib/delegation.ts's tokenSplit words them. */
+  own_usage?: Usage
+  delegated_usage?: Usage
 }
 
 /** GET /api/runs → RunsPage. */
@@ -1468,6 +1475,8 @@ export interface TracesFilters {
   /** The GenAI traces that make no run (obsdb.TraceQuery.NotRun, I6). */
   not_run?: boolean
   public_id?: string
+  /** The traces whose id starts with it, byte for byte (UX-A-13). */
+  id_prefix?: string
   before?: string
   before_id?: string
   limit?: number
@@ -1481,6 +1490,7 @@ export function fetchTraces(filters: TracesFilters = {}): Promise<TracesPage> {
   if (filters.service) params.set("service", filters.service)
   if (filters.not_run) params.set("not_run", "1")
   if (filters.public_id) params.set("public_id", filters.public_id)
+  if (filters.id_prefix) params.set("id_prefix", filters.id_prefix)
   if (filters.before) params.set("before", filters.before)
   if (filters.before && filters.before_id)
     params.set("before_id", filters.before_id)
@@ -2607,6 +2617,10 @@ export interface RuntimeView {
    * runtime (its registration carried it), store (restored after a
    * Studio restart). Absent for an empty set or an older Studio. */
   breakpoints_by?: "studio" | "runtime" | "store"
+  /** U30.2 (UX-A-33): the surface a Studio-delivered set came through
+   * — "runtimes" (/runtimes' editor), "api" (a PUT that named none) —
+   * kept with breakpoints_set_at across a Studio restart. */
+  breakpoints_surface?: string
   /** U20.1: the weft the runtime was built with. */
   weft_version?: string
 }
@@ -2900,11 +2914,16 @@ export function forgetRuntime(runtimeID: string) {
   )
 }
 
-export function putBreakpoints(runtimeID: string, tools: string[]) {
+export function putBreakpoints(
+  runtimeID: string,
+  tools: string[],
+  /** The page that sends it (U30.2, UX-A-33): breakpoints_surface. */
+  surface?: string
+) {
   return request<{ tools: string[] | null }>(
     "PUT",
     `runtimes/${encodeURIComponent(runtimeID)}/breakpoints`,
-    { tools }
+    surface ? { tools, surface } : { tools }
   )
 }
 

@@ -7,11 +7,19 @@
 // compare page says which option left it off.
 import { useQueries } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Fragment, useEffect, useRef } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
 
 import { diffQuery, stepQuery } from "@/lib/api"
 import type { CostFields } from "@/lib/api"
 import { costCell, costCellWords, costView } from "@/lib/cost"
+import {
+  CHANGED_ONLY,
+  USAGE_DELTA,
+  changedView,
+  stepsDiffer,
+  usageDelta,
+  usageWords,
+} from "@/lib/compare-view"
 import { isNotFound } from "@/lib/not-found"
 import { runLink } from "@/lib/links"
 import {
@@ -323,7 +331,14 @@ export function StepDiffTable({
   focus?: number
   costs?: StepCosts
 }) {
-  const width = DIFF_COLUMNS.length + 1 + (costs ? 1 : 0)
+  // "changed only" (U30.2, UX-A-16): the changed steps and columns.
+  const [only, setOnly] = useState(false)
+  const narrowed = changedView(view)
+  const anyChanged = narrowed.rows.length > 0
+  const on = only && anyChanged
+  const cols = on ? narrowed.columns : DIFF_COLUMNS
+  const shown = on ? narrowed.rows : view.rows
+  const width = cols.length + 1 + (costs ? 1 : 0)
   // The step a link landed on (compareLink's step): scrolled to once.
   const target = useRef<HTMLTableRowElement>(null)
   useEffect(() => {
@@ -360,8 +375,43 @@ export function StepDiffTable({
   const untraced = view.others.map((_, i) =>
     untracedSides(view.rows.map((r) => r.others[i].side))
   )
+  const usage = usageDelta(view)
   return (
     <div className="space-y-2" data-step-diff>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <button
+          type="button"
+          className="rounded border px-2 py-0.5 font-mono text-[11px] hover:bg-accent disabled:opacity-50 aria-pressed:bg-secondary"
+          aria-pressed={on}
+          disabled={!anyChanged}
+          title={CHANGED_ONLY.title}
+          onClick={() => setOnly((v) => !v)}
+          data-diff-changed-only
+        >
+          {CHANGED_ONLY.label}
+        </button>
+        <span className="text-muted-foreground" data-diff-count>
+          {stepsDiffer(view)}
+        </span>
+      </div>
+      <ul
+        className="space-y-0.5 font-mono text-[11px]"
+        aria-label={USAGE_DELTA.title}
+        data-usage-delta
+      >
+        <li data-usage-run={view.base.run_id}>
+          <span className="text-faint" title={USAGE_DELTA.title}>
+            {USAGE_DELTA.label}
+          </span>{" "}
+          {view.base.run_id} · base: {usageWords(usage.base)}
+        </li>
+        {usage.others.map((d) => (
+          <li key={d.run_id} data-usage-run={d.run_id}>
+            <span className="text-faint">{USAGE_DELTA.label}</span> {d.run_id}:{" "}
+            {usageWords(d.sum, d)}
+          </li>
+        ))}
+      </ul>
       {view.holes.length ? (
         <div className="space-y-1" data-diff-holes>
           {view.holes.map((h) => (
@@ -444,7 +494,7 @@ export function StepDiffTable({
                   <th scope="col" className="border-l px-2 py-1 font-normal">
                     marks
                   </th>
-                  {DIFF_COLUMNS.map((c) => (
+                  {cols.map((c) => (
                     <th
                       key={c}
                       scope="col"
@@ -467,7 +517,7 @@ export function StepDiffTable({
             </tr>
           </thead>
           <tbody>
-            {view.rows.map((row) => (
+            {shown.map((row) => (
               <tr
                 key={row.step}
                 ref={row.step === focus ? target : undefined}
@@ -502,7 +552,7 @@ export function StepDiffTable({
                     <span className="text-muted-foreground">missing</span>
                   )}
                 </td>
-                {DIFF_COLUMNS.map((c) => (
+                {cols.map((c) => (
                   <Cell
                     key={c}
                     run={view.base.run_id}
@@ -535,7 +585,7 @@ export function StepDiffTable({
                         untraced={untraced[row.others.indexOf(o)]}
                       />
                     </td>
-                    {DIFF_COLUMNS.map((c) => (
+                    {cols.map((c) => (
                       <Cell
                         key={c}
                         run={o.run_id}

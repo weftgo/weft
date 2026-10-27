@@ -22,7 +22,15 @@ import { genaiChat, isModelCall, NO_MESSAGES_REASON } from "@/lib/genai"
 import { canReplay, replayFromStep } from "@/lib/replay"
 import { isGenAISpan, spansFromTimed, timeDomain } from "@/lib/trace"
 import type { Span as TraceRow } from "@/lib/trace"
-import { keyRows, OLD_KEY_NOTE, resolveSel, traceRuns } from "@/lib/trace-sel"
+import {
+  keyRows,
+  OLD_KEY_NOTE,
+  resolveSel,
+  rootRun,
+  traceRuns,
+} from "@/lib/trace-sel"
+import { toRunKey } from "@/lib/scope-switch"
+import { ScopeSwitch } from "@/components/studio/scope-switch"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { DERIVED_HOLE, DERIVED_WORDS, isDerivedRunId } from "@/lib/honesty"
 import { ChatMessages } from "@/components/studio/genai-chat"
@@ -54,6 +62,7 @@ export const Route = createFileRoute("/traces/$id")({
     sel: searchText(search.sel),
     span: searchText(search.span),
     view: search.view === "chat" ? "chat" : undefined,
+    run: searchText(search.run),
   }),
   component: TracePage,
 })
@@ -102,19 +111,26 @@ function TracePage() {
   // The page's state is its URL (G2): the view is a view change — a
   // history entry, so back walks it — and the selection a cursor move,
   // replaced in place.
+  // The run the scope switch came from (U30.2): kept on every link.
+  const from = search.run
   const setView = (v: "tree" | "chat") =>
     void navigate({
-      ...traceSelectionLink(id, { sel: resolved.key ?? wanted, view: v }),
+      ...traceSelectionLink(id, {
+        sel: resolved.key ?? wanted,
+        view: v,
+        run: from,
+      }),
     })
   const setSel = (row: TraceRow) =>
     void navigate({
-      ...traceSelectionLink(id, { sel: row.key, view }),
+      ...traceSelectionLink(id, { sel: row.key, view, run: from }),
       replace: true,
     })
   const hrefOf = (row: TraceRow) =>
     router.history.createHref(
-      router.buildLocation(traceSelectionLink(id, { sel: row.key, view }))
-        .publicHref
+      router.buildLocation(
+        traceSelectionLink(id, { sel: row.key, view, run: from })
+      ).publicHref
     )
 
   if (q.isPending) {
@@ -144,6 +160,12 @@ function TracePage() {
   const selected = resolved.id
     ? rows.find((r) => r.id === resolved.id)?.timed?.span
     : undefined
+  // "this run" (U30.2, UX-A-17): the run the switch came from, else
+  // the trace's root run; the selection carried in that run's keys.
+  const root = rootRun(rows)
+  const back = from && runs.includes(from) ? from : root || runs.at(0)
+  const backSel =
+    resolved.key && back ? toRunKey(resolved.key, root, back) : undefined
 
   return (
     <div className="space-y-3">
@@ -156,6 +178,12 @@ function TracePage() {
           {spans.length} {spans.length === 1 ? "span" : "spans"} ·{" "}
           {spanMs(facts.durationMs)}
         </span>
+        {back ? (
+          <ScopeSwitch
+            at="trace"
+            run={runLink(back, backSel ? { sel: backSel } : {})}
+          />
+        ) : null}
         {has("traces") ? (
           <Link
             {...tracesLink()}

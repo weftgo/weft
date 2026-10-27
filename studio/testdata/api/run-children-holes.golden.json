@@ -49,6 +49,14 @@
   "catalog_hash": "974dbbd40b479735e3931872bc773dc4351bddc76c1e52c12457ea04c42f2b14",
   "request_count": 6,
   "children_count": 1,
+  "own_usage": {
+    "input_tokens": 30,
+    "output_tokens": 15
+  },
+  "delegated_usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  },
   "children": [
     {
       "id": "r_off/1/c_sub",

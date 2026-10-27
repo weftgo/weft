@@ -212,6 +212,10 @@ func TestTracesRoute(t *testing.T) {
 		{"service=studio", []string{}},          // exact
 		{"public_id=pub_a", []string{tlParent}}, // every span pub_a's: tlWeb's non-weft root is not
 		{"public_id=pub_b", []string{tlOther}},
+		// id_prefix (UX-A-13: ⌘K finds a trace by a pasted short id).
+		{"id_prefix=" + tlWeb[:8], []string{tlWeb}},
+		{"id_prefix=" + tlWeb, []string{tlWeb}},
+		{"id_prefix=" + tlWeb[:8] + "&service=orphan-svc", []string{}},
 	} {
 		doc := traceList(t, h, "/studio/api/traces?"+strings.ReplaceAll(c.query, "+", "%2B"))
 		if got := doc.ids(); !reflect.DeepEqual(got, c.want) || doc.Total != len(c.want) {

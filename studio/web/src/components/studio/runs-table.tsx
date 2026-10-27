@@ -25,6 +25,7 @@ import {
   SHOW_CHILDREN,
   childrenChip,
   moreChildren,
+  tokenSplit,
 } from "@/lib/delegation"
 import { stoppedByWords } from "@/lib/stopped-by"
 import { ProblemBadges } from "@/components/studio/problem-badges"
@@ -54,6 +55,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { lineageOf } from "@/lib/run-row"
+import { PICKS } from "@/lib/compare-picker"
 import { costView, delegatedView } from "@/lib/cost"
 import { CacheHint, CostText } from "@/components/studio/cost"
 import { DerivedChip } from "@/components/studio/hole-badge"
@@ -283,12 +285,28 @@ export function UnknownTokens({ reason }: { reason?: string }) {
   )
 }
 
-function TokensCell({ usage }: { usage: RunRow["usage"] }) {
+function TokensCell({
+  usage,
+  split,
+}: {
+  usage: RunRow["usage"]
+  /** Own + delegated (U30.2, UX-A-19): "60/30 +60/30". */
+  split?: ReturnType<typeof tokenSplit>
+}) {
   const splits =
     usage.cached_input_tokens ||
     usage.cache_write_tokens ||
     usage.reasoning_tokens
-  const cell = (
+  const cell = split ? (
+    <span
+      className="font-mono whitespace-nowrap tabular-nums"
+      title={split.title}
+      data-token-split
+    >
+      {split.own}{" "}
+      <span className="text-muted-foreground">{split.delegated}</span>
+    </span>
+  ) : (
     <span
       className="font-mono tabular-nums"
       title={tokenPair(usage.input_tokens, usage.output_tokens, true)}
@@ -354,6 +372,10 @@ export interface RunsTableProps {
    * a row listed as parked that reads decided here says why
    * (unlinkedDecided). */
   listedAs?: string
+  /** The compare picks (U30.2, UX-A-16), in picking order: each listed
+   * row gains a checkbox. Absent, none (no capability "diff"). */
+  picks?: readonly string[]
+  onPick?: (id: string) => void
 }
 
 /** CostCell is a run's own cost and, when its subagents cost anything
@@ -519,6 +541,8 @@ export function RunsTable({
   sort,
   depths,
   listedAs,
+  picks,
+  onPick,
 }: RunsTableProps) {
   const clock = now ?? Date.now()
   const selectedRow = useRef<HTMLTableRowElement>(null)
@@ -550,6 +574,8 @@ export function RunsTable({
       open={listed ? undefined : open}
       onToggle={toggle}
       listedAs={listedAs}
+      picked={picks ? picks.includes(run.id) : undefined}
+      onPick={onPick}
     />
   )
   return (
@@ -623,6 +649,9 @@ const COL = {
 }
 
 interface RunTableRowProps {
+  /** The row's compare pick (U30.2): undefined, no checkbox. */
+  picked?: boolean
+  onPick?: (id: string) => void
   run: RunRow
   /** Every row of the list: where a park's resume is looked for. */
   runs: RunRow[]
@@ -652,6 +681,8 @@ function RunTableRow({
   open,
   onToggle,
   listedAs,
+  picked,
+  onPick,
 }: RunTableRowProps) {
   const navigate = useNavigate()
   const chip = childrenChip(run)
@@ -671,12 +702,26 @@ function RunTableRow({
           // A click anywhere on the row opens the run; links and
           // buttons inside keep their own behaviour (middle-click,
           // copy).
-          if ((e.target as HTMLElement).closest("a,button")) return
+          if ((e.target as HTMLElement).closest("a,button,input,label")) return
           void navigate(runLink(run.id))
         }}
+        data-picked={picked ? "" : undefined}
       >
         <TableCell>
-          <StatusChip row={run} runs={runs} />
+          <div className="flex items-center gap-1.5">
+            {picked !== undefined && onPick ? (
+              <input
+                type="checkbox"
+                className="size-3.5 shrink-0"
+                checked={picked}
+                onChange={() => onPick(run.id)}
+                aria-label={PICKS.row(run.id)}
+                title={PICKS.title}
+                data-pick-run={run.id}
+              />
+            ) : null}
+            <StatusChip row={run} runs={runs} />
+          </div>
           {unlinkedDecided(listedAs, statusOf(run, runs), run) ? (
             <div
               className="font-mono text-[10px] leading-tight text-faint"
@@ -778,7 +823,7 @@ function RunTableRow({
           {derivedUsageUnknown(run) ? (
             <UnknownTokens reason={run.cost_reason} />
           ) : (
-            <TokensCell usage={run.usage} />
+            <TokensCell usage={run.usage} split={tokenSplit(run)} />
           )}
         </TableCell>
         {showCost ? (

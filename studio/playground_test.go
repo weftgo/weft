@@ -717,6 +717,13 @@ func TestStep8RoutesRefusePanelTokens(t *testing.T) {
 	if code, body := pt.authed(t, http.MethodPut, "/api/runtimes/rt_test/breakpoints", pt.token, `{"tools":[]}`); code != http.StatusOK {
 		t.Errorf("breakpoints, server token = %d (%s), want 200", code, body)
 	}
+	// U30.2 (UX-A-33): the surface is a short word, or absent.
+	if code, body := pt.authed(t, http.MethodPut, "/api/runtimes/rt_test/breakpoints", pt.token, `{"tools":[],"surface":"Runtimes Page"}`); code != http.StatusBadRequest {
+		t.Errorf("breakpoints, a bad surface = %d (%s), want 400", code, body)
+	}
+	if code, body := pt.authed(t, http.MethodPut, "/api/runtimes/rt_test/breakpoints", pt.token, `{"tools":[],"surface":"runtimes"}`); code != http.StatusOK {
+		t.Errorf("breakpoints, surface runtimes = %d (%s), want 200", code, body)
+	}
 
 	// Steer: the approval route's fallback rule. A runtime-started run
 	// of another public id is refused; one with no public id at all is

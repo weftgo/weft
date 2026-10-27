@@ -8,10 +8,18 @@ import { FileDown, Trash2 } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
-import { deleteRun, fetchExport, metaQuery, studioToken } from "@/lib/api"
+import {
+  apiBase,
+  deleteRun,
+  fetchExport,
+  metaQuery,
+  studioToken,
+} from "@/lib/api"
 import type { RunDoc } from "@/lib/api"
 import { runLink, runsLink } from "@/lib/links"
 import {
+  CURL,
+  curlFor,
   DELETE_LABEL,
   childrenUnder,
   deleteConfirmWords,
@@ -23,6 +31,7 @@ import {
   exportWords,
 } from "@/lib/run-actions"
 import { saveBlob } from "@/lib/saves"
+import { copyText } from "@/lib/json"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -97,6 +106,43 @@ export function ExportVerbs({
           {f.label}
         </Button>
       ))}
+      <details className="relative" data-export-curl>
+        <summary
+          className="cursor-pointer list-none rounded px-1 font-mono text-[11px] text-faint hover:text-foreground"
+          title={CURL.title}
+        >
+          {CURL.label}
+        </summary>
+        <span className="absolute top-full right-0 z-20 mt-1 flex gap-1 rounded border bg-popover p-1 shadow-sm">
+          {formats.map((f) => (
+            <Button
+              key={f.format}
+              variant="outline"
+              size="xs"
+              className="font-mono"
+              title={CURL.title}
+              data-export-curl-format={f.format}
+              onClick={() =>
+                void copyText(
+                  curlFor({
+                    apiBase: apiBase(),
+                    runID,
+                    format: f.format,
+                    tree: tree && subagents > 0,
+                    authRequired: meta.data?.auth_required,
+                  })
+                ).then((ok) =>
+                  ok
+                    ? toast.success(CURL.copied, { id: "export" })
+                    : toast.error(CURL.refused, { id: "export" })
+                )
+              }
+            >
+              {f.label}
+            </Button>
+          ))}
+        </span>
+      </details>
       {subagents > 0 ? (
         <label
           className="flex min-h-6 items-center gap-1 font-mono text-[11px] text-faint"

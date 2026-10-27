@@ -3,7 +3,10 @@
 // hover and on keyboard focus (the JumpButton pattern), each opening
 // the run page's replay drawer pre-filled from lib/replay.ts. Hidden —
 // not disabled — when the drawer is gated off (no playground, or a
-// token that may not act): useReplay() is then null.
+// token that may not act): useReplay() is then null. Under a read
+// token on a Studio that has the playground (U30.2, UX-C-39) a step
+// card's hover says why instead — lib/replay.ts's REPLAY_OFF.read, the
+// drawer's own line — so a viewer learns the verbs exist.
 import {
   FilePenLine,
   GitBranch,
@@ -17,10 +20,14 @@ import {
   continueHere,
   editPromptAndReplay,
   editResultAndReplay,
+  REPLAY_OFF,
   replayFromStep,
   rerun,
+  tokenScopeOf,
 } from "@/lib/replay"
 import type { ReplayDraft } from "@/lib/replay"
+import { studioToken } from "@/lib/api"
+import { useCapabilities } from "@/hooks/use-capabilities"
 import { UNNAMED_AGENT } from "@/lib/format"
 import { useReplay } from "@/components/studio/replay-drawer"
 import { Button } from "@/components/ui/button"
@@ -89,7 +96,8 @@ function Verb({
  * a new message. */
 export function StepVerbs({ at }: { at: ReplayAt }) {
   const open = useReplay()
-  if (!open || at.step < 0) return null
+  if (!open) return at.step < 0 ? null : <ReadTokenWhy />
+  if (at.step < 0) return null
   const n = at.step
   return (
     <span className="flex items-center" data-replay-verbs="step">
@@ -194,5 +202,23 @@ export function ChildVerb({ runID, agent }: { runID: string; agent: string }) {
       icon={<RotateCcw data-slot="icon" />}
       draft={rerun()}
     />
+  )
+}
+
+/** ReadTokenWhy is a step card's word where its verbs would be under a
+ * read token (UX-C-39): shown as the verbs are — on hover and on focus
+ * within the card — and read by a screen reader as the card's text.
+ * Nothing on a Studio without the playground: no verb exists there. */
+function ReadTokenWhy() {
+  const { has } = useCapabilities()
+  if (!has("playground") || tokenScopeOf(studioToken()) !== "read") return null
+  return (
+    <span
+      className="max-w-56 truncate font-mono text-[10px] text-faint opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100"
+      title={REPLAY_OFF.read}
+      data-replay-off="read"
+    >
+      {REPLAY_OFF.read}
+    </span>
   )
 }

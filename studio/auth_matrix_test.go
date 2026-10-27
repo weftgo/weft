@@ -709,6 +709,7 @@ func TestAuthMatrix(t *testing.T) {
 		// panel token's public id (pinned below: no foreign trace or run
 		// id), a foreign public_id 403 before any parameter is read.
 		{name: "GET /api/traces", method: "GET", path: fixed("/api/traces"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/traces?id_prefix=", method: "GET", path: fixed("/api/traces?id_prefix=0123abcd"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/traces?service=svc&limit=500", method: "GET", path: fixed("/api/traces?service=svc&limit=500"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/traces?public_id=", method: "GET", path: func(res string) string { return "/api/traces?public_id=" + public[res] },
 			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {

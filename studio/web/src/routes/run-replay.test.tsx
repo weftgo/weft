@@ -51,6 +51,7 @@ import {
   editResultAndReplay,
   editTranscript,
   REPLAY_MARK,
+  REPLAY_OFF,
   replayFromStep,
 } from "@/lib/replay"
 import type { ReplayDraft } from "@/lib/replay"
@@ -647,6 +648,15 @@ describe("the verbs are capability-gated", () => {
       expect(document.querySelector('[data-call="c3"]')).toBeTruthy()
     )
     expect(document.querySelectorAll("[data-replay-verb]").length).toBe(0)
+    // U30.2 (UX-C-39): each step card's hover says why, in the drawer's
+    // words — a viewer learns the verbs exist.
+    const why = [
+      ...document.querySelectorAll<HTMLElement>('[data-replay-off="read"]'),
+    ]
+    expect(why.length).toBeGreaterThan(0)
+    expect(why[0].textContent).toBe(REPLAY_OFF.read)
+    expect(why[0].className).toContain("group-hover/row:opacity-100")
+    expect(why[0].className).toContain("group-focus-within/row:opacity-100")
     // Nothing the drawer reads is fetched for a token that may not act
     // (and nothing a read scope may not see).
     const paths = studio.requests.map((r) => r.path)
@@ -667,6 +677,8 @@ describe("the verbs are capability-gated", () => {
       expect(document.querySelector('[data-call="c3"]')).toBeTruthy()
     )
     expect(document.querySelectorAll("[data-replay-verb]").length).toBe(0)
+    // No playground: no verb exists, so nothing says why.
+    expect(document.querySelector("[data-replay-off]")).toBeNull()
   })
 
   it("drawn under a playground-scoped panel token", async () => {

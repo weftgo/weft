@@ -51,6 +51,14 @@
   "request_count": 6,
   "prompt_preview": "refund order 42",
   "children_count": 1,
+  "own_usage": {
+    "input_tokens": 30,
+    "output_tokens": 15
+  },
+  "delegated_usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  },
   "children": [
     {
       "id": "r_steps/1/c_sub",

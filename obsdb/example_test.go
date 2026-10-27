@@ -341,7 +341,7 @@ func ExampleCommandStore() {
 	if err := cs.PutRoute(ctx, obsdb.RunRoute{RunID: "run_1", RuntimeID: "rt_1", CommandID: "cmd_1", Seen: cmd.Updated}); err != nil {
 		log.Fatal(err)
 	}
-	if err := cs.PutBreakpoints(ctx, "rt_1", []string{"issue_refund"}); err != nil {
+	if err := cs.PutBreakpoints(ctx, "rt_1", obsdb.BreakpointSet{Tools: []string{"issue_refund"}}); err != nil {
 		log.Fatal(err)
 	}
 
@@ -353,8 +353,8 @@ func ExampleCommandStore() {
 		fmt.Println(c.ID, c.State, c.RunID, "accepted at", c.AcceptedAt.Sub(c.Created))
 	}
 	route, _, _ := cs.Route(ctx, "run_1")
-	tools, _, _ := cs.Breakpoints(ctx, "rt_1")
-	fmt.Println("run_1 →", route.RuntimeID, "parks on", tools)
+	bp, _, _ := cs.Breakpoints(ctx, "rt_1")
+	fmt.Println("run_1 →", route.RuntimeID, "parks on", bp.Tools)
 	// Output:
 	// cmd_1 accepted run_1 accepted at 1s
 	// run_1 → rt_1 parks on [issue_refund]

@@ -106,7 +106,7 @@ func TestRestartRestoresState(t *testing.T) {
 	nextRun(t, r)
 	ack(t, rs, Ack{CommandID: done.CommandID, State: "accepted", RunID: "pg_done"})
 	ack(t, rs, Ack{CommandID: done.CommandID, State: "finished", RunID: "pg_done", Status: "succeeded"})
-	if err := rs.SetBreakpoints("rt_keep", []string{"refund"}); err != nil {
+	if err := rs.SetBreakpoints("rt_keep", []string{"refund"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := rs.Command(held.CommandID)
@@ -384,14 +384,14 @@ func (s *recordingStore) Route(context.Context, string) (obsdb.RunRoute, bool, e
 	return obsdb.RunRoute{}, false, nil
 }
 
-func (s *recordingStore) PutBreakpoints(context.Context, string, []string) error {
+func (s *recordingStore) PutBreakpoints(context.Context, string, obsdb.BreakpointSet) error {
 	defer s.enter("PutBreakpoints")()
 	return nil
 }
 
-func (s *recordingStore) Breakpoints(context.Context, string) ([]string, bool, error) {
+func (s *recordingStore) Breakpoints(context.Context, string) (obsdb.BreakpointSet, bool, error) {
 	defer s.enter("Breakpoints")()
-	return nil, false, nil
+	return obsdb.BreakpointSet{}, false, nil
 }
 
 func (s *recordingStore) PutRuntime(context.Context, obsdb.StoredRuntime) error {
@@ -445,7 +445,7 @@ func TestNoStoreUnchanged(t *testing.T) {
 	cmd := mustEnqueue(t, rs, "rt_mem", Command{Agent: "acme-support"})
 	nextRun(t, r)
 	ack(t, rs, Ack{CommandID: cmd.CommandID, State: "accepted", RunID: "pg_mem"})
-	if err := rs.SetBreakpoints("rt_mem", []string{"refund"}); err != nil {
+	if err := rs.SetBreakpoints("rt_mem", []string{"refund"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	rs.Snapshot()

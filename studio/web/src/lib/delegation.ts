@@ -5,7 +5,7 @@
 // under its parent, indented by its depth — for the runs list's "with
 // subagents" view and the Live page. Plain TypeScript, no React.
 import type { RunRow } from "./api"
-import { plural } from "./format"
+import { plural, tokenPair } from "./format"
 import { ownTurn, poolParent, subagentRun } from "./honesty"
 import type { HoleMark } from "./honesty"
 
@@ -332,4 +332,25 @@ export function childKind(row: {
 }): ChildKind {
   if (subagentRun(row)) return "subagent"
   return poolParent(row) && ownTurn(row) ? "delegated" : "started"
+}
+
+/** tokenSplit is the runs list's tokens cell where the run delegated
+ * (U30.2, UX-A-19): its own "60 in · 30 out" and its subagents'
+ * "+60 in · 30 out", the
+ * title saying which is which and that the run's usage is both.
+ * Undefined when the row carries no split (no Subagent child, a
+ * running run, the children read failed, an older Studio). */
+export function tokenSplit(
+  run: Pick<RunRow, "usage" | "own_usage" | "delegated_usage">
+): { own: string; delegated: string; title: string } | undefined {
+  const o = run.own_usage
+  const d = run.delegated_usage
+  if (!o || !d) return undefined
+  const exact = (u: { input_tokens: number; output_tokens: number }) =>
+    tokenPair(u.input_tokens, u.output_tokens, true)
+  return {
+    own: tokenPair(o.input_tokens, o.output_tokens),
+    delegated: `+${tokenPair(d.input_tokens, d.output_tokens)}`,
+    title: `own ${exact(o)} · + ${exact(d)} by its child runs · ${exact(run.usage)} in all (the run's usage counts both)`,
+  }
 }

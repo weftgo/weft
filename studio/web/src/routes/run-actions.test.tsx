@@ -17,8 +17,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "@/lib/api"
 import { queryClient } from "@/lib/query"
 import type { RunDoc, RunsPage } from "@/lib/api"
-import { DELETE_OFF, EXPORT_TREE, deleteConfirmWords } from "@/lib/run-actions"
+import {
+  DELETE_OFF,
+  EXPORT_TREE,
+  RUN_MENU,
+  deleteConfirmWords,
+} from "@/lib/run-actions"
 import { renderApp, stubBrowser } from "@/test/app"
+import { stubViewport } from "@/test/layout"
+import axe from "axe-core"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
   FakeStudio,
@@ -128,6 +135,38 @@ describe("export on the run page", () => {
     }
   })
 
+  it("copy as curl copies the export as a command naming $WEFT_STUDIO_TOKEN, never the token (U30.2, UX-A-15)", async () => {
+    setStudioToken(DEV)
+    serve({ auth_required: true }).requireToken(DEV).install()
+    const copied: string[] = []
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: {
+        writeText: (t: string) => {
+          copied.push(t)
+          return Promise.resolve()
+        },
+      },
+    })
+    renderApp(`/runs/${RUN}`)
+    await waitFor(() => expect(formats()).toEqual(["json", "jsonl", "otlp"]))
+    const curl = [
+      ...document.querySelectorAll<HTMLElement>("[data-export-curl-format]"),
+    ]
+    expect(curl.map((b) => b.dataset.exportCurlFormat)).toEqual([
+      "json",
+      "jsonl",
+      "otlp",
+    ])
+    fireEvent.click(curl[2])
+    await waitFor(() => expect(copied).toHaveLength(1))
+    expect(copied[0]).toContain("$WEFT_STUDIO_TOKEN")
+    expect(copied[0]).not.toContain(DEV)
+    expect(copied[0]).toContain(`/api/runs/${RUN}/export?format=otlp'`)
+    // Nothing was fetched: a copy is no download.
+    expect(studio.calls(`GET runs/${RUN}/export`)).toHaveLength(0)
+  })
+
   it("a run with subagents offers 'with child runs', which adds tree=1 (UX-A-31); a run without none", async () => {
     const kids = [
       { ...rOK, id: `${RUN}/call_1`, agent: "worker" },
@@ -169,6 +208,55 @@ describe("export on the run page", () => {
     renderApp(`/runs/${RUN}`)
     await screen.findByText("copy link")
     expect(formats()).toEqual([])
+  })
+})
+
+describe("the run page at phone width (U30.2, UX-A-21)", () => {
+  it("the header's verbs fold into one ⋯ actions disclosure; wide, a row", async () => {
+    const resize = stubViewport(360)
+    serve().install()
+    renderApp(`/runs/${RUN}`)
+    const menu = await waitFor(() => {
+      const m = document.querySelector<HTMLDetailsElement>(
+        "[data-run-actions-menu]"
+      )
+      expect(m).toBeTruthy()
+      return m!
+    })
+    const summary = menu.querySelector("summary")!
+    expect(summary.textContent).toBe(`⋯ ${RUN_MENU.label}`)
+    expect(menu.open).toBe(false)
+    // The verbs are inside it, reached once it opens.
+    await waitFor(() =>
+      expect(menu.querySelector("[data-export-format]")).toBeTruthy()
+    )
+    fireEvent.click(summary)
+    expect(menu.open).toBe(true)
+    expect((await axe.run(menu)).violations).toEqual([])
+    resize(1280)
+    await waitFor(() =>
+      expect(document.querySelector("[data-run-actions-menu]")).toBeNull()
+    )
+    expect(document.querySelector("[data-export-format]")).toBeTruthy()
+  })
+
+  it("the waterfall keeps its bars: compact, a thin bar under each row's name", async () => {
+    stubViewport(360)
+    serve().install()
+    renderApp(`/runs/${RUN}`)
+    const wf = await waitFor(() => {
+      const w = document.querySelector<HTMLElement>(".waterfall")
+      expect(w).toBeTruthy()
+      return w!
+    })
+    expect(wf.hasAttribute("data-compact")).toBe(true)
+    const tracks = wf.querySelectorAll<HTMLElement>("[data-track]")
+    expect(tracks.length).toBeGreaterThan(0)
+    for (const t of tracks) {
+      expect(t.className).toContain("max-[480px]:col-span-2")
+      expect(t.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+      expect(t.querySelector("div")).toBeTruthy() // the bar
+    }
   })
 })
 

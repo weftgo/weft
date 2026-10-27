@@ -297,14 +297,15 @@ describe("the runtime's breakpoints, on /runtimes (UX-A-33, UX-C-18)", () => {
         BREAKPOINT_WORDS.all
       )
     )
+    // U30.2 (UX-A-33): the surface it came through.
     expect(c.querySelector("[data-breakpoints-by]")!.textContent).toMatch(
-      /^set .+ through this Studio$/
+      /^set .+ through this Studio's runtimes page$/
     )
     fireEvent.click(c.querySelector("[data-breakpoints-clear]")!)
     await waitFor(() =>
       expect(
         studio.calls(`PUT runtimes/${batch.id}/breakpoints`)[0]?.body
-      ).toEqual({ tools: [] })
+      ).toEqual({ tools: [], surface: "runtimes" })
     )
   })
 

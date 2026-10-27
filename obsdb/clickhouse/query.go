@@ -1574,6 +1574,11 @@ func traceInner(q obsdb.TraceQuery) (string, []any) {
 		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE t.Timestamp >= fromUnixTimestamp64Nano(toInt64(?)))")
 		narrowArgs = append(narrowArgs, q.Since.UnixNano())
 	}
+	if q.IDPrefix != "" {
+		// TraceQuery.IDPrefix: bytes, no wildcard, no case folding.
+		narrow = append(narrow, "startsWith(TraceId, ?)")
+		narrowArgs = append(narrowArgs, q.IDPrefix)
+	}
 	for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
 		// A span carrying the pair (exact, not a superset: the filter is
 		// this narrowing).

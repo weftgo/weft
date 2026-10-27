@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   childrenUnder,
+  curlFor,
   DELETE_OFF,
   deleteConfirmWords,
   deleteOffWhy,
@@ -62,5 +63,24 @@ describe("deleteOffWhy", () => {
     expect(deleteConfirmWords({ id: "r", children: [] }).body).toMatch(
       /studio's database only/
     )
+  })
+})
+
+describe("curlFor (U30.2, UX-A-15)", () => {
+  it("names $WEFT_STUDIO_TOKEN where the API is walled, never a token; the route and tree=1 as the page fetches them", () => {
+    expect(
+      curlFor({
+        apiBase: "http://127.0.0.1:7331/studio/api/",
+        runID: "r/0/call 1",
+        format: "jsonl",
+        tree: true,
+        authRequired: true,
+      })
+    ).toBe(
+      `curl -fsSL -OJ -H "Authorization: Bearer $WEFT_STUDIO_TOKEN" 'http://127.0.0.1:7331/studio/api/runs/r%2F0%2Fcall%201/export?format=jsonl&tree=1'`
+    )
+    expect(
+      curlFor({ apiBase: "http://h/api/", runID: "r'x", format: "json" })
+    ).toBe(`curl -fsSL -OJ 'http://h/api/runs/r%27x/export?format=json'`)
   })
 })

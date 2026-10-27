@@ -2736,7 +2736,12 @@ per agent its registered `manifest_hash` against its latest run's
 yet); the runtime-wide breakpoints, clearable, with who set them
 (`breakpoints_by`: `studio` — this Studio's PUT, with
 `breakpoints_set_at`; `runtime` — the registration carried a set an
-earlier Studio delivered; `store` — restored after a restart). Settings'
+earlier Studio delivered; `store` — restored after a restart) and,
+for a set Studio delivered, the surface it came through
+(`breakpoints_surface`: the PUT body's optional `surface`, `runtimes`
+from /runtimes, else `api`) — `breakpoints_set_at` and it are kept in
+the command store, so a restarted Studio still says "set by <surface>
+at <time>" (U30.2). Settings'
 Runtimes section is now a summary and a link here. `GET /api/runtimes`
 rows add `weft_version` and, for a non-empty set, `breakpoints_by`.
 `DELETE /api/runtimes/{id}` forgets a runtime that is gone: 204, its row

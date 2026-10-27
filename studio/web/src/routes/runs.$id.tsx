@@ -78,6 +78,8 @@ import {
   VIEWS,
 } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { ScopeSwitch } from "@/components/studio/scope-switch"
+import { toTraceKey } from "@/lib/scope-switch"
 import { editKey, impliedFromStep, putEdit, schemaOf } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 import { replayBounds } from "@/lib/experiment-body"
@@ -101,10 +103,7 @@ import {
   stepRowOf,
   gapNote,
   expandFor,
-  qualifyKey,
   resolveRowSel,
-  TRACE_HINT,
-  TRACE_LINK,
   treeSpans,
 } from "@/lib/run-tree"
 import {
@@ -1933,23 +1932,21 @@ function RunPage() {
                 </span>
               ) : null}
               {view === "waterfall" && doc.trace_id ? (
-                <Link
-                  {...traceSelectionLink(doc.trace_id, {
-                    // Always run-qualified (U9.2-fix W4): the trace page
-                    // keys bare only its own root run — a top-level run
-                    // need not be it (a sibling under an app's trace) —
-                    // and reads its root's qualified keys back.
+                // One view at two scopes (U30.2, UX-A-17): the trace side
+                // carries the selection, always run-qualified (U9.2-fix
+                // W4: the trace page keys bare only its own root run and
+                // reads its root's qualified keys back), and ?run= so its
+                // "this run" comes back here.
+                <ScopeSwitch
+                  at="run"
+                  trace={traceSelectionLink(doc.trace_id, {
                     sel:
                       selectedRow && selectedRow.runId === id
-                        ? qualifyKey(selectedRow.key, id)
+                        ? toTraceKey(selectedRow.key, id)
                         : selectedRow?.key,
+                    run: id,
                   })}
-                  className="font-mono text-[11px] text-thread-ink hover:underline"
-                  title={TRACE_HINT}
-                  data-trace-link
-                >
-                  {TRACE_LINK}
-                </Link>
+                />
               ) : null}
               <span className="hidden items-center gap-1 text-[11px] text-faint md:flex">
                 <Kbd>w</Kbd>

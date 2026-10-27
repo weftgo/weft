@@ -581,10 +581,16 @@ type RuntimeView struct {
 	// reloaded UI shows the rule that is parking its runs. Empty, never
 	// null.
 	Breakpoints []string `json:"breakpoints"`
-	// BreakpointsSetAt is when this Studio last delivered the set (PUT
-	// …/breakpoints, UX-A-33). In memory: absent for a set adopted from
-	// a registration or restored from the store after a restart.
+	// BreakpointsSetAt is when Studio last delivered the set (PUT
+	// …/breakpoints, UX-A-33), kept in the command store (U30.2): a set
+	// restored after a restart keeps it. Absent for a set adopted from a
+	// registration, and for one an older Studio stored.
 	BreakpointsSetAt *time.Time `json:"breakpoints_set_at,omitempty"`
+	// BreakpointsSurface is the surface the set came through (U30.2,
+	// UX-A-33's "set by <surface>"): the Studio page that sent it — the
+	// PUT body's surface, "runtimes" from /runtimes — else "api" for a
+	// PUT that named none. Kept and absent as BreakpointsSetAt is.
+	BreakpointsSurface string `json:"breakpoints_surface,omitempty"`
 	// BreakpointsBy says where a non-empty set came from (U20.1, "who
 	// set them"): BreakpointsByStudio — PUT …/breakpoints through this
 	// Studio (BreakpointsSetAt says when); BreakpointsByRuntime — the
@@ -593,6 +599,10 @@ type RuntimeView struct {
 	// command store after a Studio restart. Absent for an empty set.
 	BreakpointsBy string `json:"breakpoints_by,omitempty"`
 }
+
+// BreakpointsSurfaceAPI is RuntimeView.BreakpointsSurface for a PUT
+// that named no surface (a script, curl).
+const BreakpointsSurfaceAPI = "api"
 
 // Where a runtime's breakpoint set came from (RuntimeView.BreakpointsBy).
 const (
@@ -798,6 +808,9 @@ type connected struct {
 	breakpointsSetAt time.Time
 	// breakpointsBy is where the set came from (RuntimeView.BreakpointsBy).
 	breakpointsBy string
+	// breakpointsSurface is the surface SetBy named
+	// (RuntimeView.BreakpointsSurface).
+	breakpointsSurface string
 	// manifest keys the manifest its latest registration carried.
 	manifest manifestKey
 	// stored is the LastSeen last written to the store (the ping
@@ -953,7 +966,7 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 		// authority and every stream open sends it (serveCommands).
 		c = &connected{breakpoints: append([]string(nil), reg.Breakpoints...), breakpointsBy: BreakpointsByRuntime}
 		rs.runtimes[reg.RuntimeID] = c
-		rs.saveBreakpointsLocked(reg.RuntimeID, c.breakpoints)
+		rs.saveBreakpointsLocked(reg.RuntimeID, c)
 	}
 	c.reg = reg
 	c.restored = false
@@ -1845,9 +1858,10 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			BreakpointsOwn: c.reg.BreakpointsOwn,
 			Breakpoints:    append([]string{}, c.breakpoints...),
 		}
-		if !c.breakpointsSetAt.IsZero() {
+		if !c.breakpointsSetAt.IsZero() && len(c.breakpoints) > 0 {
 			at := c.breakpointsSetAt
 			v.BreakpointsSetAt = &at
+			v.BreakpointsSurface = c.breakpointsSurface
 		}
 		if len(c.breakpoints) > 0 {
 			v.BreakpointsBy = c.breakpointsBy
@@ -2049,8 +2063,9 @@ func orDefault(s, def string) string {
 // (an `event: breakpoints` frame): the runtime passes the named tools
 // as core.ParkOn on every run it starts from then on. It cannot alter
 // agents it did not build — the app's own turns are not breakable
-// from here (PQ7), and meta says so.
-func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string) error {
+// from here (PQ7), and meta says so. surface names where the set came
+// from (RuntimeView.BreakpointsSurface; "" reads "api").
+func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string, surface string) error {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	c := rs.runtimes[runtimeID]
@@ -2068,10 +2083,14 @@ func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string) error 
 		rs.dropFeedLocked(runtimeID, c)
 		return ErrNotConnected
 	}
+	if surface == "" {
+		surface = BreakpointsSurfaceAPI
+	}
 	c.breakpoints = append([]string(nil), tools...)
 	c.breakpointsSetAt = time.Now().UTC()
 	c.breakpointsBy = BreakpointsByStudio
-	rs.saveBreakpointsLocked(runtimeID, c.breakpoints)
+	c.breakpointsSurface = surface
+	rs.saveBreakpointsLocked(runtimeID, c)
 	return nil
 }
 

@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { ArrowUpRight, Check, Link2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import type { ReactNode } from "react"
 
 import { VsTypical } from "@/components/studio/agent-stats"
 import {
@@ -64,6 +65,8 @@ import {
 } from "@/components/studio/cost"
 import { SaveAsTest } from "@/components/studio/saves"
 import { DeleteRun, ExportVerbs } from "@/components/studio/run-actions"
+import { RUN_MENU } from "@/lib/run-actions"
+import { useMediaQuery } from "@/hooks/use-media-query"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { RunManifestMark } from "@/components/studio/manifest-badge"
 import {
@@ -708,14 +711,14 @@ export function RunHeader({
         {/* A derived run hides the verbs that need weft's records
             (I6, UX-S4-03): the holes below say why, once. */}
         {derived ? null : <CompareWith doc={doc} />}
-        <span className="ml-auto flex flex-wrap items-center gap-2">
+        <HeaderActions>
           {derived ? null : <OpenInApp doc={doc} at={openAt} />}
           {derived ? null : <SaveAsTest runID={doc.id} />}
           {/* The run's other downloads and its delete (U26). */}
           <ExportVerbs runID={doc.id} subagents={doc.children.length} />
           <CopyLink />
           <DeleteRun doc={doc} />
-        </span>
+        </HeaderActions>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground tabular-nums">
@@ -1055,4 +1058,32 @@ export function runPlace(
     agent: t.kind === "agent" ? undefined : doc.agent || undefined,
     title: t.text,
   }
+}
+
+/** HeaderActions holds the run's verbs: a row beside the header, and —
+ * under RUN_MENU.narrow (U30.2, UX-A-21) — one "⋯ actions" disclosure
+ * whose panel stacks them, so the header never overflows a phone. A
+ * details/summary: Enter and Space open it, the verbs keep their own
+ * keys and dialogs. */
+function HeaderActions({ children }: { children: ReactNode }) {
+  const narrow = useMediaQuery(RUN_MENU.narrow)
+  if (!narrow)
+    return (
+      <span className="ml-auto flex flex-wrap items-center gap-2">
+        {children}
+      </span>
+    )
+  return (
+    <details className="relative ml-auto" data-run-actions-menu>
+      <summary
+        className="cursor-pointer list-none rounded-md border px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:text-foreground"
+        title={RUN_MENU.title}
+      >
+        ⋯ {RUN_MENU.label}
+      </summary>
+      <div className="absolute right-0 z-20 mt-1 flex w-max max-w-[calc(100vw-2rem)] flex-col items-start gap-2 rounded-md border bg-popover p-2 shadow-sm">
+        {children}
+      </div>
+    </details>
+  )
 }

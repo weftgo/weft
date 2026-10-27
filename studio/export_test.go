@@ -377,7 +377,7 @@ func withoutChildren(t *testing.T, body []byte) string {
 	// The run's cost split reads its children (plan A5: own usage is its
 	// usage minus theirs, delegated is theirs), which the copy lacks.
 	for _, k := range []string{"cost_usd", "cost_known", "cost_badge", "cost_reason", "cache",
-		"delegated_cost_usd", "delegated_cost_known", "delegated_cost_reason"} {
+		"delegated_cost_usd", "delegated_cost_known", "delegated_cost_reason", "own_usage", "delegated_usage"} {
 		delete(run, k)
 	}
 	b, err := json.MarshalIndent(doc, "", " ")

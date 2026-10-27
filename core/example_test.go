@@ -1235,14 +1235,17 @@ func ExampleWithMetadata() {
 	// page = https://app.example/chat tenant = acme
 }
 
-// WithCaller links the next run to a caller in another process — here
-// the run and tool call an upstream service named in its request. The
-// run records weft.caller.run.id / weft.caller.call.id (a link, not
-// parenthood); weft/mcp's Serve does this for an MCP client's _meta.
+// WithCaller links the runs started on a context to a caller in another
+// process — here the run and tool call an upstream service named in its
+// request. Each such run records weft.caller.run.id /
+// weft.caller.call.id and weft.caller.remote (a link, not parenthood;
+// readers keep the run top-level); a Caller's Span adds an
+// OpenTelemetry link. weft/mcp's Serve does this for an MCP client's
+// _meta.
 func ExampleWithCaller() {
 	agt := core.New(wefttest.Script(wefttest.Say("done")), core.Name("worker"))
 	handle := func(ctx context.Context, callerRun, callerCall, prompt string) (string, error) {
-		res, err := agt.Generate(core.WithCaller(ctx, callerRun, callerCall), core.Prompt(prompt))
+		res, err := agt.Generate(core.WithCaller(ctx, core.Caller{RunID: callerRun, CallID: callerCall}), core.Prompt(prompt))
 		if err != nil {
 			return "", err
 		}

@@ -209,10 +209,14 @@ func (d *DB) deleteInBatches(ctx context.Context, stmt string, args ...any) erro
 // thread's too, when it shares the file. VACUUM needs the file to
 // itself for its duration; a writer in another process waits on the
 // busy timeout. In WAL mode VACUUM writes the new file through the
-// WAL, so a checkpoint follows (TRUNCATE: the WAL back to zero bytes
-// when no reader holds it): the file's size after a vacuum is its size,
+// WAL, so a checkpoint follows: PASSIVE (what no reader holds), then
+// TRUNCATE (the WAL back to zero bytes) — both under a short busy
+// timeout of their own (vacuumCheckpointWait), never the writer's 30 s,
+// so a live Studio's reader or writer never stalls the vacuum and the
+// vacuum never stalls it: the file's size after a vacuum is its size,
 // not the main file's plus a WAL the size of the database (UX-S5a-12).
-// A checkpoint a reader blocks is not an error — the next one folds it.
+// A checkpoint a live reader or writer blocks is not an error — the
+// next one folds the rest.
 func (d *DB) Vacuum(ctx context.Context) (err error) {
 	if err := d.checkOpen(); err != nil {
 		return err
@@ -224,8 +228,40 @@ func (d *DB) Vacuum(ctx context.Context) (err error) {
 	if _, err = d.writer.ExecContext(ctx, `VACUUM`); err != nil {
 		return err
 	}
-	_, err = d.writer.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
-	return err
+	return d.checkpoint(ctx, vacuumCheckpointWait)
+}
+
+// vacuumCheckpointWait is the busy timeout Vacuum's checkpoint waits
+// under.
+const vacuumCheckpointWait = 250 * time.Millisecond
+
+// checkpoint runs a PASSIVE then a TRUNCATE WAL checkpoint on one
+// writer connection whose busy timeout is wait for the two statements
+// alone, put back after. A checkpoint SQLite reports busy (a reader or
+// writer holds the WAL) is not an error.
+func (d *DB) checkpoint(ctx context.Context, wait time.Duration) error {
+	conn, err := d.writer.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	var was int64
+	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&was); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout = %d`, wait.Milliseconds())); err != nil {
+		return err
+	}
+	defer func() {
+		_, _ = conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf(`PRAGMA busy_timeout = %d`, was))
+	}()
+	for _, mode := range []string{"PASSIVE", "TRUNCATE"} {
+		var busy, logFrames, done int64
+		if err := conn.QueryRowContext(ctx, `PRAGMA wal_checkpoint(`+mode+`)`).Scan(&busy, &logFrames, &done); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // deleteTx runs one deletion in a writer transaction: pick chooses the

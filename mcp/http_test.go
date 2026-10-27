@@ -73,7 +73,7 @@ func TestToolsStreamableHTTPErrorKinds(t *testing.T) {
 		_, err := f(ctx, json.RawMessage(`{"q":"a"}`))
 		return errorTypeOf(err)
 	}
-	if got := call(callHandler(sess, "never_listed")); got != "mcp_rpc_error" {
+	if got := call(callHandler(sess, "never_listed", false)); got != "mcp_rpc_error" {
 		t.Errorf("unknown tool over HTTP = %q, want mcp_rpc_error", got)
 	}
 	if got := call(byName["explode"].Invoke); got != "mcp_rpc_error" {

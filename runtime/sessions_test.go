@@ -143,6 +143,18 @@ func TestAppSessionApprovalThroughSessions(t *testing.T) {
 	live = s
 	mu.Unlock()
 
+	// The parked turn runs nothing: a steer or a cancel is refused at
+	// once, 409, saying to decide instead (UX-H-19, U33.1-fix).
+	for _, verb := range []string{"steer", "cancel"} {
+		code, body := e.api(t, http.MethodPost, "/api/runs/"+parked.RunID()+"/"+verb, `{"message":"hurry"}`)
+		if code != http.StatusConflict || !strings.Contains(body, "is parked: decide its pending calls (approve/deny) instead") {
+			t.Errorf("%s on the parked app turn = %d %s, want 409 decide instead", verb, code, body)
+		}
+	}
+	if p := s.Pending(); len(p) != 1 {
+		t.Fatalf("a refused steer or cancel changed the park: %+v", p)
+	}
+
 	code, body := e.api(t, http.MethodPost, "/api/runs/"+parked.RunID()+"/approvals",
 		`{"call_id":"`+callID+`","decision":"approve"}`)
 	if code != http.StatusAccepted {

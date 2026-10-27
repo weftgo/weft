@@ -452,3 +452,25 @@ What it does not prove is Claude Code itself: the check speaks the same
 MCP protocol over stdio that Claude Code speaks, through the official
 Go SDK's client; the registration is the documented `claude mcp add`
 command above.
+
+## 8. Your own agents over MCP: the caller link (`weft/mcp`)
+
+Not `weft mcp` itself — the `weft/mcp` package, when one of your agents
+calls another you serve with `mcp.Serve`. To see the served run linked
+to the call that made it, opt in on the client:
+
+    tools, err := mcp.Tools(ctx, sess, mcp.Server("helpers"), mcp.CallerMeta())
+
+Every call those tools make then carries, in `params._meta`, the W3C
+`traceparent` (and `tracestate`) of its `execute_tool` span and
+`dev.weftgo/caller` `{run_id, call_id}`. The served run records
+`weft.caller.run.id` / `weft.caller.call.id` with `weft.caller.remote`,
+and its `invoke_agent` span links (an OpenTelemetry link) to the caller's
+span — its own trace, never the caller's child, so the client's
+sampling never decides whether the server records it. Studio keeps a
+remote link off the run's place: the served run is top-level and its
+session's own turn, whatever ids a client states (record contract §2).
+
+`CallerMeta` is **off by default**: the run and call ids and the trace
+state name your runs to the server. Turn it on for servers you run, not
+for a third party's.

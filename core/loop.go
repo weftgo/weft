@@ -55,6 +55,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// carries no link, as under a top-level run, and never claims the
 	// Subagent's parent link (O11, record contract §2).
 	link := runLinkAttrs(ctx)
+	callerSpan := remoteCallerSpan(ctx)
 	ctx = enterRun(ctx)
 	// The run's metadata is merged and placed before any span starts, so
 	// every span and record of this run carries it and a Subagent's child
@@ -159,6 +160,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		resumedFrom:  cfg.resumedFrom,
 		resumeCalls:  resumeCalls,
 		link:         link,
+		callerSpan:   callerSpan,
 		obs:          &a.obs,
 		panics:       &a.tapPanics,
 	}

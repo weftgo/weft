@@ -11,24 +11,27 @@ import (
 	"github.com/weftgo/weft/core"
 )
 
-// The caller link over the wire (U33.1, UX-S2-08's remainder): a
-// tools/call carries its caller in params._meta, both directions over
-// the SDK's Meta map —
+// The caller link over the wire (U33.1, UX-S2-08's remainder; U33.1-fix):
+// a tools/call can carry its caller in params._meta, both directions
+// over the SDK's Meta map —
 //
 //   - "traceparent" (and "tracestate"), W3C trace context: MCP's trace
-//     propagation convention, the same header bytes HTTP carries. An
-//     imported tool sends its execute_tool span's; a served call starts
-//     under it as a remote parent, so the served run's spans join the
-//     caller's trace, as a tool call's work does in one process.
+//     propagation convention, the same header bytes HTTP carries. A
+//     served call's run links its invoke_agent span to that span (an
+//     OpenTelemetry link) and starts its own trace — never the caller's
+//     child, so the client's sampled flag never decides whether this
+//     process records the run.
 //   - MetaCaller, {"run_id", "call_id"}: the weft run and tool call the
-//     request came from (core.CallFromContext). A served call's run
-//     records them as weft.caller.run.id / weft.caller.call.id
-//     (core.WithCaller) — a link to the caller, never parenthood: no
-//     weft.parent.*, its usage its own (record contract §2, O11).
+//     request came from. A served call's run records them as
+//     weft.caller.run.id / weft.caller.call.id with weft.caller.remote
+//     (core.WithCaller) — a link, never parenthood, and readers keep the
+//     run top-level, so a stated id cannot move or hide runs (record
+//     contract §2, O11).
 //
-// Reporting only: a malformed or missing entry is ignored, never a
-// refused call, and nothing the model sees changes. The client's ids
-// are taken as the client states them — a link, not an identity.
+// The client sends both only under the CallerMeta option (off by
+// default: the ids name your runs to the server). Reporting only: a
+// malformed or missing entry is ignored, never a refused call, and
+// nothing the model sees changes.
 
 // MetaCaller is the params._meta key a tools/call names its weft
 // caller under: {"run_id": "<run>", "call_id": "<tool call>"}.
@@ -38,9 +41,9 @@ const MetaCaller = "dev.weftgo/caller"
 // metadata value bound): a longer one is ignored.
 const metaIDMax = 1024
 
-// callerMeta is the _meta an imported tool's tools/call carries: the
-// trace context of the span ctx carries and the weft call it serves;
-// nil when ctx has neither.
+// callerMeta is the _meta an imported tool's tools/call carries under
+// CallerMeta: the trace context of the span ctx carries and the weft
+// call it serves; nil when ctx has neither.
 func callerMeta(ctx context.Context) sdk.Meta {
 	var m sdk.Meta
 	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
@@ -58,29 +61,30 @@ func callerMeta(ctx context.Context) sdk.Meta {
 	return m
 }
 
-// servedContext is ctx with a served call's caller from its _meta: the
-// caller's span as the remote parent (traceparent) and its weft run and
-// call as the next run's caller link (core.WithCaller). Anything
-// missing or malformed is skipped.
+// servedContext is ctx with a served call's caller from its _meta
+// (core.WithCaller): its weft run and call, and its span to link to.
+// Anything missing or malformed is skipped; the span is never made the
+// served run's parent.
 func servedContext(ctx context.Context, req *sdk.CallToolRequest) context.Context {
 	if req == nil || req.Params == nil || len(req.Params.Meta) == 0 {
 		return ctx
 	}
 	meta := req.Params.Meta
+	var c core.Caller
 	if tp, ok := meta["traceparent"].(string); ok {
 		ts, _ := meta["tracestate"].(string)
 		if sc, ok := parseTraceparent(tp, ts); ok {
-			ctx = trace.ContextWithRemoteSpanContext(ctx, sc)
+			c.Span = sc
 		}
 	}
-	if c, ok := meta[MetaCaller].(map[string]any); ok {
-		run, _ := c["run_id"].(string)
-		call, _ := c["call_id"].(string)
+	if m, ok := meta[MetaCaller].(map[string]any); ok {
+		run, _ := m["run_id"].(string)
+		call, _ := m["call_id"].(string)
 		if run != "" && len(run) <= metaIDMax && len(call) <= metaIDMax {
-			ctx = core.WithCaller(ctx, run, call)
+			c.RunID, c.CallID = run, call
 		}
 	}
-	return ctx
+	return core.WithCaller(ctx, c)
 }
 
 // parseTraceparent reads a W3C traceparent ("00-<32 hex>-<16 hex>-<2

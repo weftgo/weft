@@ -85,8 +85,9 @@ metadata rides every span and record verbatim):
 | run | `weft.run.id` | string | the core | 32 lowercase hex digits for a plain run; `<session>-t<n>` for a `thread` turn; `<parent>/<step>/<call id>` for a Subagent child (below); or the caller's own, through `core.RunID` (any string — it must not start with `otel-`, the derived-run prefix of §9; nothing enforces that — the core accepts any id, and obsdb does not guard it either: a weft run whose id has the exact derived shape, `otel-<32 hex>-<16 hex>`, would have its spans read as a derived run's, by trace — `obsdb.ParseStockRunID`) |
 | parent run | `weft.parent.run.id` | string | the core | on a Subagent child's `invoke_agent` span and its `run_start` record only |
 | parent call | `weft.parent.call.id` | string | the core | the parent's tool call the child ran under (its `gen_ai.tool.call.id`); on the same span and record as `weft.parent.run.id` |
-| caller run | `weft.caller.run.id` | string | the core | on the `invoke_agent` span and `run_start` record of any other run started on a tool call's context — a `thread/pool` child session's turn, another agent's `Generate` inside a handler — or on a context `core.WithCaller` named a caller from another process on (an MCP client's `params._meta`, read by `mcp.Serve`) — never with `weft.parent.*` (O11, U14): a link, not parenthood |
+| caller run | `weft.caller.run.id` | string | the core | on the `invoke_agent` span and `run_start` record of any other run started on a tool call's context — a `thread/pool` child session's turn, another agent's `Generate` inside a handler — or started directly on a context `core.WithCaller` named a caller from another process on (an MCP client's `params._meta`, read by `mcp.Serve`; then with `weft.caller.remote`) — never with `weft.parent.*` (O11, U14): a link, not parenthood |
 | caller call | `weft.caller.call.id` | string | the core | the tool call that run was started from (its `gen_ai.tool.call.id`); on the same span and record as `weft.caller.run.id` (absent when a `core.WithCaller` caller named no call) |
+| remote caller | `weft.caller.remote` | string `"true"` | the core | beside `weft.caller.run.id` / `weft.caller.call.id` when the caller is in another process (`core.WithCaller`) and states itself: readers never place a run by it — `caller_run_id` / `caller_call_id` stay empty (obsdb.DeriveSpan / DeriveRecord; ClickHouse 0032), so the run is top-level, off the stated run's caller-linked runs, its session's own turn and no session's parent run; the ids stay on the span and the record. Not metadata. The `invoke_agent` span also carries an OpenTelemetry link to the caller's span (a `traceparent`), never parenting under it (the `remote_caller` fixture) |
 | session | `weft.session.id` | string | `thread`, or the app via `Metadata` | mirrored as `gen_ai.conversation.id` and `session.id` on every span and record the core emits for the run (and so on the heartbeat, which copies `run_start`'s attributes) — not on `thread`'s session compaction marker, which carries `weft.session.id` alone (§4) |
 | turn | `weft.turn` | int (as a string) | `thread` | the turn number the run id was minted from (`-t<n>`) |
 | public id | `weft.public_id` | string | `thread.PublicID`, or the app via `Metadata` | the browser-facing id a panel token is scoped to |
@@ -129,14 +130,22 @@ with its own id (`<child session>-t<n>`): its caller link names the
 delegating turn and call when the delegation ran under one (`pool.Wrap`),
 none when `p.Submit` was called outside a run, and its lineage is the
 session metadata below either way (the `pool_child` fixture). Across a
-process boundary the caller names itself: `core.WithCaller(ctx, run,
-call)` links the next run started on `ctx` (outside a tool call — a call
-on the context wins; no run inside it inherits the link), and
-`mcp.Serve` does that for a `tools/call` whose `params._meta` carries
-`dev.weftgo/caller` `{run_id, call_id}` — `mcp.Tools`' imported tools
-send it, with the W3C `traceparent` of their `execute_tool` span, which
-the served call takes as its remote parent: the served run's spans join
-the caller's trace, its run a caller-linked run on the served side. Before
+process boundary the caller names itself: `core.WithCaller(ctx,
+core.Caller{RunID, CallID, Span})` links every run started directly on
+`ctx` (not inside a tool call — a call on the context wins — and no run
+started inside such a run inherits the link), and `mcp.Serve` does that
+for a `tools/call` whose `params._meta` carries `dev.weftgo/caller`
+`{run_id, call_id}` and a W3C `traceparent` — `mcp.Tools`' imported
+tools send both under `mcp.CallerMeta()` (off by default: the ids name
+the caller's runs to the server). Such a link is **remote**: the run
+records `weft.caller.remote` `"true"` beside the ids, and its
+`invoke_agent` span links (an OpenTelemetry link) to the caller's span
+and starts its own trace — never the caller's child, so the caller's
+sampling flag never decides whether the server records it. A remote
+link is the caller's own statement, so readers never place a run by it:
+obsdb leaves `caller_run_id` / `caller_call_id` empty, the run stays
+top-level and its session's own turn, and a stated id cannot move or
+hide runs (the `remote_caller` fixture). Before
 weft 0.18 the core stamped `weft.parent.*` on every run started on a
 tool call's context; a reader of older records tells a Subagent child by
 its id (`<parent>/…`) and a pool child session's turn by its own
@@ -247,7 +256,8 @@ child). It ends when the run does, however the run ends.
 | `gen_ai.request.model` | string | the model reports a name |
 | `weft.instructions.hash` | string, sha256 hex | always (on runs written since ADR 0028; the empty string's hash for no instructions) |
 | `weft.parent.run.id`, `weft.parent.call.id` | string | Subagent children |
-| `weft.caller.run.id`, `weft.caller.call.id` | string | any other run started on a tool call's context, or under `core.WithCaller` (§2's caller link) |
+| `weft.caller.run.id`, `weft.caller.call.id` | string | any other run started on a tool call's context, or directly on a `core.WithCaller` context (§2's caller link) |
+| `weft.caller.remote` | string `"true"` | a `core.WithCaller` link (§2: a remote link, which readers never place a run by) |
 | `weft.manifest.hash` | string | named agents |
 | `weft.version` | string | always |
 | `weft.logs.bridged` | int | at start, while the pipeline has a live slog bridge (a `Pipeline.SlogHandler`, `otel.Slog`'s wrap while it is still `slog.Default`'s handler, or any handler that has teed a line into this pipeline; set by `weft/otel`'s span processor, not the core), and only on the copy a destination that takes app logs (`otel.AppLogs`) exports — a content-off sink, an `AppLogs(false)` one or a third party not opted in receives the span without it: the lines the bridge had emitted so far. Its presence is the mark — "this store holds the run's bridged lines"; a stored root without it ran with no bridge reaching this store, which the logs route's hint reads (§7); not caller metadata (`obsdb.MetaOf` skips it) |
@@ -970,7 +980,7 @@ backends' own tests' to pin.
 |---|---|
 | `id` | `weft.run.id` |
 | `parent_run_id`, `parent_call_id` | `weft.parent.run.id`, `weft.parent.call.id` |
-| `caller_run_id`, `caller_call_id` | `weft.caller.run.id`, `weft.caller.call.id` (§2's caller link; fill-if-empty like every identity column). Columns `runs.caller_run_id` / `caller_call_id` (SQLite 0021, index `runs_caller`) and `weft_runs.CallerRunID` / `CallerCallID` (ClickHouse 0023, both run views restated); `RunRow.CallerRunID` / `CallerCallID`, `RunQuery.CallerRunID` (the runs started from one run's calls); served on Studio's run row as `caller_run_id` / `caller_call_id` (omitted when empty). No backfill: `""` on a run recorded before weft 0.18 |
+| `caller_run_id`, `caller_call_id` | `weft.caller.run.id`, `weft.caller.call.id` (§2's caller link; fill-if-empty like every identity column) — empty when the record or span carries `weft.caller.remote` `"true"` (a remote link places nothing; ClickHouse 0032). Columns `runs.caller_run_id` / `caller_call_id` (SQLite 0021, index `runs_caller`) and `weft_runs.CallerRunID` / `CallerCallID` (ClickHouse 0023, both run views restated); `RunRow.CallerRunID` / `CallerCallID`, `RunQuery.CallerRunID` (the runs started from one run's calls); served on Studio's run row as `caller_run_id` / `caller_call_id` (omitted when empty). No backfill: `""` on a run recorded before weft 0.18 |
 | `trace_id` | the `invoke_agent` span's trace id (else any record's) |
 | `service` | the resource's `service.name` |
 | `agent` | `gen_ai.agent.name` |
@@ -1896,6 +1906,7 @@ when a directory has no row here or a row no directory.
 | `messages_lost` | the `tool_calls` run with its middle transcript batch dropped by the generator (the growth `messages` record at index 1, the assistant's tool call), every event and span kept: `message_count` 3 below `messages_emitted` 4 — `gap` (cause `messages_lost`, "1 of 4 transcript batches were lost"); every event stored, so no `events_lost` |
 | `onion` | the middleware onion recorded (U23.1), the model declaring its wire facts (`wire`: `gateway.example:8443 keys=metadata,provider headers=authorization,x-gateway-route` from a URL carrying credentials and a query — none of them stored), captured through a Studio destination with content on under the development detail level (`otel.DevMode`, `otel.DevDetail`): `mw.Log` › `mw.Retry` › `mw.RepairJSON` around the model, `mw.Audit` › `mw.Allow` › `mw.MapErrors` around the tools. The first request fails with HTTP 503 and `mw.Retry` sends it again (attempt 2 `weft.attempt.layer` `retry`); the answer's lookup arrives fenced (`repairs`: the `weft.repair` event with its `original`; the call `args_repaired`), its delete is refused (`denied_by` `allow`), its refund's `io.EOF` hidden (`error_type` `INTERNAL`, `error_masked` `io.EOF`), its charge's handler panics (`error_type` `panic`, `panic_layer` `handler`; the `weft.panic` event's stack under `repairs`, its text fixed by the generator — a real stack names addresses and this machine's paths); `layers` lists each layer span with its parent; problems `attempts_retried` 1, `tool_errors` 2, `denied` 1, `repaired` 1; none of the six new span keys in `meta`. (`tool_problems`, `retry_fallback`, `approval_denied` and the thread approval cases carry `denied_by` and `weft.attempt.layer` `retry` too.) |
 | `mcp_mesh` | rw.mcp-mesh's shape, MCP identity recorded (U23.2, O8, UX-S2-08): a front desk imports a billing server's tools under `mcp.Server("billing")`, `mcp.Transport("memory")` and `mcp.Prefix("svc_")` beside a local tool, one step calling all five; the tools record's `source` `mcp:billing` and `source_detail` per imported tool, the listing's non-object-root tool in `skipped` with its reason (`sources`); each imported call's `execute_tool` span `origin` `mcp:billing`, the local call none; `svc_legacy_ledger`'s `isError` `mcp_tool_error`, `svc_export_statement`'s JSON-RPC error answer `mcp_rpc_error` (U23.2-fix) and `svc_archive_statement` — imported over a second session to the billing service, closed before the run — `mcp_transport`: three tool errors told apart, `problems` `tool_errors` 3; `weft.tool.origin` not in `meta`. (`subagent`, `run_cards`, `pool_child` and `thread_pool` carry `origin` `subagent` too.) |
+| `remote_caller` | a caller link across MCP (U33.1-fix, §2): a lead imports a helper agent served with `mcp.Serve`, under `mcp.CallerMeta()`, and calls it (`d1`); the served run's `invoke_agent` span and `run_start` record carry `weft.caller.run.id` (the lead's run), `weft.caller.call.id` `d1` and `weft.caller.remote` `"true"`, and the span an OpenTelemetry link to the lead's `execute_tool` span (its own trace, never the lead's child); both runs top-level, the served run's `caller_run_id` / `caller_call_id` empty, `weft.caller.remote` not in `meta` |
 | `flow_scope` | a run started under `scope.WithFlow` (what `scope.Header` does for a scope with `flow=`) with `arena.batch` through `core.Metadata`: `weft.flow` and `arena.batch` in `meta`, the pairs `flow=` and `tag.arena.batch=` filter on (§2) |
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...],

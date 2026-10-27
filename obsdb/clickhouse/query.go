@@ -2504,6 +2504,10 @@ var contractKeys = []string{
 	// U23.2 (O8): the tool's Origin on execute_tool (migration 0030's
 	// restatement of the traces view).
 	"weft.tool.origin",
+	// U33.1-fix: a caller link from another process (core.WithCaller),
+	// beside weft.caller.* — the run row's caller columns stay empty
+	// (migration 0032's restatement of both views).
+	"weft.caller.remote",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

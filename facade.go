@@ -391,24 +391,35 @@ func New(m Model, opts ...Option) *Agent { return core.New(m, opts...) }
 // set: a manifest describes the code, not the registry behind a source.
 func ToolSource(fn func() []*ToolDef) Option { return core.ToolSource(fn) }
 
-// WithCaller returns a copy of ctx naming the run and tool call that
-// called this process from outside it — an MCP client's tool call
-// (weft/mcp's Serve reads it from the request's _meta), a queue
-// message, an RPC: the run started next on ctx records
-// weft.caller.run.id and weft.caller.call.id (callID omitted when "")
-// on its invoke_agent span and run_start record — a link to its
-// caller, never parenthood: no weft.parent.*, and its usage stays its
-// own (record contract §2, O11).
+// Caller is a run's caller in another process — an MCP client's tool
+// call (weft/mcp's Serve reads it from the request's _meta), a queue
+// message, an RPC. RunID and CallID are that process's weft run and
+// tool call, as it states them; Span is its span (a W3C traceparent),
+// which the run's invoke_agent span links to. Either half may be
+// absent.
+type Caller = core.Caller
+
+// WithCaller returns a copy of ctx naming a caller from another
+// process. Every run started directly on ctx — not inside a tool call:
+// a call on the context wins, and no run started inside such a run (its
+// model chain, its tools' handlers) inherits the link — records:
 //
-// The link is that run's alone: a run started inside it (from its
-// model chain, or a tool handler's Generate, which carries the
-// handler's own call instead) does not inherit it, and a run started
-// on a tool call's context keeps that call's link — the in-process
-// caller wins. An empty runID returns ctx unchanged. Reporting only:
-// the link changes nothing the model sees.
-func WithCaller(ctx context.Context, runID, callID string) context.Context {
-	return core.WithCaller(ctx, runID, callID)
-}
+//   - weft.caller.run.id / weft.caller.call.id (callID omitted when "")
+//     and weft.caller.remote = "true" on its invoke_agent span and
+//     run_start record, when c.RunID is set — a link, never parenthood
+//     (no weft.parent.*, its usage its own). Readers ignore a remote
+//     link for the run's place: the run stays top-level and its
+//     session's own turn, so a caller id a client states cannot move or
+//     hide runs (record contract §2, O11);
+//   - an OpenTelemetry link from its invoke_agent span to c.Span, when
+//     c.Span is valid: the run starts its own trace (or under the span
+//     ctx already carries — an HTTP handler's), never as the caller's
+//     child, so the caller's sampling decision never decides whether
+//     this process records the run.
+//
+// A Caller with neither half returns ctx unchanged. Reporting only:
+// nothing the model sees changes.
+func WithCaller(ctx context.Context, c Caller) context.Context { return core.WithCaller(ctx, c) }
 
 // CancelCause is a typed cancellation cause: what a layer passes to the
 // CancelCauseFunc of a context.WithCancelCause it fells a run with, so

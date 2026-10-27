@@ -7549,23 +7549,24 @@ func TestRequestRecorderCatalogMemoIsItsOwn(t *testing.T) {
 	}
 }
 
-// TestWithCallerLinksTheNextRunOnly (O11, record contract §2; U33.1):
-// WithCaller names a caller from another process — weft/mcp's Serve
-// reads it from an MCP client's _meta. The run started on that context
-// records weft.caller.run.id / weft.caller.call.id on its invoke_agent
-// span and run_start record, never weft.parent.*; a run its own tool
-// starts carries that tool call's link instead, a judge in its model
-// chain carries none, a run started on a tool call's context keeps the
-// call's link over a WithCaller around it, and an empty run id is no
-// link.
-func TestWithCallerLinksTheNextRunOnly(t *testing.T) {
+// TestWithCallerLinksRunsStartedOnCtx (O11, record contract §2;
+// U33.1, U33.1-fix): WithCaller names a caller from another process —
+// weft/mcp's Serve reads it from an MCP client's _meta. Every run
+// started directly on that context records weft.caller.run.id /
+// weft.caller.call.id and weft.caller.remote = "true" on its
+// invoke_agent span and run_start record, never weft.parent.*; a run
+// its own tool starts carries that tool call's (local) link instead, a
+// judge in its model chain carries none, a run started on a tool call's
+// context keeps the call's link over a WithCaller around it, and a
+// Caller with neither half is no link.
+func TestWithCallerLinksRunsStartedOnCtx(t *testing.T) {
 	tp, lp := newRecProvider(), newRecLogProvider()
 	obs := []core.Option{core.TracerProvider(tp), core.LoggerProvider(lp)}
-	judge := core.New(wefttest.Script(wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok")), append(obs, core.Name("judge"))...)
-	worker := core.New(wefttest.Script(wefttest.Say("looked up"), wefttest.Say("again")), append(obs, core.Name("worker"))...)
+	judge := core.New(wefttest.Script(wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok")), append(obs, core.Name("judge"))...)
+	worker := core.New(wefttest.Script(wefttest.Say("looked up"), wefttest.Say("again"), wefttest.Say("more")), append(obs, core.Name("worker"))...)
 	lookup := core.Tool("lookup", "Look up.", func(ctx context.Context, _ struct{}) (string, error) {
 		// A WithCaller inside a handler: the handler's own call wins.
-		res, err := worker.Generate(core.WithCaller(ctx, "elsewhere", "x"), core.Prompt("look it up"))
+		res, err := worker.Generate(core.WithCaller(ctx, core.Caller{RunID: "elsewhere", CallID: "x"}), core.Prompt("look it up"))
 		if err != nil {
 			return "", err
 		}
@@ -7574,17 +7575,22 @@ func TestWithCallerLinksTheNextRunOnly(t *testing.T) {
 	served := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "lookup", Args: `{}`, ID: "c_l"}),
 		wefttest.Say("served done"),
+		wefttest.Say("second run"),
 	), append(obs, core.Name("served"), lookup, core.WrapModel(func(next core.Model) core.Model {
 		return judgedModel{next: next, judge: func(ctx context.Context) { _, _ = judge.Generate(ctx, core.Prompt("judge")) }}
 	}))...)
-	ctx := core.WithCaller(context.Background(), "remote_run", "remote_call")
+	ctx := core.WithCaller(context.Background(), core.Caller{RunID: "remote_run", CallID: "remote_call"})
 	if _, err := served.Generate(ctx, core.RunID("s1"), core.Prompt("go")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := worker.Generate(core.WithCaller(context.Background(), "", "ignored"), core.RunID("w0"), core.Prompt("alone")); err != nil {
+	// Every run started directly on ctx is linked, not only the first.
+	if _, err := served.Generate(ctx, core.RunID("s2"), core.Prompt("again")); err != nil {
 		t.Fatal(err)
 	}
-	keys := []string{"weft.parent.run.id", "weft.parent.call.id", "weft.caller.run.id", "weft.caller.call.id"}
+	if _, err := worker.Generate(core.WithCaller(context.Background(), core.Caller{CallID: "ignored"}), core.RunID("w0"), core.Prompt("alone")); err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{"weft.parent.run.id", "weft.parent.call.id", "weft.caller.run.id", "weft.caller.call.id", "weft.caller.remote"}
 	tp.mu.Lock()
 	spans := append([]*recSpan(nil), tp.spans...)
 	tp.mu.Unlock()
@@ -7615,10 +7621,13 @@ func TestWithCallerLinksTheNextRunOnly(t *testing.T) {
 			}
 		}
 	}
-	if len(byAgent["served"]) != 1 || len(byAgent["worker"]) != 2 || len(byAgent["judge"]) != 2 {
+	if len(byAgent["served"]) != 2 || len(byAgent["worker"]) != 2 || len(byAgent["judge"]) != 3 {
 		t.Fatalf("runs by agent: %v", byAgent)
 	}
-	check(byAgent["served"][0], map[string]string{"weft.caller.run.id": "remote_run", "weft.caller.call.id": "remote_call"})
+	remote := map[string]string{"weft.caller.run.id": "remote_run", "weft.caller.call.id": "remote_call", "weft.caller.remote": "true"}
+	for _, a := range byAgent["served"] {
+		check(a, remote)
+	}
 	for _, a := range byAgent["worker"] {
 		if a["weft.run.id"] == "w0" {
 			check(a, nil)

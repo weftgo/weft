@@ -177,6 +177,13 @@ func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 			// now, 409, in the runtime's words — not accepted and then
 			// failed on the command's row (UX-H-19). A row still reading
 			// running goes to the runtime, whose session decides.
+			if row.Pending > 0 {
+				// Parked at the approval boundary: nothing runs to steer
+				// into; the next move is a decision (cancel's rule).
+				writeError(w, r, http.StatusConflict, "conflict",
+					appSteerRefused+": run "+runID+" is parked: decide its pending calls (approve/deny) instead")
+				return
+			}
 			if row.Status == obsdb.StatusSucceeded || row.Status == obsdb.StatusFailed {
 				writeError(w, r, http.StatusConflict, "conflict",
 					appSteerRefused+": run "+runID+" already finished ("+string(row.Status)+")")

@@ -76,9 +76,9 @@ func ExampleServe() {
 
 // A caller not built on weft links its call to the served run by
 // params._meta: the W3C traceparent of its own span (the served run
-// joins that trace) and MetaCaller, the run and call it acts for (the
+// links to that span) and MetaCaller, the run and call it acts for (the
 // run records them as weft.caller.run.id / weft.caller.call.id).
-// Tools sends both on every call by itself.
+// Tools sends both on every call under the CallerMeta option.
 func ExampleServe_callerLink() {
 	agt := weft.New(wefttest.Script(wefttest.Say("linked")), weft.Name("research"))
 	srv := sdk.NewServer(&sdk.Implementation{Name: "demo", Version: "0"}, nil)
@@ -103,6 +103,29 @@ func ExampleServe_callerLink() {
 	}
 	fmt.Println(res.Content[0].(*sdk.TextContent).Text)
 	// Output: linked
+}
+
+// CallerMeta opts the imported tools in to sending their caller — the
+// tool span's traceparent and the weft run and call — in each call's
+// params._meta, so a weft server's Serve links its run back. Off by
+// default: use it with servers you run.
+func ExampleCallerMeta() {
+	helper := weft.New(wefttest.Script(wefttest.Say("helped")), weft.Name("helper"))
+	srv := sdk.NewServer(&sdk.Implementation{Name: "helpers", Version: "0"}, nil)
+	mcp.Serve(srv, helper, "Helps with anything.")
+	serverTransport, clientTransport := sdk.NewInMemoryTransports()
+	go func() { _ = srv.Run(context.Background(), serverTransport) }()
+	sess, err := sdk.NewClient(&sdk.Implementation{Name: "lead", Version: "0"}, nil).
+		Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		panic(err)
+	}
+	tools, err := mcp.Tools(context.Background(), sess, mcp.Server("helpers"), mcp.CallerMeta())
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(len(tools), tools[0].Name)
+	// Output: 1 helper
 }
 
 // Tools imports a server's tools as ordinary weft tools: the server's

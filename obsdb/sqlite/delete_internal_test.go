@@ -281,3 +281,51 @@ func TestSweepYieldsBetweenPasses(t *testing.T) {
 		t.Errorf("the run written mid-sweep = %v, want kept", err)
 	}
 }
+
+// TestVacuumCheckpointNeverStalls (U33.1-fix; UX-S5a-12): Vacuum's WAL
+// checkpoint waits a short busy timeout of its own, never the writer's
+// 30 s — a live reader holding a snapshot (a running Studio's) costs the
+// vacuum at most that wait, the WAL folded later — and the writer's own
+// busy timeout is put back after. With no reader the WAL ends at 0.
+func TestVacuumCheckpointNeverStalls(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "vac.db")
+	o, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := o.(*DB)
+	defer func() { _ = db.Close() }()
+	delFixture(t, o, "run_a", "", "", time.Now().UTC())
+	reader, err := sql.Open("sqlite", fileURI(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	tx, err := reader.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM runs`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := db.Vacuum(ctx); err != nil {
+		t.Fatalf("Vacuum with a live reader = %v", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("Vacuum with a live reader took %v: the checkpoint waited the writer's busy timeout", took)
+	}
+	_ = tx.Rollback()
+	var was int64
+	if err := db.writer.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&was); err != nil || was < 1000 {
+		t.Errorf("the writer's busy timeout after Vacuum = %d, %v; want its own put back", was, err)
+	}
+	if err := db.Vacuum(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.checkpoint(ctx, vacuumCheckpointWait); err != nil {
+		t.Fatal(err)
+	}
+}

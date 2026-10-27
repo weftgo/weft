@@ -1406,6 +1406,18 @@ func normaliseCase(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.Expor
 			}
 		}
 	}
+	// A span's links (a remote caller's, U33.1-fix) name spans of
+	// another trace the capture may hold: renumbered after every span.
+	for _, rs := range tr.GetResourceSpans() {
+		for _, ss := range rs.GetScopeSpans() {
+			for _, s := range ss.GetSpans() {
+				for _, l := range s.GetLinks() {
+					l.TraceId = mapID(traceIDs, l.TraceId, "7ace", 32)
+					l.SpanId = mapID(spanIDs, l.SpanId, "5ba0", 16)
+				}
+			}
+		}
+	}
 	for _, rl := range lg.GetResourceLogs() {
 		for _, sl := range rl.GetScopeLogs() {
 			for _, r := range sl.GetLogRecords() {
@@ -2614,7 +2626,50 @@ func genCases() []genCase {
 			return []string{mustRun(t, ctx, agt, core.Prompt("Customer 42 asks about invoice INV-9.")).ID}
 		},
 	}
-	return append(append(cases, threadGenCases()...), flowScope, onion, mcpMesh)
+	// Last, after mcp_mesh, for the same reason.
+	remoteCaller := genCase{
+		name: "remote_caller",
+		dest: content,
+		desc: "a caller link across MCP (U33.1-fix, §2): a lead imports a helper agent served with mcp.Serve, under mcp.CallerMeta, and calls it (d1). The tools/call's params._meta carries the lead's execute_tool traceparent and dev.weftgo/caller {run_id, call_id}; the served run's invoke_agent span and run_start record carry weft.caller.run.id (the lead's run), weft.caller.call.id d1 and weft.caller.remote \"true\", and the span an OpenTelemetry link to the lead's tool span — its own trace, never the lead's child. Readers never place a run by a remote link: both runs are top-level, the served run's row has no caller columns, and weft.caller.remote stays out of meta",
+		run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+			var served string
+			helper := pipelineAgent(p, "helper", wefttest.Script(wefttest.Say("ACME closed at 41.2.")),
+				core.Instructions("You look up quotes."),
+				core.OnRunEnd(func(_ context.Context, res *core.RunResult, _ error) {
+					if res != nil {
+						served = res.ID
+					}
+				}))
+			srv := sdk.NewServer(&sdk.Implementation{Name: "quotes", Version: "1"}, nil)
+			mcp.Serve(srv, helper, "Look up a stock quote.")
+			st, ct := sdk.NewInMemoryTransports()
+			runCtx, stop := context.WithCancel(ctx)
+			defer stop()
+			go func() { _ = srv.Run(runCtx, st) }()
+			sess, err := sdk.NewClient(&sdk.Implementation{Name: "lead", Version: "1"}, nil).Connect(ctx, ct, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = sess.Close() }()
+			imported, err := mcp.Tools(ctx, sess, mcp.Server("quotes"), mcp.Transport("memory"), mcp.CallerMeta())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var opts []core.Option
+			for _, td := range imported {
+				opts = append(opts, td)
+			}
+			lead := pipelineAgent(p, "lead", wefttest.Script(
+				wefttest.ToolCalls(wefttest.Call{Name: "helper", ID: "d1", Args: `{"prompt":"Quote ACME"}`}),
+				wefttest.Say("ACME: 41.2.")), opts...)
+			res := mustRun(t, ctx, lead, core.Prompt("What did ACME close at?"))
+			if served == "" {
+				t.Fatal("the served run never ended")
+			}
+			return []string{res.ID, served}
+		},
+	}
+	return append(append(cases, threadGenCases()...), flowScope, onion, mcpMesh, remoteCaller)
 }
 
 // gatewayModel is the onion case's model declaring its wire facts (the

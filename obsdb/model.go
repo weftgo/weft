@@ -112,6 +112,7 @@ const (
 	attrForkedFrom   = "weft.forked_from"
 	attrResumedFrom  = "weft.resumed_from"
 	attrCallerRunID  = "weft.caller.run.id"
+	attrCallerRemote = "weft.caller.remote"
 	attrCallerCallID = "weft.caller.call.id"
 
 	// ADR 0028 §8: the compaction view and the session marker.
@@ -142,9 +143,22 @@ func DeriveSpan(s Span) Weft {
 		ExperimentID: attr(s.Attrs, attrExperimentID),
 		ForkedFrom:   attr(s.Attrs, attrForkedFrom),
 		ResumedFrom:  attr(s.Attrs, attrResumedFrom),
-		CallerRunID:  attr(s.Attrs, attrCallerRunID),
-		CallerCallID: attr(s.Attrs, attrCallerCallID),
+		CallerRunID:  localCaller(s.Attrs, attrCallerRunID),
+		CallerCallID: localCaller(s.Attrs, attrCallerCallID),
 	}
+}
+
+// localCaller reads a caller link key — "" when the link is remote
+// (weft.caller.remote, core.WithCaller: a caller in another process, as
+// it states itself). Readers place a run by its local link alone, so a
+// stated id never moves a run off the top-level list, under another
+// run's caller-linked runs, or out of its session's own turns; the ids
+// stay on the span and the record (record contract §2).
+func localCaller(m map[string]any, k string) string {
+	if attrBool(m, attrCallerRemote) {
+		return ""
+	}
+	return attr(m, k)
 }
 
 // DeriveRecord returns the weft identity a log record carries. Pos is
@@ -170,8 +184,8 @@ func DeriveRecord(r Record) Weft {
 		ExperimentID: attr(r.Attrs, attrExperimentID),
 		ForkedFrom:   attr(r.Attrs, attrForkedFrom),
 		ResumedFrom:  attr(r.Attrs, attrResumedFrom),
-		CallerRunID:  attr(r.Attrs, attrCallerRunID),
-		CallerCallID: attr(r.Attrs, attrCallerCallID),
+		CallerRunID:  localCaller(r.Attrs, attrCallerRunID),
+		CallerCallID: localCaller(r.Attrs, attrCallerCallID),
 		Reason:       attrReason(r.Attrs),
 		Input:        attrBool(r.Attrs, attrMessagesInput),
 	}
@@ -333,6 +347,7 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.tool.denied_kind":        {}, // U13.1: denied | no_decision
 	attrCallerRunID:                {}, // U14 (O11): the run row's caller_run_id column
 	attrCallerCallID:               {}, // U14 (O11): the run row's caller_call_id column
+	attrCallerRemote:               {}, // U33.1-fix: a remote caller link — the caller columns stay empty
 	"weft.messages.count":          {},
 	"weft.messages.input":          {},
 	"weft.content":                 {},

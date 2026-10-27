@@ -898,7 +898,7 @@ func TestToolsRPCErrorIsNotTransport(t *testing.T) {
 	}
 	// A name the server does not list (it forgot the tool between the
 	// listing and the call).
-	unknown := callHandler(sess, "never_listed")
+	unknown := callHandler(sess, "never_listed", false)
 	_, err = unknown(context.Background(), json.RawMessage(`{}`))
 	if got := errorTypeOf(err); got != "mcp_rpc_error" {
 		t.Errorf("unknown tool: %v (%s), want mcp_rpc_error", err, got)

@@ -1,0 +1,110 @@
+{
+  "case": "remote_caller",
+  "description": "a caller link across MCP (U33.1-fix, §2): a lead imports a helper agent served with mcp.Serve, under mcp.CallerMeta, and calls it (d1). The tools/call's params._meta carries the lead's execute_tool traceparent and dev.weftgo/caller {run_id, call_id}; the served run's invoke_agent span and run_start record carry weft.caller.run.id (the lead's run), weft.caller.call.id d1 and weft.caller.remote \"true\", and the span an OpenTelemetry link to the lead's tool span — its own trace, never the lead's child. Readers never place a run by a remote link: both runs are top-level, the served run's row has no caller columns, and weft.caller.remote stays out of meta",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "helper",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:42:00Z",
+      "finished": "2026-10-01T09:42:00.015Z",
+      "last_seen": "2026-10-01T09:42:00.015Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "9d8635998c1e7aa87617fb1328f51f215f7ef3c468a0b1d4f9cb91ce55c19bff",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000002",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "lead",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000002",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:42:00Z",
+      "finished": "2026-10-01T09:42:00.024Z",
+      "last_seen": "2026-10-01T09:42:00.024Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "0d09c8411fbe11247d04549dde6769b7d68b82675b0ab5425d8c4b982c8afc99",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "helper",
+          "call_id": "d1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok",
+          "origin": "mcp:quotes"
+        }
+      ],
+      "sources": [
+        "helper mcp:quotes server=quotes transport=memory prefix= remote=helper"
+      ],
+      "holes": []
+    }
+  ]
+}

@@ -131,11 +131,13 @@ func argumentBytes(req *sdk.CallToolRequest) json.RawMessage {
 // enumerated — its tools still run inside the agent tool's own steps.
 //
 // A caller that sends its trace context and weft call in params._meta
-// (traceparent, MetaCaller — this package's imported tools do) is
-// linked: the served run's spans join the caller's trace under its
-// tool span, and the run records weft.caller.run.id /
-// weft.caller.call.id — a link, never parenthood (meta.go). AddTools'
-// tools read the same _meta, for a run a handler starts.
+// (traceparent, MetaCaller — this package's imported tools do under
+// CallerMeta) is linked: the served run's invoke_agent span links to
+// the caller's span (its own trace, never the caller's child), and the
+// run records weft.caller.run.id / weft.caller.call.id and
+// weft.caller.remote — a link, never parenthood, and readers keep the
+// run top-level (meta.go). AddTools' tools read the same _meta, for a
+// run a handler starts.
 //
 // Serve panics on a nil agent, an unnamed agent (the manifest's rule),
 // or a name collision between the agent and one of its tools.

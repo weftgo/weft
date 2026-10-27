@@ -112,11 +112,11 @@ func runVacuum(args []string, stdout, stderr io.Writer) error {
 	}
 	if path != "" {
 		// The main file and its WAL apart (UX-S5a-12): Vacuum checkpoints,
-		// so the WAL is usually 0 after; one a reader held says so.
+		// so the WAL is usually 0 after; one a live reader or writer held says so.
 		afterMain, afterWAL := fileSizes(path)
 		_, _ = fmt.Fprintf(stdout, "vacuum: %s %d → %d bytes (WAL %d → %d bytes)\n", path, beforeMain, afterMain, beforeWAL, afterWAL)
 		if afterWAL > 0 {
-			_, _ = fmt.Fprintln(stdout, "vacuum: the WAL is not checkpointed yet (a reader holds it): the next checkpoint folds it into the file")
+			_, _ = fmt.Fprintln(stdout, "vacuum: the WAL is not checkpointed yet (a live reader or writer holds it — a running Studio): the next checkpoint folds it into the file")
 		}
 	} else {
 		_, _ = fmt.Fprintf(stdout, "vacuum: %s optimized\n", dbLabel(*dbFlag))

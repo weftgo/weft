@@ -1252,3 +1252,66 @@ func TestMCPTurnDefaultsMostCommon(t *testing.T) {
 		t.Errorf("a one-turn session: %s", b)
 	}
 }
+
+// TestMCPStatsTagToken (U33.1-fix): the stats tool under a tag token
+// (a panel token minted for run metadata, I4) answers the route's scope
+// — the tagged batch's runs alone — and the tool's tag argument narrows
+// the server token's numbers to the same batch.
+func TestMCPStatsTagToken(t *testing.T) {
+	base := mcpSeedStudio(t)
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(base, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	batcher := core.New(wefttest.Script(wefttest.Say("batched")), core.Name("batcher"),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := batcher.Generate(ctx, core.RunID("r_batch"), core.Prompt("go"),
+		core.Metadata(map[string]string{"arena.batch": "b1"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c := newClient(base, "tok")
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if b, err := c.get(ctx, runPath("r_batch"), nil); err == nil && strings.Contains(string(b), `"status":"succeeded"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("r_batch never settled")
+		}
+	}
+	req, _ := http.NewRequest(http.MethodPost, base+"/api/panel-tokens", strings.NewReader(`{"tags":{"arena.batch":"b1"},"ttl":"1h"}`))
+	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var minted struct {
+		Token string `json:"token"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&minted)
+	_ = resp.Body.Close()
+	if minted.Token == "" {
+		t.Fatalf("mint a tag token: %s", resp.Status)
+	}
+	window := map[string]any{"by": "agent", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z"}
+	stats := func(cs *sdk.ClientSession, args map[string]any) []string {
+		t.Helper()
+		res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "stats", Arguments: args})
+		if err != nil || res.IsError {
+			t.Fatalf("stats %v: %v %v", args, err, texts(t, res))
+		}
+		return texts(t, res)
+	}
+	got := stats(inProcess(t, newClient(base, minted.Token)), window)
+	if !strings.Contains(got[0], ": 1 group: batcher 1 run, 0 failed") || strings.Contains(got[1], `"key":"orders"`) {
+		t.Errorf("stats under the tag token = %q, want the b1 batch's runs alone", got)
+	}
+	window["tag"] = map[string]any{"arena.batch": "b1"}
+	if got := stats(inProcess(t, c), window); !strings.Contains(got[0], ": 1 group: batcher 1 run") {
+		t.Errorf("stats tag {arena.batch: b1} under the server token = %q, want the batch alone", got[0])
+	}
+}

@@ -191,7 +191,7 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*cor
 		}
 		toolOpts = append(toolOpts, cfg.policy...)
 		tool := core.RawTool(k.name, t.Description, k.schema,
-			callHandler(sess, t.Name), toolOpts...)
+			callHandler(sess, t.Name, cfg.callerMeta), toolOpts...)
 		if t.OutputSchema != nil {
 			if raw, err := fromSDK(t.OutputSchema); err == nil {
 				if outSchema, err := core.ParseSchema(raw); err == nil {
@@ -287,10 +287,11 @@ func (e *ImportError) Unwrap() []error {
 type Option interface{ apply(*importConfig) }
 
 type importConfig struct {
-	prefix    string
-	server    string
-	transport string
-	policy    []core.ToolOption
+	prefix     string
+	server     string
+	transport  string
+	policy     []core.ToolOption
+	callerMeta bool
 }
 
 type serverOption string
@@ -328,6 +329,18 @@ func (p prefixOption) apply(c *importConfig) { c.prefix = string(p) }
 // agent; the remote call still uses the server's name.
 func Prefix(p string) Option { return prefixOption(p) }
 
+type callerMetaOption struct{}
+
+func (callerMetaOption) apply(c *importConfig) { c.callerMeta = true }
+
+// CallerMeta makes every imported tool's call send its caller in
+// params._meta: the W3C traceparent (and tracestate) of the
+// execute_tool span, and MetaCaller — the weft run and tool call ids.
+// A weft server's Serve links its run to them (meta.go). Off by
+// default: the ids and the trace state name your runs to the server, so
+// send them to a server you run, not to a third party's.
+func CallerMeta() Option { return callerMetaOption{} }
+
 type policyOption []core.ToolOption
 
 func (p policyOption) apply(c *importConfig) { c.policy = append(c.policy, p...) }
@@ -347,14 +360,18 @@ func Policy(opts ...core.ToolOption) Option { return policyOption(opts) }
 // trip, the model's argument bytes forwarded verbatim (a
 // json.RawMessage marshals as its own bytes — no map round trip, no
 // key reordering). Empty or null arguments go as {} because
-// tools/call requires an object. params._meta carries the caller: the
-// tool span's trace context and the weft call (meta.go).
-func callHandler(sess *sdk.ClientSession, remoteName string) func(context.Context, json.RawMessage) (string, error) {
+// tools/call requires an object. Under CallerMeta, params._meta carries
+// the caller: the tool span's trace context and the weft call (meta.go).
+func callHandler(sess *sdk.ClientSession, remoteName string, sendCaller bool) func(context.Context, json.RawMessage) (string, error) {
 	return func(ctx context.Context, args json.RawMessage) (string, error) {
 		if trimmed := strings.TrimSpace(string(args)); trimmed == "" || trimmed == "null" {
 			args = json.RawMessage("{}")
 		}
-		res, err := sess.CallTool(ctx, &sdk.CallToolParams{Meta: callerMeta(ctx), Name: remoteName, Arguments: args})
+		params := &sdk.CallToolParams{Name: remoteName, Arguments: args}
+		if sendCaller {
+			params.Meta = callerMeta(ctx)
+		}
+		res, err := sess.CallTool(ctx, params)
 		if err != nil {
 			// Transport and protocol failures are data too: the tool
 			// failed, the model stops calling it (deep dive ch. 5's

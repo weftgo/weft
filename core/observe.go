@@ -291,8 +291,11 @@ func runLinkAttrs(ctx context.Context) []attribute.KeyValue {
 // a reader tells "no logger" (0) from "emitted M, stored fewer" (a
 // destination lost them) by them. Counts, never content (ADR 0016).
 func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo, extra []attribute.KeyValue, rec *recorder) (context.Context, func(res *RunResult, err error, end runEnd)) {
-	ctx, span := o.startSpan(ctx, rec, spanName(semconv.GenAIOperationNameInvokeAgent, agent),
-		trace.WithSpanKind(trace.SpanKindInternal))
+	opts := []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindInternal)}
+	if rec != nil && rec.callerSpan.IsValid() {
+		opts = append(opts, trace.WithLinks(trace.Link{SpanContext: rec.callerSpan}))
+	}
+	ctx, span := o.startSpan(ctx, rec, spanName(semconv.GenAIOperationNameInvokeAgent, agent), opts...)
 	start := time.Now()
 	func() {
 		defer rec.containTraces(ctx)
@@ -986,6 +989,9 @@ type recorder struct {
 	// context the run was started on before it detached the call:
 	// reported on the run_start record, as on the invoke_agent span.
 	link []attribute.KeyValue
+	// callerSpan is a WithCaller caller's span (another process's): the
+	// invoke_agent span links to it, never parents under it.
+	callerSpan trace.SpanContext
 
 	eventPos    atomic.Int64
 	deltaPos    atomic.Int64

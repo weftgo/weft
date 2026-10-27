@@ -11,10 +11,6 @@ import (
 	"github.com/weftgo/weft/obsdb/sqlite"
 )
 
-// A status filter as the read API takes it (I3): the four derived
-// statuses and the read-time parked and cancelled are filters; any other
-// word is an error naming them, never an empty list. A read-time word
-// narrows its derived status (Stored) with a condition of its own.
 // A weft flag read the same in both spellings: the bool a fixture or
 // the OTLP wire carries, and the string "true" a store that stringifies
 // attributes (ClickHouse behind a stock collector) reads back.
@@ -95,6 +91,10 @@ func ExampleSessionQuery_states() {
 	// 1 1 compaction
 }
 
+// A status filter as the read API takes it (I3): the four derived
+// statuses and the read-time parked and cancelled are filters; any other
+// word is an error naming them, never an empty list. A read-time word
+// narrows its derived status (Stored) with a condition of its own.
 func ExampleParseStatus() {
 	st, err := obsdb.ParseStatus("parked")
 	fmt.Println(st, st.Stored(), err)

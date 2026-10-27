@@ -25,7 +25,9 @@ import (
 // (core.ReportFromContext) — reporting only, a no-op outside a run —
 // a backup's with AttemptInfo.Layer core.AttemptLayerFallback, the
 // marker a reader's fallbacks counter keys on. A backup that reports
-// its own attempts (a Retry around it) reports them itself, unmarked.
+// its own attempts (a Retry around it) reports them itself, each marked
+// AttemptLayerFallback too (its retries included): it reads the mark
+// from the context, so the counter counts the run the backup answered.
 // Each model tried is handed its own copy of the request's slices and
 // Params values, so what a failed model wrote into its request never
 // reaches the next one.

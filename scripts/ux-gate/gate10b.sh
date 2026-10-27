@@ -264,6 +264,8 @@ rows10b=$(jq -r '.rows | (map(.label) | index("P10a-pre-web-fix")) as $i | .[($i
 # every commit since v0.19.0 that changed the built panel.js appended a ledger row
 miss=""; ncommits=0
 for c in $(git -C "$REPO" rev-list v0.19.0..HEAD -- studio/dist/panel/panel.js); do
+  # a release bump restamps the version only: no size change, no row
+  git -C "$REPO" log -1 --format=%s "$c" | grep -qE '^release [0-9]+\.[0-9]+\.[0-9]+:' && continue
   ncommits=$((ncommits+1))
   a=$(git -C "$REPO" show "$c:studio/web/panel-budget.json" 2>/dev/null | jq '.rows | length'); p=$(git -C "$REPO" show "$c^:studio/web/panel-budget.json" 2>/dev/null | jq '.rows | length')
   [ "${a:-0}" -gt "${p:-0}" ] || miss="$miss $(git -C "$REPO" log -1 --format=%h "$c")"

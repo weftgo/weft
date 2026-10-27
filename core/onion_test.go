@@ -164,8 +164,8 @@ func TestOnionGovernancePatterns(t *testing.T) {
 	scrubbed, limited := governance()
 	doc := manifestOf(t, scrubbed, limited)
 	tools, models := doc.Agents[0], doc.Agents[1]
-	if len(tools.ToolMiddleware) != 1 || !strings.HasPrefix(tools.ToolMiddleware[0].Name, "core_test.governance.func") ||
-		!strings.HasPrefix(tools.ToolMiddleware[0].Source, "github.com/weftgo/weft/core_test/onion_test.go:") || tools.ModelMiddleware != nil {
+	if len(tools.ToolMiddleware) != 1 || !strings.HasPrefix(tools.ToolMiddleware[0].Name, "func@core/onion_test.go:") ||
+		!strings.HasPrefix(tools.ToolMiddleware[0].Source, "core/onion_test.go:") || tools.ModelMiddleware != nil {
 		t.Errorf("scrubbed agent's onion = model %v, tool %+v; want the scrub closure by name and file:line", tools.ModelMiddleware, tools.ToolMiddleware)
 	}
 	if got := layerNames(models.ModelMiddleware); !slices.Equal(got, []string{"core_test.yieldModel (opaque)"}) {
@@ -216,7 +216,7 @@ func TestOnionGovernancePatterns(t *testing.T) {
 	}
 	var scrubLayer *recSpan
 	for _, s := range detS.all() {
-		if strings.HasPrefix(s.name, "layer core_test.governance.func") {
+		if strings.HasPrefix(s.name, "layer func@core/onion_test.go:") {
 			scrubLayer = s
 		}
 	}
@@ -299,7 +299,7 @@ func TestManifestListsTheOnion(t *testing.T) {
 		t.Fatalf("hooks = %+v, want one tap, one prepare_step, one on_run_end", h)
 	}
 	for _, f := range [][]core.MiddlewareInfo{h.Tap, h.PrepareStep, h.OnRunEnd} {
-		if !strings.HasPrefix(f[0].Source, "github.com/weftgo/weft/core_test/onion_test.go:") || !strings.HasPrefix(f[0].Name, "core_test.TestManifestListsTheOnion.func") {
+		if !strings.HasPrefix(f[0].Source, "core/onion_test.go:") || f[0].Name != "func@"+f[0].Source {
 			t.Errorf("hook = %+v, want the closure's name and file:line", f[0])
 		}
 	}

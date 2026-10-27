@@ -23,7 +23,9 @@ import (
 // every call — the middleware is a pass-through, so a policy that is
 // configured off composes without a branch at the call site.
 func Allow(permit func(core.Call) bool) core.ToolMiddleware {
-	return func(next core.ToolCaller) core.ToolCaller {
+	// Named where it is made (core.NameToolMiddleware): the manifest
+	// and the layer spans read "mw.Allow" however it is inlined.
+	return core.NameToolMiddleware("mw.Allow", func(next core.ToolCaller) core.ToolCaller {
 		return func(ctx context.Context, call core.ToolCallPart) (string, error) {
 			c, ok := core.CallFromContext(ctx)
 			if !ok {
@@ -37,7 +39,7 @@ func Allow(permit func(core.Call) bool) core.ToolMiddleware {
 			}
 			return next(ctx, call)
 		}
-	}
+	})
 }
 
 // Audit logs one line per tool call at Info level on the given logger
@@ -49,7 +51,9 @@ func Allow(permit func(core.Call) bool) core.ToolMiddleware {
 // err_bytes, the error text's length, and a *core.ToolError's code. It
 // changes nothing.
 func Audit(l *slog.Logger) core.ToolMiddleware {
-	return func(next core.ToolCaller) core.ToolCaller {
+	// Named where it is made (core.NameToolMiddleware): the manifest
+	// and the layer spans read "mw.Audit" however it is inlined.
+	return core.NameToolMiddleware("mw.Audit", func(next core.ToolCaller) core.ToolCaller {
 		return func(ctx context.Context, call core.ToolCallPart) (string, error) {
 			log := l
 			if log == nil {
@@ -86,7 +90,7 @@ func Audit(l *slog.Logger) core.ToolMiddleware {
 			log.InfoContext(ctx, "tool call", attrs...)
 			return out, err
 		}
-	}
+	})
 }
 
 // MapErrors shapes handler errors centrally before the loop renders
@@ -98,7 +102,9 @@ func Audit(l *slog.Logger) core.ToolMiddleware {
 // failed` while keeping the original as the ToolError's cause for
 // Audit and errors.As.
 func MapErrors(fn func(error) error) core.ToolMiddleware {
-	return func(next core.ToolCaller) core.ToolCaller {
+	// Named where it is made (core.NameToolMiddleware): the manifest
+	// and the layer spans read "mw.MapErrors" however it is inlined.
+	return core.NameToolMiddleware("mw.MapErrors", func(next core.ToolCaller) core.ToolCaller {
 		return func(ctx context.Context, call core.ToolCallPart) (string, error) {
 			out, err := next(ctx, call)
 			if err == nil || passThrough(err) {
@@ -123,7 +129,7 @@ func MapErrors(fn func(error) error) core.ToolMiddleware {
 			}
 			return out, mapped
 		}
-	}
+	})
 }
 
 // sameError compares two errors without panicking on an uncomparable

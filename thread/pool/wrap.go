@@ -213,7 +213,9 @@ func (p *Pool) Wrap(name, description string, agent *core.Agent, opts ...WrapOpt
 	// The middleware wraps the subagent tool's own chain from the
 	// outside (a tool-level WrapTools, ADR 0006): agent middleware →
 	// this wrap → the tool's own options → handler.
-	all := append([]core.ToolOption{core.WrapTools(mw)}, cfg.toolOpts...)
+	// Named where it is made (core.NameToolMiddleware): the tool's
+	// manifest middleware reads "pool.Wrap" however it is inlined.
+	all := append([]core.ToolOption{core.WrapTools(core.NameToolMiddleware("pool.Wrap", mw))}, cfg.toolOpts...)
 	return core.Subagent(name, description, agent, all...), nil
 }
 

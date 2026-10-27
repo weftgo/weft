@@ -102,21 +102,22 @@ func NoEnv() Option {
 }
 
 // DevMode attests in code that this pipeline runs in development: it
-// satisfies the dev gate (ADR 0028 §12) that RawBodies and a
+// satisfies the dev gate (ADR 0028 §12) that RawBodies, DevDetail and a
 // destination's Blocking need, without reading the environment. It is
 // the code-side twin of WEFT_ENV=dev, for tests and harnesses that
 // control their own process — typically beside NoEnv, which reads no
-// WEFT_ENV and so refuses both on its own. It unlocks those two and
-// nothing else: no destination, discovery read or runtime link follows
+// WEFT_ENV and so refuses all three on its own. It unlocks those three
+// and nothing else: no destination, discovery read or runtime link follows
 // from it (runtime.Install keeps its own WEFT_ENV / Enabled rule). The
 // gate still applies — a production binary never sets DevMode; the
 // attestation has only moved from the process environment into code.
 // The operator's environment wins: when the pipeline reads it (no
 // NoEnv) and WEFT_ENV is set to anything but "dev", DevMode is refused
-// with one WARN ("otel: DevMode ignored: WEFT_ENV=<value>") and both
+// with one WARN ("otel: DevMode ignored: WEFT_ENV=<value>") and the
 // switches stay off; it opens the gate under NoEnv or with WEFT_ENV
 // unset. Whenever DevMode is what opened it, Start logs one INFO line
 // per switch it unlocked ("otel: raw bodies on by otel.DevMode()",
+// "otel: dev detail on by otel.DevDetail() under otel.DevMode()",
 // "otel: Blocking on by otel.DevMode()"), so a binary that ships it is
 // visible.
 func DevMode() Option {

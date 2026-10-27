@@ -798,11 +798,27 @@ func UnmarshalEvent(b []byte) (Event, error) { return core.UnmarshalEvent(b) }
 //
 // convention, as mw.Retry, mw.Fallback, mw.Log and mw.RepairJSON do; a
 // layer that does not is named by its type. A tool middleware is a
-// function and cannot carry a method: it is named by the function
-// (runtime.FuncForPC), with its source position when it is not one of
-// weft's own. Params carry configuration only — counts, durations,
-// model names — never a secret or a closure's captured value.
+// function and cannot carry a method: it is named by the name its
+// constructor registered (NameToolMiddleware; weft's own), else by the
+// function — a named one by its name with its source position, a
+// closure by where it is written ("func@<dir>/<file>:<line>"), the same
+// whatever the compiler inlined. Params carry configuration only —
+// counts, durations, model names — never a secret or a closure's
+// captured value.
 type MiddlewareInfo = core.MiddlewareInfo
+
+// NameToolMiddleware names a tool middleware for the manifest
+// (tool_middleware, a tool's middleware) and its development detail
+// layer span, and returns it unchanged: weft's own (mw.Allow, mw.Audit,
+// mw.MapErrors, thread/pool's) are named through it. A middleware not
+// named so is named by the function it is: a named function or method
+// by its name, a closure by where it is written ("func@<file>:<line>"),
+// never by the runtime's name for it, which inlining changes. The name
+// is configuration — the same for every closure of one literal; no
+// secret. Calling it again for the same literal keeps the last name.
+func NameToolMiddleware(name string, mw ToolMiddleware) ToolMiddleware {
+	return core.NameToolMiddleware(name, mw)
+}
 
 // ToolReporter is the reporting path from the tool chain into the
 // call's own record (ADR 0016's A8 path, the tool side of Reporter): a

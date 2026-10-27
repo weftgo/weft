@@ -672,8 +672,10 @@ transcript and event stream).
    `Describe() core.MiddlewareInfo` — a convention, like
    `ReportsAttempts`, ADR 0013 — else its type; a layer without
    `Unwrap` ends the walk marked `opaque`), `tool_middleware` and a
-   tool's own `middleware` (each function named by `runtime.FuncForPC`,
-   weft's own alone, any other with its file:line) and `hooks`
+   tool's own `middleware` (weft's own by the name their constructor
+   registers, `core.NameToolMiddleware`; a named function by its name
+   and file:line; a closure `func@<dir>/<file>:<line>` — never the
+   runtime's name, which inlining changes, P10b-inline-names) and `hooks`
    (`prepare_step`, `tap`, `on_run_end`, `tool_source`). Zero per-run
    cost; an agent's `weft.manifest.hash` now changes when its chain
    does.

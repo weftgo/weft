@@ -1444,9 +1444,17 @@ and `classifier` `custom` when set, `mw.Fallback` with its `models` and
 `when` `custom`, `mw.RepairJSON`), else its type's name; a layer that
 declares no `Unwrap` ends the walk marked `opaque` — never an onion
 that silently reads shorter; `tool_middleware` — the agent's
-`WrapTools` list, outer to inner, each function named by
-`runtime.FuncForPC` (weft's own as `mw.Allow`, any other with its
-`source` file:line — never an absolute path, a tool's `source` neither,
+`WrapTools` list, outer to inner, each named the same whatever the
+compiler inlined (P10b-inline-names): weft's own by the name their
+constructor registered (`core.NameToolMiddleware`: `mw.Allow`,
+`mw.Audit`, `mw.MapErrors`, `pool.Wrap`) alone; any other named
+function or method by its name with its `source`; a closure
+`func@<dir>/<file>:<line>` — the directory's and the file's names where
+it is written, its `source` the same — never the runtime's name for it,
+which is the chain of functions it was compiled into (a constructor
+inlined into its caller renames its closure, go1.26.0 does for
+`mw.Allow`). A named function's `source` file:line is never an absolute
+path, a tool's `source` neither,
 and one form on every machine: the defining function's package import
 path and the file's base name (`github.com/x/app/tools.go:12`; a main
 package by its build-info path), `<module>/<dir>/f.go` from the module

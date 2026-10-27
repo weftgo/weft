@@ -5429,7 +5429,14 @@ describe("the shared libs on both surfaces (U21.1)", () => {
     expect(shared.sort()).toEqual(
       ["/", "?", "[ / ]", "j / k", "o", "s / w / q / r"].sort()
     )
-    for (const k of shared) expect(panelKeys.get(k), k).toBe(studioKeys.get(k))
+    // "/" is the one key worded per surface: one meaning, the filter,
+    // but Studio binds it on the runs list alone (routes/runs.index.tsx)
+    // while the panel filters any list and the raw view's tree — each
+    // ? dialog says where it works (lib/keys.ts STUDIO_KEY_FILTER).
+    for (const k of shared.filter((key) => key !== "/"))
+      expect(panelKeys.get(k), k).toBe(studioKeys.get(k))
+    expect(panelKeys.get("/")).toMatch(/^filter the list in view/)
+    expect(studioKeys.get("/")).toBe("filter the runs list")
     // The panel's ? list draws PANEL_KEYMAP.
     const el = await panelOver([turn(1, {})])
     await vi.waitFor(() => expect(all(el, ".weft-turn")).toHaveLength(1), {

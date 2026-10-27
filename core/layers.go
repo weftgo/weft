@@ -9,10 +9,13 @@ import (
 	"iter"
 	"log/slog"
 	"os"
+	"path"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/weftgo/weft/core/internal/contentflag"
@@ -43,13 +46,17 @@ import (
 //
 // convention, as mw.Retry, mw.Fallback, mw.Log and mw.RepairJSON do; a
 // layer that does not is named by its type. A tool middleware is a
-// function and cannot carry a method: it is named by the function
-// (runtime.FuncForPC), with its source position when it is not one of
-// weft's own. Params carry configuration only — counts, durations,
-// model names — never a secret or a closure's captured value.
+// function and cannot carry a method: it is named by the name its
+// constructor registered (NameToolMiddleware; weft's own), else by the
+// function — a named one by its name with its source position, a
+// closure by where it is written ("func@<dir>/<file>:<line>"), the same
+// whatever the compiler inlined. Params carry configuration only —
+// counts, durations, model names — never a secret or a closure's
+// captured value.
 type MiddlewareInfo struct {
 	// Name is the layer's name: "mw.Retry", "mw.Allow", a type name
-	// ("main.cacheModel") or a function's ("main.main.func2").
+	// ("main.cacheModel"), a named function's ("main.audit") or a
+	// closure's place ("func@app/main.go:42").
 	Name string `json:"name"`
 	// Params is the layer's configuration, rendered as text, e.g.
 	// {"max_retries": "3", "base_delay": "200ms"}. Omitted when none.
@@ -138,54 +145,94 @@ func typeName(v any) string {
 	return s
 }
 
-// weftPackage reports whether a function's full name is in one of
-// weft's library packages (not its examples): those are named alone,
-// without a source position that would churn with every release.
-func weftPackage(full string) bool {
-	if !strings.HasPrefix(full, "github.com/weftgo/weft/") || strings.HasPrefix(full, "github.com/weftgo/weft/examples/") {
-		return false
+// toolNames is the registry NameToolMiddleware fills: a tool
+// middleware's code pointer → its name. Filled where the closure is
+// made, so it holds whatever pointer the compiler gave it: a constructor
+// inlined into its caller makes its closure a copy with another pointer
+// and another runtime name ("caller.Allow.func9") — registered as made,
+// it is still found by name.
+var toolNames sync.Map // uintptr → string
+
+// NameToolMiddleware names a tool middleware for the manifest
+// (tool_middleware, a tool's middleware) and its development detail
+// layer span, and returns it unchanged: weft's own (mw.Allow, mw.Audit,
+// mw.MapErrors, thread/pool's) are named through it. A middleware not
+// named so is named by the function it is: a named function or method
+// by its name, a closure by where it is written ("func@<file>:<line>"),
+// never by the runtime's name for it, which inlining changes. The name
+// is configuration — the same for every closure of one literal; no
+// secret. Calling it again for the same literal keeps the last name.
+func NameToolMiddleware(name string, mw ToolMiddleware) ToolMiddleware {
+	if mw != nil && name != "" {
+		toolNames.Store(reflect.ValueOf(mw).Pointer(), name)
 	}
-	// The package path ends at the first dot after the last slash; a
-	// test package (…_test) is the user's code, not the library's.
-	slash := strings.LastIndex(full, "/")
-	pkg := full
-	if dot := strings.Index(full[slash+1:], "."); dot >= 0 {
-		pkg = full[:slash+1+dot]
-	}
-	return !strings.HasSuffix(pkg, "_test")
+	return mw
 }
 
-// funcInfo names a function value for the manifest. A weft function
-// reads as its package and name ("mw.Allow"), its closure suffixes
-// dropped; any other function as its last path element
-// ("main.main.func2") with its source position.
+// funcInfo names a function value for the manifest and the layer
+// spans, the same whatever the compiler inlined (P10b-inline-names):
+//
+//   - a tool middleware NameToolMiddleware named: that name alone;
+//   - a named function or method: its name — the last import-path
+//     element and the function ("main.audit", "app.(*S).Hook"), its
+//     source position beside it;
+//   - a closure: "func@<source>", its source the file:line it is written
+//     at (sourceRel's rule) — the runtime's name for a closure is the
+//     chain of functions it was compiled into, which inlining decides.
 func funcInfo(fn any) MiddlewareInfo {
 	v := reflect.ValueOf(fn)
 	if v.Kind() != reflect.Func || v.IsNil() {
 		return MiddlewareInfo{Name: "func"}
 	}
 	pc := v.Pointer()
+	if name, ok := toolNames.Load(pc); ok {
+		return MiddlewareInfo{Name: name.(string)}
+	}
 	f := runtime.FuncForPC(pc)
 	if f == nil {
 		return MiddlewareInfo{Name: "func"}
 	}
-	full := f.Name()
-	short := full[strings.LastIndex(full, "/")+1:]
-	if weftPackage(full) {
-		for {
-			i := strings.LastIndex(short, ".")
-			if i <= 0 || !closureSuffix(short[i+1:]) {
-				break
-			}
-			short = short[:i]
+	full := strings.TrimSuffix(f.Name(), "-fm") // a method value
+	file, line := f.FileLine(f.Entry())
+	if isClosure(full) {
+		src := "unknown"
+		if file != "" {
+			src = closureSource(file) + ":" + strconv.Itoa(line)
 		}
-		return MiddlewareInfo{Name: short}
+		return MiddlewareInfo{Name: "func@" + src, Source: src}
 	}
-	info := MiddlewareInfo{Name: short}
-	if file, line := f.FileLine(f.Entry()); file != "" {
+	info := MiddlewareInfo{Name: full[strings.LastIndex(full, "/")+1:]}
+	if file != "" {
 		info.Source = sourceRel(file, full) + ":" + strconv.Itoa(line)
 	}
 	return info
+}
+
+// closureSource places a closure by its file alone — the directory's
+// name and the file's ("mw/tool.go"; a module cache directory's
+// @version dropped) — never by its runtime name, whose package is the
+// function it was compiled into: a closure-returning helper inlined
+// into another package's caller would read as that package's. The same
+// source tree gives the same place on every machine, toolchain and
+// inlining decision, never an absolute path.
+func closureSource(file string) string {
+	slashed := filepath.ToSlash(file)
+	dir := path.Base(path.Dir(slashed))
+	if at := strings.Index(dir, "@"); at > 0 {
+		dir = dir[:at]
+	}
+	if dir == "." || dir == "/" || dir == "" {
+		return path.Base(slashed)
+	}
+	return unescapeModPath(dir) + "/" + path.Base(slashed)
+}
+
+// isClosure reports a runtime name that is a function literal's (its
+// last element "func1", "1", "gowrap2"), not a named function's.
+func isClosure(full string) bool {
+	short := full[strings.LastIndex(full, "/")+1:]
+	i := strings.LastIndex(short, ".")
+	return i > 0 && closureSuffix(short[i+1:])
 }
 
 // closureSuffix reports a compiler-made name element: "func1", "1",

@@ -115,6 +115,13 @@ export const KEY_FILTER: KeyBinding = {
   keys: ["/"],
   action: "filter the list in view (on the raw view: its tree)",
 }
+/** Studio binds / on the runs list alone (routes/runs.index.tsx): its
+ * ? dialog promises no raw-view filter. */
+export const STUDIO_KEY_FILTER: KeyBinding = {
+  keys: ["/"],
+  action: "filter the runs list",
+  where: "runs",
+}
 export const KEY_HELP: KeyBinding = { keys: ["?"], action: "this list" }
 
 /** The panel's ? list (panel/element.ts's SHORTCUTS, the README's
@@ -155,7 +162,7 @@ export const STUDIO_KEYMAP: readonly KeyBinding[] = [
     action:
       "command palette: find a run, session, trace or experiment; jump to a page",
   },
-  KEY_FILTER,
+  STUDIO_KEY_FILTER,
   KEY_ITEMS,
   { keys: ["enter"], action: "open the selected run", where: "runs" },
   {

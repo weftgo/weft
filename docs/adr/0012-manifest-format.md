@@ -154,8 +154,18 @@ Additive. Each agent may carry `model_middleware` and `tool_middleware`
 omitted when empty, so an agent without them renders byte for byte as
 before. An entry is `{name, params?, source?, opaque?}` — a model
 layer's optional `Describe() core.MiddlewareInfo`, else its type; a
-function by `runtime.FuncForPC`, weft's own by name alone, any other with
-its `source` file:line (the import-path form, as a tool's `source` is); a
+function's name never depends on what the compiler inlined
+(P10b-inline-names): weft's own middleware register their name where
+the closure is made (`core.NameToolMiddleware`, a registry keyed by the
+closure's code pointer — an inlined constructor's copy registers its own
+pointer) and read by it alone; any other named function or method by its
+name and its `source` file:line (the import-path form, as a tool's
+`source` is); a closure as `func@<dir>/<file>:<line>` with that
+`source` — its directory's and file's names, because the runtime names a
+closure after the functions it was compiled into, and the package in
+that name is the caller's when a closure-returning helper is inlined
+across packages. The same source gives the same name under go1.26.0's
+inlining and `-gcflags=all=-l` (`TestManifestHashAcrossBuilds`). A
 model layer without `Unwrap` ends the walk `opaque`. Configuration only,
 never a captured value. A `source` is never an absolute path (U23.1-fix;
 a tool's `source` neither, the same helper), and since U23.2-fix it has

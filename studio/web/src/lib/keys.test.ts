@@ -1,7 +1,13 @@
 // Shortcut gating: bare keys only, never with a modifier or in a box.
 import { describe, expect, it } from "vitest"
 
-import { CHORD_MS, goChord, isPlainShortcut } from "./keys"
+import {
+  CHORD_MS,
+  goChord,
+  isPlainShortcut,
+  PANEL_KEYMAP,
+  STUDIO_KEYMAP,
+} from "./keys"
 
 function key(init: KeyboardEventInit, target?: HTMLElement): KeyboardEvent {
   const e = new KeyboardEvent("keydown", init)
@@ -66,5 +72,22 @@ describe("goChord (P8-pre-web #4)", () => {
     expect(at("g", 3000)).toBe("start")
     expect(at("k", 3100, { metaKey: true })).toBeNull()
     expect(at("r", 3200)).toBeNull()
+  })
+})
+
+describe("the / filter's words", () => {
+  // Studio binds / on the runs list alone (routes/runs.index.tsx): its
+  // ? dialog promises no raw-view filter; the panel's keeps its own.
+  it("Studio: the runs list only", () => {
+    const slash = STUDIO_KEYMAP.filter((k) => k.keys.includes("/"))
+    expect(slash).toEqual([
+      { keys: ["/"], action: "filter the runs list", where: "runs" },
+    ])
+  })
+  it("the panel: the list in view, the raw view's tree", () => {
+    const slash = PANEL_KEYMAP.find((k) => k.keys.includes("/"))
+    expect(slash?.action).toBe(
+      "filter the list in view (on the raw view: its tree)"
+    )
   })
 })

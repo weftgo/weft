@@ -123,6 +123,16 @@ describe("error kinds (U4)", () => {
       "INTERNAL ← io.EOF"
     )
   })
+
+  it("a masked plain Go error reads its class, not its Go type; the hover keeps the record (P020.1)", () => {
+    const f = toolFailure("INTERNAL", { error_masked: "*errors.errorString" })!
+    expect(f.word).toBe("INTERNAL ← plain error")
+    expect(f.hint).toContain("*errors.errorString")
+    // Any other Go type names something: it stays.
+    expect(
+      toolFailure("INTERNAL", { error_masked: "*net.OpError" })?.word
+    ).toBe("INTERNAL ← *net.OpError")
+  })
 })
 
 describe("U32.1's words", () => {

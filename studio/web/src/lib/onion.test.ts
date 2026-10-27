@@ -18,6 +18,7 @@ import {
   effectsOf,
   isMcpOrigin,
   layerShort,
+  maskedWord,
   modelCallFacts,
   modelOnion,
   skippedLine,
@@ -290,6 +291,16 @@ describe("the effect chips and the MCP words (both renderers)", () => {
     expect(effectChips(fx, true).at(-1)).toBe("mcp:billing")
     expect(effectChips({ origin: "subagent" }, true)).toEqual([])
     expect(effectChips(undefined)).toEqual([])
+  })
+
+  it('a hidden plain Go error: "plain error" on the chip and the MapErrors decision, the attribute as recorded (P020.1)', () => {
+    const fx = effectsOf({
+      "error.type": "INTERNAL",
+      "weft.tool.error_masked": "*errors.errorString",
+    })
+    expect(effectChips(fx)).toEqual(["⇣ plain error"])
+    expect(maskedWord("*errors.errorString")).toBe("plain error")
+    expect(maskedWord("io.EOF")).toBe("io.EOF")
   })
 
   it("isMcpOrigin: mcp and mcp:<server>, never mcpx (U23.2-fix)", () => {

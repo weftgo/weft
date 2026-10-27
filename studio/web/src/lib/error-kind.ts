@@ -12,7 +12,12 @@
 
 /** A kind's words: the chip's text, its one-line hint, its tone. */
 import { ordinalOf, plural } from "./format"
-import { MCP_FAILURE, attrStr as factStr, deniedWord } from "./onion"
+import {
+  MCP_FAILURE,
+  attrStr as factStr,
+  deniedWord,
+  maskedWord,
+} from "./onion"
 
 export interface KindWords {
   word: string
@@ -226,7 +231,7 @@ export function toolFailure(
   }
   if (attrs.error_masked)
     return {
-      word: `${errorType} ← ${attrs.error_masked}`,
+      word: `${errorType} ← ${maskedWord(attrs.error_masked)}`,
       hint: `a tool layer hid a ${attrs.error_masked} behind ${errorType} (weft.tool.error_masked: the kind, never its text)`,
     }
   switch (errorType) {

@@ -74,6 +74,13 @@ export interface CallEffects {
 export const deniedWord = (by: string) =>
   `denied by ${by === "allow" ? "policy" : by}`
 
+/** maskedWord is weft.tool.error_masked as it reads: a plain Go error
+ * (errors.New, fmt.Errorf without %w) has no kind but its Go type,
+ * *errors.errorString, which says nothing — "plain error"; the hover
+ * keeps the recorded kind (P020.1). */
+export const maskedWord = (k: string) =>
+  k == "*errors.errorString" ? "plain error" : k
+
 /** effectChips is a tool row's chip per effect, outer to inner: "✋
  * allow" (the refusing layer), "⇣ io.EOF" (the error a layer hid),
  * "✎ repaired" (the arguments a model layer fixed), and the call's
@@ -81,7 +88,7 @@ export const deniedWord = (by: string) =>
 export function effectChips(f?: CallEffects, origin = false): string[] {
   const out: string[] = []
   if (f?.deniedBy) out.push(`✋ ${f.deniedBy}`)
-  if (f?.masked) out.push(`⇣ ${f.masked}`)
+  if (f?.masked) out.push(`⇣ ${maskedWord(f.masked)}`)
   if (f?.repaired) out.push("✎ repaired")
   if (origin && isMcpOrigin(f?.origin)) out.push(f.origin)
   return out
@@ -184,7 +191,7 @@ function toolDecision(
     case "mw.MapErrors":
       return f.masked
         ? {
-            decision: `${f.errorType ?? "error"} ← ${f.masked}`,
+            decision: `${f.errorType ?? "error"} ← ${maskedWord(f.masked)}`,
             attrs: [["weft.tool.error_masked", f.masked]],
           }
         : { attrs: [] }

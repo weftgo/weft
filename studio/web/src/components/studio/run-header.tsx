@@ -1067,6 +1067,33 @@ export function runPlace(
  * keys and dialogs. */
 function HeaderActions({ children }: { children: ReactNode }) {
   const narrow = useMediaQuery(RUN_MENU.narrow)
+  const menu = useRef<HTMLDetailsElement>(null)
+  const [open, setOpen] = useState(false)
+  // Open, it closes on Escape (focus back on its summary) and on a
+  // pointer down outside it (U30.2-fix) — a disclosure that behaves as
+  // a menu does.
+  useEffect(() => {
+    if (!open) return
+    const close = (refocus: boolean) => {
+      const d = menu.current
+      if (!d) return
+      d.open = false
+      setOpen(false)
+      if (refocus) d.querySelector("summary")?.focus()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close(true)
+    }
+    const onDown = (e: PointerEvent) => {
+      if (!menu.current?.contains(e.target as Node)) close(false)
+    }
+    document.addEventListener("keydown", onKey)
+    document.addEventListener("pointerdown", onDown)
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.removeEventListener("pointerdown", onDown)
+    }
+  }, [open])
   if (!narrow)
     return (
       <span className="ml-auto flex flex-wrap items-center gap-2">
@@ -1074,7 +1101,12 @@ function HeaderActions({ children }: { children: ReactNode }) {
       </span>
     )
   return (
-    <details className="relative ml-auto" data-run-actions-menu>
+    <details
+      ref={menu}
+      className="relative ml-auto"
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+      data-run-actions-menu
+    >
       <summary
         className="cursor-pointer list-none rounded-md border px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:text-foreground"
         title={RUN_MENU.title}

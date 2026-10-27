@@ -93,6 +93,14 @@ func TestSessionTitlesAndQuery(t *testing.T) {
 	if got := list("/api/sessions?q=pub_b"); len(got) != 1 || got["conv_p"].ID == "" {
 		t.Errorf("?q=pub_b = %v, want conv_p by its first prompt and public id", got)
 	}
+	// id_prefix (U30.2): the session ids that start with it, never one
+	// that holds it mid-id or a title or prompt that does.
+	if got := list("/api/sessions?id_prefix=conv_t"); len(got) != 1 || got["conv_t"].ID == "" {
+		t.Errorf("?id_prefix=conv_t = %v, want conv_t", got)
+	}
+	if got := list("/api/sessions?id_prefix=onv_"); len(got) != 0 {
+		t.Errorf("?id_prefix=onv_ = %v, want none (a prefix, not a substring)", got)
+	}
 	// A panel token's document is recomputed over its turns
 	// (scopedSessionRow): the title and the first prompt survive it.
 	panel := mintPanel(t, ts.URL, serverTok, "pub_a")

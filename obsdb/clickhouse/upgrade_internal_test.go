@@ -238,7 +238,7 @@ func TestUpgradeFrom0007AddsCommandStore(t *testing.T) {
 	if err := cs.PutRoute(ctx, obsdb.RunRoute{RunID: "run_1", RuntimeID: "rt_1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := cs.PutBreakpoints(ctx, "rt_1", obsdb.BreakpointSet{Tools: []string{"refund"}}); err != nil {
+	if err := cs.PutBreakpoints(ctx, "rt_1", []string{"refund"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := cs.PutRuntime(ctx, obsdb.StoredRuntime{ID: "rt_1"}); err != nil {

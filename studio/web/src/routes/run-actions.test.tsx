@@ -233,6 +233,22 @@ describe("the run page at phone width (U30.2, UX-A-21)", () => {
     fireEvent.click(summary)
     expect(menu.open).toBe(true)
     expect((await axe.run(menu)).violations).toEqual([])
+    // U30.2-fix: Escape closes it, focus back on its summary; a
+    // pointer down outside closes it; one inside does not.
+    const reopen = async () => {
+      menu.open = true
+      fireEvent(menu, new Event("toggle"))
+      await waitFor(() => expect(menu.open).toBe(true))
+    }
+    fireEvent.keyDown(document, { key: "Escape" })
+    await waitFor(() => expect(menu.open).toBe(false))
+    expect(document.activeElement).toBe(summary)
+    await reopen()
+    fireEvent.pointerDown(menu.querySelector("[data-export-format]")!)
+    expect(menu.open).toBe(true)
+    fireEvent.pointerDown(document.body)
+    await waitFor(() => expect(menu.open).toBe(false))
+    await reopen()
     resize(1280)
     await waitFor(() =>
       expect(document.querySelector("[data-run-actions-menu]")).toBeNull()

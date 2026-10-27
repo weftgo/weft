@@ -326,16 +326,21 @@ export function StepDiffTable({
   view,
   focus,
   costs,
+  changedOnlyDefault = false,
 }: {
   view: NWayView
   focus?: number
   costs?: StepCosts
+  /** "changed only" starts on when a step differs (the compare page). */
+  changedOnlyDefault?: boolean
 }) {
-  // "changed only" (U30.2, UX-A-16): the changed steps and columns.
-  const [only, setOnly] = useState(false)
+  // "changed only" (U30.2, UX-A-16): the changed steps and columns —
+  // on by default when any step differs (the card's proposal), the
+  // reader's toggle wins.
+  const [only, setOnly] = useState<boolean | null>(null)
   const narrowed = changedView(view)
   const anyChanged = narrowed.rows.length > 0
-  const on = only && anyChanged
+  const on = (only ?? changedOnlyDefault) && anyChanged
   const cols = on ? narrowed.columns : DIFF_COLUMNS
   const shown = on ? narrowed.rows : view.rows
   const width = cols.length + 1 + (costs ? 1 : 0)
@@ -385,7 +390,7 @@ export function StepDiffTable({
           aria-pressed={on}
           disabled={!anyChanged}
           title={CHANGED_ONLY.title}
-          onClick={() => setOnly((v) => !v)}
+          onClick={() => setOnly(!on)}
           data-diff-changed-only
         >
           {CHANGED_ONLY.label}
@@ -394,6 +399,19 @@ export function StepDiffTable({
           {stepsDiffer(view)}
         </span>
       </div>
+      {on && focus !== undefined && !shown.some((r) => r.step === focus) ? (
+        <p className="text-xs text-muted-foreground" data-diff-focus-hidden>
+          {CHANGED_ONLY.focusHidden(focus)} ·{" "}
+          <button
+            type="button"
+            className="text-thread-ink hover:underline"
+            onClick={() => setOnly(false)}
+            data-diff-show-all
+          >
+            {CHANGED_ONLY.showAll}
+          </button>
+        </p>
+      ) : null}
       <ul
         className="space-y-0.5 font-mono text-[11px]"
         aria-label={USAGE_DELTA.title}
@@ -645,7 +663,10 @@ export function StepCompare({
   others,
   focus,
   arriving = false,
+  changedOnlyDefault = false,
 }: {
+  /** StepDiffTable's: the compare page starts on the changed steps. */
+  changedOnlyDefault?: boolean
   base: string
   others: string[]
   focus?: number
@@ -770,6 +791,7 @@ export function StepCompare({
         view={nWayView(answered.map(({ q }) => q.data as DiffDoc))}
         focus={focus}
         costs={costs}
+        changedOnlyDefault={changedOnlyDefault}
       />
     </div>
   )

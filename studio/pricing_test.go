@@ -85,6 +85,12 @@ func TestDefaultPricingLoads(t *testing.T) {
 // child inherits it, as core.Metadata does).
 func costUsage(t *testing.T, db obsdb.DB, id, parent, session, provider, model string, at time.Time, total core.Usage, steps ...core.Usage) {
 	t.Helper()
+	costUsagePub(t, db, id, parent, session, "", provider, model, at, total, steps...)
+}
+
+// costUsagePub is costUsage with the run's public id (weft.public_id).
+func costUsagePub(t *testing.T, db obsdb.DB, id, parent, session, pub, provider, model string, at time.Time, total core.Usage, steps ...core.Usage) {
+	t.Helper()
 	var recs []obsdb.Record
 	pos := int64(0)
 	add := func(evType string, body any) {
@@ -99,6 +105,9 @@ func costUsage(t *testing.T, db obsdb.DB, id, parent, session, provider, model s
 		if parent != "" {
 			attrs["weft.parent.run.id"] = parent
 			attrs["weft.parent.call.id"] = "call_" + id[len(id)-1:]
+		}
+		if pub != "" {
+			attrs["weft.public_id"] = pub
 		}
 		if session != "" {
 			attrs["weft.session.id"] = session

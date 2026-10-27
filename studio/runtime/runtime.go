@@ -2063,9 +2063,16 @@ func orDefault(s, def string) string {
 // (an `event: breakpoints` frame): the runtime passes the named tools
 // as core.ParkOn on every run it starts from then on. It cannot alter
 // agents it did not build — the app's own turns are not breakable
-// from here (PQ7), and meta says so. surface names where the set came
-// from (RuntimeView.BreakpointsSurface; "" reads "api").
-func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string, surface string) error {
+// from here (PQ7), and meta says so. The set's surface reads "api"
+// (SetBreakpointsFrom names one).
+func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string) error {
+	return rs.SetBreakpointsFrom(runtimeID, tools, "")
+}
+
+// SetBreakpointsFrom is SetBreakpoints naming the surface the set came
+// through (RuntimeView.BreakpointsSurface, U30.2; "" reads "api"):
+// Studio's PUT …/breakpoints passes its body's surface.
+func (rs *RuntimeServer) SetBreakpointsFrom(runtimeID string, tools []string, surface string) error {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	c := rs.runtimes[runtimeID]

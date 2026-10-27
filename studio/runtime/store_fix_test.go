@@ -73,12 +73,12 @@ func (hangingStore) PutRoute(ctx context.Context, _ obsdb.RunRoute) error {
 func (hangingStore) Route(context.Context, string) (obsdb.RunRoute, bool, error) {
 	return obsdb.RunRoute{}, false, nil
 }
-func (hangingStore) PutBreakpoints(ctx context.Context, _ string, _ obsdb.BreakpointSet) error {
+func (hangingStore) PutBreakpoints(ctx context.Context, _ string, _ []string) error {
 	<-ctx.Done()
 	return ctx.Err()
 }
-func (hangingStore) Breakpoints(context.Context, string) (obsdb.BreakpointSet, bool, error) {
-	return obsdb.BreakpointSet{}, false, nil
+func (hangingStore) Breakpoints(context.Context, string) ([]string, bool, error) {
+	return nil, false, nil
 }
 func (hangingStore) PutRuntime(ctx context.Context, _ obsdb.StoredRuntime) error {
 	<-ctx.Done()
@@ -219,11 +219,9 @@ func (failingStore) PutRoute(context.Context, obsdb.RunRoute) error { return err
 func (failingStore) Route(context.Context, string) (obsdb.RunRoute, bool, error) {
 	return obsdb.RunRoute{}, false, errStoreDown
 }
-func (failingStore) PutBreakpoints(context.Context, string, obsdb.BreakpointSet) error {
-	return errStoreDown
-}
-func (failingStore) Breakpoints(context.Context, string) (obsdb.BreakpointSet, bool, error) {
-	return obsdb.BreakpointSet{}, false, errStoreDown
+func (failingStore) PutBreakpoints(context.Context, string, []string) error { return errStoreDown }
+func (failingStore) Breakpoints(context.Context, string) ([]string, bool, error) {
+	return nil, false, errStoreDown
 }
 func (failingStore) PutRuntime(context.Context, obsdb.StoredRuntime) error { return errStoreDown }
 func (failingStore) Runtimes(context.Context) ([]obsdb.StoredRuntime, error) {
@@ -293,7 +291,7 @@ func TestFailingStoreChangesNothing(t *testing.T) {
 	if rt, ok := rs.RuntimeOf("pg_f"); !ok || rt != "rt_f" {
 		t.Errorf("RuntimeOf(pg_f) = %q %v", rt, ok)
 	}
-	if err := rs.SetBreakpoints("rt_f", []string{"refund"}, ""); err != nil {
+	if err := rs.SetBreakpoints("rt_f", []string{"refund"}); err != nil {
 		t.Fatal(err)
 	}
 	lost := mustEnqueue(t, rs, "rt_f", Command{Agent: "acme-support"})

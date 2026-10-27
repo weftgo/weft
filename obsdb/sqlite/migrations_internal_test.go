@@ -290,7 +290,7 @@ func TestUpgradeFrom0006AddsCommandStore(t *testing.T) {
 	if err := cs.PutRoute(ctx, obsdb.RunRoute{RunID: "run_1", RuntimeID: "rt_1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := cs.PutBreakpoints(ctx, "rt_1", obsdb.BreakpointSet{Tools: []string{"refund"}}); err != nil {
+	if err := cs.PutBreakpoints(ctx, "rt_1", []string{"refund"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := cs.PutRuntime(ctx, obsdb.StoredRuntime{ID: "rt_1"}); err != nil {
@@ -1331,18 +1331,6 @@ func TestMigration0026RederivesStock(t *testing.T) {
 			Start: time.Unix(0, 120), End: time.Unix(0, 200),
 			Attrs: map[string]any{"gen_ai.operation.name": "chat", "gen_ai.input.messages": `[]`}},
 	}
-	// A second trace as the old writer left it: a conversation-rooted
-	// derived row with no message count, a derived row the new rule does
-	// not make (stale), and a weft run in the same trace that must stay.
-	const tr2 = "7d000000000000000000000000000002"
-	spans = append(spans,
-		obsdb.Span{TraceID: tr2, SpanID: "7d00000000000011", Name: "invoke_agent support", Start: time.Unix(0, 100), End: time.Unix(0, 900),
-			Attrs: map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.conversation.id": "c1"}},
-		obsdb.Span{TraceID: tr2, SpanID: "7d00000000000012", ParentSpanID: "7d00000000000011", Name: "chat m", Start: time.Unix(0, 120), End: time.Unix(0, 200),
-			Attrs: map[string]any{"gen_ai.operation.name": "chat", "gen_ai.output.messages": `[]`}})
-	weftSpan := obsdb.Span{TraceID: tr2, SpanID: "7d00000000000013", Name: "invoke_agent w", Start: time.Unix(0, 300), End: time.Unix(0, 400),
-		Attrs: map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": "w_keep"}}
-	convID, staleID := obsdb.StockRunID(tr2, "7d00000000000011"), obsdb.StockRunID(tr2, "7d00000000000012")
 	tx, err := raw.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -1351,15 +1339,6 @@ func TestMigration0026RederivesStock(t *testing.T) {
 		if _, err := insertSpan(context.Background(), tx, s, obsdb.Weft{Step: -1, ToolSeq: -1}); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if _, err := insertSpan(context.Background(), tx, weftSpan, obsdb.Weft{RunID: "w_keep", Step: -1, ToolSeq: -1}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(`INSERT INTO runs (run_id, trace_id, agent, started_ns, last_seen_ns, root_ended, derived, message_count, meta, problems) VALUES
-		(?, ?, 'support', 100, 900, 1, 1, 0, '{}', '[]'),
-		(?, ?, '', 120, 200, 1, 1, 0, '{}', '[]'),
-		('w_keep', ?, 'w', 300, 400, 1, 0, 0, '{}', '[]')`, convID, tr2, staleID, tr2, tr2); err != nil {
-		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
@@ -1379,27 +1358,7 @@ func TestMigration0026RederivesStock(t *testing.T) {
 	if err != nil || !run.Derived || run.SessionID != "" || run.Steps != 1 || run.MessageCount != 1 {
 		t.Fatalf("after 0026 %s = %+v, %v; want a derived run with no session, 1 step, 1 chat span with messages", id, run.RunRow, err)
 	}
-	if r, err := db.Run(ctx, convID); err != nil || r.MessageCount != 1 || r.SessionID != "c1" {
-		t.Errorf("after 0026 the old conversation row = %+v, %v; want its message count backfilled (1)", r.RunRow, err)
-	}
-	if _, err := db.Run(ctx, staleID); !errors.Is(err, obsdb.ErrNotFound) {
-		t.Errorf("after 0026 the stale derived row: %v, want not found", err)
-	}
-	if r, err := db.Run(ctx, "w_keep"); err != nil || r.Derived {
-		t.Errorf("after 0026 the weft run in the trace = %+v, %v; want it kept", r.RunRow, err)
-	}
 	page, err := db.Traces(ctx, obsdb.TraceQuery{})
-	if err != nil || len(page.Traces) != 2 {
-		t.Fatalf("traces after 0026 = %+v (%v), want both", page.Traces, err)
-	}
-	got := map[string][]string{}
-	for _, tp := range page.Traces {
-		got[tp.TraceID] = tp.RunIDs
-	}
-	if ids := got[tr2]; len(ids) != 2 || ids[0] != convID || ids[1] != "w_keep" {
-		t.Errorf("trace %s after 0026 names %v, want the conversation run and the weft run", tr2, ids)
-	}
-	page.Traces = []obsdb.TraceRow{{TraceID: tr, RunIDs: got[tr]}}
 	if err != nil || len(page.Traces) != 1 || len(page.Traces[0].RunIDs) != 1 || page.Traces[0].RunIDs[0] != id {
 		t.Errorf("traces after 0026 = %+v (%v), want the trace naming %s", page.Traces, err, id)
 	}

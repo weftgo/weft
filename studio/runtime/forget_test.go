@@ -42,7 +42,7 @@ func TestBreakpointsByAndForget(t *testing.T) {
 	if v, _ := viewOf(rs, "rt_a"); v.BreakpointsBy != "" {
 		t.Errorf("an empty set's breakpoints_by = %q, want absent", v.BreakpointsBy)
 	}
-	if err := rs.SetBreakpoints("rt_a", []string{"refund"}, ""); err != nil {
+	if err := rs.SetBreakpoints("rt_a", []string{"refund"}); err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := viewOf(rs, "rt_a"); v.BreakpointsBy != BreakpointsByStudio || v.BreakpointsSetAt == nil {
@@ -146,7 +146,7 @@ func (g *gateStore) PutRuntime(ctx context.Context, r obsdb.StoredRuntime) error
 	g.wait()
 	return g.CommandStore.PutRuntime(ctx, r)
 }
-func (g *gateStore) PutBreakpoints(ctx context.Context, id string, tools obsdb.BreakpointSet) error {
+func (g *gateStore) PutBreakpoints(ctx context.Context, id string, tools []string) error {
 	g.wait()
 	return g.CommandStore.PutBreakpoints(ctx, id, tools)
 }
@@ -172,7 +172,7 @@ func TestForgetThenReregisterBeforeTheWriterDrains(t *testing.T) {
 			t.Cleanup(ts.Close)
 			register(t, mux(rs), regBody("rt_a"))
 			_, closeA := subscribe(t, rs, ts.URL, "rt_a", "")
-			if err := rs.SetBreakpoints("rt_a", []string{"refund"}, ""); err != nil {
+			if err := rs.SetBreakpoints("rt_a", []string{"refund"}); err != nil {
 				t.Fatal(err)
 			}
 			closeA()
@@ -205,7 +205,7 @@ func TestForgetThenReregisterBeforeTheWriterDrains(t *testing.T) {
 				t.Errorf("memory after forget + re-register = %+v (listed %v); want its own set, by runtime", v, ok)
 			}
 			ctx := context.Background()
-			if bp, ok, err := cs.Breakpoints(ctx, "rt_a"); err != nil || !ok || len(bp.Tools) != 1 || bp.Tools[0] != "lookup_order" {
+			if bp, ok, err := cs.Breakpoints(ctx, "rt_a"); err != nil || !ok || len(bp) != 1 || bp[0] != "lookup_order" {
 				t.Errorf("stored breakpoints = %v, %v, %v; want [lookup_order]", bp, ok, err)
 			}
 			found := false
@@ -240,13 +240,13 @@ func TestBreakpointsSurfaceAndSetAtPersist(t *testing.T) {
 	register(t, mux(rs), regBody("rt_a"))
 	_, closeA := subscribe(t, rs, ts.URL, "rt_a", "")
 
-	if err := rs.SetBreakpoints("rt_a", []string{"refund"}, ""); err != nil {
+	if err := rs.SetBreakpoints("rt_a", []string{"refund"}); err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := viewOf(rs, "rt_a"); v.BreakpointsSurface != BreakpointsSurfaceAPI {
 		t.Errorf("a PUT naming no surface: breakpoints_surface = %q, want api", v.BreakpointsSurface)
 	}
-	if err := rs.SetBreakpoints("rt_a", []string{"refund"}, "runtimes"); err != nil {
+	if err := rs.SetBreakpointsFrom("rt_a", []string{"refund"}, "runtimes"); err != nil {
 		t.Fatal(err)
 	}
 	v, _ := viewOf(rs, "rt_a")
@@ -274,7 +274,7 @@ func TestBreakpointsSurfaceAndSetAtPersist(t *testing.T) {
 	register(t, mux(rs3), regBody("rt_a"))
 	_, close3 := subscribe(t, rs3, ts3.URL, "rt_a", "")
 	t.Cleanup(close3)
-	if err := rs3.SetBreakpoints("rt_a", nil, "runtimes"); err != nil {
+	if err := rs3.SetBreakpointsFrom("rt_a", nil, "runtimes"); err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := viewOf(rs3, "rt_a"); v.BreakpointsSetAt != nil || v.BreakpointsSurface != "" {

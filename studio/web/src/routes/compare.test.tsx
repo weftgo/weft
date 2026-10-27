@@ -11,6 +11,7 @@ import type { RunDoc, RunsPage } from "@/lib/api"
 import type { DiffDoc } from "@/lib/stepdiff"
 import { CAUSES } from "@/lib/honesty"
 import { PICK_FOUND_NONE, WHY_PUBLIC } from "@/lib/compare-picker"
+import { CHANGED_ONLY } from "@/lib/compare-view"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
@@ -91,6 +92,15 @@ async function axeLines(el: Element): Promise<string[]> {
   )
 }
 
+/** The compare page starts on the changed steps (U30.2-fix): the
+ * full grid is a click away. */
+function showAllSteps() {
+  const t = document.querySelector<HTMLButtonElement>(
+    "[data-diff-changed-only]"
+  )
+  if (t?.getAttribute("aria-pressed") === "true") fireEvent.click(t)
+}
+
 describe("the compare page", () => {
   it("diff.golden.json: one 'changed at step 3' marker (tool results) and every other row the same", async () => {
     const doc = golden<DiffDoc>("diff")
@@ -99,6 +109,7 @@ describe("the compare page", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-step-diff]")).toBeTruthy()
     )
+    showAllSteps()
     expect(markers()).toEqual([
       { step: "3", run: "r_db", text: "changed at step 3 · tool results" },
     ])
@@ -170,6 +181,16 @@ describe("the compare page", () => {
           '[data-step-diff] tbody tr:first-child [data-diff-run="r_db"][data-diff-cell]'
         ),
       ].map((td) => td.getAttribute("data-diff-cell"))
+    // On by default: a step differs (U30.2-fix, the card's proposal).
+    const toggle = document.querySelector<HTMLButtonElement>(
+      "[data-diff-changed-only]"
+    )!
+    expect(toggle.getAttribute("aria-pressed")).toBe("true")
+    expect(steps()).toEqual(["3", "4"])
+    expect(cols()).toEqual(["tool_results", "usage"])
+    expect(await axeLines(document.querySelector("main")!)).toEqual([])
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute("aria-pressed")).toBe("false")
     expect(steps()).toEqual(["0", "1", "2", "3", "4"])
     expect(cols()).toEqual([
       "system",
@@ -178,17 +199,29 @@ describe("the compare page", () => {
       "text",
       "usage",
     ])
-    const toggle = document.querySelector<HTMLButtonElement>(
-      "[data-diff-changed-only]"
-    )!
-    expect(toggle.getAttribute("aria-pressed")).toBe("false")
-    fireEvent.click(toggle)
-    expect(toggle.getAttribute("aria-pressed")).toBe("true")
-    expect(steps()).toEqual(["3", "4"])
-    expect(cols()).toEqual(["tool_results", "usage"])
-    expect(await axeLines(document.querySelector("main")!)).toEqual([])
-    fireEvent.click(toggle)
-    expect(steps()).toEqual(["0", "1", "2", "3", "4"])
+  })
+
+  it("a linked step the changed-only view hides says so, and show all brings it back (U30.2-fix)", async () => {
+    serve(["diff"], { "r_da|r_db": golden<DiffDoc>("diff") })
+    renderApp("/compare?a=r_da&b=r_db&step=1")
+    await waitFor(() =>
+      expect(document.querySelector("[data-step-diff]")).toBeTruthy()
+    )
+    const note = document.querySelector("[data-diff-focus-hidden]")!
+    expect(note.textContent).toContain(CHANGED_ONLY.focusHidden(1))
+    expect(document.querySelector('[data-diff-step="1"]')).toBeNull()
+    fireEvent.click(
+      document.querySelector<HTMLElement>("[data-diff-show-all]")!
+    )
+    expect(document.querySelector('[data-diff-step="1"]')).toBeTruthy()
+    expect(document.querySelector("[data-diff-focus-hidden]")).toBeNull()
+    // The changed step a link names stays: no note.
+    cleanup()
+    renderApp("/compare?a=r_da&b=r_db&step=3")
+    await waitFor(() =>
+      expect(document.querySelector('[data-diff-step="3"]')).toBeTruthy()
+    )
+    expect(document.querySelector("[data-diff-focus-hidden]")).toBeNull()
   })
 
   it("no step changed: the toggle is off and says so", async () => {
@@ -203,6 +236,7 @@ describe("the compare page", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-step-diff]")).toBeTruthy()
     )
+    showAllSteps()
     expect(
       document.querySelector<HTMLButtonElement>("[data-diff-changed-only]")!
         .disabled
@@ -232,6 +266,7 @@ describe("the compare page", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-step-diff]")).toBeTruthy()
     )
+    showAllSteps()
     expect(studio.calls("GET diff").map((r) => r.query.get("a"))).toEqual([
       "r_da",
       "r_da",
@@ -260,6 +295,7 @@ describe("the compare page", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-step-diff]")).toBeTruthy()
     )
+    showAllSteps()
     expect(markers()).toEqual([])
     for (const row of Object.values(cells("old2")))
       for (const s of Object.values(row)) expect(s).toBe("unknown")
@@ -294,6 +330,7 @@ describe("the compare page", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-step-diff]")).toBeTruthy()
     )
+    showAllSteps()
     expect(
       document.querySelectorAll(
         '[data-step-diff] tbody [data-diff-marks] [data-hole="hidden"]'
@@ -345,6 +382,7 @@ describe("the compare page", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-step-diff]")).toBeTruthy()
     )
+    showAllSteps()
     await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2), {
       timeout: 6_000,
     })
@@ -373,6 +411,7 @@ describe("the compare page", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-step-diff]")).toBeTruthy()
     )
+    showAllSteps()
     const bad = document.querySelector("[data-step-diff-side-error]")!
     expect(bad.getAttribute("data-step-diff-side-error")).toBe("r_typo")
     expect(bad.textContent).toContain("not compared")
@@ -390,6 +429,7 @@ describe("the compare page", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-step-diff]")).toBeTruthy()
     )
+    showAllSteps()
     expect(router.state.location.search).toMatchObject({
       a: "r_da",
       b: "r_db",

@@ -24,7 +24,9 @@ export const SCOPE_SWITCH = {
 export function isBare(key: string): boolean {
   return (
     /^s\d/.test(key) ||
-    /^c:(\d+|resume):[^:]+$/.test(key) ||
+    // A call id may hold ":" itself (functions.lookup_order:0): the
+    // bare form is told by its step (or "resume") alone.
+    /^c:(\d+|resume):/.test(key) ||
     /^t:[^:]+$/.test(key)
   )
 }
@@ -42,9 +44,10 @@ export function unqualifyKey(key: string, run: string): string {
   return key
 }
 
-/** toTraceKey is a run page's key on the trace page: run-qualified. */
+/** toTraceKey is a run page's own row's key on the trace page:
+ * run-qualified (qualifyKey, whatever the call id holds). */
 export function toTraceKey(key: string, run: string): string {
-  return isBare(key) ? qualifyKey(key, run) : key
+  return qualifyKey(key, run)
 }
 
 /** toRunKey is a trace page's key on run's page: the trace root's bare

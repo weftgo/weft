@@ -74,7 +74,7 @@ func (s *Server) serveBreakpoints(rs *linkruntime.RuntimeServer) http.HandlerFun
 			badRequest(w, r, "surface must be a short lowercase word ([a-z][a-z0-9_-]{0,31}), e.g. runtimes")
 			return
 		}
-		if err := rs.SetBreakpoints(id, req.Tools, req.Surface); err != nil {
+		if err := rs.SetBreakpointsFrom(id, req.Tools, req.Surface); err != nil {
 			switch {
 			case errors.Is(err, linkruntime.ErrUnknownRuntime):
 				notFound(w, r, "unknown runtime "+id)

@@ -120,7 +120,7 @@ func TestEveryFullFeedDropEndsTheStream(t *testing.T) {
 		"approval": func(rs *RuntimeServer) {
 			_, _ = rs.EnqueueApproval("rt_stall", ApprovalDecision{RunID: "pg_1", CallID: "c", Decision: "approve"})
 		},
-		"breakpoints": func(rs *RuntimeServer) { _ = rs.SetBreakpoints("rt_stall", []string{"refund"}, "") },
+		"breakpoints": func(rs *RuntimeServer) { _ = rs.SetBreakpoints("rt_stall", []string{"refund"}) },
 		"steer":       func(rs *RuntimeServer) { _ = rs.Steer("rt_stall", "pg_1", "hi") },
 		"run":         func(rs *RuntimeServer) { _, _ = rs.Enqueue("rt_stall", Command{}) },
 	}
@@ -291,7 +291,7 @@ func TestBreakpointsSurviveAReconnect(t *testing.T) {
 	register(t, mux(rs), regBody("rt_bp"))
 
 	// Not connected: refused, and nothing is stored.
-	if err := rs.SetBreakpoints("rt_bp", []string{"refund"}, ""); err != ErrNotConnected {
+	if err := rs.SetBreakpoints("rt_bp", []string{"refund"}); err != ErrNotConnected {
 		t.Fatalf("SetBreakpoints on a disconnected runtime = %v, want ErrNotConnected", err)
 	}
 	if got := rs.BreakpointsOf("rt_bp"); len(got) != 0 {
@@ -299,7 +299,7 @@ func TestBreakpointsSurviveAReconnect(t *testing.T) {
 	}
 
 	r1, close1 := subscribe(t, rs, ts.URL, "rt_bp", "")
-	if err := rs.SetBreakpoints("rt_bp", []string{"refund"}, ""); err != nil {
+	if err := rs.SetBreakpoints("rt_bp", []string{"refund"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, data := nextRunBounded(t, r1, 2*time.Second); !strings.Contains(string(data), `"refund"`) {
@@ -519,7 +519,7 @@ func TestBreakpointsHandshake(t *testing.T) {
 	// Studio clears; from here its (empty) set is the authority: a
 	// re-registration still reporting the old set does not bring it back,
 	// and the next stream open is told the empty set.
-	if err := rs.SetBreakpoints("rt_hs", nil, ""); err != nil {
+	if err := rs.SetBreakpoints("rt_hs", nil); err != nil {
 		t.Fatal(err)
 	}
 	close1()
@@ -596,7 +596,7 @@ func TestStreamOpenSendsBreakpointsBeforeTheBacklog(t *testing.T) {
 	r1, close1 := subscribe(t, rs, ts.URL, "rt_order", "")
 	defer close1()
 	nextEvent(t, r1) // the opening ping
-	if err := rs.SetBreakpoints("rt_order", []string{"refund"}, ""); err != nil {
+	if err := rs.SetBreakpoints("rt_order", []string{"refund"}); err != nil {
 		t.Fatal(err)
 	}
 	cmd := mustEnqueue(t, rs, "rt_order", Command{Agent: "acme-support"})

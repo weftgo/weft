@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
 )
@@ -138,4 +139,99 @@ func TestSessionTurnChildren(t *testing.T) {
 		}
 	}
 	t.Fatalf("no s_a-t1 among the session's runs: %s", body)
+}
+
+// TestOwnDelegatedUsage (U30.2-fix, UX-A-19): own_usage / delegated_usage
+// split a delegating run's usage only where every Subagent child is
+// read and in scope. A panel token that cannot see one child gets
+// neither (usage − own − delegated would be the hidden subtree's
+// figure, I4's rule); a failed or capped children read omits both.
+func TestOwnDelegatedUsage(t *testing.T) {
+	db := costDB(t)
+	t0 := time.Now().Add(-time.Hour).UTC()
+	own := core.Usage{InputTokens: 100, OutputTokens: 10}
+	mine := core.Usage{InputTokens: 20, OutputTokens: 2}
+	theirs := core.Usage{InputTokens: 7, OutputTokens: 3}
+	costUsagePub(t, db, "p", "", "", "pub_a", "anthropic", "claude-opus-5-5", t0, own.Add(mine).Add(theirs), own)
+	costUsagePub(t, db, "p/0/c1", "p", "", "pub_a", "anthropic", "claude-opus-5-5", t0.Add(time.Second), mine, mine)
+	costUsagePub(t, db, "p/0/c2", "p", "", "pub_b", "anthropic", "claude-opus-5-5", t0.Add(2*time.Second), theirs, theirs)
+	h := Handler(DB(db), Token("srv"))
+	panel, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type split struct {
+		Own *core.Usage `json:"own_usage"`
+		Del *core.Usage `json:"delegated_usage"`
+	}
+	read := func(path, tok string) split {
+		t.Helper()
+		code, _, body := getWith(t, h, path, tok, "")
+		if code != 200 {
+			t.Fatalf("%s: %d %s", path, code, body)
+		}
+		var s split
+		if strings.HasPrefix(path, "/studio/api/runs?") {
+			var page struct{ Runs []split }
+			decode(t, body, &page)
+			if len(page.Runs) != 1 {
+				t.Fatalf("%s: %s", path, body)
+			}
+			return page.Runs[0]
+		}
+		decode(t, body, &s)
+		return s
+	}
+	for _, path := range []string{"/studio/api/runs/p", "/studio/api/runs?public_id=pub_a"} {
+		s := read(path, "srv")
+		if s.Own == nil || *s.Own != own || s.Del == nil || *s.Del != mine.Add(theirs) {
+			t.Errorf("server %s: own %+v delegated %+v; want %+v and %+v", path, s.Own, s.Del, own, mine.Add(theirs))
+		}
+		if s := read(path, panel); s.Own != nil || s.Del != nil {
+			t.Errorf("panel token, a hidden child, %s: own %+v delegated %+v; want neither", path, s.Own, s.Del)
+		}
+	}
+	// A failed children read (the list's per-row read): neither.
+	code, _, body := get(t, Handler(DB(failingChildren{db})), "/studio/api/runs")
+	if code != 200 || !strings.Contains(body, `"children_unknown":true`) || strings.Contains(body, "own_usage") || strings.Contains(body, "delegated_usage") {
+		t.Errorf("failing children read: %d %s; want no split", code, body)
+	}
+}
+
+// TestOwnDelegatedUsageCapped: a run whose children are past the
+// coster's bound carries no split (its own usage cannot be told).
+func TestOwnDelegatedUsageCapped(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	prev := primeChildCap
+	primeChildCap = 2
+	t.Cleanup(func() { primeChildCap = prev })
+	at := time.Now().Add(-time.Hour)
+	seedAt(t, db, "p", "", "", at, true)
+	seedAt(t, db, "p/0/c1", "", "p", at.Add(time.Second), true)
+	for i, g := range []string{"g1", "g2", "g3"} {
+		seedAt(t, db, "p/0/c1/0/"+g, "", "p/0/c1", at.Add(time.Duration(2+i)*time.Second), true)
+	}
+	_, _, body := get(t, Handler(DB(db)), "/studio/api/runs?all=1")
+	var page struct {
+		Runs []struct {
+			ID  string      `json:"id"`
+			Own *core.Usage `json:"own_usage"`
+			Del *core.Usage `json:"delegated_usage"`
+		}
+	}
+	decode(t, body, &page)
+	found := false
+	for _, r := range page.Runs {
+		found = found || r.ID == "p/0/c1"
+		if r.ID == "p/0/c1" && (r.Own != nil || r.Del != nil) {
+			t.Errorf("a capped children read: %s carries own %+v delegated %+v; want neither", r.ID, r.Own, r.Del)
+		}
+	}
+	if !found {
+		t.Fatalf("p/0/c1 not listed: %s", body)
+	}
 }

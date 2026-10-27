@@ -504,6 +504,7 @@ func TestAuthMatrix(t *testing.T) {
 				return forbidden403
 			}},
 		{name: "GET /api/search?flow=&tag.<k>=<v>", method: "GET", path: fixed("/api/search?flow=f_checkout&tag.arena.batch=b1"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/sessions?id_prefix=", method: "GET", path: fixed("/api/sessions?id_prefix=s_"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/sessions?flow=", method: "GET", path: fixed("/api/sessions?flow=f_checkout"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/traces?tag.<k>=<v>&flow=", method: "GET", path: fixed("/api/traces?tag.arena.batch=b1&flow=f_checkout"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/traces?flow=&public_id=", method: "GET", path: func(res string) string { return "/api/traces?flow=f_checkout&public_id=" + public[res] },

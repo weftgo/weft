@@ -288,7 +288,9 @@ type runRow struct {
 	// identity reads (a panel token's out-of-scope child is in neither:
 	// own excludes it, delegated does not name it). Read time, from the
 	// children read the cost makes; both omitted on a run with no
-	// Subagent child, a running run, or when that read failed.
+	// Subagent child, a running run, when that read failed, or where a
+	// panel token cannot see one of its Subagent children (usage − own −
+	// delegated would be that hidden subtree's figure, I4's rule).
 	OwnUsage       *core.Usage `json:"own_usage,omitempty"`
 	DelegatedUsage *core.Usage `json:"delegated_usage,omitempty"`
 	// Holes is set on a run document's children[] rows only (plan
@@ -2251,7 +2253,8 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 // limit.
 func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	query := obsdb.SessionQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id"), Q: strings.TrimSpace(q.Get("q")), Meta: tagParams(q)}
+	query := obsdb.SessionQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id"), Q: strings.TrimSpace(q.Get("q")), Meta: tagParams(q),
+		IDPrefix: q.Get("id_prefix")} // U30.2: the ⌘K palette's lookup
 	var ok bool
 	if query.PublicID, query.Meta, ok = scopeQuery(w, r, query.PublicID, query.Meta, q.Get("public_id")); !ok {
 		return

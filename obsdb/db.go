@@ -728,16 +728,21 @@ type SessionQuery struct {
 	Q               string
 	Parents         []string
 	IDs             []string
-	Meta            map[string]string
-	Awaiting        bool
-	Failed          bool
-	Compacted       bool
-	Status          Status    // "" any; running, succeeded, failed or interrupted
-	Lineage         string    // "", LineageChild or LineageFork
-	Since           time.Time // zero = any
-	Before          time.Time // cursor on LastSeen; zero = newest
-	BeforeID        string    // with Before: the (LastSeen, ID) pair, as RunQuery.BeforeID
-	Limit           int       // 0 = 50, max 500
+	// IDPrefix keeps the sessions whose id starts with it, byte for
+	// byte (RunQuery.IDPrefix's rule: no wildcard, no case folding) —
+	// the ⌘K palette's lookup of a pasted short session id (U30.2). ""
+	// any.
+	IDPrefix  string
+	Meta      map[string]string
+	Awaiting  bool
+	Failed    bool
+	Compacted bool
+	Status    Status    // "" any; running, succeeded, failed or interrupted
+	Lineage   string    // "", LineageChild or LineageFork
+	Since     time.Time // zero = any
+	Before    time.Time // cursor on LastSeen; zero = newest
+	BeforeID  string    // with Before: the (LastSeen, ID) pair, as RunQuery.BeforeID
+	Limit     int       // 0 = 50, max 500
 }
 
 // SessionRow is one session: a GROUP BY over its own turns (D3; record

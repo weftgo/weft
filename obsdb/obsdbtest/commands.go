@@ -196,40 +196,60 @@ func commandsTable(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 			t.Errorf("Breakpoints before any put = %v, %v; want false", ok, err)
 		}
 		for _, set := range [][]string{{"refund", "send_email"}, {"refund"}, nil} {
-			if err := cs.PutBreakpoints(ctx(), "rt_1", obsdb.BreakpointSet{Tools: set}); err != nil {
+			if err := cs.PutBreakpoints(ctx(), "rt_1", set); err != nil {
 				t.Fatal(err)
 			}
 			want := set
 			if want == nil {
 				want = []string{}
 			}
-			if got, ok, err := cs.Breakpoints(ctx(), "rt_1"); err != nil || !ok || !reflect.DeepEqual(got.Tools, want) || !got.SetAt.IsZero() || got.SetBy != "" {
+			if got, ok, err := cs.Breakpoints(ctx(), "rt_1"); err != nil || !ok || !reflect.DeepEqual(got, want) {
 				t.Errorf("Breakpoints after put %v = %#v, %v, %v; want %#v", set, got, ok, err, want)
 			}
 		}
-		if err := cs.PutBreakpoints(ctx(), "", obsdb.BreakpointSet{Tools: []string{"x"}}); !errors.Is(err, obsdb.ErrInvalidCommand) {
+		if err := cs.PutBreakpoints(ctx(), "", []string{"x"}); !errors.Is(err, obsdb.ErrInvalidCommand) {
 			t.Errorf("PutBreakpoints without a runtime = %v, want ErrInvalidCommand", err)
 		}
-		// Provenance (U30.2, UX-A-33): when and through which surface a
-		// set was delivered is kept with it; a clear keeps none.
-		setAt := time.Date(2026, 10, 27, 9, 30, 0, 123456789, time.UTC)
-		withBy := obsdb.BreakpointSet{Tools: []string{"refund"}, SetAt: setAt, SetBy: "runtimes"}
-		if err := cs.PutBreakpoints(ctx(), "rt_by", withBy); err != nil {
-			t.Fatal(err)
-		}
-		if got, ok, err := cs.Breakpoints(ctx(), "rt_by"); err != nil || !ok || !reflect.DeepEqual(got.Tools, withBy.Tools) ||
-			!got.SetAt.Equal(setAt) || got.SetBy != "runtimes" {
-			t.Errorf("Breakpoints with provenance = %+v, %v, %v; want %+v", got, ok, err, withBy)
-		}
-		if err := cs.PutBreakpoints(ctx(), "rt_by", obsdb.BreakpointSet{SetAt: setAt, SetBy: "api"}); err != nil {
-			t.Fatal(err)
-		}
-		if got, ok, err := cs.Breakpoints(ctx(), "rt_by"); err != nil || !ok || len(got.Tools) != 0 || got.Tools == nil ||
-			!got.SetAt.IsZero() || got.SetBy != "" {
-			t.Errorf("a cleared set = %+v, %v, %v; want stored, empty, no provenance", got, ok, err)
-		}
-		if err := cs.DeleteRuntime(ctx(), "rt_by"); err != nil {
-			t.Fatal(err)
+		// Provenance (U30.2, UX-A-33; obsdb.BreakpointProvenanceStore,
+		// optional): when and through which surface a set was delivered
+		// is kept with it — Breakpoints reads its tools as before — and a
+		// clear keeps none.
+		if ps, ok := cs.(obsdb.BreakpointProvenanceStore); ok {
+			setAt := time.Date(2026, 10, 27, 9, 30, 0, 123456789, time.UTC)
+			withBy := obsdb.BreakpointSet{Tools: []string{"refund"}, SetAt: setAt, SetBy: "runtimes"}
+			if err := ps.PutBreakpointSet(ctx(), "rt_by", withBy); err != nil {
+				t.Fatal(err)
+			}
+			if got, ok, err := ps.BreakpointSet(ctx(), "rt_by"); err != nil || !ok || !reflect.DeepEqual(got.Tools, withBy.Tools) ||
+				!got.SetAt.Equal(setAt) || got.SetBy != "runtimes" {
+				t.Errorf("BreakpointSet with provenance = %+v, %v, %v; want %+v", got, ok, err, withBy)
+			}
+			if got, ok, err := cs.Breakpoints(ctx(), "rt_by"); err != nil || !ok || !reflect.DeepEqual(got, withBy.Tools) {
+				t.Errorf("Breakpoints of a provenance row = %v, %v, %v; want its tools", got, ok, err)
+			}
+			// A plain put after it: the tools, no provenance.
+			if err := cs.PutBreakpoints(ctx(), "rt_by", []string{"refund", "x"}); err != nil {
+				t.Fatal(err)
+			}
+			if got, ok, err := ps.BreakpointSet(ctx(), "rt_by"); err != nil || !ok || len(got.Tools) != 2 || !got.SetAt.IsZero() || got.SetBy != "" {
+				t.Errorf("BreakpointSet after a plain put = %+v, %v, %v; want no provenance", got, ok, err)
+			}
+			if err := ps.PutBreakpointSet(ctx(), "rt_by", obsdb.BreakpointSet{SetAt: setAt, SetBy: "api"}); err != nil {
+				t.Fatal(err)
+			}
+			if got, ok, err := ps.BreakpointSet(ctx(), "rt_by"); err != nil || !ok || len(got.Tools) != 0 || got.Tools == nil ||
+				!got.SetAt.IsZero() || got.SetBy != "" {
+				t.Errorf("a cleared set = %+v, %v, %v; want stored, empty, no provenance", got, ok, err)
+			}
+			if _, ok, err := ps.BreakpointSet(ctx(), "rt_none"); err != nil || ok {
+				t.Errorf("BreakpointSet(rt_none) = %v, %v; want false", ok, err)
+			}
+			if err := ps.PutBreakpointSet(ctx(), "", withBy); !errors.Is(err, obsdb.ErrInvalidCommand) {
+				t.Errorf("PutBreakpointSet without a runtime = %v, want ErrInvalidCommand", err)
+			}
+			if err := cs.DeleteRuntime(ctx(), "rt_by"); err != nil {
+				t.Fatal(err)
+			}
 		}
 
 		// Runtimes: put, replace, listed most recently seen first.
@@ -285,7 +305,7 @@ func commandsTable(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		if _, ok, err := cs.Route(ctx(), "run_1"); err != nil || !ok {
 			t.Errorf("Route(run_1) after DeleteRun = %v, %v; want kept", ok, err)
 		}
-		if got, ok, err := cs.Breakpoints(ctx(), "rt_1"); err != nil || !ok || len(got.Tools) != 0 {
+		if got, ok, err := cs.Breakpoints(ctx(), "rt_1"); err != nil || !ok || len(got) != 0 {
 			t.Errorf("Breakpoints after deletion = %v, %v, %v; want the stored clear", got, ok, err)
 		}
 		if got, err := cs.Runtimes(ctx()); err != nil || len(got) != 2 {
@@ -377,10 +397,10 @@ func commandsPrune(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := cs.PutBreakpoints(ctx(), "rt_stale_bp", obsdb.BreakpointSet{Tools: []string{"refund"}}); err != nil {
+		if err := cs.PutBreakpoints(ctx(), "rt_stale_bp", []string{"refund"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := cs.PutBreakpoints(ctx(), "rt_stale_clear", obsdb.BreakpointSet{Tools: nil}); err != nil {
+		if err := cs.PutBreakpoints(ctx(), "rt_stale_clear", nil); err != nil {
 			t.Fatal(err)
 		}
 
@@ -414,7 +434,7 @@ func commandsPrune(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		if _, ok, err := cs.Breakpoints(ctx(), "rt_stale_clear"); err != nil || ok {
 			t.Errorf("a pruned runtime's empty set = %v, %v; want gone", ok, err)
 		}
-		if got, ok, err := cs.Breakpoints(ctx(), "rt_stale_bp"); err != nil || !ok || len(got.Tools) != 1 {
+		if got, ok, err := cs.Breakpoints(ctx(), "rt_stale_bp"); err != nil || !ok || len(got) != 1 {
 			t.Errorf("a kept runtime's set = %v, %v, %v; want [refund]", got, ok, err)
 		}
 
@@ -441,7 +461,7 @@ func commandsPrune(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		// now, they are not stale); one past now takes the empty one,
 		// and nothing else is left for it to take.
 		for rt, set := range map[string][]string{"rt_orphan_clear": nil, "rt_orphan_bp": {"refund"}} {
-			if err := cs.PutBreakpoints(ctx(), rt, obsdb.BreakpointSet{Tools: set}); err != nil {
+			if err := cs.PutBreakpoints(ctx(), rt, set); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -453,7 +473,7 @@ func commandsPrune(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		if _, ok, err := cs.Breakpoints(ctx(), "rt_orphan_clear"); err != nil || ok {
 			t.Errorf("a stale orphan empty set = %v, %v; want gone", ok, err)
 		}
-		if got, ok, err := cs.Breakpoints(ctx(), "rt_orphan_bp"); err != nil || !ok || len(got.Tools) != 1 {
+		if got, ok, err := cs.Breakpoints(ctx(), "rt_orphan_bp"); err != nil || !ok || len(got) != 1 {
 			t.Errorf("an orphan non-empty set = %v, %v, %v; want [refund] kept", got, ok, err)
 		}
 		wantIDs(t, cs, obsdb.CommandQuery{}, "q2", "a1", "q1")
@@ -626,9 +646,15 @@ func CommandsRestart(t *testing.T, open func(t *testing.T) (first obsdb.DB, reop
 	if err := cs.PutRoute(ctx(), route); err != nil {
 		t.Fatal(err)
 	}
-	bp := obsdb.BreakpointSet{Tools: []string{"refund"}, SetAt: cmdAt(time.Minute), SetBy: "runtimes"}
-	if err := cs.PutBreakpoints(ctx(), "rt_1", bp); err != nil {
+	if err := cs.PutBreakpoints(ctx(), "rt_1", []string{"refund"}); err != nil {
 		t.Fatal(err)
+	}
+	// A provenance row beside it (U30.2), where the store keeps one.
+	bp := obsdb.BreakpointSet{Tools: []string{"lookup"}, SetAt: cmdAt(time.Minute), SetBy: "runtimes"}
+	if ps, ok := cs.(obsdb.BreakpointProvenanceStore); ok {
+		if err := ps.PutBreakpointSet(ctx(), "rt_2", bp); err != nil {
+			t.Fatal(err)
+		}
 	}
 	rt := obsdb.StoredRuntime{ID: "rt_1", Service: "shop", Pid: 7, Agents: []string{"support"}, Registered: cmdAt(0), LastSeen: cmdAt(time.Minute)}
 	if err := cs.PutRuntime(ctx(), rt); err != nil {
@@ -650,9 +676,14 @@ func CommandsRestart(t *testing.T, open func(t *testing.T) (first obsdb.DB, reop
 	if got, ok, err := cs2.Route(ctx(), "run_1"); err != nil || !ok || !sameRoute(got, route) {
 		t.Errorf("after reopen Route = %+v, %v, %v; want %+v", got, ok, err, route)
 	}
-	if got, ok, err := cs2.Breakpoints(ctx(), "rt_1"); err != nil || !ok || !reflect.DeepEqual(got.Tools, bp.Tools) ||
-		!got.SetAt.Equal(bp.SetAt) || got.SetBy != bp.SetBy {
+	if got, ok, err := cs2.Breakpoints(ctx(), "rt_1"); err != nil || !ok || !reflect.DeepEqual(got, []string{"refund"}) {
 		t.Errorf("after reopen Breakpoints = %v, %v, %v", got, ok, err)
+	}
+	if ps, ok := cs2.(obsdb.BreakpointProvenanceStore); ok {
+		if got, ok, err := ps.BreakpointSet(ctx(), "rt_2"); err != nil || !ok || !reflect.DeepEqual(got.Tools, bp.Tools) ||
+			!got.SetAt.Equal(bp.SetAt) || got.SetBy != bp.SetBy {
+			t.Errorf("after reopen BreakpointSet = %+v, %v, %v; want %+v", got, ok, err, bp)
+		}
 	}
 	if got, err := cs2.Runtimes(ctx()); err != nil || len(got) != 1 || !sameRuntime(got[0], rt) {
 		t.Errorf("after reopen Runtimes = %+v, %v; want [%+v]", got, err, rt)

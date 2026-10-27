@@ -1056,15 +1056,17 @@ describe("the ⌘K palette", () => {
         sort: "started",
         next_offset: null,
       })
-      // The sessions search matches an id anywhere: a row holding the
-      // text mid-id is not exact.
+      // A server that ignored id_prefix answers a row holding the text
+      // mid-id too: never exact.
       .on("GET sessions", (req) => ({
         ...sessions,
         sessions: [
           { ...sessions.sessions[0], id: sess },
           { ...sessions.sessions[0], id: "aa5e55a0b1" },
         ].filter(
-          (x) => !req.query.get("q") || x.id.includes(req.query.get("q")!)
+          (x) =>
+            !req.query.get("id_prefix") ||
+            x.id.includes(req.query.get("id_prefix")!)
         ),
       }))
       .on("GET traces", (req) => ({
@@ -1087,6 +1089,14 @@ describe("the ⌘K palette", () => {
       ).toEqual([sess])
     )
     expect(kinds()[0]).toBe(`session:${sess}`)
+    expect(
+      studio
+        .calls("GET sessions")
+        .some((r) => r.query.get("id_prefix") === "5e55a0")
+    ).toBe(true)
+    expect(studio.calls("GET sessions").some((r) => r.query.has("q"))).toBe(
+      false
+    )
     type(input, "7ace0d1e")
     await waitFor(() => expect(kinds()[0]).toBe(`trace:${trace}`))
     expect(

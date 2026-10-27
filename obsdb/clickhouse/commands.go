@@ -24,7 +24,10 @@ import (
 // these tables; PruneCommands deletes from them with the same
 // synchronous lightweight DELETE the run deletions use.
 
-var _ obsdb.CommandStore = (*DB)(nil)
+var (
+	_ obsdb.CommandStore              = (*DB)(nil)
+	_ obsdb.BreakpointProvenanceStore = (*DB)(nil)
+)
 
 func nsOf(t time.Time) int64 {
 	if t.IsZero() {
@@ -179,7 +182,19 @@ func (d *DB) Route(ctx context.Context, runID string) (_ obsdb.RunRoute, _ bool,
 }
 
 // PutBreakpoints replaces runtimeID's set whole.
-func (d *DB) PutBreakpoints(ctx context.Context, runtimeID string, bp obsdb.BreakpointSet) (err error) {
+func (d *DB) PutBreakpoints(ctx context.Context, runtimeID string, tools []string) error {
+	return d.PutBreakpointSet(ctx, runtimeID, obsdb.BreakpointSet{Tools: tools})
+}
+
+// Breakpoints answers runtimeID's stored set.
+func (d *DB) Breakpoints(ctx context.Context, runtimeID string) ([]string, bool, error) {
+	bp, ok, err := d.BreakpointSet(ctx, runtimeID)
+	return bp.Tools, ok, err
+}
+
+// PutBreakpointSet replaces runtimeID's set whole, with its provenance
+// (obsdb.BreakpointProvenanceStore).
+func (d *DB) PutBreakpointSet(ctx context.Context, runtimeID string, bp obsdb.BreakpointSet) (err error) {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
@@ -195,8 +210,9 @@ func (d *DB) PutBreakpoints(ctx context.Context, runtimeID string, bp obsdb.Brea
 		runtimeID, set, time.Now().UnixNano())
 }
 
-// Breakpoints answers runtimeID's stored set.
-func (d *DB) Breakpoints(ctx context.Context, runtimeID string) (_ obsdb.BreakpointSet, _ bool, err error) {
+// BreakpointSet answers runtimeID's stored set with its provenance
+// (obsdb.BreakpointProvenanceStore).
+func (d *DB) BreakpointSet(ctx context.Context, runtimeID string) (_ obsdb.BreakpointSet, _ bool, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.BreakpointSet{}, false, err
 	}

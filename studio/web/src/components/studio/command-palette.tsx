@@ -175,17 +175,19 @@ export function CommandPalette({
   })
   const sessions = useQuery({ ...sessionsQuery({}), enabled: open })
   const tracesOn = has("traces")
-  // A session and a trace by id prefix too (UX-A-13): the sessions
-  // search matches an id anywhere, exactSessions keeps the prefixed.
-  const sessKey = look.idPrefix ?? look.publicId
+  // A session and a trace by id prefix too (UX-A-13): GET
+  // /api/sessions?id_prefix= and ?public_id=, /api/traces?id_prefix=.
   const sessByPrefix = useQuery({
-    queryKey: ["palette", "session_prefix", sessKey],
+    queryKey: ["palette", "session_prefix", look.idPrefix],
     staleTime: 5_000,
-    queryFn: () =>
-      fetchSessions(
-        look.idPrefix ? { q: look.idPrefix } : { public_id: look.publicId }
-      ),
-    enabled: open && !!sessKey,
+    queryFn: () => fetchSessions({ id_prefix: look.idPrefix }),
+    enabled: open && !!look.idPrefix,
+  })
+  const sessByPublic = useQuery({
+    queryKey: ["palette", "session_public", look.publicId],
+    staleTime: 5_000,
+    queryFn: () => fetchSessions({ public_id: look.publicId }),
+    enabled: open && !!look.publicId,
   })
   const traceByPrefix = useQuery({
     queryKey: ["palette", "trace_prefix", look.idPrefix],
@@ -230,7 +232,10 @@ export function CommandPalette({
     : []
   const exactIDs = new Set(exact.map((r) => r.id))
   const exactSess = settled
-    ? exactSessions(look, sessByPrefix.data?.sessions)
+    ? exactSessions(look, [
+        ...(sessByPrefix.data?.sessions ?? []),
+        ...(sessByPublic.data?.sessions ?? []),
+      ])
     : []
   const exactSessIDs = new Set(exactSess.map((x) => x.id))
   const exactTr =

@@ -1804,6 +1804,13 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 			narrowArgs, condArgs = append(narrowArgs, id), append(condArgs, id)
 		}
 	}
+	if q.IDPrefix != "" {
+		// SessionQuery.IDPrefix: bytes, no wildcard, no case folding —
+		// narrowed before the collapse as IDs is.
+		narrows = append(narrows, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE startsWith(r.SessionID, ?))")
+		cond += " AND startsWith(SessionID, ?)"
+		narrowArgs, condArgs = append(narrowArgs, q.IDPrefix), append(condArgs, q.IDPrefix)
+	}
 	narrow := ""
 	if len(narrows) > 0 {
 		narrow = " WHERE " + strings.Join(narrows, " AND ")

@@ -13,7 +13,10 @@ import { tokens } from "./format"
 export const CHANGED_ONLY = {
   label: "changed only",
   title:
-    "show only the steps a compared run changed and the columns that changed in any of them; the marks stay",
+    "show only the steps a compared run changed and the columns that changed in any of them; the marks stay (on by default when any step differs)",
+  focusHidden: (step: number) =>
+    `step ${step}, the step this link named, is the same on every run: hidden under changed only`,
+  showAll: "show all steps",
 } as const
 
 /** stepsDiffer is "3 of 41 steps differ" (the toggle's count). */

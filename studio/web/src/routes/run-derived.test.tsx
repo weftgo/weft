@@ -10,6 +10,7 @@ import {
   act,
   cleanup,
   configure,
+  fireEvent,
   screen,
   waitFor,
 } from "@testing-library/react"
@@ -83,6 +84,15 @@ afterEach(() => {
 function saysStock(text: string | null | undefined, where: string) {
   expect(text, where).toContain(STOCK.reason)
   expect(text, where).toContain(STOCK.fix)
+}
+
+/** The compare page starts on the changed steps (U30.2-fix): the
+ * full grid is a click away. */
+function showAllSteps() {
+  const t = document.querySelector<HTMLButtonElement>(
+    "[data-diff-changed-only]"
+  )
+  if (t?.getAttribute("aria-pressed") === "true") fireEvent.click(t)
 }
 
 describe("the stock_spans words (one closed table)", () => {
@@ -667,6 +677,7 @@ describe("a derived run in the compare page", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-step-diff] tbody tr")).toBeTruthy()
     )
+    showAllSteps()
     const row0 = document.querySelector<HTMLElement>(
       "[data-step-diff] tbody tr[data-diff-step='0']"
     )!

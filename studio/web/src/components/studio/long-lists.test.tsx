@@ -16,6 +16,7 @@ import { StepList } from "@/components/studio/step-list"
 import { Waterfall } from "@/components/studio/waterfall"
 import { renderWithRouter } from "@/test/render"
 import { scrollTo, stubScroll } from "@/test/scroll"
+import { stubViewport } from "@/test/layout"
 
 const ROW = 25
 const AXIS = 25
@@ -102,6 +103,50 @@ describe("the virtualised waterfall's geometry", () => {
     expect(checked).toBe(keys.length)
     // The whole height: the axis, every row, nothing more.
     expect(offset).toBe(AXIS + N * ROW)
+  })
+})
+
+describe("the virtualised waterfall across 480 px (U30.2-fix, UX-A-21)", () => {
+  it("re-measures its rows: the spacers follow the compact row height both ways", () => {
+    const N = 1_000
+    const spans: Span[] = Array.from({ length: N }, (_, i) => ({
+      id: `r${i}`,
+      runId: "r_wf",
+      key: `k${i}`,
+      depth: 0,
+      kind: "step",
+      label: `row ${i}`,
+      tone: "step",
+      from: i,
+      to: i,
+    }))
+    const resize = stubViewport(1280)
+    render(
+      <Waterfall
+        spans={spans}
+        domain={[0, N - 1]}
+        playhead={null}
+        selectedId="r0"
+        onSelect={() => {}}
+      />
+    )
+    const box = document.querySelector<HTMLElement>(".waterfall")!
+    const total = (row: number) => {
+      const tree = box.querySelector('[role="tree"]')!
+      let offset = AXIS
+      for (const el of [...tree.children]) {
+        if (el.hasAttribute("data-spacer"))
+          offset += Number.parseFloat((el as HTMLElement).style.height)
+        else if (el.getAttribute("data-span")) offset += row
+      }
+      return offset
+    }
+    expect(total(ROW)).toBe(AXIS + N * ROW)
+    act(() => resize(360))
+    expect(box.hasAttribute("data-compact")).toBe(true)
+    expect(total(32)).toBe(AXIS + N * 32)
+    act(() => resize(1280))
+    expect(total(ROW)).toBe(AXIS + N * ROW)
   })
 })
 

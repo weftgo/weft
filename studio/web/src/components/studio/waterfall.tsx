@@ -247,6 +247,11 @@ export function Waterfall({
     getItemKey: (i) => visible[i]?.id ?? i,
     ...shared(selIndex),
   })
+  // Across 480 px the rows change height (COMPACT_ROW_PX): the
+  // virtualiser measures them again, or its spacers keep the old ones.
+  useEffect(() => {
+    virt.measure()
+  }, [compact, virt])
   const items = virt.getVirtualItems()
   const shown = virtual ? items.map((it) => visible[it.index]) : visible
   // A spacer before every row that does not follow on from the one

@@ -50,14 +50,13 @@ type CommandStore interface {
 	// Route answers the route of runID; false when none is stored.
 	Route(ctx context.Context, runID string) (RunRoute, bool, error)
 	// PutBreakpoints replaces runtimeID's breakpoint set whole; an empty
-	// Tools stores the empty set (a clear), which Breakpoints then
-	// answers as stored — its SetAt and SetBy are not kept.
-	// ErrInvalidCommand for an empty runtimeID.
-	PutBreakpoints(ctx context.Context, runtimeID string, set BreakpointSet) error
-	// Breakpoints answers runtimeID's stored set (Tools never nil when
+	// tools stores the empty set (a clear), which Breakpoints then
+	// answers as stored. ErrInvalidCommand for an empty runtimeID.
+	PutBreakpoints(ctx context.Context, runtimeID string, tools []string) error
+	// Breakpoints answers runtimeID's stored set (never nil when
 	// stored); false when none was ever stored — distinct from a stored
 	// empty set, which a registering runtime's own set must not replace.
-	Breakpoints(ctx context.Context, runtimeID string) (BreakpointSet, bool, error)
+	Breakpoints(ctx context.Context, runtimeID string) ([]string, bool, error)
 	// PutRuntime writes r, replacing any row under r.ID whole. Zero
 	// Registered or LastSeen is stamped with the current time on every
 	// write, so the caller carries Registered into each upsert.
@@ -103,11 +102,27 @@ type CommandStore interface {
 	PruneCommands(ctx context.Context, before time.Time, keep int) (int, error)
 }
 
+// BreakpointProvenanceStore is the optional breakpoints-with-provenance
+// capability of a CommandStore (U30.2, UX-A-33): the set together with
+// when and through which surface Studio delivered it, so a restarted
+// Studio still says "set by <surface> at <time>". Both first-party
+// backends implement it; the runtime server type-asserts it and falls
+// back to PutBreakpoints / Breakpoints (no provenance) without it.
+// The rows are the same: PutBreakpoints is PutBreakpointSet with Tools
+// alone, and Breakpoints reads a provenance row's tools.
+type BreakpointProvenanceStore interface {
+	// PutBreakpointSet is PutBreakpoints keeping set.SetAt and set.SetBy
+	// (a clear — empty Tools — keeps neither).
+	PutBreakpointSet(ctx context.Context, runtimeID string, set BreakpointSet) error
+	// BreakpointSet is Breakpoints with the stored provenance (zero
+	// SetAt, empty SetBy when none was kept). Tools never nil when stored.
+	BreakpointSet(ctx context.Context, runtimeID string) (BreakpointSet, bool, error)
+}
+
 // BreakpointSet is one runtime's breakpoints as the store keeps them
-// (U30.2, UX-A-33): the tools, and — for a set Studio delivered — when
-// and through which surface it was set, so a restarted Studio still
-// says "set by <surface> at <time>". A set adopted from a runtime's
-// registration carries neither.
+// (BreakpointProvenanceStore): the tools, and — for a set Studio
+// delivered — when and through which surface it was set. A set
+// adopted from a runtime's registration carries neither.
 type BreakpointSet struct {
 	Tools []string
 	// SetAt is when Studio delivered the set (zero: not known).

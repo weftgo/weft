@@ -841,7 +841,11 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 	if n := c.hiddenSubs[rec.ID]; n > 0 {
 		del = scopeCutDelegated(del, n, len(c.scope.Tags) > 0)
 	}
-	split := len(subs) > 0 || c.hiddenSubs[rec.ID] > 0
+	// The split is served only when every Subagent child is in scope: a
+	// child out of a panel token's scope makes usage − own − delegated
+	// its hidden subtree's figure (I4's rule), and the delegated cost is
+	// unknown there already.
+	split := len(subs) > 0 && c.hiddenSubs[rec.ID] == 0
 	if why := usagePending(rec); why != "" {
 		// A running run carries no usage yet: no split to show.
 		return runCost{own: cost{badge: costUnknown, reason: why, cache: cacheOf(own)}, delegated: del}

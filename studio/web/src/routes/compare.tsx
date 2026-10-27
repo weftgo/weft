@@ -136,7 +136,7 @@ function ComparePage() {
         }
       />
       {a && others.length ? (
-        <StepCompare base={a} others={others} focus={step} />
+        <StepCompare base={a} others={others} focus={step} changedOnlyDefault />
       ) : null}
     </div>
   )

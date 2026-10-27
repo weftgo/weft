@@ -1324,6 +1324,16 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		having = append(having, "MAX(agent) = ?")
 		hargs = append(hargs, q.Agent)
 	}
+	if q.IDPrefix != "" {
+		// RunQuery.IDPrefix's byte range on the session id.
+		if hi, ok := prefixEnd(q.IDPrefix); ok {
+			having = append(having, "session_id >= ? AND session_id < ?")
+			hargs = append(hargs, q.IDPrefix, hi)
+		} else {
+			having = append(having, "session_id >= ? AND substr(CAST(session_id AS BLOB), 1, ?) = CAST(? AS BLOB)")
+			hargs = append(hargs, q.IDPrefix, len(q.IDPrefix), q.IDPrefix)
+		}
+	}
 	if q.Q != "" {
 		title, targs := sessionTitleExpr(ts)
 		prompt, pargs := sessionPromptExpr(ts)

@@ -2344,6 +2344,9 @@ export function traceQuery(traceId: string) {
 export interface SessionFilters {
   agent?: string
   public_id?: string
+  /** The sessions whose id starts with it, byte for byte
+   * (obsdb.SessionQuery.IDPrefix, U30.2). */
+  id_prefix?: string
   /** Text: every term in the title, first prompt, id, public id or
    * agent (obsdb.SessionQuery.Q). */
   q?: string
@@ -2372,6 +2375,7 @@ export function fetchSessions(
   if (filters.agent) params.set("agent", filters.agent)
   if (filters.public_id) params.set("public_id", filters.public_id)
   if (filters.q) params.set("q", filters.q)
+  if (filters.id_prefix) params.set("id_prefix", filters.id_prefix)
   if (filters.awaiting) params.set("awaiting", "1")
   if (filters.failed) params.set("failed", "1")
   if (filters.compacted) params.set("compacted", "1")

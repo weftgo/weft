@@ -232,7 +232,12 @@ func (rs *RuntimeServer) saveBreakpointsLocked(id string, c *connected) {
 	}
 	set := obsdb.BreakpointSet{Tools: append([]string{}, c.breakpoints...), SetAt: c.breakpointsSetAt, SetBy: c.breakpointsSurface}
 	rs.writer.put(writeKey{"breakpoints", id}, false, func(ctx context.Context, st obsdb.CommandStore) error {
-		return st.PutBreakpoints(ctx, id, set)
+		// The provenance where the store keeps it (an optional
+		// capability, obsdb.BreakpointProvenanceStore), else the tools.
+		if ps, ok := st.(obsdb.BreakpointProvenanceStore); ok {
+			return ps.PutBreakpointSet(ctx, id, set)
+		}
+		return st.PutBreakpoints(ctx, id, set.Tools)
 	})
 }
 
@@ -404,7 +409,7 @@ func (rs *RuntimeServer) load() {
 		}
 		reg.RuntimeID = sr.ID
 		c := &connected{reg: reg, connectedSince: sr.Registered, lastSeen: sr.LastSeen, stored: sr.LastSeen, restored: true}
-		if bp, ok, err := rs.store.Breakpoints(ctx, sr.ID); err == nil && ok {
+		if bp, ok, err := storedBreakpoints(ctx, rs.store, sr.ID); err == nil && ok {
 			c.breakpoints, c.breakpointsBy = bp.Tools, BreakpointsByStore
 			c.breakpointsSetAt, c.breakpointsSurface = bp.SetAt, bp.SetBy
 		}
@@ -923,4 +928,14 @@ func (w *storeWriter) close(ctx context.Context) error {
 		}
 		return ctx.Err()
 	}
+}
+
+// storedBreakpoints reads a runtime's stored set, with its provenance
+// where the store keeps it (obsdb.BreakpointProvenanceStore).
+func storedBreakpoints(ctx context.Context, st obsdb.CommandStore, id string) (obsdb.BreakpointSet, bool, error) {
+	if ps, ok := st.(obsdb.BreakpointProvenanceStore); ok {
+		return ps.BreakpointSet(ctx, id)
+	}
+	tools, ok, err := st.Breakpoints(ctx, id)
+	return obsdb.BreakpointSet{Tools: tools}, ok, err
 }

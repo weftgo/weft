@@ -116,6 +116,15 @@ const listed = () =>
     tr.querySelector("[data-run-link]")?.getAttribute("data-run-link")
   )
 
+/** The compare page starts on the changed steps (U30.2-fix): the
+ * full grid is a click away. */
+function showAllSteps() {
+  const t = document.querySelector<HTMLButtonElement>(
+    "[data-diff-changed-only]"
+  )
+  if (t?.getAttribute("aria-pressed") === "true") fireEvent.click(t)
+}
+
 describe("the runs table's Cost column", () => {
   const list = [priced("r_cheap", 0.0042), priced("r_dear", 0.5, 0.25), rStale]
   const withUnpriced = [...list, rFail]
@@ -586,6 +595,10 @@ describe("the compare table's cost column", () => {
     serveCompare(["diff", "pricing", "steps"])
     renderApp('/compare?a=r_da&b=["r_db"]')
     await waitFor(() =>
+      expect(document.querySelector("[data-diff-changed-only]")).toBeTruthy()
+    )
+    showAllSteps()
+    await waitFor(() =>
       expect(costCell(2, "r_db")?.getAttribute("data-diff-state")).toBe(
         "unknown"
       )
@@ -617,6 +630,7 @@ describe("the compare table's cost column", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-step-diff]")).toBeTruthy()
     )
+    showAllSteps()
     expect(document.querySelector('[data-diff-cell="cost"]')).toBeNull()
     expect(studio.requests.some((r) => /\/steps\//.test(r.path))).toBe(false)
   })

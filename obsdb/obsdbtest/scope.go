@@ -2,6 +2,7 @@ package obsdbtest
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -165,6 +166,33 @@ func sessionsScoped(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if other, err := db.Sessions(ctx(), obsdb.SessionQuery{PublicID: "pub_a", Agent: "other"}); err != nil || other.Total != 0 {
 			t.Errorf("pub_a + agent other = %+v (%v), want empty: the derived agent is not pub_a's", other, err)
+		}
+		// IDPrefix (U30.2, the ⌘K palette): bytes, no wildcard, no case
+		// folding, composing with the scope.
+		for _, c := range []struct {
+			q    obsdb.SessionQuery
+			want []string
+		}{
+			{obsdb.SessionQuery{IDPrefix: "s_a"}, []string{"s_a2"}},
+			{obsdb.SessionQuery{IDPrefix: "s_"}, []string{"s_a2", "s_b", "s_col", "s_der"}},
+			{obsdb.SessionQuery{IDPrefix: "S_A"}, nil},
+			{obsdb.SessionQuery{IDPrefix: "s%"}, nil},
+			{obsdb.SessionQuery{IDPrefix: "_a"}, nil},
+			{obsdb.SessionQuery{IDPrefix: "s_c", PublicID: "pub_a"}, []string{"s_col"}},
+			{obsdb.SessionQuery{IDPrefix: "s_b", PublicID: "pub_a"}, nil},
+		} {
+			got, err := db.Sessions(ctx(), c.q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			for _, s := range got.Sessions {
+				ids = append(ids, s.ID)
+			}
+			slices.Sort(ids)
+			if !slices.Equal(ids, c.want) || got.Total != len(c.want) {
+				t.Errorf("IDPrefix %+v = %v (total %d), want %v", c.q, ids, got.Total, c.want)
+			}
 		}
 	}
 }

@@ -103,17 +103,21 @@ func catalogHash(tools []*ToolDef) (string, error) {
 
 // requestBody is the request record's body (ADR 0028 §3).
 type requestBody struct {
-	Step            int              `json:"step"`
-	Attempt         int64            `json:"attempt"`
-	SystemHash      string           `json:"system_hash"`
-	MessagesRef     messagesRef      `json:"messages_ref"`
-	Tools           requestTools     `json:"tools"`
-	ToolChoice      *toolChoiceBody  `json:"tool_choice,omitempty"`
-	Thinking        *thinkingBody    `json:"thinking,omitempty"`
-	SequentialTools bool             `json:"sequential_tools"`
-	Params          paramsBody       `json:"params"`
-	Model           requestModelBody `json:"model"`
-	Stream          bool             `json:"stream"`
+	Step            int             `json:"step"`
+	Attempt         int64           `json:"attempt"`
+	SystemHash      string          `json:"system_hash"`
+	MessagesRef     messagesRef     `json:"messages_ref"`
+	Tools           requestTools    `json:"tools"`
+	ToolChoice      *toolChoiceBody `json:"tool_choice,omitempty"`
+	Thinking        *thinkingBody   `json:"thinking,omitempty"`
+	SequentialTools bool            `json:"sequential_tools"`
+	// Parallelism is the step's Parallelism dial (UX-S2-07): how many
+	// of its tool calls may run at once — the agent's, or the run's
+	// lower one; 1 under Sequential(). A bounded int, content-free.
+	Parallelism int              `json:"parallelism"`
+	Params      paramsBody       `json:"params"`
+	Model       requestModelBody `json:"model"`
+	Stream      bool             `json:"stream"`
 	// Prepared names the parts of the request the agent's PrepareStep
 	// chain changed (O9, UX-E-14), in this order: system, messages,
 	// tools, tool_choice, params, thinking, sequential_tools. Names
@@ -290,6 +294,9 @@ type stepInputs struct {
 	before   ModelRequest
 	tools    []*ToolDef
 	prepared bool
+	// parallelism is the step's Parallelism dial (the agent's, or the
+	// run's lower one): how many of its tool calls may run at once.
+	parallelism int
 }
 
 // thinkingWire asks the model chain how it sends a thinking level: the
@@ -807,6 +814,7 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 		MessagesRef:     messagesRef{Count: len(req.Messages)},
 		Tools:           requestTools{CatalogHash: catalog, Names: names},
 		SequentialTools: req.SequentialTools,
+		Parallelism:     in.parallelism,
 		Params: paramsBody{
 			Temperature: req.Params.Temperature,
 			TopP:        req.Params.TopP,

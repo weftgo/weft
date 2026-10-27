@@ -22,6 +22,7 @@ import {
   factsFromRows,
   factsFromStep,
   attemptsHole,
+  giveUpLine,
   relMs,
   msText,
   timingLine,
@@ -212,6 +213,14 @@ function AttemptsPane({ doc, running }: { doc: StepDoc; running: boolean }) {
           {rows.map((a, i) => (
             <AttemptRow key={`${a.attempt}-${i}`} a={a} from={doc.started} />
           ))}
+          {giveUpLine(rows) ? (
+            <li
+              className={`font-mono text-[11px] ${STATUS_TEXT.error}`}
+              data-gave-up={rows.at(-1)?.giveup_reason ?? ""}
+            >
+              {giveUpLine(rows)}
+            </li>
+          ) : null}
         </ul>
       ) : badge ? null : running ? (
         <span className="font-mono text-[11px] text-muted-foreground">

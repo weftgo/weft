@@ -144,6 +144,9 @@
           "retry_budget": 1
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": [
         "truncated"
       ],

@@ -749,7 +749,7 @@ function cut(r: RequestRow | undefined): boolean {
 function toolChips(t: ToolEntry): HTMLElement {
   const box = el("div", "weft-holes")
   for (const c of [
-    `timeout ${t.timeout_ms > 0 ? `${t.timeout_ms}ms` : "none"}`,
+    `timeout ${t.timeout_ms > 0 ? `${t.timeout_ms} ms` : "none"}`,
     `approval ${t.approval ? "required" : "no"}`,
     `replay ${t.replay || "never"}`,
     `result cap ${t.max_result_bytes > 0 ? bytes(t.max_result_bytes) : "off"}`,

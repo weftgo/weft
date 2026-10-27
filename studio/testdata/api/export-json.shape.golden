@@ -114,6 +114,7 @@
 .requests.requests[].body.model.name=string
 .requests.requests[].body.model.provider=string
 .requests.requests[].body.model{}
+.requests.requests[].body.parallelism=float64
 .requests.requests[].body.params{}
 .requests.requests[].body.prepared[]
 .requests.requests[].body.prepared[]=string

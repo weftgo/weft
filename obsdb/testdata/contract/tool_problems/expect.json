@@ -119,6 +119,9 @@
           "denied_by": "allow"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     }
   ]

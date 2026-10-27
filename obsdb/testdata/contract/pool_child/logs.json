@@ -544,7 +544,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"aa35f511d4a143544335a0308501b355d7f74c9f6b0ac810b9db223a59dce92d\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"f385ebc427fee6e897db3bd9090479e8c5ef8be3212547e06520e3916185343a\",\"names\":[\"market_analyst\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"aa35f511d4a143544335a0308501b355d7f74c9f6b0ac810b9db223a59dce92d\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"f385ebc427fee6e897db3bd9090479e8c5ef8be3212547e06520e3916185343a\",\"names\":[\"market_analyst\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1218,7 +1218,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"ae3add3bbfc7abf8ea26282b1f904504f255f78826f2d466d435ff975f85f014\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"\",\"names\":[]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"ae3add3bbfc7abf8ea26282b1f904504f255f78826f2d466d435ff975f85f014\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"\",\"names\":[]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -2058,7 +2058,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"aa35f511d4a143544335a0308501b355d7f74c9f6b0ac810b9db223a59dce92d\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"f385ebc427fee6e897db3bd9090479e8c5ef8be3212547e06520e3916185343a\",\"names\":[\"market_analyst\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"aa35f511d4a143544335a0308501b355d7f74c9f6b0ac810b9db223a59dce92d\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"f385ebc427fee6e897db3bd9090479e8c5ef8be3212547e06520e3916185343a\",\"names\":[\"market_analyst\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,

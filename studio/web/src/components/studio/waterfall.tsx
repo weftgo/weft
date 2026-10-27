@@ -14,8 +14,16 @@ import { ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react"
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { useMediaQuery } from "@/hooks/use-media-query"
 
+import { BARRIER, BARRIER_HINT } from "@/lib/concurrency"
 import type { Span, SpanTone } from "@/lib/trace"
-import { KIND_ICON, took } from "@/lib/waterfall"
+import {
+  KIND_ICON,
+  OFFSET_HEAD,
+  OFFSET_HINT,
+  offsetText,
+  took,
+  waitWords,
+} from "@/lib/waterfall"
 
 const toneBar: Record<SpanTone, string> = {
   step: "bg-ev-step/60",
@@ -101,6 +109,11 @@ function pct(v: number, [lo, hi]: [number, number]): number {
  * row's figure back beside its name): the bars stay at phone width. */
 const COLS =
   "grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_3.5rem] max-[480px]:grid-flow-row-dense max-[480px]:grid-cols-[minmax(0,1fr)_3.5rem]"
+/** On the time scale a fourth column, the row's offset from the run's
+ * start ("+4 ms", UX-F-16) before its duration; under COMPACT it is
+ * left out (the duration's hover keeps it). */
+const COLS_TIME =
+  "grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_4rem_3.5rem] max-[480px]:grid-flow-row-dense max-[480px]:grid-cols-[minmax(0,1fr)_3.5rem]"
 
 /** The width under which the tree draws its compact bars. */
 const COMPACT = "(max-width: 480px)"
@@ -167,6 +180,8 @@ export function Waterfall({
   // The time axis reads humanised (UX-A-23: 7.7s, not 7737), each row
   // its duration with its offset on hover; positions stay ranges.
   const time = unit === "ms"
+  const cols = time ? COLS_TIME : COLS
+  const span = time ? "col-span-4" : "col-span-3"
   const at = playhead ?? hi + 1
   const ticks = useMemo(() => {
     const n = Math.min(4, Math.max(1, total - 1))
@@ -286,7 +301,7 @@ export function Waterfall({
       {/* The axis: a sticky header row outside the tree (axe
           aria-required-children: a tree owns treeitems alone), on the
           tree's own columns. */}
-      <div className={`sticky top-0 z-10 grid ${COLS}`} data-waterfall-head>
+      <div className={`sticky top-0 z-10 grid ${cols}`} data-waterfall-head>
         <div className="flex items-center gap-2 border-b bg-secondary/80 px-2 py-1 text-[10px] tracking-wide text-faint uppercase backdrop-blur">
           {head}
           {/* Under 480 px the words become two icons (UX-F-35): the
@@ -357,12 +372,20 @@ export function Waterfall({
             ))}
           </div>
         </div>
+        {time ? (
+          <div
+            className="border-b bg-secondary/80 px-2 py-1 text-right text-[10px] tracking-wide text-faint uppercase backdrop-blur max-[480px]:hidden"
+            title={OFFSET_HINT}
+          >
+            {OFFSET_HEAD}
+          </div>
+        ) : null}
         <div className="border-b bg-secondary/80 px-2 py-1 text-right text-[10px] tracking-wide text-faint uppercase backdrop-blur">
           {unit === "event" ? "events" : unit}
         </div>
       </div>
       <div
-        className={`grid ${COLS} outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset`}
+        className={`grid ${cols} outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset`}
         role="tree"
         aria-label={label}
         tabIndex={0}
@@ -383,7 +406,7 @@ export function Waterfall({
             <Fragment key={sp.id}>
               {gap > 0 ? (
                 <div
-                  className="col-span-3 max-[480px]:col-span-2"
+                  className={`${span} max-[480px]:col-span-2`}
                   style={{ height: gap }}
                   aria-hidden
                   data-spacer
@@ -481,6 +504,15 @@ export function Waterfall({
                       </a>
                     )
                   })()}
+                  {sp.barrier ? (
+                    <span
+                      className="shrink-0 text-[9.5px] text-muted-foreground"
+                      title={BARRIER_HINT}
+                      data-barrier
+                    >
+                      {BARRIER}
+                    </span>
+                  ) : null}
                   {sp.badge ? (
                     <span
                       className={`max-w-28 shrink-0 truncate rounded-full border px-1.5 text-[9.5px] leading-4 ${selectedInk(sp.tone, selected) ? "border-ev-error/50 text-foreground" : badgeTone[sp.tone]}`}
@@ -514,6 +546,19 @@ export function Waterfall({
                     }`}
                     style={{ left: `${left}%`, width: `${width}%` }}
                   />
+                  {sp.wait && time ? (
+                    // The wait before an attempt (UX-S2-02): a hatch
+                    // ending where its bar starts.
+                    <div
+                      className="waterfall-hatched absolute top-1.5 h-3 rounded-[2px] bg-ev-step/30 max-[480px]:top-0 max-[480px]:h-1.5"
+                      style={{
+                        left: `${pct(Math.max(lo, sp.from - sp.wait), domain)}%`,
+                        width: `${Math.max(0.3, pct(sp.from, domain) - pct(Math.max(lo, sp.from - sp.wait), domain))}%`,
+                      }}
+                      title={waitWords(sp.wait)}
+                      data-wait={sp.wait}
+                    />
+                  ) : null}
                   {playhead !== null && at <= hi ? (
                     <>
                       <div
@@ -527,10 +572,19 @@ export function Waterfall({
                     </>
                   ) : null}
                 </div>
+                {time ? (
+                  <div
+                    className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums max-[480px]:hidden ${cell(selected)}`}
+                    onClick={() => onSelect?.(sp)}
+                    data-offset
+                  >
+                    {sp.untimed ? "—" : offsetText(sp.from)}
+                  </div>
+                ) : null}
                 <div
                   className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums max-[480px]:h-6 max-[480px]:border-b-0 ${cell(selected)}`}
                   onClick={() => onSelect?.(sp)}
-                  title={time ? `+${took(sp.from)}` : undefined}
+                  title={time ? offsetText(sp.from) : undefined}
                 >
                   {sp.untimed
                     ? "—"
@@ -550,7 +604,7 @@ export function Waterfall({
         })}
         {pads.after > 0 ? (
           <div
-            className="col-span-3 max-[480px]:col-span-2"
+            className={`${span} max-[480px]:col-span-2`}
             style={{ height: pads.after }}
             aria-hidden
             data-spacer

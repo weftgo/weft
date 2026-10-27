@@ -27,10 +27,10 @@ describe("callGraph", () => {
       ["a:inventory-specialist", 2, [INV]],
     ])
     expect(g.edges.map((e) => [e.from, e.to, edgeLabel(e)])).toEqual([
-      ["a:director", "a:ops-manager", "1× · 9.3ms"],
-      ["a:ops-manager", "a:inventory-specialist", "1× · 7.3ms"],
+      ["a:director", "a:ops-manager", "1× · 9.3 ms"],
+      ["a:ops-manager", "a:inventory-specialist", "1× · 7.3 ms"],
     ])
-    expect(nodeLine(g.nodes[0])).toBe("1 run · slowest 14.0ms")
+    expect(nodeLine(g.nodes[0])).toBe("1 run · slowest 14.0 ms")
   })
 
   it("shares the tree's selection: a run's node", () => {
@@ -57,9 +57,9 @@ describe("callGraph", () => {
     const w = g2.nodes.find((n) => n.id === "a:inventory-specialist")!
     expect(w.runs).toEqual([INV, second])
     expect(w.fails).toBe(1)
-    expect(nodeLine(w)).toBe("2 runs · slowest 7.3ms · 1 failed")
+    expect(nodeLine(w)).toBe("2 runs · slowest 7.3 ms · 1 failed")
     const e = g2.edges.find((x) => x.to === w.id)!
-    expect(edgeLabel(e)).toBe("2× · 7.3ms · 1 failed")
+    expect(edgeLabel(e)).toBe("2× · 7.3 ms · 1 failed")
     // Its status line (U34-fix4, UX-S3-14): the worst of its runs —
     // from the spans with no row, a row's words where the page read one.
     const st = nodeStatus(w)!
@@ -126,7 +126,7 @@ describe("callGraph", () => {
       label: "mcp:billing",
       depth: 1,
     })
-    expect(nodeLine(m)).toBe("2 calls · slowest 100µs")
+    expect(nodeLine(m)).toBe("2 calls · slowest 100 µs")
     expect(g2.edges.find((e) => e.to === m.id)).toMatchObject({
       from: "a:director",
       count: 2,
@@ -161,7 +161,7 @@ describe("callGraph", () => {
       ["a:director", "a:director", 1],
       ["a:director", "a:worker", 1],
     ])
-    expect(loopLabel(g2.edges[0])).toBe("↻ 1× · 18.0ms")
+    expect(loopLabel(g2.edges[0])).toBe("↻ 1× · 18.0 ms")
   })
 
   it("a child run's tools whose catalog the page did not read are listed unsourced, never guessed", () => {
@@ -242,7 +242,7 @@ describe("MCP identity in the graph (U23.2, O8)", () => {
     expect([m.calls, m.fails, m.unreachable, m.refused, m.toolErrors]).toEqual([
       4, 3, 1, 1, 1,
     ])
-    expect(nodeLine(m)).toBe("4 calls · slowest 47.0ms · 3 failed")
+    expect(nodeLine(m)).toBe("4 calls · slowest 47.0 ms · 3 failed")
     expect(mcpFailLine(m)).toBe("1 unreachable · 1 refused · 1 tool error")
     // An origin that only starts with "mcp" is no MCP server (U23.2-fix).
     expect(

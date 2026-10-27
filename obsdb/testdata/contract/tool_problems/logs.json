@@ -364,7 +364,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"1244de53bb5652e768d315e3a6be285f7a35447476640995a1e713e9252a0bcf\",\"names\":[\"charge_card\",\"lookup_order\",\"order_history\",\"delete_order\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"1244de53bb5652e768d315e3a6be285f7a35447476640995a1e713e9252a0bcf\",\"names\":[\"charge_card\",\"lookup_order\",\"order_history\",\"delete_order\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -804,7 +804,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"1244de53bb5652e768d315e3a6be285f7a35447476640995a1e713e9252a0bcf\",\"names\":[\"charge_card\",\"lookup_order\",\"order_history\",\"delete_order\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"1244de53bb5652e768d315e3a6be285f7a35447476640995a1e713e9252a0bcf\",\"names\":[\"charge_card\",\"lookup_order\",\"order_history\",\"delete_order\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1244,7 +1244,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":2,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":4,\"count\":5},\"tools\":{\"catalog_hash\":\"1244de53bb5652e768d315e3a6be285f7a35447476640995a1e713e9252a0bcf\",\"names\":[\"charge_card\",\"lookup_order\",\"order_history\",\"delete_order\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":2,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":4,\"count\":5},\"tools\":{\"catalog_hash\":\"1244de53bb5652e768d315e3a6be285f7a35447476640995a1e713e9252a0bcf\",\"names\":[\"charge_card\",\"lookup_order\",\"order_history\",\"delete_order\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1690,7 +1690,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":3,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":6,\"count\":7},\"tools\":{\"catalog_hash\":\"1244de53bb5652e768d315e3a6be285f7a35447476640995a1e713e9252a0bcf\",\"names\":[\"charge_card\",\"lookup_order\",\"order_history\",\"delete_order\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":3,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":6,\"count\":7},\"tools\":{\"catalog_hash\":\"1244de53bb5652e768d315e3a6be285f7a35447476640995a1e713e9252a0bcf\",\"names\":[\"charge_card\",\"lookup_order\",\"order_history\",\"delete_order\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -2130,7 +2130,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":4,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":8,\"count\":9},\"tools\":{\"catalog_hash\":\"1244de53bb5652e768d315e3a6be285f7a35447476640995a1e713e9252a0bcf\",\"names\":[\"charge_card\",\"lookup_order\",\"order_history\",\"delete_order\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":4,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":8,\"count\":9},\"tools\":{\"catalog_hash\":\"1244de53bb5652e768d315e3a6be285f7a35447476640995a1e713e9252a0bcf\",\"names\":[\"charge_card\",\"lookup_order\",\"order_history\",\"delete_order\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,

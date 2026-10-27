@@ -285,6 +285,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -381,6 +382,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -788,6 +790,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -884,6 +887,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -1281,6 +1285,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -1377,6 +1382,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -1488,12 +1494,1313 @@
       }
     ]
   },
+  "conc.parallelism": {
+    "run": {
+      "id": "r_par",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "7ace000000000000000000000000000d",
+      "agent": "fanout",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "(manifest)",
+      "weft_version": "(test)",
+      "service": "(test)",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {},
+      "started": "2026-10-01T09:00:00Z",
+      "finished": "2026-10-01T09:00:00Z",
+      "last_seen": "2026-10-01T09:00:00Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 2,
+      "pending": 0,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "events_emitted": 14,
+      "messages_emitted": 4,
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "cost_usd": 0,
+      "cost_known": true,
+      "cost_badge": "scripted",
+      "cost_reason": "a scripted model: nothing bills it, an exact $0",
+      "cache": "exact",
+      "delegated_cost_usd": 0,
+      "delegated_cost_known": true,
+      "event_count": 14,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+      "request_count": 2,
+      "prompt_preview": "fan out",
+      "children": [],
+      "holes": [],
+      "compactions": []
+    },
+    "events": {
+      "events": [
+        {
+          "pos": 0,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "run_start",
+            "id": "r_par",
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "agent": "fanout",
+            "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "pos": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_start",
+            "run_id": "r_par",
+            "index": 0
+          }
+        },
+        {
+          "pos": 2,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_par",
+            "seq": 1,
+            "call_id": "p1",
+            "name": "a",
+            "args": {}
+          }
+        },
+        {
+          "pos": 3,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_par",
+            "seq": 2,
+            "call_id": "p2",
+            "name": "b",
+            "args": {}
+          }
+        },
+        {
+          "pos": 4,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_par",
+            "seq": 3,
+            "call_id": "p1",
+            "name": "a",
+            "content": "a done",
+            "is_error": false
+          }
+        },
+        {
+          "pos": 5,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_par",
+            "seq": 4,
+            "call_id": "p3",
+            "name": "c",
+            "args": {}
+          }
+        },
+        {
+          "pos": 6,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_par",
+            "seq": 5,
+            "call_id": "p3",
+            "name": "c",
+            "content": "c done",
+            "is_error": false
+          }
+        },
+        {
+          "pos": 7,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_par",
+            "seq": 6,
+            "call_id": "p2",
+            "name": "b",
+            "content": "b done",
+            "is_error": false
+          }
+        },
+        {
+          "pos": 8,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_start",
+            "run_id": "r_par",
+            "seq": 7,
+            "call_id": "p4",
+            "name": "barrier",
+            "args": {}
+          }
+        },
+        {
+          "pos": 9,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_par",
+            "seq": 8,
+            "call_id": "p4",
+            "name": "barrier",
+            "content": "barrier done",
+            "is_error": false
+          }
+        },
+        {
+          "pos": 10,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_finish",
+            "run_id": "r_par",
+            "index": 0,
+            "reason": "tool_calls",
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            },
+            "latency_ms": 1
+          }
+        },
+        {
+          "pos": 11,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_start",
+            "run_id": "r_par",
+            "index": 1
+          }
+        },
+        {
+          "pos": 12,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_finish",
+            "run_id": "r_par",
+            "index": 1,
+            "reason": "stop",
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            },
+            "latency_ms": 1,
+            "ttft_ms": 1
+          }
+        },
+        {
+          "pos": 13,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "run_finish",
+            "run_id": "r_par",
+            "usage": {
+              "input_tokens": 20,
+              "output_tokens": 10
+            },
+            "steps": 2,
+            "stopped_by": "final_answer"
+          }
+        }
+      ],
+      "next_after": null,
+      "done": true,
+      "gaps": []
+    },
+    "transcript": {
+      "batches": [
+        {
+          "index": 0,
+          "step": 0,
+          "input": true,
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "fan out"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "step": 0,
+          "input": false,
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_call",
+                  "id": "p1",
+                  "name": "a",
+                  "args": {}
+                },
+                {
+                  "type": "tool_call",
+                  "id": "p2",
+                  "name": "b",
+                  "args": {}
+                },
+                {
+                  "type": "tool_call",
+                  "id": "p3",
+                  "name": "c",
+                  "args": {}
+                },
+                {
+                  "type": "tool_call",
+                  "id": "p4",
+                  "name": "barrier",
+                  "args": {}
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "step": 0,
+          "input": false,
+          "messages": [
+            {
+              "role": "tool",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "call_id": "p1",
+                  "name": "a",
+                  "content": "a done",
+                  "is_error": false
+                },
+                {
+                  "type": "tool_result",
+                  "call_id": "p2",
+                  "name": "b",
+                  "content": "b done",
+                  "is_error": false
+                },
+                {
+                  "type": "tool_result",
+                  "call_id": "p3",
+                  "name": "c",
+                  "content": "c done",
+                  "is_error": false
+                },
+                {
+                  "type": "tool_result",
+                  "call_id": "p4",
+                  "name": "barrier",
+                  "content": "barrier done",
+                  "is_error": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "step": 1,
+          "input": false,
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "all done"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "spans": {
+      "spans": [
+        {
+          "attrs": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.response.finish_reasons": [
+              "tool_calls"
+            ],
+            "gen_ai.response.model": "script",
+            "gen_ai.usage.input_tokens": 10,
+            "gen_ai.usage.output_tokens": 5,
+            "weft.model.tool_calls": 4,
+            "weft.run.id": "r_par",
+            "weft.step.index": 0,
+            "weft.stream": true
+          },
+          "end": "2026-10-01T09:00:00Z",
+          "events": [],
+          "kind": "client",
+          "name": "chat script",
+          "parent_span_id": "5ba000000000000e",
+          "run_id": "r_par",
+          "service": "(test)",
+          "span_id": "5ba000000000000f",
+          "start": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "trace_id": "7ace000000000000000000000000000d"
+        },
+        {
+          "attrs": {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.response.finish_reasons": [
+              "stop"
+            ],
+            "gen_ai.response.model": "script",
+            "gen_ai.usage.input_tokens": 10,
+            "gen_ai.usage.output_tokens": 5,
+            "weft.model.tool_calls": 0,
+            "weft.run.id": "r_par",
+            "weft.step.index": 1,
+            "weft.stream": true,
+            "weft.ttft_ms": 1
+          },
+          "end": "2026-10-01T09:00:00Z",
+          "events": [],
+          "kind": "client",
+          "name": "chat script",
+          "parent_span_id": "5ba000000000000e",
+          "run_id": "r_par",
+          "service": "(test)",
+          "span_id": "5ba0000000000010",
+          "start": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "trace_id": "7ace000000000000000000000000000d"
+        },
+        {
+          "attrs": {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "p1",
+            "gen_ai.tool.name": "a",
+            "weft.run.id": "r_par",
+            "weft.step.index": 0,
+            "weft.tool.result_bytes": 6,
+            "weft.tool.seq": 1
+          },
+          "end": "2026-10-01T09:00:00Z",
+          "events": [],
+          "kind": "internal",
+          "name": "execute_tool a",
+          "parent_span_id": "5ba000000000000e",
+          "run_id": "r_par",
+          "service": "(test)",
+          "span_id": "5ba0000000000011",
+          "start": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "trace_id": "7ace000000000000000000000000000d"
+        },
+        {
+          "attrs": {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "p2",
+            "gen_ai.tool.name": "b",
+            "weft.run.id": "r_par",
+            "weft.step.index": 0,
+            "weft.tool.result_bytes": 6,
+            "weft.tool.seq": 2
+          },
+          "end": "2026-10-01T09:00:00Z",
+          "events": [],
+          "kind": "internal",
+          "name": "execute_tool b",
+          "parent_span_id": "5ba000000000000e",
+          "run_id": "r_par",
+          "service": "(test)",
+          "span_id": "5ba0000000000012",
+          "start": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "trace_id": "7ace000000000000000000000000000d"
+        },
+        {
+          "attrs": {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "p4",
+            "gen_ai.tool.name": "barrier",
+            "weft.run.id": "r_par",
+            "weft.step.index": 0,
+            "weft.tool.result_bytes": 12,
+            "weft.tool.seq": 7
+          },
+          "end": "2026-10-01T09:00:00Z",
+          "events": [],
+          "kind": "internal",
+          "name": "execute_tool barrier",
+          "parent_span_id": "5ba000000000000e",
+          "run_id": "r_par",
+          "service": "(test)",
+          "span_id": "5ba0000000000013",
+          "start": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "trace_id": "7ace000000000000000000000000000d"
+        },
+        {
+          "attrs": {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "p3",
+            "gen_ai.tool.name": "c",
+            "weft.run.id": "r_par",
+            "weft.step.index": 0,
+            "weft.tool.result_bytes": 6,
+            "weft.tool.seq": 4
+          },
+          "end": "2026-10-01T09:00:00Z",
+          "events": [],
+          "kind": "internal",
+          "name": "execute_tool c",
+          "parent_span_id": "5ba000000000000e",
+          "run_id": "r_par",
+          "service": "(test)",
+          "span_id": "5ba0000000000014",
+          "start": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "trace_id": "7ace000000000000000000000000000d"
+        },
+        {
+          "attrs": {
+            "gen_ai.agent.name": "fanout",
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.usage.input_tokens": 20,
+            "gen_ai.usage.output_tokens": 10,
+            "weft.instructions.hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "weft.manifest.hash": "(manifest)",
+            "weft.run.events": 14,
+            "weft.run.id": "r_par",
+            "weft.run.messages": 4,
+            "weft.run.steps": 2,
+            "weft.run.stop_reason": "stop",
+            "weft.run.stopped_by": "final_answer",
+            "weft.version": "(test)"
+          },
+          "end": "2026-10-01T09:00:00Z",
+          "events": [],
+          "kind": "internal",
+          "name": "invoke_agent fanout",
+          "parent_span_id": "",
+          "run_id": "r_par",
+          "service": "(test)",
+          "span_id": "5ba000000000000e",
+          "start": "2026-10-01T09:00:00Z",
+          "status": "ok",
+          "status_message": "",
+          "trace_id": "7ace000000000000000000000000000d"
+        }
+      ]
+    },
+    "requests": {
+      "requests": [
+        {
+          "index": 0,
+          "step": 0,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+              "names": [
+                "a",
+                "b",
+                "c",
+                "barrier"
+              ]
+            },
+            "sequential_tools": false,
+            "parallelism": 2,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+            "tools": [
+              {
+                "name": "a",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "b",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "barrier",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "local"
+              },
+              {
+                "name": "c",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          },
+          "raw": null,
+          "raw_badge": "not_recorded",
+          "raw_reason": "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+          "raw_fix": "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+        },
+        {
+          "index": 1,
+          "step": 1,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 1,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 2,
+              "count": 3
+            },
+            "tools": {
+              "catalog_hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+              "names": [
+                "a",
+                "b",
+                "c",
+                "barrier"
+              ]
+            },
+            "sequential_tools": false,
+            "parallelism": 2,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+            "tools": [
+              {
+                "name": "a",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "b",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "barrier",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "local"
+              },
+              {
+                "name": "c",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          },
+          "raw": null,
+          "raw_badge": "not_recorded",
+          "raw_reason": "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+          "raw_fix": "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+        }
+      ]
+    },
+    "tools": {
+      "catalogs": [
+        {
+          "hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+          "tools": [
+            {
+              "name": "a",
+              "description": "Nap.",
+              "schema": {
+                "type": "object"
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": false,
+              "source": "local"
+            },
+            {
+              "name": "b",
+              "description": "Nap.",
+              "schema": {
+                "type": "object"
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": false,
+              "source": "local"
+            },
+            {
+              "name": "barrier",
+              "description": "Nap.",
+              "schema": {
+                "type": "object"
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": true,
+              "source": "local"
+            },
+            {
+              "name": "c",
+              "description": "Nap.",
+              "schema": {
+                "type": "object"
+              },
+              "timeout_ms": 0,
+              "approval": false,
+              "replay": "never",
+              "max_result_bytes": 65536,
+              "sequential": false,
+              "source": "local"
+            }
+          ],
+          "content": "",
+          "truncated_bytes": 0
+        }
+      ]
+    },
+    "steps": [
+      {
+        "run_id": "r_par",
+        "step": 0,
+        "status": "ok",
+        "reason": "tool_calls",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": "2026-10-01T09:00:00Z",
+        "latency_ms": 1,
+        "model": {
+          "provider": "wefttest",
+          "requested": "script",
+          "answered": "script"
+        },
+        "request": {
+          "index": 0,
+          "step": 0,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+              "names": [
+                "a",
+                "b",
+                "c",
+                "barrier"
+              ]
+            },
+            "sequential_tools": false,
+            "parallelism": 2,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+            "tools": [
+              {
+                "name": "a",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "b",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "barrier",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "local"
+              },
+              {
+                "name": "c",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          }
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "model": "script",
+            "provider": "wefttest",
+            "outcome": "ok",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z",
+            "span_id": "5ba000000000000f",
+            "request_index": 0
+          }
+        ],
+        "messages_in": {
+          "index": 0,
+          "count": 1
+        },
+        "events": [
+          {
+            "pos": 1,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_start",
+              "run_id": "r_par",
+              "index": 0
+            }
+          },
+          {
+            "pos": 2,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_par",
+              "seq": 1,
+              "call_id": "p1",
+              "name": "a",
+              "args": {}
+            }
+          },
+          {
+            "pos": 3,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_par",
+              "seq": 2,
+              "call_id": "p2",
+              "name": "b",
+              "args": {}
+            }
+          },
+          {
+            "pos": 4,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_par",
+              "seq": 3,
+              "call_id": "p1",
+              "name": "a",
+              "content": "a done",
+              "is_error": false
+            }
+          },
+          {
+            "pos": 5,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_par",
+              "seq": 4,
+              "call_id": "p3",
+              "name": "c",
+              "args": {}
+            }
+          },
+          {
+            "pos": 6,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_par",
+              "seq": 5,
+              "call_id": "p3",
+              "name": "c",
+              "content": "c done",
+              "is_error": false
+            }
+          },
+          {
+            "pos": 7,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_par",
+              "seq": 6,
+              "call_id": "p2",
+              "name": "b",
+              "content": "b done",
+              "is_error": false
+            }
+          },
+          {
+            "pos": 8,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_start",
+              "run_id": "r_par",
+              "seq": 7,
+              "call_id": "p4",
+              "name": "barrier",
+              "args": {}
+            }
+          },
+          {
+            "pos": 9,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_par",
+              "seq": 8,
+              "call_id": "p4",
+              "name": "barrier",
+              "content": "barrier done",
+              "is_error": false
+            }
+          },
+          {
+            "pos": 10,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_finish",
+              "run_id": "r_par",
+              "index": 0,
+              "reason": "tool_calls",
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+              },
+              "latency_ms": 1
+            }
+          }
+        ],
+        "tool_calls": [
+          {
+            "call_id": "p1",
+            "name": "a",
+            "seq": 1,
+            "args": {},
+            "result": {
+              "content": "a done",
+              "is_error": false,
+              "bytes": 6
+            },
+            "span": {
+              "id": "5ba0000000000011",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "ok"
+            }
+          },
+          {
+            "call_id": "p2",
+            "name": "b",
+            "seq": 2,
+            "args": {},
+            "result": {
+              "content": "b done",
+              "is_error": false,
+              "bytes": 6
+            },
+            "span": {
+              "id": "5ba0000000000012",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "ok"
+            }
+          },
+          {
+            "call_id": "p3",
+            "name": "c",
+            "seq": 4,
+            "args": {},
+            "result": {
+              "content": "c done",
+              "is_error": false,
+              "bytes": 6
+            },
+            "span": {
+              "id": "5ba0000000000014",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "ok"
+            }
+          },
+          {
+            "call_id": "p4",
+            "name": "barrier",
+            "seq": 7,
+            "args": {},
+            "result": {
+              "content": "barrier done",
+              "is_error": false,
+              "bytes": 12
+            },
+            "span": {
+              "id": "5ba0000000000013",
+              "started": "2026-10-01T09:00:00Z",
+              "finished": "2026-10-01T09:00:00Z",
+              "status": "ok"
+            }
+          }
+        ],
+        "children": [],
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "cost_badge": "scripted",
+        "cost_reason": "a scripted model: nothing bills it, an exact $0",
+        "cache": "exact",
+        "holes": []
+      },
+      {
+        "run_id": "r_par",
+        "step": 1,
+        "status": "ok",
+        "reason": "stop",
+        "started": "2026-10-01T09:00:00Z",
+        "finished": "2026-10-01T09:00:00Z",
+        "latency_ms": 1,
+        "ttft_ms": 1,
+        "model": {
+          "provider": "wefttest",
+          "requested": "script",
+          "answered": "script"
+        },
+        "request": {
+          "index": 1,
+          "step": 1,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 1,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 2,
+              "count": 3
+            },
+            "tools": {
+              "catalog_hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+              "names": [
+                "a",
+                "b",
+                "c",
+                "barrier"
+              ]
+            },
+            "sequential_tools": false,
+            "parallelism": 2,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "tools": {
+            "hash": "b908a89e191d4dd8959bcb51ac69918ba2da15325b2d259f0c2f5d22c085e10a",
+            "tools": [
+              {
+                "name": "a",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "b",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              },
+              {
+                "name": "barrier",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": true,
+                "source": "local"
+              },
+              {
+                "name": "c",
+                "description": "Nap.",
+                "schema": {
+                  "type": "object"
+                },
+                "timeout_ms": 0,
+                "approval": false,
+                "replay": "never",
+                "max_result_bytes": 65536,
+                "sequential": false,
+                "source": "local"
+              }
+            ],
+            "content": "",
+            "truncated_bytes": 0
+          }
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "model": "script",
+            "provider": "wefttest",
+            "outcome": "ok",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z",
+            "span_id": "5ba0000000000010",
+            "request_index": 1
+          }
+        ],
+        "messages_in": {
+          "index": 2,
+          "count": 3
+        },
+        "events": [
+          {
+            "pos": 11,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_start",
+              "run_id": "r_par",
+              "index": 1
+            }
+          },
+          {
+            "pos": 12,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_finish",
+              "run_id": "r_par",
+              "index": 1,
+              "reason": "stop",
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+              },
+              "latency_ms": 1,
+              "ttft_ms": 1
+            }
+          }
+        ],
+        "tool_calls": [],
+        "children": [],
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "cost_badge": "scripted",
+        "cost_reason": "a scripted model: nothing bills it, an exact $0",
+        "cache": "exact",
+        "holes": []
+      }
+    ]
+  },
   "loop.max-tokens-tools": {
     "run": {
       "id": "r_maxtok",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace000000000000000000000000000d",
+      "trace_id": "7ace0000000000000000000000000015",
       "agent": "echoer",
       "model": {
         "provider": "wefttest",
@@ -1792,8 +3099,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace000000000000000000000000000d",
-          "span_id": "5ba000000000000e",
+          "trace_id": "7ace0000000000000000000000000015",
+          "span_id": "5ba0000000000016",
           "parent_span_id": "",
           "name": "invoke_agent echoer",
           "kind": "internal",
@@ -1823,9 +3130,9 @@
           "run_id": "r_maxtok"
         },
         {
-          "trace_id": "7ace000000000000000000000000000d",
-          "span_id": "5ba000000000000f",
-          "parent_span_id": "5ba000000000000e",
+          "trace_id": "7ace0000000000000000000000000015",
+          "span_id": "5ba0000000000017",
+          "parent_span_id": "5ba0000000000016",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -1852,9 +3159,9 @@
           "run_id": "r_maxtok"
         },
         {
-          "trace_id": "7ace000000000000000000000000000d",
-          "span_id": "5ba0000000000010",
-          "parent_span_id": "5ba000000000000e",
+          "trace_id": "7ace0000000000000000000000000015",
+          "span_id": "5ba0000000000018",
+          "parent_span_id": "5ba0000000000016",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -1881,9 +3188,9 @@
           "run_id": "r_maxtok"
         },
         {
-          "trace_id": "7ace000000000000000000000000000d",
-          "span_id": "5ba0000000000011",
-          "parent_span_id": "5ba000000000000e",
+          "trace_id": "7ace0000000000000000000000000015",
+          "span_id": "5ba0000000000019",
+          "parent_span_id": "5ba0000000000016",
           "name": "execute_tool echo",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -1904,9 +3211,9 @@
           "run_id": "r_maxtok"
         },
         {
-          "trace_id": "7ace000000000000000000000000000d",
-          "span_id": "5ba0000000000012",
-          "parent_span_id": "5ba000000000000e",
+          "trace_id": "7ace0000000000000000000000000015",
+          "span_id": "5ba000000000001a",
+          "parent_span_id": "5ba0000000000016",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -1961,6 +3268,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -2025,6 +3333,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -2089,6 +3398,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -2201,6 +3511,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -2245,7 +3556,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000000f",
+            "span_id": "5ba0000000000017",
             "request_index": 0
           }
         ],
@@ -2347,6 +3658,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -2391,7 +3703,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000010",
+            "span_id": "5ba0000000000018",
             "request_index": 1
           }
         ],
@@ -2466,7 +3778,7 @@
               "bytes": 5
             },
             "span": {
-              "id": "5ba0000000000011",
+              "id": "5ba0000000000019",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "ok"
@@ -2523,6 +3835,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -2567,7 +3880,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000012",
+            "span_id": "5ba000000000001a",
             "request_index": 2
           }
         ],
@@ -2622,7 +3935,7 @@
       "id": "r_parts",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000013",
+      "trace_id": "7ace000000000000000000000000001b",
       "agent": "vision",
       "model": {
         "provider": "wefttest",
@@ -2780,8 +4093,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000013",
-          "span_id": "5ba0000000000014",
+          "trace_id": "7ace000000000000000000000000001b",
+          "span_id": "5ba000000000001c",
           "parent_span_id": "",
           "name": "invoke_agent vision",
           "kind": "internal",
@@ -2811,9 +4124,9 @@
           "run_id": "r_parts"
         },
         {
-          "trace_id": "7ace0000000000000000000000000013",
-          "span_id": "5ba0000000000015",
-          "parent_span_id": "5ba0000000000014",
+          "trace_id": "7ace000000000000000000000000001b",
+          "span_id": "5ba000000000001d",
+          "parent_span_id": "5ba000000000001c",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -2866,6 +4179,7 @@
               "names": []
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -2920,6 +4234,7 @@
               "names": []
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -2936,7 +4251,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000015",
+            "span_id": "5ba000000000001d",
             "request_index": 0
           }
         ],
@@ -2991,7 +4306,7 @@
       "id": "r_allow",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000016",
+      "trace_id": "7ace000000000000000000000000001e",
       "agent": "ops-shell",
       "model": {
         "provider": "wefttest",
@@ -3272,8 +4587,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000016",
-          "span_id": "5ba0000000000017",
+          "trace_id": "7ace000000000000000000000000001e",
+          "span_id": "5ba000000000001f",
           "parent_span_id": "",
           "name": "invoke_agent ops-shell",
           "kind": "internal",
@@ -3303,9 +4618,9 @@
           "run_id": "r_allow"
         },
         {
-          "trace_id": "7ace0000000000000000000000000016",
-          "span_id": "5ba0000000000018",
-          "parent_span_id": "5ba0000000000017",
+          "trace_id": "7ace000000000000000000000000001e",
+          "span_id": "5ba0000000000020",
+          "parent_span_id": "5ba000000000001f",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -3332,9 +4647,9 @@
           "run_id": "r_allow"
         },
         {
-          "trace_id": "7ace0000000000000000000000000016",
-          "span_id": "5ba0000000000019",
-          "parent_span_id": "5ba0000000000017",
+          "trace_id": "7ace000000000000000000000000001e",
+          "span_id": "5ba0000000000021",
+          "parent_span_id": "5ba000000000001f",
           "name": "execute_tool delete_path",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -3356,9 +4671,9 @@
           "run_id": "r_allow"
         },
         {
-          "trace_id": "7ace0000000000000000000000000016",
-          "span_id": "5ba000000000001a",
-          "parent_span_id": "5ba0000000000017",
+          "trace_id": "7ace000000000000000000000000001e",
+          "span_id": "5ba0000000000022",
+          "parent_span_id": "5ba000000000001f",
           "name": "execute_tool disk_usage",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -3379,9 +4694,9 @@
           "run_id": "r_allow"
         },
         {
-          "trace_id": "7ace0000000000000000000000000016",
-          "span_id": "5ba000000000001b",
-          "parent_span_id": "5ba0000000000017",
+          "trace_id": "7ace000000000000000000000000001e",
+          "span_id": "5ba0000000000023",
+          "parent_span_id": "5ba000000000001f",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -3437,6 +4752,7 @@
               ]
             },
             "sequential_tools": true,
+            "parallelism": 1,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -3523,6 +4839,7 @@
               ]
             },
             "sequential_tools": true,
+            "parallelism": 1,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -3678,6 +4995,7 @@
               ]
             },
             "sequential_tools": true,
+            "parallelism": 1,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -3743,7 +5061,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000018",
+            "span_id": "5ba0000000000020",
             "request_index": 0
           }
         ],
@@ -3845,7 +5163,7 @@
               "bytes": 41
             },
             "span": {
-              "id": "5ba0000000000019",
+              "id": "5ba0000000000021",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "error"
@@ -3864,7 +5182,7 @@
               "bytes": 14
             },
             "span": {
-              "id": "5ba000000000001a",
+              "id": "5ba0000000000022",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "ok"
@@ -3922,6 +5240,7 @@
               ]
             },
             "sequential_tools": true,
+            "parallelism": 1,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -3987,7 +5306,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000001b",
+            "span_id": "5ba0000000000023",
             "request_index": 1
           }
         ],
@@ -4042,7 +5361,7 @@
       "id": "r_repair",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace000000000000000000000000001c",
+      "trace_id": "7ace0000000000000000000000000024",
       "agent": "echoer",
       "model": {
         "provider": "wefttest",
@@ -4281,8 +5600,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace000000000000000000000000001c",
-          "span_id": "5ba000000000001d",
+          "trace_id": "7ace0000000000000000000000000024",
+          "span_id": "5ba0000000000025",
           "parent_span_id": "",
           "name": "invoke_agent echoer",
           "kind": "internal",
@@ -4312,9 +5631,9 @@
           "run_id": "r_repair"
         },
         {
-          "trace_id": "7ace000000000000000000000000001c",
-          "span_id": "5ba000000000001e",
-          "parent_span_id": "5ba000000000001d",
+          "trace_id": "7ace0000000000000000000000000024",
+          "span_id": "5ba0000000000026",
+          "parent_span_id": "5ba0000000000025",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -4352,9 +5671,9 @@
           "run_id": "r_repair"
         },
         {
-          "trace_id": "7ace000000000000000000000000001c",
-          "span_id": "5ba000000000001f",
-          "parent_span_id": "5ba000000000001d",
+          "trace_id": "7ace0000000000000000000000000024",
+          "span_id": "5ba0000000000027",
+          "parent_span_id": "5ba0000000000025",
           "name": "execute_tool echo",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -4376,9 +5695,9 @@
           "run_id": "r_repair"
         },
         {
-          "trace_id": "7ace000000000000000000000000001c",
-          "span_id": "5ba0000000000020",
-          "parent_span_id": "5ba000000000001d",
+          "trace_id": "7ace0000000000000000000000000024",
+          "span_id": "5ba0000000000028",
+          "parent_span_id": "5ba0000000000025",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -4433,6 +5752,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -4497,6 +5817,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -4609,6 +5930,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -4653,7 +5975,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000001e",
+            "span_id": "5ba0000000000026",
             "request_index": 0
           }
         ],
@@ -4728,7 +6050,7 @@
               "bytes": 6
             },
             "span": {
-              "id": "5ba000000000001f",
+              "id": "5ba0000000000027",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "ok"
@@ -4785,6 +6107,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -4829,7 +6152,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000020",
+            "span_id": "5ba0000000000028",
             "request_index": 1
           }
         ],
@@ -4884,7 +6207,7 @@
       "id": "r_retry",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000021",
+      "trace_id": "7ace0000000000000000000000000029",
       "agent": "support",
       "model": {
         "provider": "wefttest",
@@ -5033,8 +6356,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000021",
-          "span_id": "5ba0000000000022",
+          "trace_id": "7ace0000000000000000000000000029",
+          "span_id": "5ba000000000002a",
           "parent_span_id": "",
           "name": "invoke_agent support",
           "kind": "internal",
@@ -5064,9 +6387,9 @@
           "run_id": "r_retry"
         },
         {
-          "trace_id": "7ace0000000000000000000000000021",
-          "span_id": "5ba0000000000023",
-          "parent_span_id": "5ba0000000000022",
+          "trace_id": "7ace0000000000000000000000000029",
+          "span_id": "5ba000000000002b",
+          "parent_span_id": "5ba000000000002a",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -5094,9 +6417,9 @@
           "run_id": "r_retry"
         },
         {
-          "trace_id": "7ace0000000000000000000000000021",
-          "span_id": "5ba0000000000024",
-          "parent_span_id": "5ba0000000000023",
+          "trace_id": "7ace0000000000000000000000000029",
+          "span_id": "5ba000000000002c",
+          "parent_span_id": "5ba000000000002b",
           "name": "attempt",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -5105,7 +6428,7 @@
           "status_message": "503 Service Unavailable: overloaded",
           "service": "(test)",
           "attrs": {
-            "error.type": "model_error",
+            "error.type": "overloaded",
             "gen_ai.provider.name": "wefttest",
             "gen_ai.request.model": "script",
             "http.response.status_code": 503,
@@ -5117,9 +6440,9 @@
           "run_id": "r_retry"
         },
         {
-          "trace_id": "7ace0000000000000000000000000021",
-          "span_id": "5ba0000000000025",
-          "parent_span_id": "5ba0000000000023",
+          "trace_id": "7ace0000000000000000000000000029",
+          "span_id": "5ba000000000002d",
+          "parent_span_id": "5ba000000000002b",
           "name": "attempt",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -5128,7 +6451,7 @@
           "status_message": "503 Service Unavailable: overloaded",
           "service": "(test)",
           "attrs": {
-            "error.type": "model_error",
+            "error.type": "overloaded",
             "gen_ai.provider.name": "wefttest",
             "gen_ai.request.model": "script",
             "http.response.status_code": 503,
@@ -5142,9 +6465,9 @@
           "run_id": "r_retry"
         },
         {
-          "trace_id": "7ace0000000000000000000000000021",
-          "span_id": "5ba0000000000026",
-          "parent_span_id": "5ba0000000000023",
+          "trace_id": "7ace0000000000000000000000000029",
+          "span_id": "5ba000000000002e",
+          "parent_span_id": "5ba000000000002b",
           "name": "attempt",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -5191,6 +6514,7 @@
               "names": []
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -5225,6 +6549,7 @@
               "names": []
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -5259,6 +6584,7 @@
               "names": []
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -5313,6 +6639,7 @@
               "names": []
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -5327,12 +6654,12 @@
             "model": "script",
             "provider": "wefttest",
             "outcome": "error",
-            "error_type": "model_error",
+            "error_type": "overloaded",
             "http_status": 503,
             "error": "503 Service Unavailable: overloaded",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000024",
+            "span_id": "5ba000000000002c",
             "request_index": 0
           },
           {
@@ -5340,14 +6667,14 @@
             "model": "script",
             "provider": "wefttest",
             "outcome": "error",
-            "error_type": "model_error",
+            "error_type": "overloaded",
             "layer": "retry",
             "http_status": 503,
             "wait_ms": 1,
             "error": "503 Service Unavailable: overloaded",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000025",
+            "span_id": "5ba000000000002d",
             "request_index": 1
           },
           {
@@ -5359,7 +6686,7 @@
             "wait_ms": 1,
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000026",
+            "span_id": "5ba000000000002e",
             "request_index": 2
           }
         ],
@@ -5409,12 +6736,420 @@
       }
     ]
   },
+  "mw.retry-giveup": {
+    "run": {
+      "id": "r_giveup",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "7ace000000000000000000000000002f",
+      "agent": "support",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "(manifest)",
+      "weft_version": "(test)",
+      "service": "(test)",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {},
+      "started": "2026-10-01T09:00:00Z",
+      "finished": "2026-10-01T09:00:00Z",
+      "last_seen": "2026-10-01T09:00:00Z",
+      "status": "failed",
+      "err": "weft: run failed at step 0: model stream: mw: giving up after 1 retries: 429 Service Unavailable: overloaded",
+      "steps": 0,
+      "pending": 0,
+      "stop_reason": "",
+      "events_emitted": 2,
+      "messages_emitted": 1,
+      "error_type": "model_error",
+      "attempts_retried": 1,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "cost_usd": 0,
+      "cost_known": true,
+      "cost_badge": "scripted",
+      "cost_reason": "a scripted model: nothing bills it, an exact $0",
+      "cache": "exact",
+      "delegated_cost_usd": 0,
+      "delegated_cost_known": true,
+      "event_count": 2,
+      "message_count": 1,
+      "delta_count": 0,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "",
+      "request_count": 2,
+      "prompt_preview": "hi",
+      "children": [],
+      "holes": [],
+      "compactions": []
+    },
+    "events": {
+      "events": [
+        {
+          "pos": 0,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "run_start",
+            "id": "r_giveup",
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "agent": "support",
+            "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "pos": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "step_start",
+            "run_id": "r_giveup",
+            "index": 0
+          }
+        }
+      ],
+      "next_after": null,
+      "done": true,
+      "gaps": []
+    },
+    "transcript": {
+      "batches": [
+        {
+          "index": 0,
+          "step": 0,
+          "input": true,
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hi"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "spans": {
+      "spans": [
+        {
+          "trace_id": "7ace000000000000000000000000002f",
+          "span_id": "5ba0000000000030",
+          "parent_span_id": "",
+          "name": "invoke_agent support",
+          "kind": "internal",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "error",
+          "status_message": "weft: run failed at step 0: model stream: mw: giving up after 1 retries: 429 Service Unavailable: overloaded",
+          "service": "(test)",
+          "attrs": {
+            "error.type": "model_error",
+            "gen_ai.agent.name": "support",
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "gen_ai.usage.input_tokens": 0,
+            "gen_ai.usage.output_tokens": 0,
+            "weft.instructions.hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "weft.manifest.hash": "(manifest)",
+            "weft.run.events": 2,
+            "weft.run.id": "r_giveup",
+            "weft.run.messages": 1,
+            "weft.run.steps": 0,
+            "weft.version": "(test)"
+          },
+          "events": [
+            {
+              "time": "2026-10-01T09:00:00Z",
+              "name": "exception",
+              "attrs": {
+                "exception.message": "weft: run failed at step 0: model stream: mw: giving up after 1 retries: 429 Service Unavailable: overloaded",
+                "exception.type": "*core.RunError"
+              }
+            }
+          ],
+          "run_id": "r_giveup"
+        },
+        {
+          "trace_id": "7ace000000000000000000000000002f",
+          "span_id": "5ba0000000000031",
+          "parent_span_id": "5ba0000000000030",
+          "name": "chat script",
+          "kind": "client",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "error",
+          "status_message": "model stream: mw: giving up after 1 retries: 429 Service Unavailable: overloaded",
+          "service": "(test)",
+          "attrs": {
+            "error.type": "model_error",
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "weft.run.id": "r_giveup",
+            "weft.step.index": 0,
+            "weft.stream": true
+          },
+          "events": [
+            {
+              "time": "2026-10-01T09:00:00Z",
+              "name": "exception",
+              "attrs": {
+                "exception.message": "model stream: mw: giving up after 1 retries: 429 Service Unavailable: overloaded",
+                "exception.type": "*fmt.wrapError"
+              }
+            }
+          ],
+          "run_id": "r_giveup"
+        },
+        {
+          "trace_id": "7ace000000000000000000000000002f",
+          "span_id": "5ba0000000000032",
+          "parent_span_id": "5ba0000000000031",
+          "name": "attempt",
+          "kind": "client",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "error",
+          "status_message": "429 Service Unavailable: overloaded",
+          "service": "(test)",
+          "attrs": {
+            "error.type": "rate_limit",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "http.response.status_code": 429,
+            "weft.attempt.index": 1,
+            "weft.run.id": "r_giveup",
+            "weft.step.index": 0
+          },
+          "events": [],
+          "run_id": "r_giveup"
+        },
+        {
+          "trace_id": "7ace000000000000000000000000002f",
+          "span_id": "5ba0000000000033",
+          "parent_span_id": "5ba0000000000031",
+          "name": "attempt",
+          "kind": "client",
+          "start": "2026-10-01T09:00:00Z",
+          "end": "2026-10-01T09:00:00Z",
+          "status": "error",
+          "status_message": "429 Service Unavailable: overloaded",
+          "service": "(test)",
+          "attrs": {
+            "error.type": "rate_limit",
+            "gen_ai.provider.name": "wefttest",
+            "gen_ai.request.model": "script",
+            "http.response.status_code": 429,
+            "weft.attempt.giveup_reason": "budget",
+            "weft.attempt.index": 2,
+            "weft.attempt.layer": "retry",
+            "weft.attempt.wait_ms": 1,
+            "weft.run.id": "r_giveup",
+            "weft.step.index": 0
+          },
+          "events": [],
+          "run_id": "r_giveup"
+        }
+      ]
+    },
+    "requests": {
+      "requests": [
+        {
+          "index": 0,
+          "step": 0,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "",
+              "names": []
+            },
+            "sequential_tools": false,
+            "parallelism": 4,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "raw": null,
+          "raw_badge": "not_recorded",
+          "raw_reason": "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+          "raw_fix": "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+        },
+        {
+          "index": 1,
+          "step": 0,
+          "attempt": 2,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 2,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "",
+              "names": []
+            },
+            "sequential_tools": false,
+            "parallelism": 4,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          },
+          "raw": null,
+          "raw_badge": "not_recorded",
+          "raw_reason": "no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev or otel.DevMode()) or the adapter does not report them",
+          "raw_fix": "run under WEFT_ENV=dev (or otel.DevMode()) with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+        }
+      ]
+    },
+    "tools": {
+      "catalogs": []
+    },
+    "steps": [
+      {
+        "run_id": "r_giveup",
+        "step": 0,
+        "status": "error",
+        "started": "2026-10-01T09:00:00Z",
+        "model": {
+          "provider": "wefttest",
+          "requested": "script"
+        },
+        "request": {
+          "index": 0,
+          "step": 0,
+          "attempt": 1,
+          "time": "2026-10-01T09:00:00Z",
+          "system_hash": "",
+          "catalog_hash": "",
+          "content": "",
+          "truncated_bytes": 0,
+          "body": {
+            "step": 0,
+            "attempt": 1,
+            "system_hash": "",
+            "messages_ref": {
+              "index": 0,
+              "count": 1
+            },
+            "tools": {
+              "catalog_hash": "",
+              "names": []
+            },
+            "sequential_tools": false,
+            "parallelism": 4,
+            "params": {},
+            "model": {
+              "provider": "wefttest",
+              "name": "script"
+            },
+            "stream": true
+          }
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "model": "script",
+            "provider": "wefttest",
+            "outcome": "error",
+            "error_type": "rate_limit",
+            "http_status": 429,
+            "error": "429 Service Unavailable: overloaded",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z",
+            "span_id": "5ba0000000000032",
+            "request_index": 0
+          },
+          {
+            "attempt": 2,
+            "model": "script",
+            "provider": "wefttest",
+            "outcome": "error",
+            "error_type": "rate_limit",
+            "layer": "retry",
+            "http_status": 429,
+            "wait_ms": 1,
+            "error": "429 Service Unavailable: overloaded",
+            "giveup_reason": "budget",
+            "started": "2026-10-01T09:00:00Z",
+            "finished": "2026-10-01T09:00:00Z",
+            "span_id": "5ba0000000000033",
+            "request_index": 1
+          }
+        ],
+        "messages_in": {
+          "index": 0,
+          "count": 1
+        },
+        "events": [
+          {
+            "pos": 1,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "step_start",
+              "run_id": "r_giveup",
+              "index": 0
+            }
+          }
+        ],
+        "tool_calls": [],
+        "children": [],
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "cost_usd": 0,
+        "cost_known": true,
+        "cost_badge": "scripted",
+        "cost_reason": "a scripted model: nothing bills it, an exact $0",
+        "cache": "exact",
+        "holes": []
+      }
+    ]
+  },
   "opt.prepare-step": {
     "run": {
       "id": "r_prepare",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000027",
+      "trace_id": "7ace0000000000000000000000000034",
       "agent": "classifier",
       "model": {
         "provider": "",
@@ -5648,8 +7383,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000027",
-          "span_id": "5ba0000000000028",
+          "trace_id": "7ace0000000000000000000000000034",
+          "span_id": "5ba0000000000035",
           "parent_span_id": "",
           "name": "invoke_agent classifier",
           "kind": "internal",
@@ -5677,9 +7412,9 @@
           "run_id": "r_prepare"
         },
         {
-          "trace_id": "7ace0000000000000000000000000027",
-          "span_id": "5ba0000000000029",
-          "parent_span_id": "5ba0000000000028",
+          "trace_id": "7ace0000000000000000000000000034",
+          "span_id": "5ba0000000000036",
+          "parent_span_id": "5ba0000000000035",
           "name": "chat",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -5703,9 +7438,9 @@
           "run_id": "r_prepare"
         },
         {
-          "trace_id": "7ace0000000000000000000000000027",
-          "span_id": "5ba000000000002a",
-          "parent_span_id": "5ba0000000000028",
+          "trace_id": "7ace0000000000000000000000000034",
+          "span_id": "5ba0000000000037",
+          "parent_span_id": "5ba0000000000035",
           "name": "execute_tool ping",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -5726,9 +7461,9 @@
           "run_id": "r_prepare"
         },
         {
-          "trace_id": "7ace0000000000000000000000000027",
-          "span_id": "5ba000000000002b",
-          "parent_span_id": "5ba0000000000028",
+          "trace_id": "7ace0000000000000000000000000034",
+          "span_id": "5ba0000000000038",
+          "parent_span_id": "5ba0000000000035",
           "name": "chat",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -5788,6 +7523,7 @@
               "wire": "reasoning_effort"
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {
               "temperature": 0
             },
@@ -5858,6 +7594,7 @@
               "wire": "reasoning_effort"
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {},
             "stream": true,
@@ -5966,6 +7703,7 @@
               "wire": "reasoning_effort"
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {
               "temperature": 0
             },
@@ -6011,7 +7749,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000029",
+            "span_id": "5ba0000000000036",
             "request_index": 0
           }
         ],
@@ -6082,7 +7820,7 @@
               "bytes": 4
             },
             "span": {
-              "id": "5ba000000000002a",
+              "id": "5ba0000000000037",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "ok"
@@ -6141,6 +7879,7 @@
               "wire": "reasoning_effort"
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {},
             "stream": true,
@@ -6182,7 +7921,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000002b",
+            "span_id": "5ba0000000000038",
             "request_index": 1
           }
         ],
@@ -6237,7 +7976,7 @@
       "id": "r_output",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace000000000000000000000000002c",
+      "trace_id": "7ace0000000000000000000000000039",
       "agent": "reviewer",
       "model": {
         "provider": "wefttest",
@@ -6529,8 +8268,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace000000000000000000000000002c",
-          "span_id": "5ba000000000002d",
+          "trace_id": "7ace0000000000000000000000000039",
+          "span_id": "5ba000000000003a",
           "parent_span_id": "",
           "name": "invoke_agent reviewer",
           "kind": "internal",
@@ -6549,6 +8288,7 @@
             "weft.instructions.hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "weft.manifest.hash": "(manifest)",
             "weft.output.submitted": true,
+            "weft.output.type": "studio.verdict",
             "weft.run.events": 10,
             "weft.run.id": "r_output",
             "weft.run.messages": 5,
@@ -6561,9 +8301,9 @@
           "run_id": "r_output"
         },
         {
-          "trace_id": "7ace000000000000000000000000002c",
-          "span_id": "5ba000000000002e",
-          "parent_span_id": "5ba000000000002d",
+          "trace_id": "7ace0000000000000000000000000039",
+          "span_id": "5ba000000000003b",
+          "parent_span_id": "5ba000000000003a",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -6590,9 +8330,9 @@
           "run_id": "r_output"
         },
         {
-          "trace_id": "7ace000000000000000000000000002c",
-          "span_id": "5ba000000000002f",
-          "parent_span_id": "5ba000000000002d",
+          "trace_id": "7ace0000000000000000000000000039",
+          "span_id": "5ba000000000003c",
+          "parent_span_id": "5ba000000000003a",
           "name": "execute_tool submit_output",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -6614,9 +8354,9 @@
           "run_id": "r_output"
         },
         {
-          "trace_id": "7ace000000000000000000000000002c",
-          "span_id": "5ba0000000000030",
-          "parent_span_id": "5ba000000000002d",
+          "trace_id": "7ace0000000000000000000000000039",
+          "span_id": "5ba000000000003d",
+          "parent_span_id": "5ba000000000003a",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -6643,9 +8383,9 @@
           "run_id": "r_output"
         },
         {
-          "trace_id": "7ace000000000000000000000000002c",
-          "span_id": "5ba0000000000031",
-          "parent_span_id": "5ba000000000002d",
+          "trace_id": "7ace0000000000000000000000000039",
+          "span_id": "5ba000000000003e",
+          "parent_span_id": "5ba000000000003a",
           "name": "execute_tool submit_output",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -6693,6 +8433,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -6762,6 +8503,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -6884,6 +8626,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -6933,7 +8676,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000002e",
+            "span_id": "5ba000000000003b",
             "request_index": 0
           }
         ],
@@ -7010,7 +8753,7 @@
               "bytes": 83
             },
             "span": {
-              "id": "5ba000000000002f",
+              "id": "5ba000000000003c",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "error"
@@ -7066,6 +8809,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -7115,7 +8859,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000030",
+            "span_id": "5ba000000000003d",
             "request_index": 1
           }
         ],
@@ -7192,7 +8936,7 @@
               "bytes": 8
             },
             "span": {
-              "id": "5ba0000000000031",
+              "id": "5ba000000000003e",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "ok"
@@ -7218,7 +8962,7 @@
       "id": "r_nooutput",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000032",
+      "trace_id": "7ace000000000000000000000000003f",
       "agent": "reviewer",
       "model": {
         "provider": "wefttest",
@@ -7366,8 +9110,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000032",
-          "span_id": "5ba0000000000033",
+          "trace_id": "7ace000000000000000000000000003f",
+          "span_id": "5ba0000000000040",
           "parent_span_id": "",
           "name": "invoke_agent reviewer",
           "kind": "internal",
@@ -7386,6 +9130,7 @@
             "weft.instructions.hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "weft.manifest.hash": "(manifest)",
             "weft.output.submitted": false,
+            "weft.output.type": "studio.verdict",
             "weft.run.events": 4,
             "weft.run.id": "r_nooutput",
             "weft.run.messages": 2,
@@ -7398,9 +9143,9 @@
           "run_id": "r_nooutput"
         },
         {
-          "trace_id": "7ace0000000000000000000000000032",
-          "span_id": "5ba0000000000034",
-          "parent_span_id": "5ba0000000000033",
+          "trace_id": "7ace000000000000000000000000003f",
+          "span_id": "5ba0000000000041",
+          "parent_span_id": "5ba0000000000040",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -7455,6 +9200,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -7578,6 +9324,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -7627,7 +9374,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000034",
+            "span_id": "5ba0000000000041",
             "request_index": 0
           }
         ],
@@ -7682,7 +9429,7 @@
       "id": "r_lab",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000035",
+      "trace_id": "7ace0000000000000000000000000042",
       "agent": "orders",
       "model": {
         "provider": "wefttest",
@@ -7830,8 +9577,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000035",
-          "span_id": "5ba0000000000036",
+          "trace_id": "7ace0000000000000000000000000042",
+          "span_id": "5ba0000000000043",
           "parent_span_id": "",
           "name": "invoke_agent orders",
           "kind": "internal",
@@ -7868,9 +9615,9 @@
           "run_id": "r_lab"
         },
         {
-          "trace_id": "7ace0000000000000000000000000035",
-          "span_id": "5ba0000000000037",
-          "parent_span_id": "5ba0000000000036",
+          "trace_id": "7ace0000000000000000000000000042",
+          "span_id": "5ba0000000000044",
+          "parent_span_id": "5ba0000000000043",
           "name": "chat alt-model",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -7930,6 +9677,7 @@
               "mode": "none"
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {
               "temperature": 0.4,
               "top_p": 0.9,
@@ -8097,6 +9845,7 @@
               "mode": "none"
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {
               "temperature": 0.4,
               "top_p": 0.9,
@@ -8170,7 +9919,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000037",
+            "span_id": "5ba0000000000044",
             "request_index": 0
           }
         ],
@@ -8225,7 +9974,7 @@
       "id": "r_mesh",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000038",
+      "trace_id": "7ace0000000000000000000000000045",
       "agent": "front-desk",
       "model": {
         "provider": "wefttest",
@@ -8632,8 +10381,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000038",
-          "span_id": "5ba0000000000039",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba0000000000046",
           "parent_span_id": "",
           "name": "invoke_agent front-desk",
           "kind": "internal",
@@ -8663,9 +10412,9 @@
           "run_id": "r_mesh"
         },
         {
-          "trace_id": "7ace0000000000000000000000000038",
-          "span_id": "5ba000000000003a",
-          "parent_span_id": "5ba0000000000039",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba0000000000047",
+          "parent_span_id": "5ba0000000000046",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -8692,9 +10441,9 @@
           "run_id": "r_mesh"
         },
         {
-          "trace_id": "7ace0000000000000000000000000038",
-          "span_id": "5ba000000000003b",
-          "parent_span_id": "5ba0000000000039",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba0000000000048",
+          "parent_span_id": "5ba0000000000046",
           "name": "execute_tool customer_profile",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -8715,9 +10464,9 @@
           "run_id": "r_mesh"
         },
         {
-          "trace_id": "7ace0000000000000000000000000038",
-          "span_id": "5ba000000000003c",
-          "parent_span_id": "5ba0000000000039",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba0000000000049",
+          "parent_span_id": "5ba0000000000046",
           "name": "execute_tool svc_get_invoice",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -8739,9 +10488,9 @@
           "run_id": "r_mesh"
         },
         {
-          "trace_id": "7ace0000000000000000000000000038",
-          "span_id": "5ba000000000003d",
-          "parent_span_id": "5ba0000000000039",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba000000000004a",
+          "parent_span_id": "5ba0000000000046",
           "name": "execute_tool svc_legacy_ledger",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -8763,9 +10512,9 @@
           "run_id": "r_mesh"
         },
         {
-          "trace_id": "7ace0000000000000000000000000038",
-          "span_id": "5ba000000000003e",
-          "parent_span_id": "5ba0000000000039",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba000000000004b",
+          "parent_span_id": "5ba0000000000046",
           "name": "execute_tool svc_export_statement",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -8787,9 +10536,9 @@
           "run_id": "r_mesh"
         },
         {
-          "trace_id": "7ace0000000000000000000000000038",
-          "span_id": "5ba000000000003f",
-          "parent_span_id": "5ba0000000000039",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba000000000004c",
+          "parent_span_id": "5ba0000000000046",
           "name": "execute_tool svc_archive_statement",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -8811,9 +10560,9 @@
           "run_id": "r_mesh"
         },
         {
-          "trace_id": "7ace0000000000000000000000000038",
-          "span_id": "5ba0000000000040",
-          "parent_span_id": "5ba0000000000039",
+          "trace_id": "7ace0000000000000000000000000045",
+          "span_id": "5ba000000000004d",
+          "parent_span_id": "5ba0000000000046",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -8872,6 +10621,7 @@
               ]
             },
             "sequential_tools": true,
+            "parallelism": 1,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -9043,6 +10793,7 @@
               ]
             },
             "sequential_tools": true,
+            "parallelism": 1,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -9365,6 +11116,7 @@
               ]
             },
             "sequential_tools": true,
+            "parallelism": 1,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -9512,7 +11264,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000003a",
+            "span_id": "5ba0000000000047",
             "request_index": 0
           }
         ],
@@ -9695,7 +11447,7 @@
               "bytes": 22
             },
             "span": {
-              "id": "5ba000000000003b",
+              "id": "5ba0000000000048",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "ok"
@@ -9714,7 +11466,7 @@
               "bytes": 22
             },
             "span": {
-              "id": "5ba000000000003c",
+              "id": "5ba0000000000049",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "ok"
@@ -9733,7 +11485,7 @@
               "bytes": 34
             },
             "span": {
-              "id": "5ba000000000003d",
+              "id": "5ba000000000004a",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "error"
@@ -9752,7 +11504,7 @@
               "bytes": 56
             },
             "span": {
-              "id": "5ba000000000003e",
+              "id": "5ba000000000004b",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "error"
@@ -9771,7 +11523,7 @@
               "bytes": 63
             },
             "span": {
-              "id": "5ba000000000003f",
+              "id": "5ba000000000004c",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "error"
@@ -9832,6 +11584,7 @@
               ]
             },
             "sequential_tools": true,
+            "parallelism": 1,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -9979,7 +11732,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000040",
+            "span_id": "5ba000000000004d",
             "request_index": 1
           }
         ],
@@ -10034,7 +11787,7 @@
       "id": "r_subfail",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000041",
+      "trace_id": "7ace000000000000000000000000004e",
       "agent": "lead",
       "model": {
         "provider": "wefttest",
@@ -10095,7 +11848,7 @@
           "id": "r_subfail/0/w1",
           "parent_run_id": "r_subfail",
           "parent_call_id": "w1",
-          "trace_id": "7ace0000000000000000000000000041",
+          "trace_id": "7ace000000000000000000000000004e",
           "agent": "worker",
           "model": {
             "provider": "wefttest",
@@ -10334,8 +12087,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000041",
-          "span_id": "5ba0000000000042",
+          "trace_id": "7ace000000000000000000000000004e",
+          "span_id": "5ba000000000004f",
           "parent_span_id": "",
           "name": "invoke_agent lead",
           "kind": "internal",
@@ -10365,9 +12118,9 @@
           "run_id": "r_subfail"
         },
         {
-          "trace_id": "7ace0000000000000000000000000041",
-          "span_id": "5ba0000000000043",
-          "parent_span_id": "5ba0000000000042",
+          "trace_id": "7ace000000000000000000000000004e",
+          "span_id": "5ba0000000000050",
+          "parent_span_id": "5ba000000000004f",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -10394,9 +12147,9 @@
           "run_id": "r_subfail"
         },
         {
-          "trace_id": "7ace0000000000000000000000000041",
-          "span_id": "5ba0000000000044",
-          "parent_span_id": "5ba0000000000042",
+          "trace_id": "7ace000000000000000000000000004e",
+          "span_id": "5ba0000000000051",
+          "parent_span_id": "5ba000000000004f",
           "name": "execute_tool work",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -10419,9 +12172,9 @@
           "run_id": "r_subfail"
         },
         {
-          "trace_id": "7ace0000000000000000000000000041",
-          "span_id": "5ba0000000000045",
-          "parent_span_id": "5ba0000000000042",
+          "trace_id": "7ace000000000000000000000000004e",
+          "span_id": "5ba0000000000052",
+          "parent_span_id": "5ba000000000004f",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -10476,6 +12229,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -10541,6 +12295,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -10655,6 +12410,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -10700,7 +12456,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000043",
+            "span_id": "5ba0000000000050",
             "request_index": 0
           }
         ],
@@ -10775,7 +12531,7 @@
               "bytes": 80
             },
             "span": {
-              "id": "5ba0000000000044",
+              "id": "5ba0000000000051",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "error"
@@ -10851,6 +12607,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -10896,7 +12653,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000045",
+            "span_id": "5ba0000000000052",
             "request_index": 1
           }
         ],
@@ -10950,7 +12707,7 @@
         "id": "r_subfail/0/w1",
         "parent_run_id": "r_subfail",
         "parent_call_id": "w1",
-        "trace_id": "7ace0000000000000000000000000041",
+        "trace_id": "7ace000000000000000000000000004e",
         "agent": "worker",
         "model": {
           "provider": "wefttest",
@@ -11006,7 +12763,7 @@
       "id": "r_timeout",
       "parent_run_id": "",
       "parent_call_id": "",
-      "trace_id": "7ace0000000000000000000000000046",
+      "trace_id": "7ace0000000000000000000000000053",
       "agent": "support",
       "model": {
         "provider": "wefttest",
@@ -11241,8 +12998,8 @@
     "spans": {
       "spans": [
         {
-          "trace_id": "7ace0000000000000000000000000046",
-          "span_id": "5ba0000000000047",
+          "trace_id": "7ace0000000000000000000000000053",
+          "span_id": "5ba0000000000054",
           "parent_span_id": "",
           "name": "invoke_agent support",
           "kind": "internal",
@@ -11272,9 +13029,9 @@
           "run_id": "r_timeout"
         },
         {
-          "trace_id": "7ace0000000000000000000000000046",
-          "span_id": "5ba0000000000048",
-          "parent_span_id": "5ba0000000000047",
+          "trace_id": "7ace0000000000000000000000000053",
+          "span_id": "5ba0000000000055",
+          "parent_span_id": "5ba0000000000054",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -11301,9 +13058,9 @@
           "run_id": "r_timeout"
         },
         {
-          "trace_id": "7ace0000000000000000000000000046",
-          "span_id": "5ba0000000000049",
-          "parent_span_id": "5ba0000000000047",
+          "trace_id": "7ace0000000000000000000000000053",
+          "span_id": "5ba0000000000056",
+          "parent_span_id": "5ba0000000000054",
           "name": "execute_tool slow",
           "kind": "internal",
           "start": "2026-10-01T09:00:00Z",
@@ -11325,9 +13082,9 @@
           "run_id": "r_timeout"
         },
         {
-          "trace_id": "7ace0000000000000000000000000046",
-          "span_id": "5ba000000000004a",
-          "parent_span_id": "5ba0000000000047",
+          "trace_id": "7ace0000000000000000000000000053",
+          "span_id": "5ba0000000000057",
+          "parent_span_id": "5ba0000000000054",
           "name": "chat script",
           "kind": "client",
           "start": "2026-10-01T09:00:00Z",
@@ -11382,6 +13139,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -11438,6 +13196,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -11534,6 +13293,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -11570,7 +13330,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba0000000000048",
+            "span_id": "5ba0000000000055",
             "request_index": 0
           }
         ],
@@ -11641,7 +13401,7 @@
               "bytes": 32
             },
             "span": {
-              "id": "5ba0000000000049",
+              "id": "5ba0000000000056",
               "started": "2026-10-01T09:00:00Z",
               "finished": "2026-10-01T09:00:00Z",
               "status": "error"
@@ -11698,6 +13458,7 @@
               ]
             },
             "sequential_tools": false,
+            "parallelism": 4,
             "params": {},
             "model": {
               "provider": "wefttest",
@@ -11734,7 +13495,7 @@
             "outcome": "ok",
             "started": "2026-10-01T09:00:00Z",
             "finished": "2026-10-01T09:00:00Z",
-            "span_id": "5ba000000000004a",
+            "span_id": "5ba0000000000057",
             "request_index": 1
           }
         ],

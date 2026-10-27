@@ -23,6 +23,7 @@
           ]
         },
         "sequential_tools": false,
+        "parallelism": 4,
         "params": {},
         "model": {
           "provider": "wefttest",
@@ -67,6 +68,7 @@
           ]
         },
         "sequential_tools": false,
+        "parallelism": 4,
         "params": {},
         "model": {
           "provider": "wefttest",
@@ -114,6 +116,7 @@
           ]
         },
         "sequential_tools": false,
+        "parallelism": 4,
         "params": {},
         "model": {
           "provider": "wefttest",
@@ -161,6 +164,7 @@
           ]
         },
         "sequential_tools": false,
+        "parallelism": 4,
         "params": {},
         "model": {
           "provider": "wefttest",

@@ -362,6 +362,12 @@
                   }
                 },
                 {
+                  "key": "weft.output.type",
+                  "value": {
+                    "stringValue": "obsdb_test.verdict"
+                  }
+                },
+                {
                   "key": "weft.version",
                   "value": {
                     "stringValue": "v0.0.0-contract"
@@ -763,6 +769,12 @@
                   "key": "weft.manifest.hash",
                   "value": {
                     "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000003"
+                  }
+                },
+                {
+                  "key": "weft.output.type",
+                  "value": {
+                    "stringValue": "obsdb_test.verdict"
                   }
                 },
                 {
@@ -2661,7 +2673,7 @@
                 {
                   "key": "error.type",
                   "value": {
-                    "stringValue": "model_error"
+                    "stringValue": "overloaded"
                   }
                 }
               ],

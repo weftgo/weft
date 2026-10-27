@@ -114,6 +114,14 @@
         "call_1 fence 31→19 original \"```json\\n{\\\"order_id\\\":\\\"1234\\\"}\\n```\"",
         "panic on execute_tool charge_card: stack \"goroutine 1 [running]:\\n(stack fixed by the generator)\""
       ],
+      "parallelism": [
+        1
+      ],
+      "attempts": [
+        "step 0 attempt 1 error overloaded",
+        "step 0 attempt 2 ok",
+        "step 1 attempt 1 ok"
+      ],
       "holes": []
     }
   ]

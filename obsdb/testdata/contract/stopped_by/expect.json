@@ -50,6 +50,9 @@
           "status": "ok"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     }
   ]

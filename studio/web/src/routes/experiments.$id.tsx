@@ -24,12 +24,14 @@ import {
   experimentQuery,
   fetchCommand,
   postPlaygroundRun,
+  requestsQuery,
   runQuery,
   runtimesQuery,
   studioToken,
   transcriptQuery,
 } from "@/lib/api"
 import { turnPrompt } from "@/lib/events"
+import { variantParamLines } from "@/lib/cards"
 import { useSourceSteps } from "@/components/studio/experiment-form"
 import type { CommandStatus, ExperimentRow, RunRow } from "@/lib/api"
 import { absoluteTime, duration, relativeTime } from "@/lib/format"
@@ -235,6 +237,14 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
     ""
   const srcSteps = useSourceSteps(srcRun)
   const srcT = useQuery({ ...transcriptQuery(srcRun), enabled: !!srcRun })
+  // The source run's first request: the agent's own sampling knobs,
+  // beside each variant's overridden ones (UX-S5b-03).
+  const srcReq = useQuery({
+    ...requestsQuery(srcRun),
+    enabled: !!srcRun && caps.includes("requests"),
+  })
+  const agentKnobs = srcReq.data?.requests.find((r) => r.attempt <= 1)?.body
+    .params
 
   // This browser's record of the matrix as it ran, when there is one.
   const [kept, setKept] = useState<FormState | null | undefined>(undefined)
@@ -701,6 +711,15 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                   <span className="ml-1 text-faint">
                     {overrideSummary(v.overrides)}
                   </span>
+                  {variantParamLines(v.overrides, agentKnobs).map((l) => (
+                    <span
+                      key={l}
+                      className="block font-mono text-[10px] text-faint"
+                      data-variant-param
+                    >
+                      {l}
+                    </span>
+                  ))}
                 </th>
               ))}
             </tr>

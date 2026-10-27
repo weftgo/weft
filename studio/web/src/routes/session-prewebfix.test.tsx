@@ -333,7 +333,7 @@ describe("the conversation page (finding 15)", () => {
     expect(
       container.querySelector('[data-turn="sa-t2"] [data-turn-gap]')
         ?.textContent
-    ).toBe("+10.0s after t1")
+    ).toBe("+10.0 s after t1")
     screen.getByRole("button", { name: "oldest first" }).click()
     await waitFor(() => expect(order()).toEqual(["sa-t1", "sb-t1", "sa-t2"]))
     expect(router.state.location.search).toMatchObject({ order: "oldest" })

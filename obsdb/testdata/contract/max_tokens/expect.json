@@ -41,6 +41,9 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
       "holes": [
         "max_tokens"
       ]

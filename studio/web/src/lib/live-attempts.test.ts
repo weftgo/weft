@@ -76,7 +76,7 @@ describe("attempt frames", () => {
     expect(n.text).toBe("↻ attempt 1 failed")
     expect(n.retrying).toBe(true)
     expect(n.title).toContain("step 1 attempt 1 failed (rate_limited)")
-    expect(n.title).toContain("the provider asked to wait 4.0s")
+    expect(n.title).toContain("the provider asked to wait 4.0 s")
     expect(attemptNote(att(), false)!.retrying).toBe(false)
     expect(
       attemptNote(

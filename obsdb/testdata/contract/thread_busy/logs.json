@@ -508,7 +508,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1276,7 +1276,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":3,\"count\":4},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":3,\"count\":4},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -2100,7 +2100,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":6},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":6},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -2708,7 +2708,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":2,\"count\":8},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":2,\"count\":8},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -3532,7 +3532,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":10},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":10},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -4356,7 +4356,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":12},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":12},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -5026,7 +5026,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":15},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":15},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -5850,7 +5850,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":17},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":17},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -6592,7 +6592,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":17},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"8441f7eec39294efb4fb60f770984ac20a9b08a9ecdd6c252be3f27400c6698f\",\"messages_ref\":{\"index\":0,\"count\":17},\"tools\":{\"catalog_hash\":\"28202b073892b0b6afa2160e29ec7989b60452714bbe76171710e7300d00170e\",\"names\":[\"check_metric\",\"run_analysis\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,

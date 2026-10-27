@@ -249,10 +249,10 @@ describe("the timeline", () => {
     ])
     expect(all(el, ".weft-tl .weft-wf-ms").map((n) => n.textContent)).toEqual([
       // The fold's step and model call no span covers: untimed (U8.3).
-      "2.0s",
+      "2.0 s",
       "—",
       "—",
-      "1.0s",
+      "1.0 s",
     ])
   })
 

@@ -40,7 +40,8 @@ func TestMigration0032RestatesRunViews(t *testing.T) {
 	if len(traces30) != 1 || len(now) != 2 || logs23 == "" {
 		t.Fatalf("statements: 0030 %d, 0032 %d, 0023 logs view found %v", len(traces30), len(now), logs23 != "")
 	}
-	want := strings.Join(append([]string{}, contractKeys...), "', '")
+	// 0033 (U30.3) appends its two keys after 0032's tuple.
+	want := strings.Join(append([]string{}, contractKeys[:len(contractKeys)-u303Keys]...), "', '")
 	for i, c := range []struct{ was, attrs string }{{logs23, "LogAttributes"}, {traces30[0], "SpanAttributes"}} {
 		got := now[i]
 		if normal(got, c.attrs) != normal(c.was, c.attrs) {
@@ -50,7 +51,7 @@ func TestMigration0032RestatesRunViews(t *testing.T) {
 			t.Errorf("0032 statement %d does not empty CallerRunID for a remote link", i)
 		}
 		if strings.Join(strings.Fields(strings.ReplaceAll(tuple(got), "\n", " ")), " ") != "'"+want+"'" {
-			t.Errorf("0032 statement %d's tuple is not contractKeys", i)
+			t.Errorf("0032 statement %d's tuple is not contractKeys as of 0032", i)
 		}
 	}
 }

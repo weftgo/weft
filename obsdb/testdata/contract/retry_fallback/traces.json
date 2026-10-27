@@ -1064,6 +1064,12 @@
                   }
                 },
                 {
+                  "key": "weft.attempt.giveup_reason",
+                  "value": {
+                    "stringValue": "budget"
+                  }
+                },
+                {
                   "key": "error.type",
                   "value": {
                     "stringValue": "stream_idle"

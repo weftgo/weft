@@ -100,6 +100,7 @@
 <request>.body.model.name=string
 <request>.body.model.provider=string
 <request>.body.model{}
+<request>.body.parallelism=float64
 <request>.body.params{}
 <request>.body.prepared[]
 <request>.body.prepared[]=string

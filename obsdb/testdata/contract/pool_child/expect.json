@@ -63,6 +63,9 @@
           "origin": "subagent"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -112,6 +115,9 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
       "holes": []
     }
   ],

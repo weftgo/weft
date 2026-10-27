@@ -119,6 +119,10 @@ type manifestTool struct {
 	// fleet. The manifest does not recurse into the child: it describes
 	// the agents it was given, not the fleet (ADR 0012).
 	Subagent string `json:"subagent,omitempty"`
+	// OutputType names the type an Output tool (submit_output) decodes
+	// into — "main.Invoice" (UX-S1-06): the tool is the run's typed
+	// answer, not a side effect. Absent on every other tool.
+	OutputType string `json:"output_type,omitempty"`
 	// Middleware is the tool's own WrapTools list, outer to inner; it
 	// runs inside the agent's (U23.1).
 	Middleware []MiddlewareInfo `json:"middleware,omitempty"`
@@ -177,6 +181,9 @@ func (a *Agent) manifestEntry() manifestAgent {
 			Source:          toolSource(t),
 			Subagent:        t.subagent,
 			Middleware:      toolLayers(t.mw),
+		}
+		if a.hasOutput && t.Name == outputToolName {
+			mt.OutputType = a.outputType
 		}
 		if t.capSet {
 			resultCap := t.resultCap

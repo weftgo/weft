@@ -364,7 +364,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"cf37d3f2ebf1da3838725edc5dd83ffe5a29df3a9083fc145fa70ff07ddd2016\",\"names\":[\"submit_output\",\"issue_refund\",\"add_note\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"cf37d3f2ebf1da3838725edc5dd83ffe5a29df3a9083fc145fa70ff07ddd2016\",\"names\":[\"submit_output\",\"issue_refund\",\"add_note\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1286,7 +1286,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":1,\"count\":3},\"tools\":{\"catalog_hash\":\"cf37d3f2ebf1da3838725edc5dd83ffe5a29df3a9083fc145fa70ff07ddd2016\",\"names\":[\"submit_output\",\"issue_refund\",\"add_note\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":1,\"count\":3},\"tools\":{\"catalog_hash\":\"cf37d3f2ebf1da3838725edc5dd83ffe5a29df3a9083fc145fa70ff07ddd2016\",\"names\":[\"submit_output\",\"issue_refund\",\"add_note\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,

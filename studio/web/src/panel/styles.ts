@@ -208,8 +208,8 @@ ${statusRules()}
 details.weft-collapsible > summary {
   cursor: pointer; color: var(--weft-dim); padding: 3px 0; list-style: none;
 }
-details.weft-collapsible > summary::before { content: "\\25B8 "; }
-details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
+details.weft-collapsible > summary::before, .weft-fold::before { content: "\\25B8 "; }
+details.weft-collapsible[open] > summary::before, [aria-expanded=true].weft-fold::before { content: "\\25BE "; }
 
 .weft-req { margin-bottom: 6px; }
 details[data-depth] { margin-left: -10px; }

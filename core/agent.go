@@ -658,6 +658,9 @@ type Agent struct {
 	// hasOutput records that Output was applied: a Subagent delegating
 	// to this agent returns the submitted JSON, not the final text.
 	hasOutput bool
+	// outputType is Output's type name (outputTypeName): the run's
+	// weft.output.type and the manifest's output_type.
+	outputType string
 	// tapPanics counts tap invocations that panicked and were contained;
 	// read with TapPanics.
 	tapPanics atomic.Int64

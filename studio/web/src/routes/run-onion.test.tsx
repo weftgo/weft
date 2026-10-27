@@ -183,7 +183,7 @@ describe("the onion shown (U23.2)", () => {
       '[data-node="m:mcp:billing"]'
     )!
     expect(node.textContent).toContain("mcp:billing")
-    expect(node.textContent).toMatch(/4 calls · slowest \S+ · 3 failed/)
+    expect(node.textContent).toMatch(/4 calls · slowest \S+ \S+ · 3 failed/)
     // U23.2-fix: unreachable (no answer), refused (a JSON-RPC error
     // answer) and a tool error (isError), each its own kind.
     expect(node.querySelector("[data-node-mcp-failures]")!.textContent).toBe(

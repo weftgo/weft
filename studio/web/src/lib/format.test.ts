@@ -45,13 +45,13 @@ describe("absoluteTime and duration", () => {
 
   it("computes run durations", () => {
     expect(duration("2026-09-28T09:00:00Z", "2026-09-28T09:00:01.4Z")).toBe(
-      "1.4s"
+      "1.4 s"
     )
     expect(duration("2026-09-28T09:00:00Z", "2026-09-28T09:04:03Z")).toBe(
       "4m03s"
     )
     expect(duration("2026-09-28T09:00:00Z", "2026-09-28T09:00:00.012Z")).toBe(
-      "12ms"
+      "12 ms"
     )
     expect(duration("2026-09-28T09:00:00Z", "2026-09-28T11:05:00Z")).toBe(
       "2h05m"
@@ -86,7 +86,7 @@ describe("formatting edges", () => {
   it("never renders NaN, undefined or a 60-second remainder", () => {
     expect(spanMs(Number.NaN)).toBe("—")
     expect(spanMs(299_700)).toBe("5m00s") // was "4m60s"
-    expect(spanMs(59_960)).toBe("1m00s") // was "60.0s"
+    expect(spanMs(59_960)).toBe("1m00s") // was "60.0 s"
     expect(tokens(undefined as unknown as number)).toBe("—")
     expect(tokens(1_234_567)).toBe("1.2M")
     expect(tokens(999_999)).toBe("1.0M") // was "1000.0k"

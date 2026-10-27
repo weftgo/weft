@@ -1,6 +1,6 @@
 {
   "case": "retry_fallback",
-  "description": "four runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2); mw.Fallback over a model that fails once, the backup answering (the backup's attempt carries weft.attempt.layer fallback — problems attempts_retried 1, fallbacks 1); mw.Retry exhausted, three attempts all failing (the run fails stream_idle — attempts_retried 2: the last attempt was not retried); mw.Fallback to a backup of the primary's model name on another provider (fallbacks 1: the layer marks it, no name comparison — attempts_retried 1); and mw.Fallback to a backup under its own mw.Retry that fails once (U23.1-fix: both backup requests carry weft.attempt.layer fallback — fallbacks 1, attempts_retried 2)",
+  "description": "four runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2); mw.Fallback over a model that fails once, the backup answering (the backup's attempt carries weft.attempt.layer fallback — problems attempts_retried 1, fallbacks 1); mw.Retry exhausted, three attempts all failing (the run fails stream_idle — attempts_retried 2: the last attempt was not retried; that attempt carries weft.attempt.giveup_reason budget, U30.3); mw.Fallback to a backup of the primary's model name on another provider (fallbacks 1: the layer marks it, no name comparison — attempts_retried 1); and mw.Fallback to a backup under its own mw.Retry that fails once (U23.1-fix: both backup requests carry weft.attempt.layer fallback — fallbacks 1, attempts_retried 2)",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",
@@ -44,6 +44,14 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
+      "attempts": [
+        "step 0 attempt 1 error stream_idle",
+        "step 0 attempt 2 error stream_idle",
+        "step 0 attempt 3 ok"
+      ],
       "holes": []
     },
     {
@@ -89,6 +97,13 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
+      "attempts": [
+        "step 0 attempt 1 error stream_idle",
+        "step 0 attempt 2 ok"
+      ],
       "holes": []
     },
     {
@@ -131,6 +146,14 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
+      "attempts": [
+        "step 0 attempt 1 error stream_idle",
+        "step 0 attempt 2 error stream_idle",
+        "step 0 attempt 3 error stream_idle giveup budget"
+      ],
       "holes": []
     },
     {
@@ -176,6 +199,13 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
+      "attempts": [
+        "step 0 attempt 1 error stream_idle",
+        "step 0 attempt 2 ok"
+      ],
       "holes": []
     },
     {
@@ -221,6 +251,14 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
+      "attempts": [
+        "step 0 attempt 1 error stream_idle",
+        "step 0 attempt 2 error stream_idle",
+        "step 0 attempt 3 ok"
+      ],
       "holes": []
     }
   ]

@@ -124,13 +124,20 @@ describe("Waterfall on a cyclic parent chain", () => {
     // The unit as-is (no "MSS"), the axis in s/ms, durations not ranges.
     expect(screen.getByText("ms")).toBeTruthy()
     expect(screen.queryByText("mss")).toBeNull()
-    expect(screen.getByText("7.7s", { selector: "span" })).toBeTruthy()
-    expect(screen.getByText("7.7s", { selector: "div" })).toBeTruthy()
-    expect(screen.getByText("500µs")).toBeTruthy()
+    expect(screen.getByText("7.7 s", { selector: "span" })).toBeTruthy()
+    expect(screen.getByText("7.7 s", { selector: "div" })).toBeTruthy()
+    expect(screen.getByText("500 µs")).toBeTruthy()
     expect(screen.queryByText("0–7737")).toBeNull()
-    // The first tick is the origin: "0", not "0µs".
-    expect(screen.queryByText("0µs")).toBeNull()
+    // The first tick is the origin: "0", not "0 µs".
+    expect(screen.queryByText("0 µs")).toBeNull()
     expect(screen.getByText("0", { selector: "span" })).toBeTruthy()
+    // UX-F-16: the offset is a column of its own beside the duration,
+    // in the same spaced units ("+1.9 s"); a position axis has none.
+    const offsets = [...document.querySelectorAll("[data-offset]")].map(
+      (n) => n.textContent
+    )
+    expect(offsets).toEqual(["+0 µs", "+1.9 s"])
+    expect(screen.getByText("start")).toBeTruthy()
   })
 
   it("the position axis keeps its ranges, the unit pluralised once", () => {
@@ -142,5 +149,6 @@ describe("Waterfall on a cyclic parent chain", () => {
       />
     )
     expect(screen.getByText("events")).toBeTruthy()
+    expect(document.querySelector("[data-offset]")).toBeNull()
   })
 })

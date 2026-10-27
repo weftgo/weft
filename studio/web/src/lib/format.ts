@@ -41,7 +41,7 @@ export function clockTime(iso: string, ms = true): string {
   return ms ? `${hms}.${p(t.getMilliseconds(), 3)}` : hms
 }
 
-/** Run-level duration (finished - started), "12ms" / "1.2s" / "4m03s" / "2h05m". */
+/** Run-level duration (finished - started), "12 ms" / "1.2 s" / "4m03s" / "2h05m". */
 export function duration(started: string, finished: string | null): string {
   const a = Date.parse(started)
   const b = finished ? Date.parse(finished) : NaN
@@ -118,15 +118,17 @@ export function zoneLabel(offsetMinutes: number): string {
   return `UTC${offsetMinutes < 0 ? "+" : "-"}${h}${m ? `:${String(m).padStart(2, "0")}` : ""}`
 }
 
-/** A span of milliseconds in the tightest unit that still reads. */
+/** A span of milliseconds in the tightest unit that still reads: the
+ * one duration format of both surfaces (UX-F-16) — "11 ms", "1.2 s"
+ * (a space before a unit word), "4m03s", "2h05m". */
 export function spanMs(ms: number): string {
   if (!Number.isFinite(ms)) return "—"
-  // The unit is chosen on the rounded value: 999.6ms reads 1.0s, never
-  // "1000ms".
-  if (ms < 999.5) return `${Math.round(ms)}ms`
+  // The unit is chosen on the rounded value: 999.6 ms reads 1.0 s,
+  // never "1000 ms".
+  if (ms < 999.5) return `${Math.round(ms)} ms`
   // Under a minute keeps a decimal — unless rounding would print
-  // "60.0s"; from there on whole seconds, so a remainder never reads 60.
-  if (ms < 59_950) return `${(ms / 1000).toFixed(1)}s`
+  // "60.0 s"; from there on whole seconds, so a remainder never reads 60.
+  if (ms < 59_950) return `${(ms / 1000).toFixed(1)} s`
   const s = Math.round(ms / 1000)
   const m = Math.floor(s / 60)
   if (m < 60) return `${m}m${String(s % 60).padStart(2, "0")}s`

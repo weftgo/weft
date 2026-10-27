@@ -55,6 +55,9 @@
           "pending_source": "approval"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -120,6 +123,9 @@
           "status": "unset",
           "pending_source": "approval"
         }
+      ],
+      "parallelism": [
+        4
       ],
       "holes": []
     },
@@ -189,6 +195,9 @@
           "pending_source": "approval"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -250,6 +259,9 @@
           "denied_by": "grant"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -304,6 +316,9 @@
           "status": "unset",
           "pending_source": "approval"
         }
+      ],
+      "parallelism": [
+        4
       ],
       "holes": []
     },
@@ -371,6 +386,9 @@
           "pending_source": "approval"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -426,6 +444,9 @@
           "approved_by": "grant",
           "grant_id": "e_thread_grants_0004"
         }
+      ],
+      "parallelism": [
+        4
       ],
       "holes": []
     }

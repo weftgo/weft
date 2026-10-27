@@ -64,6 +64,10 @@ var cardShapes = []struct{ name, run string }{
 	{"mw.repairjson", "r_repair"},
 	{"mw.allow", "r_allow"},
 	{"rw.mcp-mesh", "r_mesh"},
+	// U30.3: an exhausted Retry's give-up (UX-S2-02) and a step's
+	// Parallelism dial beside a Sequential barrier (UX-S2-07).
+	{"mw.retry-giveup", "r_giveup"},
+	{"conc.parallelism", "r_par"},
 }
 
 func recordCardRuns(t *testing.T, url string) {
@@ -115,6 +119,40 @@ func recordCardRuns(t *testing.T, url string) {
 		run(agent("support", wefttest.Script(
 			wefttest.Fail(cardStatusErr{503}), wefttest.Fail(cardStatusErr{503}), wefttest.Say("hello after two retries")),
 			core.WrapModel(mw.Retry(mw.MaxRetries(3), mw.BaseDelay(time.Millisecond)))), "r_retry", core.Prompt("hi"))
+
+		// mw.retry-giveup: two 429s under MaxRetries(1) — the run fails,
+		// the last attempt giving up on its budget.
+		if _, err := agent("support", wefttest.Script(
+			wefttest.Fail(cardStatusErr{429}), wefttest.Fail(cardStatusErr{429})),
+			core.WrapModel(mw.Retry(mw.MaxRetries(1), mw.BaseDelay(time.Millisecond)))).Generate(ctx,
+			core.RunID("r_giveup"), core.Prompt("hi")); err == nil {
+			t.Fatal("r_giveup: the run succeeded; want the provider's 429")
+		}
+
+		// conc.parallelism: three calls under Parallelism(2), then a
+		// Sequential barrier tool. The completion order is fixed (a, c,
+		// b): c starts once a returned, b returns once c did, each
+		// 20 ms after its signal.
+		aDone, cDone := make(chan struct{}), make(chan struct{})
+		nap := func(name string, wait <-chan struct{}, done chan struct{}, opts ...core.ToolOption) *core.ToolDef {
+			return core.Tool(name, "Nap.", func(context.Context, struct{}) (string, error) {
+				if wait != nil {
+					<-wait
+					time.Sleep(20 * time.Millisecond)
+				}
+				if done != nil {
+					close(done)
+				}
+				return name + " done", nil
+			}, opts...)
+		}
+		run(agent("fanout", wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{ID: "p1", Name: "a"}, wefttest.Call{ID: "p2", Name: "b"},
+				wefttest.Call{ID: "p3", Name: "c"}, wefttest.Call{ID: "p4", Name: "barrier"}),
+			wefttest.Say("all done")),
+			core.Parallelism(2), nap("a", nil, aDone), nap("b", cDone, nil),
+			nap("c", aDone, cDone), nap("barrier", nil, nil, core.Sequential())),
+			"r_par", core.Prompt("fan out"))
 
 		// tools.timeout: a tool cut at its 50 ms limit.
 		slow := core.Tool("slow", "Slow.", func(c context.Context, _ struct{}) (string, error) {
@@ -340,7 +378,9 @@ func TestRunCardsGolden(t *testing.T) {
 	t.Setenv("WEFT_MODEL_REQUESTS", "deny")
 	ts, _ := requestsServer(t)
 	recordCardRuns(t, ts.URL)
-	finished := func(b string) bool { return strings.Contains(b, `"status":"succeeded"`) }
+	finished := func(b string) bool {
+		return strings.Contains(b, `"status":"succeeded"`) || strings.Contains(b, `"status":"failed"`)
+	}
 
 	type shapeDoc struct {
 		Run        json.RawMessage            `json:"run"`
@@ -370,7 +410,9 @@ func TestRunCardsGolden(t *testing.T) {
 			Requests:   json.RawMessage(fetchJSON(t, ts, "/api/runs/"+id+"/requests?limit=1000", nil)),
 			Tools:      json.RawMessage(fetchJSON(t, ts, "/api/runs/"+id+"/tools", nil)),
 		}
-		for n := 0; n < row.Steps; n++ {
+		// A run that failed in its first model call counts no step;
+		// its step 0 still holds the attempts.
+		for n := 0; n < max(row.Steps, 1); n++ {
 			d.Steps = append(d.Steps, json.RawMessage(fetchJSON(t, ts, fmt.Sprintf("/api/runs/%s/steps/%d", id, n), nil)))
 		}
 		for _, c := range row.Children {
@@ -384,6 +426,22 @@ func TestRunCardsGolden(t *testing.T) {
 	}
 	for _, s := range cardShapes {
 		out[s.name] = read(s.run)
+	}
+	// conc.parallelism's calls start two at a time: the spans route
+	// orders a tie by span id (random), so the golden takes them by name.
+	{
+		d := out["conc.parallelism"]
+		var doc map[string]any
+		decode(t, string(d.Spans), &doc)
+		spans, _ := doc["spans"].([]any)
+		name := func(i int) string { n, _ := spans[i].(map[string]any)["name"].(string); return n }
+		sort.SliceStable(spans, func(i, j int) bool { return name(i) < name(j) })
+		b, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.Spans = b
+		out["conc.parallelism"] = d
 	}
 
 	// The Go half of the facts, on what the routes serve.
@@ -434,6 +492,10 @@ func TestRunCardsGolden(t *testing.T) {
 		{"mw.allow", "execute_tool", "weft.tool.denied_by", []string{"allow"}},
 		{"rw.mcp-mesh", "execute_tool", "weft.tool.origin", []string{"mcp:billing", "mcp:billing", "mcp:billing", "mcp:billing"}},
 		{"rw.mcp-mesh", "execute_tool", "error.type", []string{"mcp_rpc_error", "mcp_tool_error", "mcp_transport"}},
+		{"mw.retry", "attempt", "error.type", []string{"overloaded", "overloaded"}},
+		{"mw.retry-giveup", "attempt", "error.type", []string{"rate_limit", "rate_limit"}},
+		{"mw.retry-giveup", "attempt", "weft.attempt.giveup_reason", []string{"budget"}},
+		{"out.invalid-repaired", "invoke_agent", "weft.output.type", []string{"studio.verdict"}},
 	} {
 		if got := attr(c.shape, c.span, c.key); strings.Join(got, "|") != strings.Join(c.want, "|") {
 			t.Errorf("%s %s %s = %q, want %q", c.shape, c.span, c.key, got, c.want)
@@ -457,6 +519,13 @@ func TestRunCardsGolden(t *testing.T) {
 		!strings.Contains(string(out["mw.retry"].Steps[0]), `"wait_ms"`) ||
 		!strings.Contains(string(out["mw.retry"].Steps[0]), `overloaded`) {
 		t.Errorf("mw.retry step 0 attempts lack status, wait or cause:\n%s", out["mw.retry"].Steps[0])
+	}
+
+	if !strings.Contains(string(out["mw.retry-giveup"].Steps[0]), `"giveup_reason":"budget"`) {
+		t.Errorf("mw.retry-giveup step 0 attempts lack the give-up:\n%s", out["mw.retry-giveup"].Steps[0])
+	}
+	if !strings.Contains(string(out["conc.parallelism"].Requests), `"parallelism":2`) {
+		t.Errorf("conc.parallelism's request records lack parallelism 2:\n%s", out["conc.parallelism"].Requests)
 	}
 
 	b, err := json.Marshal(out)

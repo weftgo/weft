@@ -1285,3 +1285,36 @@ func ExampleParkSource() {
 	// pending: refund
 	// refunded
 }
+
+// once is a ModelMiddleware that sends each request once and reports
+// the attempt — saying, on a failure, that it stops there
+// (AttemptInfo.GiveUp: the attempt span's weft.attempt.giveup_reason,
+// what Studio's "gave up" line reads).
+func once(next core.Model) core.Model { return onceModel{next} }
+
+type onceModel struct{ next core.Model }
+
+func (m onceModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
+		info, start := core.InfoOf(m.next), time.Now()
+		var failed error
+		for ev, err := range m.next.Stream(ctx, req) {
+			failed = err
+			if !yield(ev, err) || err != nil {
+				break
+			}
+		}
+		a := core.AttemptInfo{Model: info.Name, Provider: info.Provider, Start: start, End: time.Now(), Err: failed}
+		if failed != nil {
+			a.GiveUp = core.AttemptGiveUpNotRetryable
+		}
+		core.ReportFromContext(ctx).Attempt(a)
+	}
+}
+
+func ExampleAttemptInfo_giveUp() {
+	agt := core.New(wefttest.Script(wefttest.Fail(errors.New("401 unauthorized"))), core.WrapModel(once))
+	_, err := agt.Generate(context.Background(), core.Prompt("hi"))
+	fmt.Println(err != nil)
+	// Output: true
+}

@@ -61,6 +61,9 @@
           "pending_source": "approval"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -129,6 +132,9 @@
           "denied_kind": "no_decision",
           "denied_by": "approval"
         }
+      ],
+      "parallelism": [
+        4
       ],
       "holes": []
     }

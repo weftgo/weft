@@ -61,6 +61,10 @@
           "pending_source": "approval"
         }
       ],
+      "parallelism": [
+        4
+      ],
+      "output_type": "obsdb_test.verdict",
       "holes": []
     },
     {
@@ -123,6 +127,10 @@
           "status": "ok"
         }
       ],
+      "parallelism": [
+        4
+      ],
+      "output_type": "obsdb_test.verdict",
       "holes": []
     }
   ]

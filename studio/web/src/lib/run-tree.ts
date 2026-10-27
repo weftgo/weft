@@ -83,8 +83,17 @@ export function treeSpans(model: WaterfallModel): Span[] {
         ? { childRun: r.child.runId, collapsed: r.child.collapsed }
         : {}),
       ...(r.untimed ? { untimed: r.untimed } : {}),
+      ...(time && r.kind === "attempt" ? waitOf(r.span) : {}),
     }
   })
+}
+
+/** waitOf is an attempt row's wait before it (UX-S2-02): its span's
+ * weft.attempt.wait_ms — the backoff mw.Retry slept, a retry-after it
+ * honoured — the waterfall's hatch before the bar. */
+function waitOf(sp: TimedSpan | undefined): { wait?: number } {
+  const w = Number(sp?.attrs["weft.attempt.wait_ms"])
+  return w > 0 ? { wait: w } : {}
 }
 
 /**

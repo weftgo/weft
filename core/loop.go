@@ -140,6 +140,9 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	if a.manifestHash != "" {
 		runExtra = append(runExtra, attrManifestHash.String(a.manifestHash))
 	}
+	if a.outputType != "" {
+		runExtra = append(runExtra, attrOutputType.String(a.outputType))
+	}
 	runExtra = append(runExtra, attrVersion.String(version))
 	if mdDropped > 0 {
 		runExtra = append(runExtra, attrMetadataDropped.Int(mdDropped))
@@ -537,7 +540,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// records) — against the step's own inputs, the transcript and
 		// the fetched tools, which the chain's deep copies leave
 		// untouched.
-		inputs := stepInputs{model: model, before: before, tools: tools, prepared: a.prepare != nil}
+		inputs := stepInputs{model: model, before: before, tools: tools, prepared: a.prepare != nil, parallelism: parallelism}
 		if a.prepare != nil {
 			// The chain's tools are the step's snapshot (without a
 			// chain, the fetched one is). Either way the model is handed

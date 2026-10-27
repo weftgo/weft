@@ -10,7 +10,7 @@
 /** What the attempt line says: the answering attempt's number (0 when
  * the step ended with none answering), how many attempts the step
  * made, the model asked for and the one that answered. */
-import { FIRST_TOKEN, plural } from "./format"
+import { FIRST_TOKEN, plural, spanMs } from "./format"
 
 export interface AttemptFacts {
   n: number
@@ -144,13 +144,8 @@ export function factsFromRows(
 }
 
 /** msText is a measured interval as the timing line says it: "180 ms",
- * "1.2 s", "1m03s". */
-export function msText(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)} ms`
-  if (ms < 59_950) return `${(ms / 1000).toFixed(1)} s`
-  const s = Math.round(ms / 1000)
-  return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`
-}
+ * "1.2 s", "1m03s" — lib/format.ts's spanMs, the one format (UX-F-16). */
+export const msText = spanMs
 
 /** timingLine is the step's latency and TTFT: "1.2 s · first token
  * 180 ms", both surfaces (FIRST_TOKEN, U21.1). An absent value is not
@@ -163,6 +158,31 @@ export function timingLine(
   if (latencyMs && latencyMs > 0) parts.push(msText(latencyMs))
   if (ttftMs && ttftMs > 0) parts.push(`${FIRST_TOKEN} ${msText(ttftMs)}`)
   return parts.length ? parts.join(" · ") : null
+}
+
+/** Why the retrying layer stopped (weft.attempt.giveup_reason,
+ * UX-S2-02). */
+export const GIVE_UP: Record<string, string | undefined> = {
+  budget: "retries spent",
+  not_retryable: "not retryable",
+  retry_after_too_long: "the provider asked to wait past MaxWait",
+}
+
+/** giveUpLine is the line after a step's last attempt when the step
+ * got no answer (UX-S2-02): "gave up: retries spent (3 attempts)" from
+ * the last attempt's giveup_reason; "gave up after 3 attempts" when
+ * several failed and none says why (a record before it, a layer that
+ * does not say). Null when the last attempt answered, or a single
+ * failure says nothing more than its own row. */
+export function giveUpLine(
+  attempts: { outcome?: string; giveup_reason?: string }[] | undefined
+): string | null {
+  const last = attempts?.at(-1)
+  if (!last || last.outcome !== "error") return null
+  const n = plural(attempts!.length, "attempt")
+  const why = last.giveup_reason
+  if (why) return `gave up: ${GIVE_UP[why] ?? why} (${n})`
+  return attempts!.length > 1 ? `gave up after ${n}` : null
 }
 
 /** A step with no attempt row yet while the run is still running. */

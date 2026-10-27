@@ -121,11 +121,11 @@ describe("the Timeline on the director run (U8.3)", () => {
     const box = renderTimeline(turn())
     expect(box.getAttribute("data-axis")).toBe("time")
     const ms = row(box, `r:${DIR}`).querySelector(".weft-wf-ms")!
-    expect(ms.textContent).toBe("14.0ms")
-    expect(ms.getAttribute("title")).toBe("+0µs")
+    expect(ms.textContent).toBe("14.0 ms")
+    expect(ms.getAttribute("title")).toBe("+0 µs")
     expect(
       row(box, "c:0:call_1").querySelector(".weft-wf-ms")!.getAttribute("title")
-    ).toBe("+1.0ms")
+    ).toBe("+1.0 ms")
     expect(box.querySelector(".weft-tick")!.textContent).toBe("0 ms")
   })
 

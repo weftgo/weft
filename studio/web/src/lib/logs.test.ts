@@ -187,6 +187,7 @@ const STEP_ATTEMPT_KEYS: Record<keyof StepAttempt, true> = {
   http_status: true,
   wait_ms: true,
   error: true,
+  giveup_reason: true,
   started: true,
   finished: true,
   span_id: true,

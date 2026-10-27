@@ -66,6 +66,9 @@
         "DEBUG model request · chat script [messages model provider system_bytes thinking tools]",
         "DEBUG model finish · chat script [dur input_tokens model output_tokens provider raw reason tool_calls]"
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     }
   ]

@@ -45,6 +45,9 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
       "holes": []
     }
   ]

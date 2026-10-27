@@ -44,6 +44,9 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
       "holes": [
         "stripped"
       ]
@@ -93,6 +96,9 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
       "holes": [
         "stripped"
       ]

@@ -69,6 +69,11 @@ export interface Span {
    * time is not known — pending its spans, missing, or a call the
    * loop never ran (unrun). */
   untimed?: "pending" | "missing" | "unrun"
+  /** An attempt row's wait before it, in ms (weft.attempt.wait_ms,
+   * UX-S2-02): drawn as a hatch ending where its bar starts. */
+  wait?: number
+  /** A tool row of a Sequential tool (UX-S2-07): its barrier mark. */
+  barrier?: boolean
 }
 
 /** A time-axis row's own data: the span, with from/to in milliseconds

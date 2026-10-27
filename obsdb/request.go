@@ -358,9 +358,13 @@ type RequestBody struct {
 	ToolChoice      *RequestToolChoice `json:"tool_choice,omitempty"`
 	Thinking        *RequestThinking   `json:"thinking,omitempty"`
 	SequentialTools bool               `json:"sequential_tools"`
-	Params          RequestParams      `json:"params"`
-	Model           RequestModel       `json:"model"`
-	Stream          bool               `json:"stream"`
+	// Parallelism is the step's Parallelism dial (UX-S2-07, record
+	// contract §4): how many of its tool calls may run at once. 0 on a
+	// record written before it.
+	Parallelism int           `json:"parallelism,omitempty"`
+	Params      RequestParams `json:"params"`
+	Model       RequestModel  `json:"model"`
+	Stream      bool          `json:"stream"`
 	// Prepared names the parts the run's PrepareStep chain changed
 	// (O9, record contract §4): system, messages, tools, tool_choice,
 	// params, thinking, sequential_tools. Absent when none did.

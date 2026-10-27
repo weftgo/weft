@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -52,7 +53,24 @@ type AttemptInfo struct {
 	// response), zero when none is known. The attempt span carries it as
 	// http.response.status_code.
 	HTTPStatus int
+	// GiveUp says why the reporting layer stopped after this failed
+	// attempt — the call's last: AttemptGiveUpBudget (its retries were
+	// spent), AttemptGiveUpNotRetryable (the failure is not one it
+	// retries), AttemptGiveUpRetryAfter (the provider asked to wait
+	// longer than it may). Empty on an attempt it followed with another,
+	// on a success, and when the layer does not know (a cancelled run
+	// names its own cause). The attempt span carries it as
+	// weft.attempt.giveup_reason.
+	GiveUp string
 }
+
+// The AttemptInfo.GiveUp values: why a retrying layer stopped after a
+// failed attempt (weft.attempt.giveup_reason, a closed set).
+const (
+	AttemptGiveUpBudget       = "budget"
+	AttemptGiveUpNotRetryable = "not_retryable"
+	AttemptGiveUpRetryAfter   = "retry_after_too_long"
+)
 
 // AttemptLayerFallback is AttemptInfo.Layer for a request a fallback
 // layer sent to a backup model rather than the one asked.
@@ -320,6 +338,8 @@ const (
 	attrAttemptRetryAfterMS = attribute.Key("weft.attempt.retry_after_ms")
 	attrAttemptLayer        = attribute.Key("weft.attempt.layer")
 	attrAttemptWaitMS       = attribute.Key("weft.attempt.wait_ms")
+	attrAttemptGiveUp       = attribute.Key("weft.attempt.giveup_reason")
+	logGiveUp               = "giveup"
 	logWait                 = "wait"
 	logStatus               = "status"
 	logAttempt              = "attempt"
@@ -358,7 +378,7 @@ func (s *stepReport) attempt(a AttemptInfo) {
 	if recording {
 		var errMsg, errType string
 		if a.Err != nil {
-			errMsg, errType = a.Err.Error(), runErrorType(a.Err)
+			errMsg, errType = a.Err.Error(), attemptErrorType(a.Err, a.HTTPStatus)
 		}
 		s.attemptSpan(a, index, timed, errMsg, errType)
 	}
@@ -388,6 +408,9 @@ func (s *stepReport) attempt(a AttemptInfo) {
 		}
 		if a.HTTPStatus > 0 {
 			attrs = append(attrs, slog.Int(logStatus, a.HTTPStatus))
+		}
+		if a.GiveUp != "" {
+			attrs = append(attrs, slog.String(logGiveUp, a.GiveUp))
 		}
 		if a.Err != nil {
 			attrs = append(attrs, slog.String(logErr, a.Err.Error()))
@@ -444,6 +467,9 @@ func (s *stepReport) attemptSpan(a AttemptInfo, index int64, timed bool, errMsg,
 		if a.HTTPStatus > 0 {
 			attrs = append(attrs, semconv.HTTPResponseStatusCode(a.HTTPStatus))
 		}
+		if a.Err != nil && a.GiveUp != "" {
+			attrs = append(attrs, attrAttemptGiveUp.String(a.GiveUp))
+		}
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 		if a.Err != nil {
@@ -488,4 +514,41 @@ func (s *stepReport) requestAttempt(ctx context.Context, index int64, a AttemptI
 // see it pass.
 func sinceAtLeast(t time.Time) time.Duration {
 	return max(time.Since(t), time.Nanosecond)
+}
+
+// attemptErrorType classifies a failed attempt for its span's
+// error.type (UX-S2-02), a closed set finer than the run's: the
+// context errors' names and weft's named failures as runErrorType
+// reads them, context_overflow (ErrContextOverflow), then by the
+// provider's HTTP status — rate_limit (429), overloaded (503, 529),
+// timeout (408, 504, or a transport error whose Timeout() says so),
+// auth (401, 403), server_error (any other 5xx) — and model_error for
+// the rest. Types only: the provider's text stays the status
+// description (ADR 0016).
+func attemptErrorType(err error, status int) string {
+	if t := runErrorType(err); t != "model_error" {
+		return t
+	}
+	if errors.Is(err, ErrContextOverflow) {
+		return "context_overflow"
+	}
+	switch {
+	case status == 429:
+		return "rate_limit"
+	case status == 503 || status == 529:
+		return "overloaded"
+	case status == 408 || status == 504:
+		return "timeout"
+	case status == 401 || status == 403:
+		return "auth"
+	case status >= 500 && status < 600:
+		return "server_error"
+	}
+	if t, ok := errors.AsType[interface {
+		error
+		Timeout() bool
+	}](err); ok && t.Timeout() {
+		return "timeout"
+	}
+	return "model_error"
 }

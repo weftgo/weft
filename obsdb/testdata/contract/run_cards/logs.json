@@ -308,7 +308,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"fe1c6afdbd1bdcc11132395edd2bdcad8cf672c8562d1345d28032b97279fc2e\",\"names\":[\"submit_output\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"fe1c6afdbd1bdcc11132395edd2bdcad8cf672c8562d1345d28032b97279fc2e\",\"names\":[\"submit_output\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -742,7 +742,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"fe1c6afdbd1bdcc11132395edd2bdcad8cf672c8562d1345d28032b97279fc2e\",\"names\":[\"submit_output\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"fe1c6afdbd1bdcc11132395edd2bdcad8cf672c8562d1345d28032b97279fc2e\",\"names\":[\"submit_output\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1406,7 +1406,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"fe1c6afdbd1bdcc11132395edd2bdcad8cf672c8562d1345d28032b97279fc2e\",\"names\":[\"submit_output\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"fe1c6afdbd1bdcc11132395edd2bdcad8cf672c8562d1345d28032b97279fc2e\",\"names\":[\"submit_output\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1934,7 +1934,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"dbc50d76ecb613ffdb94f564bcab1c877313c8d353621e5297a4b9922ee24e18\",\"names\":[\"refund_order\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"dbc50d76ecb613ffdb94f564bcab1c877313c8d353621e5297a4b9922ee24e18\",\"names\":[\"refund_order\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -2474,7 +2474,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8\",\"names\":[\"lookup_order\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8\",\"names\":[\"lookup_order\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -3014,7 +3014,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"1908a9d0105663ee90d4dd21051049548155d0e028d93e73f88572a63618e289\",\"names\":[\"slow_lookup\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"1908a9d0105663ee90d4dd21051049548155d0e028d93e73f88572a63618e289\",\"names\":[\"slow_lookup\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -3448,7 +3448,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"1908a9d0105663ee90d4dd21051049548155d0e028d93e73f88572a63618e289\",\"names\":[\"slow_lookup\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"1908a9d0105663ee90d4dd21051049548155d0e028d93e73f88572a63618e289\",\"names\":[\"slow_lookup\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -3976,7 +3976,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"48f2ecfcf1b7fc18abfb6dcffa2c9d9e346bb4cf74ba5c16f3100c12a9da9d7d\",\"names\":[\"refunds\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"48f2ecfcf1b7fc18abfb6dcffa2c9d9e346bb4cf74ba5c16f3100c12a9da9d7d\",\"names\":[\"refunds\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -4410,7 +4410,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"dbc50d76ecb613ffdb94f564bcab1c877313c8d353621e5297a4b9922ee24e18\",\"names\":[\"refund_order\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"dbc50d76ecb613ffdb94f564bcab1c877313c8d353621e5297a4b9922ee24e18\",\"names\":[\"refund_order\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -4962,7 +4962,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"48f2ecfcf1b7fc18abfb6dcffa2c9d9e346bb4cf74ba5c16f3100c12a9da9d7d\",\"names\":[\"refunds\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"48f2ecfcf1b7fc18abfb6dcffa2c9d9e346bb4cf74ba5c16f3100c12a9da9d7d\",\"names\":[\"refunds\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -5546,7 +5546,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"4e423600df239f74e4bd7800110805f717d1bca584615d4e6fa92e29b8fc6c84\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8\",\"names\":[\"lookup_order\"]},\"tool_choice\":{\"mode\":\"tool\",\"name\":\"lookup_order\"},\"thinking\":{\"level\":\"low\",\"wire\":\"reasoning_effort\"},\"sequential_tools\":false,\"params\":{\"temperature\":0},\"model\":{},\"stream\":true,\"prepared\":[\"system\",\"tool_choice\",\"params\"]}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"4e423600df239f74e4bd7800110805f717d1bca584615d4e6fa92e29b8fc6c84\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8\",\"names\":[\"lookup_order\"]},\"tool_choice\":{\"mode\":\"tool\",\"name\":\"lookup_order\"},\"thinking\":{\"level\":\"low\",\"wire\":\"reasoning_effort\"},\"sequential_tools\":false,\"parallelism\":4,\"params\":{\"temperature\":0},\"model\":{},\"stream\":true,\"prepared\":[\"system\",\"tool_choice\",\"params\"]}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -6030,7 +6030,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"f3520d4073eb6a537a911cec6046c46fdf6e475b887a7f3b5e51ba633a88c54b\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8\",\"names\":[\"lookup_order\"]},\"thinking\":{\"level\":\"low\",\"wire\":\"reasoning_effort\"},\"sequential_tools\":false,\"params\":{},\"model\":{},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"f3520d4073eb6a537a911cec6046c46fdf6e475b887a7f3b5e51ba633a88c54b\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8\",\"names\":[\"lookup_order\"]},\"thinking\":{\"level\":\"low\",\"wire\":\"reasoning_effort\"},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -6496,7 +6496,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"\",\"names\":[]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"\",\"names\":[]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -6602,7 +6602,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":2,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"\",\"names\":[]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":2,\"system_hash\":\"\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"\",\"names\":[]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,

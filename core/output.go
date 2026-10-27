@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 )
@@ -48,15 +49,41 @@ func Output[Out any]() Option {
 	if file, line, fn := callerSource(); file != "" {
 		tool.sourceFile, tool.sourceLine, tool.sourceFunc = file, line, fn
 	}
-	return outputOption{tool: tool}
+	return outputOption{tool: tool, typ: outputTypeName(reflect.TypeFor[Out]())}
 }
 
-type outputOption struct{ tool *ToolDef }
+type outputOption struct {
+	tool *ToolDef
+	typ  string
+}
 
 func (o outputOption) apply(a *Agent) {
 	o.tool.apply(a)
 	a.stops = append(a.stops, outputSubmitted{})
 	a.hasOutput = true
+	a.outputType = o.typ
+}
+
+// maxOutputTypeName bounds weft.output.type and the manifest's
+// output_type: a Go type's package-qualified name, cut past it.
+const maxOutputTypeName = 128
+
+// outputTypeName is Output's type as the record names it (UX-S1-06):
+// the package-qualified name ("main.Invoice"), a pointer's element's,
+// "struct" for an anonymous struct — a name, never a value, at most
+// maxOutputTypeName bytes.
+func outputTypeName(t reflect.Type) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Name() == "" {
+		return t.Kind().String()
+	}
+	s := t.String()
+	if len(s) > maxOutputTypeName {
+		s = s[:maxOutputTypeName]
+	}
+	return s
 }
 
 // outputSubmitted stops the run once a step has recorded a non-error

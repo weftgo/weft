@@ -378,7 +378,7 @@ describe("the call graph (U9.2-fix W5, W6)", () => {
       /calls along this edge/
     )
     expect(edge.querySelector("[data-edge-label]")!.textContent).toBe(
-      "1× · 9.3ms"
+      "1× · 9.3 ms"
     )
     expect(g.querySelector("[data-graph-unsourced]")!.textContent).toMatch(
       /^MCP calls of 2 child runs not shown/

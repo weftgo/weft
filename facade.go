@@ -1275,6 +1275,14 @@ func Repair(msgs []Message) []Message { return core.Repair(msgs) }
 // numbers stay unique however many layers report.
 type AttemptInfo = core.AttemptInfo
 
+// The AttemptInfo.GiveUp values: why a retrying layer stopped after a
+// failed attempt (weft.attempt.giveup_reason, a closed set).
+const (
+	AttemptGiveUpBudget       = core.AttemptGiveUpBudget
+	AttemptGiveUpNotRetryable = core.AttemptGiveUpNotRetryable
+	AttemptGiveUpRetryAfter   = core.AttemptGiveUpRetryAfter
+)
+
 // AttemptLayerFallback is AttemptInfo.Layer for a request a fallback
 // layer sent to a backup model rather than the one asked.
 const AttemptLayerFallback = core.AttemptLayerFallback

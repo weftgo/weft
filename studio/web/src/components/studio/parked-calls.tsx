@@ -14,7 +14,7 @@
 // the playground says so in meta.capabilities_off's words. Steer on the
 // running app turn sits beside (AppSteer). Cancel is never offered on
 // an app turn: the runtime refuses it.
-import { BREAKPOINT } from "@/lib/cards"
+import { BREAKPOINT, BREAKPOINT_CLEAR } from "@/lib/cards"
 import { absoluteTime } from "@/lib/format"
 import {
   CALLS_HOLE,
@@ -48,6 +48,7 @@ import {
   metaQuery,
   postApproval,
   postSteer,
+  putBreakpoints,
   runCommandsQuery,
   runtimesQuery,
   sessionQuery,
@@ -515,6 +516,87 @@ function useRequestExpiries(doc: RunDoc) {
   return { exp, now, capped, unread }
 }
 
+/** ClearBreakpoint is a breakpoint park's link to clear it (UX-H-18):
+ * the runtime of the run's service whose breakpoints name the tool, its
+ * set PUT without it — a read token is told why not. Nothing when no
+ * connected runtime holds that breakpoint. */
+function ClearBreakpoint({
+  tool,
+  service,
+}: {
+  tool: string
+  service?: string
+}) {
+  const read = tokenScopeOf(studioToken()) === "read"
+  const qc = useQueryClient()
+  const rts = useQuery({ ...runtimesQuery(), enabled: !read && !!service })
+  const [state, setState] = useState<"" | "saving" | "cleared">("")
+  const [err, setErr] = useState("")
+  if (read)
+    return (
+      <span
+        className="ml-2 font-sans text-faint"
+        data-breakpoint-clear="read-only"
+      >
+        {BREAKPOINT_CLEAR.readOnly}
+      </span>
+    )
+  const rt = rts.data?.runtimes.find(
+    (r) => r.service === service && r.breakpoints?.includes(tool)
+  )
+  if (state === "cleared")
+    return (
+      <span
+        className="ml-2 font-sans text-faint"
+        data-breakpoint-clear="cleared"
+      >
+        {BREAKPOINT_CLEAR.cleared}
+      </span>
+    )
+  if (!rt) return null
+  const clear = async () => {
+    setState("saving")
+    setErr("")
+    try {
+      await putBreakpoints(
+        rt.id,
+        (rt.breakpoints ?? []).filter((t) => t !== tool),
+        "run"
+      )
+      setState("cleared")
+      void qc.invalidateQueries({ queryKey: runtimesQuery().queryKey })
+    } catch (e) {
+      setState("")
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }
+  return (
+    <span className="ml-2 font-sans" data-breakpoint-clear={rt.id}>
+      <button
+        type="button"
+        className="text-thread-ink hover:underline disabled:opacity-50"
+        title={BREAKPOINT_CLEAR.title(rt.id)}
+        disabled={state === "saving"}
+        onClick={() => void clear()}
+      >
+        {BREAKPOINT_CLEAR.clear(tool)}
+      </button>
+      {" · "}
+      <Link
+        {...runtimesLink({ runtime: rt.id })}
+        className="text-faint hover:underline"
+      >
+        {BREAKPOINT_CLEAR.at(rt.id)}
+      </Link>
+      {err ? (
+        <span className="ml-2 text-destructive" role="alert">
+          {err}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
 export function ParkedCalls({
   doc,
   pending,
@@ -618,6 +700,10 @@ export function ParkedCalls({
                     ? "decided"
                     : (words?.get(p.id)?.word ?? AWAITING)}
                 </span>
+                {shown !== "resumed" &&
+                words?.get(p.id)?.word === BREAKPOINT ? (
+                  <ClearBreakpoint tool={p.name} service={doc.service} />
+                ) : null}
                 {shown !== "resumed" && expiry.exp.get(p.id) ? (
                   <RequestExpiry at={expiry.exp.get(p.id)!} now={expiry.now} />
                 ) : null}

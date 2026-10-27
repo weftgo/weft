@@ -252,3 +252,45 @@ func TestRetryOverSelfReportingModelStaysSilent(t *testing.T) {
 		}
 	}
 }
+
+// Retry says why it stopped on the call's last failed attempt
+// (AttemptInfo.GiveUp, weft.attempt.giveup_reason; UX-S2-02): its
+// retries spent, a failure it does not retry, a retry-after past
+// MaxWait — and nothing on an attempt it followed with another.
+func TestRetryGiveUpReason(t *testing.T) {
+	cases := []struct {
+		name  string
+		fails []error
+		opts  []mw.RetryOption
+		want  []string // each attempt's giveup, in order
+	}{
+		{"budget", []error{status(503, nil), status(503, nil)}, []mw.RetryOption{mw.MaxRetries(1)}, []string{"", "budget"}},
+		{"not retryable", []error{status(401, nil)}, nil, []string{"not_retryable"}},
+		{"retry-after too long", []error{status(429, map[string]string{"retry-after": "120"})}, []mw.RetryOption{mw.MaxWait(time.Second)}, []string{"retry_after_too_long"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := &attemptLines{}
+			var steps []wefttest.Turn
+			for _, e := range c.fails {
+				steps = append(steps, wefttest.Fail(e))
+			}
+			model := wefttest.Script(steps...)
+			agt := core.New(model, core.Logger(slog.New(h)),
+				core.WrapModel(mw.Retry(append([]mw.RetryOption{mw.BaseDelay(0)}, c.opts...)...)))
+			if _, err := agt.Generate(context.Background(), core.Prompt("x")); err == nil {
+				t.Fatal("the run succeeded; want the provider's failure")
+			}
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if len(h.lines) != len(c.want) {
+				t.Fatalf("attempt lines = %v, want %d", h.lines, len(c.want))
+			}
+			for i, w := range c.want {
+				if got := h.lines[i]["giveup"]; got != w {
+					t.Errorf("attempt %d giveup = %q, want %q", i+1, got, w)
+				}
+			}
+		})
+	}
+}

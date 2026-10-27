@@ -47,6 +47,8 @@ import {
   attemptTag,
   OUTPUT,
   overrideTitle,
+  overrideTag,
+  paramOverrideTags,
   preparedChip,
   thinkingWords,
 } from "@/lib/cards"
@@ -419,7 +421,7 @@ function ToolChips({ t }: { t: ToolEntry }) {
   return (
     <span className="flex flex-wrap gap-1">
       <Chip title="the tool's deadline (weft.Timeout)">
-        timeout {t.timeout_ms > 0 ? `${t.timeout_ms}ms` : "none"}
+        timeout {t.timeout_ms > 0 ? `${t.timeout_ms} ms` : "none"}
       </Chip>
       <Chip title="RequireApproval: a call parks for a decision">
         approval {t.approval ? "required" : "no"}
@@ -646,6 +648,18 @@ function AttemptView({
 }) {
   const b = row.body
   const model = [b.model.provider, b.model.name].filter(Boolean).join("/")
+  // Each overridden knob's tag (UX-S5b-03): the run's
+  // weft.override.params, the tool choice's weft.override.tool_choice.
+  const ov = ctx?.override?.fields ?? []
+  const tags = ov.includes("params")
+    ? paramOverrideTags(
+        ctx?.spans?.find(
+          (s) =>
+            s.attrs["gen_ai.operation.name"] === "invoke_agent" &&
+            s.attrs["weft.run.id"] === ctx.runId
+        )?.attrs["weft.override.params"]
+      )
+    : undefined
   return (
     <div className="space-y-2 text-xs">
       {row.content === "stripped" ? (
@@ -686,6 +700,15 @@ function AttemptView({
               <span className="text-faint">{k}</span>
               <span className={v === "adapter default" ? "text-faint" : ""}>
                 {v}
+                {tags?.get(k) ? (
+                  <span
+                    className="ml-2 text-thread-ink"
+                    data-param-override={k}
+                    title="a run option replaced the agent's params for this run (weft.override.params)"
+                  >
+                    ◂ {tags.get(k)}
+                  </span>
+                ) : null}
               </span>
             </span>
           ))}
@@ -697,6 +720,15 @@ function AttemptView({
           {b.tool_choice
             ? `${b.tool_choice.mode}${b.tool_choice.name ? ` (${b.tool_choice.name})` : ""}`
             : "adapter default"}
+          {ov.includes("tool_choice") ? (
+            <span
+              className="ml-2 text-thread-ink"
+              data-param-override="tool_choice"
+              title="a run option set the tool choice for this run (weft.override.tool_choice)"
+            >
+              ◂ {overrideTag("tool_choice")}
+            </span>
+          ) : null}
         </span>
       </div>
       <div className="flex gap-2">

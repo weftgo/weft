@@ -382,6 +382,14 @@ export function eventStatus(r: RunRow): string {
   return r.status === "succeeded" && r.pending > 0 ? "parked" : r.status
 }
 
+/** childRow is a child run's row: the turn's own children, else a
+ * loaded child's (a grandchild at any depth). */
+function childRow(t: TurnView, id: string) {
+  return [t.doc, ...[...t.children.values()].map((c) => c.doc)]
+    .flatMap((d) => (d ? [...d.children, ...(d.caller_linked ?? [])] : []))
+    .find((c) => c.id === id)
+}
+
 /** engineWord is an experiment's engine as its chips say it: scripted
  * when the run answered as the scripted engine's model, else live. */
 export function engineWord(r: RunRow): "scripted" | "live" {
@@ -408,22 +416,6 @@ export function prevTurn(
     )
       p = x
   return p
-}
-
-/** studioLink builds the ⤢ deep link (§2: "open in Studio" with the
- * context carried over; Dv3 adds the step, G1 makes it the ordinal):
- * lib/links.ts's runLink, so the panel lands where Studio's own link
- * to the step lands. The run id travels as one encoded path segment;
- * the panel's token is never part of a link. */
-export function studioLink(
-  endpoint: string,
-  runId: string,
-  step?: number
-): string {
-  return href(
-    endpoint,
-    runPage(runId, step === undefined ? {} : { step, view: "story" })
-  )
 }
 
 /** capAdd adds k to a set bounded at max (insertion order: the oldest
@@ -529,14 +521,6 @@ export const HOW_TO_SCOPE: readonly string[] = [
 
 /** The fallback's header label: no rung names a scope. */
 export const NO_SCOPE_LABEL = "no conversation detected on this page"
-
-/** childRow is a child run's row: the turn's own children, else a
- * loaded child's (a grandchild at any depth). */
-function childRow(t: TurnView, id: string) {
-  return [t.doc, ...[...t.children.values()].map((c) => c.doc)]
-    .flatMap((d) => (d ? [...d.children, ...(d.caller_linked ?? [])] : []))
-    .find((c) => c.id === id)
-}
 
 /** SHORTCUTS is the keyboard (lib/keys.ts's PANEL_KEYMAP: the ? list
  * and the README's table). Every key but Alt+W fires only with focus
@@ -6917,6 +6901,22 @@ export function linkedStep(s: PanelState): number | undefined {
   return running ? t.folded.steps.at(-1)?.index : undefined
 }
 
+/** studioLink builds the ⤢ deep link (§2: "open in Studio" with the
+ * context carried over; Dv3 adds the step, G1 makes it the ordinal):
+ * lib/links.ts's runLink, so the panel lands where Studio's own link
+ * to the step lands. The run id travels as one encoded path segment;
+ * the panel's token is never part of a link. */
+export function studioLink(
+  endpoint: string,
+  runId: string,
+  step?: number
+): string {
+  return href(
+    endpoint,
+    runPage(runId, step === undefined ? {} : { step, view: "story" })
+  )
+}
+
 /** lastStep is the highest step the request record holds a row of. */
 function lastStep(req: PanelRequests): number {
   let n = -1
@@ -7680,14 +7680,39 @@ function renderStep(
   streaming = false,
   ans?: number
 ): HTMLElement {
+  // The whole card folds to its head line (UX-D-12): the step read,
+  // the answer's and the streaming one open, the rest closed. Its
+  // label is the toggle (a button: the head keeps its verbs and links
+  // beside it, keyboard reachable); what was shown or chosen is kept
+  // in the open keys across redraws (<key>1 open, <key>0 closed).
   const card = el("div", "weft-step", "", {
     "data-key": `s${step.index}`,
   })
   card.setAttribute("data-weft-step", String(step.index))
+  // ans is the step read when one is (renderFolded's landing rule).
+  const k = `${open?.scope}\u0000${step.index}`
+  const shown =
+    !open?.keys.has(k + 0) &&
+    (streaming || step.index === ans || !!open?.keys.has(k + 1))
+  // A card shown stays open when the step read moves on.
+  if (shown) open?.keys.add(k + 1)
   if (selectedStep === step.index)
     card.style.outline = "1px solid var(--weft-accent)"
   const head = el("div", "weft-step-h", [
-    el("span", "", `step ${step.index}`),
+    // The fold rides main's toggle listener, which keeps the key it
+    // names and redraws the turn.
+    on(
+      el("button", "weft-btn weft-fold", `step ${step.index}`, {
+        "aria-expanded": `${shown}`,
+        "data-weft-open": k + +!shown,
+      }),
+      "click",
+      (_, b) => {
+        open?.keys.delete(k + +shown)
+        ;(b as HTMLDetailsElement).open = true
+        b.dispatchEvent(new Event("toggle"))
+      }
+    ),
     el("span", "weft-grow"),
   ])
   // A child's step reads the child's record (by the child's id).
@@ -7747,6 +7772,7 @@ function renderStep(
     )
   card.append(head)
   const body = el("div", "weft-step-b")
+  body.hidden = !shown
   // The answer first (§6.3), on renderFolded's landing step.
   const run = ctx?.run
   if (t && run && step.index === ans)

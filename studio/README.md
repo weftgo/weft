@@ -1308,8 +1308,8 @@ retries one `/api/meta` read a minute, while the page is visible,
 brings it back by itself. The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 293,618 B raw / 98,515 B gzip
-(96.2 KiB, the bundle of the ledger's row "I6-fix2"; 7,981 B — 7.8 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 293,795 B raw / 98,637 B gzip
+(96.3 KiB, the bundle of the ledger's row "U30.3"; 7,859 B — 7.7 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -3110,7 +3110,11 @@ read-scoped panel token is refused them, 403 with `badge: "hidden"`),
 `runs/{id}/steps/{n}` (one step assembled server-side, `n` its ordinal,
 under the `steps` capability: the step's status, timing, the model
 requested and the one that answered, attempt 1's request row, every
-attempt with its model and outcome, `messages_in`, its events, its tool
+attempt with its model and outcome (a failed one's classified
+`error_type`, `http_status`, `wait_ms`, its status text as `error`, and
+`giveup_reason` — `budget`, `not_retryable`, `retry_after_too_long` —
+on the one the retrying layer stopped after, UX-S2-02),
+`messages_in`, its events, its tool
 calls with their spans and results, the child runs they started, usage,
 the compaction view it saw and `holes` — every absent block a badge
 with its reason and fix; scoped like `events`, except that a read-scoped

@@ -5,6 +5,9 @@
 import type { ManifestAgent, ManifestTool } from "./api"
 import { tokens } from "./format"
 
+/** The Output tool's mark on the Agents card (UX-S1-06). */
+export const OUTPUT_MARK = "typed output"
+
 export interface PolicyChip {
   /** The field, for a test hook. */
   key: string
@@ -101,6 +104,14 @@ export function agentPolicyChips(
 /** toolPolicyChips is one tool's own policy. */
 export function toolPolicyChips(tool: ManifestTool): PolicyChip[] {
   const out: PolicyChip[] = []
+  // UX-S1-06: the Output tool is the run's typed answer, not a side
+  // effect — marked first, with the type it decodes into.
+  if (tool.output_type)
+    out.push({
+      key: "output_type",
+      text: `${OUTPUT_MARK} · ${tool.output_type}`,
+      title: `the run's typed answer (Output[${tool.output_type}]): the model calls it once, and GenerateAs / OutputOf decode its arguments into ${tool.output_type}`,
+    })
   if (tool.timeout)
     out.push({
       key: "timeout",

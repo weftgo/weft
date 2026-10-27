@@ -252,7 +252,7 @@
                 {
                   "key": "error.type",
                   "value": {
-                    "stringValue": "model_error"
+                    "stringValue": "overloaded"
                   }
                 }
               ],

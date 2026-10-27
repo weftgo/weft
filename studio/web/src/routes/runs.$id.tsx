@@ -127,6 +127,7 @@ import { costNotRead, costView, sumCost } from "@/lib/cost"
 import type { HoleMark } from "@/lib/honesty"
 // The ?tree=1 read: the descendant rules too (lib/waterfall-tree.ts).
 import { treeRows as waterfallRows } from "@/lib/waterfall-tree"
+import { concurrencyMarks } from "@/lib/concurrency"
 import type { FoldedRun } from "@/lib/events"
 import {
   ROWS_LEVEL,
@@ -1095,12 +1096,16 @@ function RunPage() {
   const ended = useBusyEnd(run.data)
   const treeRows = useMemo(
     () =>
-      busyEndSpans(
-        compactionBadges(treeSpans(tree), id, compactionsOf(run.data)),
-        id,
-        ended
+      concurrencyMarks(
+        busyEndSpans(
+          compactionBadges(treeSpans(tree), id, compactionsOf(run.data)),
+          id,
+          ended
+        ),
+        requestsQ.data?.requests,
+        id
       ),
-    [tree, id, run.data, ended]
+    [tree, id, run.data, ended, requestsQ.data]
   )
   // WARN / ERROR ticks (U11.2): read only when the run document counts
   // such lines (log_warn / log_error), at warn and above.

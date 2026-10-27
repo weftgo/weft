@@ -539,7 +539,7 @@ describe("a parked call's request expiry (UX-B-41)", () => {
       { timeout: 5_000 }
     )
     expect(first).toMatch(
-      new RegExp(`^ · expires ${clockTime(at, false)} \\(in \\d\\.\\ds\\)$`)
+      new RegExp(`^ · expires ${clockTime(at, false)} \\(in \\d\\.\\d s\\)$`)
     )
     expect(expiry(el)?.title).toBe(expiryTitle(at))
     const reads = () =>

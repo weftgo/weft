@@ -66,6 +66,9 @@
           "status": "ok"
         }
       ],
+      "parallelism": [
+        1
+      ],
       "holes": []
     },
     {
@@ -123,6 +126,9 @@
           "pending_source": "park_on"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -179,6 +185,9 @@
           "approved": true,
           "approved_by": "runtime"
         }
+      ],
+      "parallelism": [
+        4
       ],
       "holes": []
     }

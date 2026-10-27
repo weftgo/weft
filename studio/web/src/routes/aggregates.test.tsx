@@ -178,8 +178,8 @@ describe("the Agents page's numbers (UX-A-14, UX-E-25)", () => {
       strip.querySelector<HTMLElement>(`[data-metric="${k}"]`)!.textContent
     expect(metric("runs")).toContain("5")
     expect(metric("failed")).toContain("60%")
-    expect(metric("duration")).toContain("p50 3.0s · p95 5.0s")
-    expect(metric("ttft")).toContain("p50 600ms")
+    expect(metric("duration")).toContain("p50 3.0 s · p95 5.0 s")
+    expect(metric("ttft")).toContain("p50 600 ms")
     expect(metric("tokens")).toContain("176 → 58")
     // An unpriced model: the badge, never $0.
     expect(metric("cost")).toContain("unpriced")
@@ -229,7 +229,7 @@ describe("the Agents page's numbers (UX-A-14, UX-E-25)", () => {
     })
     expect(tool.textContent).toContain("4 calls")
     expect(tool.textContent).toContain("failed 25%")
-    expect(tool.textContent).toContain("p50 300ms · p95 2.0s")
+    expect(tool.textContent).toContain("p50 300 ms · p95 2.0 s")
     expect(
       studio
         .calls("GET stats")

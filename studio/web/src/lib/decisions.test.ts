@@ -311,7 +311,7 @@ describe("a request expiry's rule, words and clock", () => {
 
   it("lapses past the stamp, never at it: thread's now.After(expiry)", () => {
     expect(expiryText(AT, at).lapsed).toBe(false)
-    expect(expiryText(AT, at).text).toMatch(/\(in 0ms\)$/)
+    expect(expiryText(AT, at).text).toMatch(/\(in 0 ms\)$/)
     expect(expiryText(AT, at + 1).lapsed).toBe(true)
     // The clock runs at the stamp (Studio's ticking, the panel's tick)
     // and stops past it.
@@ -352,7 +352,7 @@ describe("a request expiry's rule, words and clock", () => {
     expect(check(120_000)).toBe(501)
     // Under a minute, tenths: the whole tenth of the next second.
     expect(check(40_000)).toBe(951)
-    expect(words(at - 40_000 + 951)).toMatch(/\(in 39\.0s\)$/)
+    expect(words(at - 40_000 + 951)).toMatch(/\(in 39\.0 s\)$/)
     expect(check(2_500)).toBe(451)
     // The lapse instant itself, when it comes first.
     expect(expiryNext(AT, at - 40)).toBe(41)

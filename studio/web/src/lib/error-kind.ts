@@ -326,6 +326,14 @@ const ATTEMPT_WORDS: Record<string, string | undefined> = {
   "context.Canceled": CANCELLED,
   "context.DeadlineExceeded": "deadline",
   model_contract: "the adapter broke the stream contract",
+  // The classified provider failures (UX-S2-02): the attempt span's
+  // error.type from its HTTP status, model_error the rest.
+  rate_limit: "rate limited (429)",
+  overloaded: "overloaded",
+  timeout: "timed out",
+  auth: "auth refused",
+  server_error: "server error",
+  context_overflow: "past the context window",
 }
 
 /** attemptError words a failed attempt's error.type: the phrase, and

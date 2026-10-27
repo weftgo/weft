@@ -380,6 +380,10 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.tool.queue_ms":        {},
 	"weft.subagent.pending":     {},
 	"weft.output.submitted":     {},
+	// U30.3: an attempt's give-up reason (UX-S2-02) and an Output run's
+	// type name (UX-S1-06).
+	"weft.attempt.giveup_reason": {},
+	"weft.output.type":           {},
 	// U12.1 (audit O15): weft/thread's summarizer chat spans' role.
 	"weft.chat.role": {},
 	// UX-B-14: an approved call's provenance on its execute_tool span

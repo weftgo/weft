@@ -508,7 +508,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1116,7 +1116,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1940,7 +1940,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":0,\"count\":5},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":0,\"count\":5},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -2548,7 +2548,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":2,\"count\":7},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"360075d2ed174eeae4ad44bc8e6ee755b9ae57a709c49f1ad3931251f37211d8\",\"messages_ref\":{\"index\":2,\"count\":7},\"tools\":{\"catalog_hash\":\"950fbb5520cdb8af2ea55839e51c26f0c6f77d60dadb7a28a708af33aa595b0a\",\"names\":[\"fetch_doc\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,

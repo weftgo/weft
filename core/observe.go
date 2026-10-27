@@ -82,6 +82,7 @@ const (
 	attrSubagentPending = attribute.Key("weft.subagent.pending")
 	// An Output agent's run end (UX-S1-06).
 	attrOutputSubmitted = attribute.Key("weft.output.submitted")
+	attrOutputType      = attribute.Key("weft.output.type")
 	attrToolResultBytes = attribute.Key("weft.tool.result_bytes")
 	attrToolTruncated   = attribute.Key("weft.tool.truncated_bytes")
 	attrToolInputError  = attribute.Key("weft.tool.input_error")

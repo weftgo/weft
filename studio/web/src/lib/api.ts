@@ -997,6 +997,9 @@ export interface ManifestTool {
   prompt_snippet?: string
   source?: string
   subagent?: string
+  /** An Output tool's (submit_output) typed answer's type name, e.g.
+   * "main.Invoice" (UX-S1-06); absent on every other tool. */
+  output_type?: string
   /** The tool's own WrapTools, outer to inner (U23.1): inside the
    * agent's tool_middleware. */
   middleware?: LayerInfo[]
@@ -1693,6 +1696,9 @@ export interface RequestBody {
    * it writes, or "none"; absent when the model declares none. */
   thinking?: { level: string; budget?: number; wire?: string }
   sequential_tools: boolean
+  /** The step's Parallelism dial (UX-S2-07); absent on a record
+   * written before it. */
+  parallelism?: number
   params: {
     temperature?: number
     top_p?: number
@@ -1948,6 +1954,10 @@ export interface StepAttempt {
   http_status?: number
   wait_ms?: number
   error?: string
+  /** U30.3 (UX-S2-02): weft.attempt.giveup_reason on the attempt the
+   * retrying layer stopped after — budget, not_retryable,
+   * retry_after_too_long. */
+  giveup_reason?: string
   started?: string
   finished?: string
   span_id?: string

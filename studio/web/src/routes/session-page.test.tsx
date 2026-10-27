@@ -147,8 +147,8 @@ afterEach(() => {
 
 describe("the words", () => {
   it("turnGap: a park's wait, a plain gap, an overlap", () => {
-    expect(turnGap(rows[0], rows[1])?.text).toBe("+500ms waited for a decision")
-    expect(turnGap(rows[1], rows[2])?.text).toBe("+56.8s after t2")
+    expect(turnGap(rows[0], rows[1])?.text).toBe("+500 ms waited for a decision")
+    expect(turnGap(rows[1], rows[2])?.text).toBe("+56.8 s after t2")
     expect(
       turnGap(rows[1], { started: "2026-10-01T09:00:03.000Z" })?.text
     ).toBe("started while t2 ran")
@@ -182,7 +182,7 @@ describe("the words", () => {
     const open = expiryWords(exp.get("c1")!, at - 40_000)
     expect(open.lapsed).toBe(false)
     expect(open.text).toBe(
-      `expires ${clockTime(exp.get("c1")!, false)} (in 40.0s)`
+      `expires ${clockTime(exp.get("c1")!, false)} (in 40.0 s)`
     )
     const gone = expiryWords(exp.get("c1")!, at + 1)
     expect(gone.lapsed).toBe(true)
@@ -211,9 +211,9 @@ describe("the session table (UX-B-18/19/20/40, UX-S3-16)", () => {
       clockTime(rows[1].started)
     )
     expect(t2.querySelector("[data-turn-gap]")?.textContent).toBe(
-      "+500ms waited for a decision"
+      "+500 ms waited for a decision"
     )
-    expect(t2.querySelector("[data-duration]")?.textContent).toBe("750ms")
+    expect(t2.querySelector("[data-duration]")?.textContent).toBe("750 ms")
     // UX-B-20: no agent column; a chip on the turn that ran another.
     const heads = [...container.querySelectorAll("thead th")].map(
       (th) => th.textContent

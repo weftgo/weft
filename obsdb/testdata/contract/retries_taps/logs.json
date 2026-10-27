@@ -2668,7 +2668,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"f26ca36fb976b391fa6602ed80551551a919704fd4156aa1781df57d847f5e1f\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"f0d49f39603ce2ee63d288c1261930c602bdc2ef5dcc349acfa9dacea79733c9\",\"names\":[\"flaky\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"f26ca36fb976b391fa6602ed80551551a919704fd4156aa1781df57d847f5e1f\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"f0d49f39603ce2ee63d288c1261930c602bdc2ef5dcc349acfa9dacea79733c9\",\"names\":[\"flaky\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -5796,7 +5796,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"f26ca36fb976b391fa6602ed80551551a919704fd4156aa1781df57d847f5e1f\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"f0d49f39603ce2ee63d288c1261930c602bdc2ef5dcc349acfa9dacea79733c9\",\"names\":[\"flaky\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"f26ca36fb976b391fa6602ed80551551a919704fd4156aa1781df57d847f5e1f\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"f0d49f39603ce2ee63d288c1261930c602bdc2ef5dcc349acfa9dacea79733c9\",\"names\":[\"flaky\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,

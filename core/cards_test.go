@@ -469,3 +469,135 @@ func TestRequestFactsOffComputeNothing(t *testing.T) {
 		}
 	}
 }
+
+// codeError carries an HTTP status the way the vendor SDKs' errors do,
+// with its own code.
+type codeError struct{ StatusCode int }
+
+func (e codeError) Error() string { return "provider said no" }
+
+// TestAttemptErrorTypeClassified (UX-S2-02): a failed attempt's
+// error.type is classified by what the reporter knows — the provider's
+// HTTP status, weft's own sentinels — a closed set finer than the
+// run's model_error; and the last failed attempt of an exhausted
+// mw.Retry carries weft.attempt.giveup_reason.
+func TestAttemptErrorTypeClassified(t *testing.T) {
+	all := mw.Classifier(func(error) bool { return true })
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{codeError{429}, "rate_limit"},
+		{codeError{503}, "overloaded"},
+		{codeError{529}, "overloaded"},
+		{codeError{504}, "timeout"},
+		{codeError{401}, "auth"},
+		{codeError{500}, "server_error"},
+		{codeError{400}, "model_error"},
+		{core.ErrStreamIdle, "stream_idle"},
+		{core.ErrContextOverflow, "context_overflow"},
+		{errors.New("no status"), "model_error"},
+	} {
+		tp := newRecProvider()
+		m := wefttest.Script(wefttest.Fail(c.err), wefttest.Fail(c.err))
+		agt := core.New(m, core.TracerProvider(tp), core.WrapModel(mw.Retry(mw.MaxRetries(1), mw.BaseDelay(0), all)))
+		if _, err := agt.Generate(context.Background(), core.Prompt("x")); err == nil {
+			t.Fatalf("%v: the run succeeded", c.err)
+		}
+		att := spansOf(tp, "attempt")
+		if len(att) != 2 {
+			t.Fatalf("%v: attempt spans = %d, want 2", c.err, len(att))
+		}
+		for i, a := range att {
+			if a["error.type"] != c.want {
+				t.Errorf("%v: attempt %d error.type = %q, want %q", c.err, i+1, a["error.type"], c.want)
+			}
+		}
+		if att[0]["weft.attempt.giveup_reason"] != "" || att[1]["weft.attempt.giveup_reason"] != "budget" {
+			t.Errorf("%v: giveup = %q, %q; want none, then budget", c.err, att[0]["weft.attempt.giveup_reason"], att[1]["weft.attempt.giveup_reason"])
+		}
+	}
+	// The run's own error.type keeps the run's closed table.
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(wefttest.Fail(codeError{429})), core.TracerProvider(tp))
+	_, _ = agt.Generate(context.Background(), core.Prompt("x"))
+	runs := spansOf(tp, "invoke_agent")
+	if len(runs) != 1 {
+		t.Fatalf("invoke_agent spans = %d, want 1", len(runs))
+	}
+	for _, s := range runs {
+		if s["error.type"] != "model_error" {
+			t.Errorf("run error.type = %q, want model_error", s["error.type"])
+		}
+	}
+}
+
+// TestRequestRecordParallelism (UX-S2-07): the request record carries
+// the step's Parallelism dial — the agent's, the run's lower one, 1
+// under Sequential() — so a reader can say "parallelism N" beside the
+// lanes the spans draw.
+func TestRequestRecordParallelism(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		opts []core.Option
+		run  []core.RunOption
+		want int
+	}{
+		{"agent", []core.Option{core.Parallelism(3)}, nil, 3},
+		{"run lowers it", []core.Option{core.Parallelism(3)}, []core.RunOption{core.Parallelism(2)}, 2},
+		{"sequential", []core.Option{core.Sequential()}, nil, 1},
+	} {
+		lp := newRecLogProvider()
+		agt := core.New(wefttest.Script(wefttest.Say("hi")), append(c.opts, core.LoggerProvider(lp))...)
+		if _, err := agt.Generate(context.Background(), append(c.run, core.Prompt("x"))...); err != nil {
+			t.Fatal(err)
+		}
+		var b struct {
+			Parallelism int `json:"parallelism"`
+		}
+		if err := json.Unmarshal([]byte(lp.ofKind(t, "request")[0].body), &b); err != nil {
+			t.Fatal(err)
+		}
+		if b.Parallelism != c.want {
+			t.Errorf("%s: parallelism = %d, want %d", c.name, b.Parallelism, c.want)
+		}
+	}
+}
+
+// TestOutputTypeRecorded (UX-S1-06): an Output agent's run names its
+// typed answer's type on invoke_agent (weft.output.type) and the
+// manifest marks submit_output with it (output_type); an agent without
+// Output carries neither.
+func TestOutputTypeRecorded(t *testing.T) {
+	type Invoice struct {
+		Number string `json:"number"`
+	}
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(wefttest.Say("x")), core.Name("billing"), core.TracerProvider(tp), core.Output[*Invoice]())
+	_, _ = agt.Generate(context.Background(), core.Prompt("x"))
+	if got := tp.find(t, "invoke_agent billing").attrsMap()["weft.output.type"]; got != "core_test.Invoice" {
+		t.Errorf("weft.output.type = %q, want core_test.Invoice", got)
+	}
+	raw, err := core.Manifest(agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Agents []struct {
+			Tools []struct {
+				Name       string `json:"name"`
+				OutputType string `json:"output_type"`
+			} `json:"tools"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil || len(m.Agents) != 1 || len(m.Agents[0].Tools) != 1 ||
+		m.Agents[0].Tools[0].OutputType != "core_test.Invoice" {
+		t.Errorf("manifest = %s, want submit_output with output_type core_test.Invoice", raw)
+	}
+	tp = newRecProvider()
+	plain := core.New(wefttest.Script(wefttest.Say("x")), core.TracerProvider(tp))
+	_, _ = plain.Generate(context.Background(), core.Prompt("x"))
+	if _, ok := tp.find(t, "invoke_agent").attrsMap()["weft.output.type"]; ok {
+		t.Error("a run without Output carries weft.output.type")
+	}
+}

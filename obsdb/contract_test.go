@@ -233,6 +233,15 @@ type contractRun struct {
 	// value, sorted; omitted when none carries one.
 	Wire    []string `json:"wire,omitempty"`
 	Repairs []string `json:"repairs,omitempty"`
+	// Parallelism is the run's request records' Parallelism dials (§4,
+	// UX-S2-07), distinct values ascending; omitted when none carries one.
+	Parallelism []int `json:"parallelism,omitempty"`
+	// Attempts are the run's attempt spans (§3, UX-S2-02): "step <s>
+	// attempt <n> <status>[ <error.type>][ giveup <reason>]" in step and
+	// attempt order; omitted when the chain reported none.
+	Attempts []string `json:"attempts,omitempty"`
+	// OutputType is the root's weft.output.type (§3, UX-S1-06).
+	OutputType string `json:"output_type,omitempty"`
 	// Sources are the run's tools records' origins in parts (§4, U23.2:
 	// O8), as obsdb.ToolsRecordOf reads them: "<tool> <source>
 	// server=<s> transport=<t> prefix=<p> remote=<r>" per tool carrying
@@ -494,6 +503,8 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 		c.Chat, c.Tools = spanSteps(spans)
 		c.Layers, c.Repairs = onionOf(spans)
 		c.Wire = wireOf(t, db, r.ID)
+		c.Parallelism = parallelismOf(t, db, r.ID)
+		c.Attempts, c.OutputType = attemptsOf(spans, r.ID)
 		c.Sources = sourcesOf(t, db, r.ID)
 		c.Tree = treeOf(t, db, r.ID, len(spans))
 		c.Logs = logsOf(t, db, r.ID, spans)
@@ -700,6 +711,67 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 		return tools[i].CallID < tools[j].CallID
 	})
 	return chat, tools
+}
+
+// parallelismOf reads a run's request records' Parallelism dials
+// (contractRun.Parallelism).
+func parallelismOf(t *testing.T, db obsdb.DB, id string) []int {
+	t.Helper()
+	reqs, err := db.Requests(context.Background(), id, obsdb.RequestQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []int
+	for _, r := range reqs {
+		if n := r.Body.Parallelism; n > 0 && !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// attemptsOf reads a run's own attempt spans and its root's
+// weft.output.type (contractRun.Attempts, OutputType).
+func attemptsOf(spans []obsdb.Span, id string) ([]string, string) {
+	type row struct {
+		step, n int64
+		line    string
+	}
+	var rows []row
+	var outType string
+	for _, sp := range spans {
+		if sp.Attrs["weft.run.id"] != id {
+			continue
+		}
+		if sp.Attrs["gen_ai.operation.name"] == "invoke_agent" {
+			outType, _ = sp.Attrs["weft.output.type"].(string)
+		}
+		if sp.Name != "attempt" {
+			continue
+		}
+		step, _ := sp.Attrs["weft.step.index"].(int64)
+		n, _ := sp.Attrs["weft.attempt.index"].(int64)
+		line := fmt.Sprintf("step %d attempt %d %s", step, n, map[int]string{0: "unset", 1: "ok", 2: "error"}[int(sp.StatusCode)])
+		if e, _ := sp.Attrs["error.type"].(string); e != "" {
+			line += " " + e
+		}
+		if g, _ := sp.Attrs["weft.attempt.giveup_reason"].(string); g != "" {
+			line += " giveup " + g
+		}
+		rows = append(rows, row{step, n, line})
+	}
+	slices.SortFunc(rows, func(a, b row) int {
+		if a.step != b.step {
+			return int(a.step - b.step)
+		}
+		return int(a.n - b.n)
+	})
+	var out []string
+	for _, r := range rows {
+		out = append(out, r.line)
+	}
+	return out, outType
 }
 
 // wireOf reads a run's request records' wire facts (contractRun.Wire).
@@ -2208,7 +2280,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "retry_fallback",
-			desc: "four runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2); mw.Fallback over a model that fails once, the backup answering (the backup's attempt carries weft.attempt.layer fallback — problems attempts_retried 1, fallbacks 1); mw.Retry exhausted, three attempts all failing (the run fails stream_idle — attempts_retried 2: the last attempt was not retried); mw.Fallback to a backup of the primary's model name on another provider (fallbacks 1: the layer marks it, no name comparison — attempts_retried 1); and mw.Fallback to a backup under its own mw.Retry that fails once (U23.1-fix: both backup requests carry weft.attempt.layer fallback — fallbacks 1, attempts_retried 2)",
+			desc: "four runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2); mw.Fallback over a model that fails once, the backup answering (the backup's attempt carries weft.attempt.layer fallback — problems attempts_retried 1, fallbacks 1); mw.Retry exhausted, three attempts all failing (the run fails stream_idle — attempts_retried 2: the last attempt was not retried; that attempt carries weft.attempt.giveup_reason budget, U30.3); mw.Fallback to a backup of the primary's model name on another provider (fallbacks 1: the layer marks it, no name comparison — attempts_retried 1); and mw.Fallback to a backup under its own mw.Retry that fails once (U23.1-fix: both backup requests carry weft.attempt.layer fallback — fallbacks 1, attempts_retried 2)",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				flaky := wefttest.Script(wefttest.Fail(core.ErrStreamIdle), wefttest.Fail(core.ErrStreamIdle),
@@ -2425,7 +2497,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "run_cards",
-			desc: "the run cards' facts (U25): an Output run repaired after one invalid submission (submit_output INVALID_INPUT then a valid call; the tools record marks it output, the root weft.output.submitted true) and an Output run that answered in text (weft.output.submitted false); a call parked by the run's ParkOn (pending_source park_on) and one parked by an agent ParkSource (park_source); a tool cut by its Timeout (timeout_ms 5, error.type timeout); a Subagent child parked at its RequireApproval tool (SUBAGENT_PENDING, weft.subagent.pending names its call); a PrepareStep rewriting the system text, the tool choice and the params at step 0 (the request record's prepared [system, tool_choice, params]) on a model declaring its thinking wire (thinking.wire reasoning_effort); mw.Retry over a 503 then an answer (the second attempt's weft.attempt.wait_ms, the first's http.response.status_code 503)",
+			desc: "the run cards' facts (U25): an Output run repaired after one invalid submission (submit_output INVALID_INPUT then a valid call; the tools record marks it output, the root weft.output.submitted true) and an Output run that answered in text (weft.output.submitted false); a call parked by the run's ParkOn (pending_source park_on) and one parked by an agent ParkSource (park_source); a tool cut by its Timeout (timeout_ms 5, error.type timeout); a Subagent child parked at its RequireApproval tool (SUBAGENT_PENDING, weft.subagent.pending names its call); a PrepareStep rewriting the system text, the tool choice and the params at step 0 (the request record's prepared [system, tool_choice, params]) on a model declaring its thinking wire (thinking.wire reasoning_effort); mw.Retry over a 503 then an answer (the second attempt's weft.attempt.wait_ms, the first's http.response.status_code 503 and its classified error.type overloaded, U30.3); the Output runs' roots name their type (weft.output.type obsdb_test.verdict), every request record its Parallelism dial (parallelism)",
 			dest: content,
 			run:  runCards,
 		},

@@ -97,6 +97,9 @@
           "origin": "mcp:billing"
         }
       ],
+      "parallelism": [
+        1
+      ],
       "sources": [
         "skipped odd_report from mcp:billing: weft: ParseSchema: top-level type must be \"object\", got \"\"",
         "svc_archive_statement mcp:billing server=billing transport=memory prefix=svc_ remote=archive_statement",

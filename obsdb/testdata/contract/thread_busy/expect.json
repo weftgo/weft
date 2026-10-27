@@ -61,6 +61,9 @@
           "status": "ok"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -122,6 +125,9 @@
           "status": "ok"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -166,6 +172,9 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -222,6 +231,9 @@
           "error_type": "context.Canceled"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -266,6 +278,9 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -322,6 +337,9 @@
           "error_type": "context.Canceled"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -370,6 +388,9 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
       "holes": []
     }
   ],

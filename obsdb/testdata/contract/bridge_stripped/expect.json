@@ -62,6 +62,9 @@
       "logs": [
         "WARN  · execute_tool lookup_order [attempt order_id weft.content]"
       ],
+      "parallelism": [
+        4
+      ],
       "holes": [
         "stripped"
       ]

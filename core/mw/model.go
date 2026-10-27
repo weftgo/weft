@@ -113,7 +113,7 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 			if i == 0 {
 				actx, t = ctx, tryOf(ctx)
 			}
-			yielded, failed := replay(actx, model, attemptRequest(req), t, yield)
+			yielded, failed := replay(actx, model, attemptRequest(req), t, yield, nil)
 			if failed == nil {
 				return
 			}
@@ -137,17 +137,28 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 // with no error. t is the report's AttemptInfo.Layer ("" for a first
 // try) and Wait (the backoff slept before this request); the report
 // carries the HTTP status HTTPStatus finds on the attempt's error.
-func replay(ctx context.Context, model core.Model, req core.ModelRequest, t try, yield func(core.ModelEvent, error) bool) (bool, error) {
+// giveUp, when not nil, is the calling layer's verdict on a failed
+// attempt, read before the report: AttemptInfo.GiveUp when it stops
+// there ("" when it tries again).
+func replay(ctx context.Context, model core.Model, req core.ModelRequest, t try, yield func(core.ModelEvent, error) bool, giveUp func(yielded bool, failed error) string) (bool, error) {
 	if reportsItself(model) {
-		return stream(ctx, model, req, yield)
+		yielded, failed := stream(ctx, model, req, yield)
+		if giveUp != nil && failed != nil {
+			giveUp(yielded, failed)
+		}
+		return yielded, failed
 	}
 	info, start := core.InfoOf(model), time.Now()
 	yielded, failed := stream(ctx, model, req, yield)
 	end := time.Now()
 	ask, _ := RetryAfter(failed, end)
 	status, _ := HTTPStatus(failed)
+	var why string
+	if giveUp != nil && failed != nil {
+		why = giveUp(yielded, failed)
+	}
 	core.ReportFromContext(ctx).Attempt(core.AttemptInfo{Model: info.Name, Provider: info.Provider,
-		Start: start, End: end, Err: failed, RetryAfter: ask, Layer: t.layer, Wait: t.wait, HTTPStatus: status})
+		Start: start, End: end, Err: failed, RetryAfter: ask, Layer: t.layer, Wait: t.wait, HTTPStatus: status, GiveUp: why})
 	return yielded, failed
 }
 

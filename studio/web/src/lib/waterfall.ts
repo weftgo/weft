@@ -300,16 +300,27 @@ const quote = (s: string) => `“${clip(s, GIST)}”`
 /** A ToolError renders "CODE: message" — the code is the error. */
 const CODED = /^([A-Z][A-Z0-9_]+): /
 
-/** A duration in ms in the tightest unit that reads: 15µs, 9.5ms,
- * 120ms, 7.7s (lib/format.ts's spanMs from 100ms up). The unit is
- * chosen on the rounded value: 999.6µs reads 1.0ms, 99.96ms 100ms. */
+/** A duration in ms in the tightest unit that reads: 15 µs, 9.5 ms,
+ * 120 ms, 7.7 s (lib/format.ts's spanMs from 100 ms up, its spaced
+ * units: UX-F-16). The unit is chosen on the rounded value: 999.6 µs
+ * reads 1.0 ms, 99.96 ms 100 ms. */
 export function took(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "—"
   const us = Math.round(ms * 1000)
-  if (us < 1000) return `${us}µs`
+  if (us < 1000) return `${us} µs`
   const r = Math.round(ms * 10) / 10
-  return r < 100 ? `${r.toFixed(1)}ms` : spanMs(ms)
+  return r < 100 ? `${r.toFixed(1)} ms` : spanMs(ms)
 }
+
+/** A row's offset from the run's start, the waterfall's second figure
+ * (UX-F-16): "+4.0 ms" — took's units, a plus before it. */
+export const offsetText = (ms: number) => `+${took(ms)}`
+/** An attempt's wait as the hatch says it (UX-S2-02). */
+export const waitWords = (ms: number) =>
+  `waited ${took(ms)} before this attempt`
+/** The offset column's head and hover. */
+export const OFFSET_HEAD = "start"
+export const OFFSET_HINT = "when the row started, from the run's start"
 
 // ── Rows ───────────────────────────────────────────────────────────
 

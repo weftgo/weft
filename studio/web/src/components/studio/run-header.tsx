@@ -25,6 +25,8 @@ import {
   attachmentsOf,
   OUTPUT,
   outputOf,
+  outputType,
+  childTokenChips,
   repairedWords,
   tokenSplit,
 } from "@/lib/cards"
@@ -598,6 +600,7 @@ export function RunHeader({
   // The structured output (UX-S1-06), the prompt's attachments
   // (UX-S1-13), the own / delegated token split (UX-S3-13).
   const output = outputOf(folded, spans, doc.id)
+  const outType = outputType(spans, doc.id)
   const files = attachmentsOf(transcript?.batches)
   const split = tokenSplit(doc)
   const timing =
@@ -761,6 +764,16 @@ export function RunHeader({
             {split}
           </span>
         ) : null}
+        {childTokenChips(doc).map((c) => (
+          <span
+            key={c.id}
+            className="rounded-full border px-1.5 font-mono text-[10px] text-muted-foreground"
+            title={c.title}
+            data-child-tokens={c.id}
+          >
+            {c.text}
+          </span>
+        ))}
         {costCapable ? (
           <RunCost
             term
@@ -876,6 +889,14 @@ export function RunHeader({
             <span title="the arguments of the run's last valid submit_output call: what GenerateAs / OutputOf decode">
               {OUTPUT.typed}
             </span>
+            {outType ? (
+              <span
+                title="the type GenerateAs / OutputOf decode it into (weft.output.type)"
+                data-output-type
+              >
+                {outType}
+              </span>
+            ) : null}
             {output.repairs ? (
               <span
                 className={`${STATUS_TEXT.int}`}

@@ -10,7 +10,7 @@ import type { DecisionDoc, Part, Usage } from "./api"
 import { attemptLabel, msText } from "./attempts"
 import { decidedCall, outcomeOf } from "./decisions"
 import type { FoldedRun, TranscriptBatch } from "./events"
-import { plural, tokens } from "./format"
+import { plural, tokenPair, tokens, UNNAMED_AGENT } from "./format"
 import { attrNum as num, attrStr as str, effectsOf } from "./onion"
 import type { CallEffects } from "./onion"
 import { AWAITING, turnTag } from "./status"
@@ -109,6 +109,19 @@ export function parkWord(
 /** A parked call's words (UX-S3-12, UX-H-18): never "never completed"
  * — an approval gate, a debugger's breakpoint, a park rule. */
 export const BREAKPOINT = "paused at breakpoint"
+/** The parked card's breakpoint link (UX-H-18): clear the breakpoint
+ * that parked the call — the runtime's breakpoints PUT, that one tool
+ * taken out — or, for a read token, why not. */
+export const BREAKPOINT_CLEAR = {
+  clear: (tool: string) => `clear the breakpoint on ${tool}`,
+  title: (rt: string) =>
+    `take this tool out of runtime ${rt}'s breakpoints (PUT /api/runtimes/{id}/breakpoints): the runs it starts from now on run it; this parked call still waits for its decision`,
+  cleared: "breakpoint cleared: runs from now on run this tool",
+  at: (rt: string) => `runtime ${rt}`,
+  readOnly:
+    "a read token cannot change breakpoints: open Studio with its own token to clear it",
+} as const
+
 /** A ParkSource's park that no debugger is known to have set:
  * ParkSource is a general option (ADR 0030), runtime.Breakpoints() one
  * source of it. */
@@ -324,6 +337,76 @@ export function paramsOverride(v: unknown): string | null {
   return `replaced whole: ${out.join(", ") || "every knob the adapter's default"}`
 }
 
+/** A knob's sampling params as the request record names them. */
+type Knobs = Record<string, unknown>
+
+/** overrideTag is a knob's tag in the request and experiment views
+ * (UX-S5b-03): "override (agent: 0.7)" — the agent's own value beside
+ * an overridden one when it is known (agent given), "(agent: default)"
+ * when the agent sets none; "override" alone when it is not known. */
+export function overrideTag(knob: string, agent?: Knobs | null): string {
+  if (!agent) return "override"
+  const a = agent[knob]
+  return `override (agent: ${a === undefined || a === null ? "default" : JSON.stringify(a)})`
+}
+
+/** paramOverrideTags reads weft.override.params (paramsOverride's three
+ * shapes) into each knob's tag: a knob the override set reads
+ * overrideTag's words, one it cleared (the current shape's null)
+ * "cleared by override". Empty when unreadable. */
+export function paramOverrideTags(
+  v: unknown,
+  agent?: Knobs | null
+): Map<string, string> {
+  const out = new Map<string, string>()
+  let o = v
+  if (typeof v === "string")
+    try {
+      o = JSON.parse(v)
+    } catch {
+      return out
+    }
+  if (!o || typeof o !== "object" || Array.isArray(o)) return out
+  const entries = Object.entries(o)
+  const old = entries.some(([k]) => k in PARAM)
+  for (const [k, x] of entries) {
+    const name = PARAM[k] ?? k
+    if (x !== null && !(Array.isArray(x) && !x.length))
+      out.set(name, overrideTag(name, agent))
+    else if (!old) out.set(name, "cleared by override")
+  }
+  return out
+}
+
+/** variantParamLines are an experiment variant's sampling knobs, each
+ * with its tag (UX-S5b-03): "temperature 0.4 ◂ override (agent: 0.7)"
+ * — the variant's overrides (options.temperature, params, tool_choice)
+ * against the source run's request (agent), when it is read. */
+export function variantParamLines(o: unknown, agent?: Knobs | null): string[] {
+  if (!o || typeof o !== "object") return []
+  const v = o as {
+    options?: Record<string, unknown>
+    params?: Knobs
+    tool_choice?: unknown
+  }
+  const knobs: Knobs = { ...(v.params ?? {}) }
+  if (v.options?.temperature !== undefined)
+    knobs.temperature = v.options.temperature
+  const out = Object.entries(knobs).map(
+    ([k, x]) => `${k} ${JSON.stringify(x)} ◂ ${overrideTag(k, agent)}`
+  )
+  if (v.tool_choice !== undefined)
+    out.push(`tool choice ${toolChoiceText(v.tool_choice)} ◂ override`)
+  return out
+}
+
+const toolChoiceText = (t: unknown) =>
+  typeof t === "string"
+    ? t
+    : t && typeof t === "object" && "mode" in t
+      ? `${(t as { mode: string }).mode}${(t as { name?: string }).name ? ` ${(t as { name?: string }).name}` : ""}`
+      : JSON.stringify(t)
+
 /** fileWords is a file part as a chip (UX-S1-13): "file image/png ·
  * url", "file text/plain · 14 B" — the media type and size, never the
  * bytes. */
@@ -375,6 +458,27 @@ export function tokenSplit(doc: {
   return `${tokens(u)} in = ${tokens(u - sub)} own + ${tokens(sub)} via ${plural(n, "child", "children")}`
 }
 
+/** childTokenChips are the roll-up's per-child chips (UX-S3-13): each
+ * Subagent child's own "ops-manager 40 in · 20 out" — the rows
+ * tokenSplit adds up — its title the exact counts. None unless the run
+ * says its delegated usage (delegated_usage: U30.2-fix leaves it out
+ * where this token cannot see every Subagent child, so a split is
+ * never drawn from part of them). */
+export function childTokenChips(doc: {
+  id: string
+  delegated_usage?: Usage
+  children: { id: string; agent?: string; usage?: Usage }[]
+}): { id: string; text: string; title: string }[] {
+  if (!doc.delegated_usage) return []
+  return doc.children
+    .filter((c) => c.id.startsWith(`${doc.id}/`) && c.usage)
+    .map((c) => ({
+      id: c.id,
+      text: `${c.agent || UNNAMED_AGENT} ${tokenPair(c.usage!.input_tokens, c.usage!.output_tokens)}`,
+      title: `delegated to ${c.agent || UNNAMED_AGENT} (${c.id}): ${tokenPair(c.usage!.input_tokens, c.usage!.output_tokens, true)}, its own children included`,
+    }))
+}
+
 /** The structured output's words (UX-S1-06). */
 export const OUTPUT = {
   typed: "typed output (submit_output)",
@@ -382,6 +486,21 @@ export const OUTPUT = {
 }
 export const repairedWords = (n: number) =>
   `repaired after ${plural(n, "invalid submission")}`
+
+/** outputType is the run's typed answer's type, its root span's
+ * weft.output.type (UX-S1-06): "main.Invoice"; undefined without one
+ * (no Output agent, a record from before it). */
+export function outputType(
+  spans: SpanLike[] | null | undefined,
+  runId: string
+): string | undefined {
+  const t = spans?.find(
+    (s) =>
+      s.attrs?.["gen_ai.operation.name"] === "invoke_agent" &&
+      s.attrs["weft.run.id"] === runId
+  )?.attrs?.["weft.output.type"]
+  return typeof t === "string" && t ? t : undefined
+}
 
 /** outputOf reads a run's structured output from its fold: the last
  * valid submit_output call's arguments and the invalid ones before it;

@@ -166,20 +166,45 @@ func (m *retryModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq
 		// Fallback under a Retry must not clear it.
 		t := tryOf(ctx)
 		for attempt := 0; ; attempt++ {
-			yielded, failed := replay(withTry(ctx, t), m.next, attemptRequest(req), t, yield)
+			// The verdict on a failed try is reached before the try is
+			// reported, so its attempt says why Retry stops there
+			// (AttemptInfo.GiveUp); the decision itself is unchanged.
+			var (
+				stop     bool
+				delay    time.Duration
+				delayErr error
+			)
+			verdict := func(yielded bool, failed error) string {
+				if yielded || ctx.Err() != nil {
+					stop = true
+					return ""
+				}
+				if !m.cfg.classify(failed) {
+					stop = true
+					return core.AttemptGiveUpNotRetryable
+				}
+				// The retry-after fail-fast outranks the attempt budget,
+				// so even MaxRetries(0) reports ErrRetryAfterTooLong
+				// rather than the raw error.
+				delay, delayErr = m.cfg.delay(attempt, failed, time.Now())
+				if delayErr != nil {
+					return core.AttemptGiveUpRetryAfter
+				}
+				if attempt >= m.cfg.maxRetries {
+					return core.AttemptGiveUpBudget
+				}
+				return ""
+			}
+			_, failed := replay(withTry(ctx, t), m.next, attemptRequest(req), t, yield, verdict)
 			if failed == nil {
 				return
 			}
-			if yielded || ctx.Err() != nil || !m.cfg.classify(failed) {
+			if stop {
 				yield(nil, failed)
 				return
 			}
-			// The retry-after fail-fast outranks the attempt budget, so
-			// even MaxRetries(0) reports ErrRetryAfterTooLong rather than
-			// the raw error.
-			delay, err := m.cfg.delay(attempt, failed, time.Now())
-			if err != nil {
-				yield(nil, err)
+			if delayErr != nil {
+				yield(nil, delayErr)
 				return
 			}
 			if attempt >= m.cfg.maxRetries {

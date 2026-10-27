@@ -310,7 +310,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":1},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":1},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -934,7 +934,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":3},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":3},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -1534,7 +1534,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":5},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":5},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -2378,7 +2378,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":7},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":7},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -2996,7 +2996,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":9},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":9},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -3888,7 +3888,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":11},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":11},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -4524,7 +4524,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":13},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":13},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,
@@ -5184,7 +5184,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":15},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"count\":15},\"tools\":{\"catalog_hash\":\"4e7c4cfefa13eaab24a84e86f177403752c526a3d0c08e430e927fa6ff360277\",\"names\":[\"issue_refund\",\"send_email\",\"track_parcel\"]},\"sequential_tools\":false,\"parallelism\":4,\"params\":{},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
               },
               "eventName": "weft.request",
               "flags": 1,

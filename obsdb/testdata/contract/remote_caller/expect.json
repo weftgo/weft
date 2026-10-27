@@ -41,6 +41,9 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -100,6 +103,9 @@
           "status": "ok",
           "origin": "mcp:quotes"
         }
+      ],
+      "parallelism": [
+        4
       ],
       "sources": [
         "helper mcp:quotes server=quotes transport=memory prefix= remote=helper"

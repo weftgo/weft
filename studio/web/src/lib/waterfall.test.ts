@@ -75,10 +75,10 @@ describe("waterfallRows: the director run on the time scale", () => {
     expect(wf.domain).toEqual([0, 14])
     expect(by("s0").start).toBeCloseTo(0.1, 3)
     expect(by("s0").took).toBeCloseTo(10.4, 3)
-    expect(took(by("s0:m").took!)).toBe("15µs")
-    expect(took(by("c:0:call_1").took!)).toBe("9.5ms")
-    expect(took(by("r:r_dir").took!)).toBe("14.0ms")
-    expect(extent(by("s1"), "time")).toBe("1.2ms")
+    expect(took(by("s0:m").took!)).toBe("15 µs")
+    expect(took(by("c:0:call_1").took!)).toBe("9.5 ms")
+    expect(took(by("r:r_dir").took!)).toBe("14.0 ms")
+    expect(extent(by("s1"), "time")).toBe("1.2 ms")
     expect(by("s0").finish).toBe("tool_calls")
     expect(by("s0:m").ttft).toBe(0)
     expect(by("c:0:call_1").lane).toBe(1)
@@ -308,10 +308,10 @@ describe("the shared helpers", () => {
   })
 
   it("humanises a duration: µs, ms, s", () => {
-    expect(took(0.015)).toBe("15µs")
-    expect(took(9.49)).toBe("9.5ms")
-    expect(took(120)).toBe("120ms")
-    expect(took(7737)).toBe("7.7s")
+    expect(took(0.015)).toBe("15 µs")
+    expect(took(9.49)).toBe("9.5 ms")
+    expect(took(120)).toBe("120 ms")
+    expect(took(7737)).toBe("7.7 s")
     expect(took(-1)).toBe("—")
   })
 
@@ -617,11 +617,11 @@ describe("two model calls in one step (re-run after an error)", () => {
 
 describe("the words (cosmetic)", () => {
   it("chooses the unit on the rounded value", () => {
-    expect(took(999.6)).toBe("1.0s")
-    expect(took(999.4)).toBe("999ms")
-    expect(took(99.96)).toBe("100ms")
-    expect(took(0.9996)).toBe("1.0ms")
-    expect(took(0)).toBe("0µs")
+    expect(took(999.6)).toBe("1.0 s")
+    expect(took(999.4)).toBe("999 ms")
+    expect(took(99.96)).toBe("100 ms")
+    expect(took(0.9996)).toBe("1.0 ms")
+    expect(took(0)).toBe("0 µs")
   })
 
   it("an expanded child's scaled positions keep one decimal", () => {

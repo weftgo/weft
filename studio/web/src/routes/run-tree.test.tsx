@@ -151,7 +151,7 @@ describe("the run tree on the director run (the Done line)", () => {
     expect(tree.textContent).toContain("ms")
     expect(tree.textContent).not.toMatch(/\bMSS?\b/)
     // Durations, not ranges: the run's 14 ms.
-    expect(row(`r:${DIR}`).textContent).toContain("14.0ms")
+    expect(row(`r:${DIR}`).textContent).toContain("14.0 ms")
   })
 
   it("without spans_tree, the run's own spans: the child is still one collapsed row", async () => {

@@ -1,6 +1,6 @@
 {
   "case": "run_cards",
-  "description": "the run cards' facts (U25): an Output run repaired after one invalid submission (submit_output INVALID_INPUT then a valid call; the tools record marks it output, the root weft.output.submitted true) and an Output run that answered in text (weft.output.submitted false); a call parked by the run's ParkOn (pending_source park_on) and one parked by an agent ParkSource (park_source); a tool cut by its Timeout (timeout_ms 5, error.type timeout); a Subagent child parked at its RequireApproval tool (SUBAGENT_PENDING, weft.subagent.pending names its call); a PrepareStep rewriting the system text, the tool choice and the params at step 0 (the request record's prepared [system, tool_choice, params]) on a model declaring its thinking wire (thinking.wire reasoning_effort); mw.Retry over a 503 then an answer (the second attempt's weft.attempt.wait_ms, the first's http.response.status_code 503)",
+  "description": "the run cards' facts (U25): an Output run repaired after one invalid submission (submit_output INVALID_INPUT then a valid call; the tools record marks it output, the root weft.output.submitted true) and an Output run that answered in text (weft.output.submitted false); a call parked by the run's ParkOn (pending_source park_on) and one parked by an agent ParkSource (park_source); a tool cut by its Timeout (timeout_ms 5, error.type timeout); a Subagent child parked at its RequireApproval tool (SUBAGENT_PENDING, weft.subagent.pending names its call); a PrepareStep rewriting the system text, the tool choice and the params at step 0 (the request record's prepared [system, tool_choice, params]) on a model declaring its thinking wire (thinking.wire reasoning_effort); mw.Retry over a 503 then an answer (the second attempt's weft.attempt.wait_ms, the first's http.response.status_code 503 and its classified error.type overloaded, U30.3); the Output runs' roots name their type (weft.output.type obsdb_test.verdict), every request record its Parallelism dial (parallelism)",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",
@@ -52,6 +52,9 @@
           "seq": 1,
           "status": "ok"
         }
+      ],
+      "parallelism": [
+        4
       ],
       "holes": []
     },
@@ -124,6 +127,10 @@
           "status": "ok"
         }
       ],
+      "parallelism": [
+        4
+      ],
+      "output_type": "obsdb_test.verdict",
       "holes": []
     },
     {
@@ -166,6 +173,10 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
+      "output_type": "obsdb_test.verdict",
       "holes": []
     },
     {
@@ -218,6 +229,9 @@
           "pending_source": "park_on"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -269,6 +283,9 @@
           "status": "unset",
           "pending_source": "park_source"
         }
+      ],
+      "parallelism": [
+        4
       ],
       "holes": []
     },
@@ -333,6 +350,9 @@
           "error_type": "timeout",
           "timeout_ms": 5
         }
+      ],
+      "parallelism": [
+        4
       ],
       "holes": []
     },
@@ -402,6 +422,9 @@
       "tree": [
         "a1100000000000000000000000000007/0/call_1 child of a1100000000000000000000000000007: 3 spans"
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -456,6 +479,9 @@
           "pending_source": "approval"
         }
       ],
+      "parallelism": [
+        4
+      ],
       "holes": []
     },
     {
@@ -500,6 +526,13 @@
         }
       ],
       "tools": [],
+      "parallelism": [
+        4
+      ],
+      "attempts": [
+        "step 0 attempt 1 error overloaded",
+        "step 0 attempt 2 ok"
+      ],
       "holes": []
     }
   ]

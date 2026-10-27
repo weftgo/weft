@@ -253,8 +253,8 @@ describe("the graph scale (§6.2)", () => {
       document
         .querySelector(`[data-edge="${k}"] [data-edge-label]`)
         ?.textContent.replace(EDGE_HINT_RE, "")
-    expect(edge("a:director>a:ops-manager")).toBe("1× · 9.3ms")
-    expect(edge("a:ops-manager>a:inventory-specialist")).toBe("1× · 7.3ms")
+    expect(edge("a:director>a:ops-manager")).toBe("1× · 9.3 ms")
+    expect(edge("a:ops-manager>a:inventory-specialist")).toBe("1× · 7.3 ms")
     expect(document.querySelectorAll("[data-edge]")).toHaveLength(2)
     // The switch offers the graph beside time and order.
     expect(

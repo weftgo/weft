@@ -653,10 +653,16 @@ function scopeForm(o: MountOptions): string {
   return o.publicId ? serializeScope({ publicId: o.publicId }) : ""
 }
 
-/** scopeValue reads a host-given Scope object: its string fields only,
- * sessionId / runId accepted for session / run (a run event's detail
- * fed back), a missing publicId read as "" when a session names the
- * conversation. null when it names neither. */
+/** scopeNames reports a scope that names something to follow: a public
+ * id, a session, or a page of runs (U22: an agent, a flow, a tag). A
+ * run alone names none — it pins a turn inside one. */
+const scopeNames = (s: Scope) => !!serializeScope({ ...s, run: "" })
+
+/** scopeValue reads a host-given Scope object as its string form
+ * would read (parseScope over serializeScope): its string fields and
+ * tag pairs, sessionId / runId accepted for session / run (a run
+ * event's detail fed back), a missing publicId read as "". null when
+ * it has no publicId and names nothing to follow. */
 function scopeValue(v: unknown): Scope | null {
   if (!v || typeof v !== "object") return null
   const o = v as Record<string, unknown>
@@ -664,17 +670,20 @@ function scopeValue(v: unknown): Scope | null {
     for (const k of keys) if (typeof o[k] === "string" && o[k]) return o[k]
     return ""
   }
-  const session = str("session", "sessionId")
-  if (typeof o.publicId !== "string" && !session) return null
-  const out: Scope = {
-    publicId: typeof o.publicId === "string" ? o.publicId : "",
-  }
-  const flow = str("flow")
-  const run = str("run", "runId")
-  if (session) out.session = session
-  if (flow) out.flow = flow
-  if (run) out.run = run
-  return out
+  const out = parseScope(
+    serializeScope({
+      publicId: str("publicId"),
+      session: str("session", "sessionId"),
+      flow: str("flow"),
+      run: str("run", "runId"),
+      agent: str("agent"),
+      tags: (o.tags && typeof o.tags === "object" ? o.tags : {}) as Record<
+        string,
+        string
+      >,
+    })
+  )
+  return typeof o.publicId === "string" || scopeNames(out) ? out : null
 }
 
 /** prevTurn is the turn before r in its session among the loaded
@@ -1288,7 +1297,9 @@ export class WeftDevtools extends HTMLElement {
 
   /** scope sets the explicit scope (detection rung 1: it wins over the
    * URL, markers and headers, and its run pins): a Scope, or its string
-   * form ("pub_…;session=…;run=…", parseScope). null clears what scope()
+   * form ("pub_…;session=…;run=…", "tag.arena.batch=b1", parseScope) —
+   * both name a public id, a session, an agent, a flow or a tag, else
+   * the panel says so in one line. null clears what scope()
    * set, so the ladder decides again (a data-scope in the page's markup
    * stays the page's). A scope naming a session and no public id is
    * resolved through GET /api/sessions/{id}/public_id — setup A or the
@@ -1315,14 +1326,15 @@ export class WeftDevtools extends HTMLElement {
         return
       }
       const next = typeof s === "string" ? parseScope(s) : scopeValue(s)
+      // The string form follows what the object form does: a public
+      // id, a session, an agent, a flow or a tag ("tag.k=v", U22); a
+      // string naming none of them is refused ("" is the dev list, as
+      // {publicId: ""} is).
       if (
         !next ||
-        (!next.publicId &&
-          !next.session &&
-          typeof s === "string" &&
-          s.trim() !== "")
+        (typeof s === "string" && s.trim() !== "" && !scopeNames(next))
       ) {
-        this.say("scope: no public id or session")
+        this.say("scope: no public id, session, agent, flow or tag")
         return
       }
       if (!next.publicId && next.session) {

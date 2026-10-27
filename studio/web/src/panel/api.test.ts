@@ -790,14 +790,66 @@ describe("review fixes", () => {
     })
   })
 
-  it("1. a scope naming neither a public id nor a session is said, not dropped", async () => {
+  it("1. a scope naming nothing to follow (a run alone) is said, not dropped", async () => {
     fakeStudio(baseRoutes())
     const el = await mountWith()
-    el.scope({ flow: "f_1" } as unknown as Scope)
+    el.scope({ run: "r_1" } as unknown as Scope)
     await settle()
-    expect(text(el, ".weft-api-note")).toBe("scope: no public id or session")
+    expect(text(el, ".weft-api-note")).toBe(
+      "scope: no public id, session, agent, flow or tag"
+    )
     expect(following(el).publicId).toBe("pub_orders")
   })
+
+  it.each([";", "run=r_1", " ; run=r_1 "])(
+    "1. the string form %j names nothing to follow: said, the scope kept",
+    async (str) => {
+      fakeStudio(baseRoutes())
+      const el = await mountWith()
+      el.scope(str)
+      await settle()
+      expect(text(el, ".weft-api-note")).toBe(
+        "scope: no public id, session, agent, flow or tag"
+      )
+      expect(following(el).publicId).toBe("pub_orders")
+    }
+  )
+
+  // A page of runs (U22): the string form follows what the object form
+  // does — a tag, an agent or a flow without a public id
+  // (P10b-pre-web-fix2).
+  it.each<[string, Record<string, unknown>, Scope]>([
+    [
+      "tag.arena.batch=b1",
+      { tags: { "arena.batch": "b1" } },
+      { publicId: "", tags: { "arena.batch": "b1" } },
+    ],
+    ["agent=x", { agent: "x" }, { publicId: "", agent: "x" }],
+    ["flow=f_1", { flow: "f_1" }, { publicId: "", flow: "f_1" }],
+    [
+      "agent=x;tag.arena.batch=b1",
+      { publicId: "", agent: "x", tags: { "arena.batch": "b1" } },
+      { publicId: "", agent: "x", tags: { "arena.batch": "b1" } },
+    ],
+  ])(
+    "1. scope(%j) and its object form follow the same page of runs",
+    async (str, obj, want) => {
+      fakeStudio(baseRoutes())
+      const el = await mountWith()
+      el.scope(str)
+      await settle()
+      expect($(el, ".weft-api-note")).toBeNull()
+      expect(following(el)).toEqual(want)
+      expect(el.getAttribute("data-weft-scope")).toBe(`;${str}`)
+      el.scope(null)
+      await settle()
+      el.scope(obj as unknown as Scope)
+      await settle()
+      expect($(el, ".weft-api-note")).toBeNull()
+      expect(following(el)).toEqual(want)
+      expect(el.getAttribute("data-weft-scope")).toBe(`;${str}`)
+    }
+  )
 
   it("2. scope(null) restores what mount() named before the first scope()", async () => {
     fakeStudio(two())

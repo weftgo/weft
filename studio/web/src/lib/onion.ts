@@ -447,9 +447,15 @@ export const ONION = {
 } as const
 
 /** layerShort: "mw.Retry" → "Retry", "main.cacheModel" → "cacheModel",
- * "main.main.func2" → "main.func2". */
+ * and a closure — named by its place, "func@demo/main.go:182" (core's
+ * funcInfo) — its file and line, "main.go:182" ("func@unknown" kept). */
 export function layerShort(name: string): string {
   if (name.startsWith("mw.")) return name.slice(3)
+  if (name.startsWith("func@")) {
+    const at = name.slice(5)
+    const base = at.slice(at.lastIndexOf("/") + 1)
+    return base.includes(":") ? base : name
+  }
   const i = name.indexOf(".")
   return i > 0 && i < name.length - 1 ? name.slice(i + 1) : name
 }

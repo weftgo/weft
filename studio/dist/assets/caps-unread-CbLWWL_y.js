@@ -1,1 +1,0 @@
-import{Xi as e,us as t,x as n}from"./preload-helper-BFbeW-Kz.js";var r=t();function i({error:t}){return(0,r.jsx)(`div`,{className:`mx-auto max-w-lg space-y-2 py-24 text-center`,"data-caps-unread":!0,children:(0,r.jsx)(`p`,{className:`text-sm ${n.error}`,children:`${e}: ${t}`})})}export{i as t};

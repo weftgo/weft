@@ -1329,8 +1329,8 @@ retries one `/api/meta` read a minute, while the page is visible,
 brings it back by itself. The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 294,694 B raw / 98,875 B gzip
-(96.6 KiB, the bundle of the ledger's row "P10b-pre-web-fix"; 7,621 B — 7.4 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 294,722 B raw / 98,921 B gzip
+(96.6 KiB, the bundle of the ledger's row "P10b-pre-web-fix2"; 7,575 B — 7.4 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1464,7 +1464,7 @@ panel on the page.
 | Method | What it does |
 |---|---|
 | `open()`, `close()`, `toggle()`, `isOpen` | expand, collapse or flip the dock; `isOpen` reads it (from npm, `isOpen()`) |
-| `scope(s)` | the explicit scope (rung 1: it wins over the URL, markers and headers, and its run pins): a `Scope` or its string form (`"pub_…;session=…;run=…"`); `sessionId`/`runId` are read as `session`/`run`, so a `run` event's detail can be fed back; one naming neither a public id nor a session reads `scope: no public id or session`. `scope(null)` clears what `scope()` set and puts back what `mount()` named, so the ladder decides again (a `data-scope` in your markup stays yours) |
+| `scope(s)` | the explicit scope (rung 1: it wins over the URL, markers and headers, and its run pins): a `Scope` or its string form (`"pub_…;session=…;run=…"`, or a page of runs: `"tag.arena.batch=b1"`, `"agent=…"`, `"flow=…"`) — both accept the same scopes; `sessionId`/`runId` are read as `session`/`run`, so a `run` event's detail can be fed back; one naming none of a public id, a session, an agent, a flow or a tag (a run alone) reads `scope: no public id, session, agent, flow or tag`. `scope(null)` clears what `scope()` set and puts back what `mount()` named, so the ladder decides again (a `data-scope` in your markup stays yours) |
 | `select(runId, step?)` | selects that turn, and the step by its ordinal (G1), once a `scope()` just before it has settled; ⤢ then carries the step. A run the list does not show is read by id (`GET /api/runs/{id}`, scoped by the token) and joins the list when it is the conversation's (a run with no session id — a playground run — is not judged by a session narrowing, as in the list); else the line `run r_… not in this conversation` (`run r_…: Studio did not answer` when the read failed). A step the run does not have reads `step n not in run r_… · showing step m`, and the last step is carried. A call made while the panel's start hangs waits 10 s, then reads `select r_…: the panel is not connected` |
 | `on(event, cb)` → unsubscribe | follows one event (below); a `cb` that throws is swallowed |
 | `studioLink(runId, step?)` | the Studio page of that run (and step) through `lib/links.ts` — the link ⤢ carries, never with a token; `""` before the panel knows its endpoint |

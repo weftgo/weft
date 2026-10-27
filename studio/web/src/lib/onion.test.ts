@@ -331,7 +331,12 @@ describe("the effect chips and the MCP words (both renderers)", () => {
 
   it("layerShort and the Agents card's chain", () => {
     expect(layerShort("mw.Retry")).toBe("Retry")
-    expect(layerShort("main.main.func2")).toBe("main.func2")
+    expect(layerShort("main.cacheModel")).toBe("cacheModel")
+    expect(layerShort("func@demo/main.go:182")).toBe("main.go:182")
+    expect(layerShort("func@main.go:7")).toBe("main.go:7")
+    expect(layerShort("func@mw/tool.go:40")).toBe("tool.go:40")
+    expect(layerShort("func@unknown")).toBe("func@unknown")
+    expect(layerShort("func")).toBe("func")
     expect(
       chainLayers(
         [{ name: "mw.Allow" }, { name: "mw.MapErrors" }],

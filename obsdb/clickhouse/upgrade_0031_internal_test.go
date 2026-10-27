@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -82,6 +83,29 @@ func TestUpgradeTo0031RederivesStock(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A second trace as the old writer left it: a conversation-rooted
+	// derived row with no message count, a derived row the new rule does
+	// not make (stale), and a weft run in the same trace that must stay
+	// (its row the traces view's, from its span).
+	const tr2 = "7e000000000000000000000000000002"
+	sp2 := func(id, parent, spanName string, attrs map[string]any) obsdb.Span {
+		s := sp(id, parent, spanName, attrs)
+		s.TraceID = tr2
+		return s
+	}
+	if err := (&DB{conn: conn}).insertSpans(ctx, []obsdb.Span{
+		sp2("7e00000000000011", "", "invoke_agent support", map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.conversation.id": "c1"}),
+		sp2("7e00000000000012", "7e00000000000011", "chat m", map[string]any{"gen_ai.operation.name": "chat", "gen_ai.output.messages": `[]`}),
+		sp2("7e00000000000013", "", "invoke_agent w", map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": "w_keep"}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	convID, staleID := obsdb.StockRunID(tr2, "7e00000000000011"), obsdb.StockRunID(tr2, "7e00000000000012")
+	if err := conn.Exec(ctx, `INSERT INTO weft_runs (RunId, TraceID, Agent, SessionID, Started, LastSeen, FinishedOK, Derived, RootEnded)
+		VALUES (?, ?, 'support', 'c1', ?, ?, 1, 1, 1), (?, ?, '', '', ?, ?, 1, 1, 1)`,
+		convID, tr2, at, at.Add(time.Second), staleID, tr2, at, at.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	_ = conn.Close()
 
 	db, err := Open(dsn)
@@ -94,7 +118,22 @@ func TestUpgradeTo0031RederivesStock(t *testing.T) {
 	if err != nil || !r.Derived || r.SessionID != "" || r.Steps != 1 || r.MessageCount != 1 {
 		t.Fatalf("after 0031 %s = %+v, %v; want a derived run with no session, 1 step, 1 chat span with messages", id, r.RunRow, err)
 	}
+	if r, err := db.Run(ctx, convID); err != nil || r.MessageCount != 1 || r.SessionID != "c1" {
+		t.Errorf("after 0031 the old conversation row = %+v, %v; want its message count backfilled (1)", r.RunRow, err)
+	}
+	if _, err := db.Run(ctx, staleID); !errors.Is(err, obsdb.ErrNotFound) {
+		t.Errorf("after 0031 the stale derived row: %v, want not found", err)
+	}
+	if r, err := db.Run(ctx, "w_keep"); err != nil || r.Derived {
+		t.Errorf("after 0031 the weft run in the trace = %+v, %v; want it kept", r.RunRow, err)
+	}
 	page, err := db.Traces(ctx, obsdb.TraceQuery{})
+	for i := range page.Traces {
+		if page.Traces[i].TraceID == tr {
+			page.Traces = page.Traces[i : i+1]
+			break
+		}
+	}
 	if err != nil || len(page.Traces) != 1 || len(page.Traces[0].RunIDs) != 1 || page.Traces[0].RunIDs[0] != id {
 		t.Errorf("traces after 0031 = %+v (%v), want the trace naming %s", page.Traces, err, id)
 	}

@@ -196,7 +196,7 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 			return err
 		}
 	}
-	derived, err := deriveStock(ctx, tx, stockTraces)
+	derived, removed, err := deriveStock(ctx, tx, stockTraces)
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,7 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	d.publish(b, runIDs, derived)
+	d.publish(b, runIDs, derived, removed)
 	return nil
 }
 
@@ -217,28 +217,33 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 // later batch with more chat spans, or the root arriving after its
 // children, rewrites the row from everything stored. It returns the
 // derived run ids, for the hub.
-func deriveStock(ctx context.Context, tx *sql.Tx, traces []string) ([]string, error) {
-	var ids []string
+func deriveStock(ctx context.Context, tx *sql.Tx, traces []string) (ids []string, removed []obsdb.RunRow, err error) {
 	for _, trace := range traces {
 		spans, err := querySpansOn(ctx, tx, `trace_id = ? ORDER BY start_ns, span_id`, trace)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		runs := obsdb.DeriveStockRuns(spans)
-		if err := dropStaleDerived(ctx, tx, trace, runs); err != nil {
-			return nil, err
-		}
 		for _, r := range runs {
 			if err := upsertDerived(ctx, tx, r.Row); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if err := updateSearch(ctx, tx, r.Row.ID, &runUpdate{errText: r.Row.Err}); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			ids = append(ids, r.Row.ID)
 		}
+		// After the rows, against the same read (the write transaction's:
+		// no other writer interleaves — SQLite holds one writer, and a
+		// concurrent commit fails this one's upgrade rather than hiding
+		// from it): the rows this derivation no longer makes go.
+		gone, err := dropStaleDerived(ctx, tx, trace, runs)
+		if err != nil {
+			return nil, nil, err
+		}
+		removed = append(removed, gone...)
 	}
-	return ids, nil
+	return ids, removed, nil
 }
 
 // rederiveStock is migration 0026's Go step: every trace holding a span
@@ -263,40 +268,43 @@ func rederiveStock(tx *sql.Tx) error {
 	if err := rs.Close(); err != nil {
 		return err
 	}
-	_, err = deriveStock(ctx, tx, traces)
+	_, _, err = deriveStock(ctx, tx, traces)
 	return err
 }
 
 // dropStaleDerived deletes the trace's derived rows the latest
-// derivation no longer makes (§9): an agent without a conversation id
+// derivation no longer makes (§9) and answers them as Removed rows (the
+// live frame's): an agent without a conversation id
 // stored before its enclosing agent arrived was a run of its own for a
 // while and now folds into the enclosing run. Only the row and its
 // search entries go — the spans stay, they are the enclosing run's.
-func dropStaleDerived(ctx context.Context, tx *sql.Tx, trace string, runs []obsdb.StockRun) error {
+func dropStaleDerived(ctx context.Context, tx *sql.Tx, trace string, runs []obsdb.StockRun) ([]obsdb.RunRow, error) {
 	keep := make(map[string]bool, len(runs))
 	for _, r := range runs {
 		keep[r.Row.ID] = true
 	}
-	rs, err := tx.QueryContext(ctx, `SELECT run_id FROM runs WHERE trace_id = ? AND derived = 1`, trace)
+	rs, err := tx.QueryContext(ctx, `SELECT run_id, agent, session_id FROM runs WHERE trace_id = ? AND derived = 1`, trace)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var stale []any
+	var gone []obsdb.RunRow
 	for rs.Next() {
-		var id string
-		if err := rs.Scan(&id); err != nil {
+		var id, agent, session string
+		if err := rs.Scan(&id, &agent, &session); err != nil {
 			_ = rs.Close()
-			return err
+			return nil, err
 		}
 		if !keep[id] {
 			stale = append(stale, id)
+			gone = append(gone, obsdb.RunRow{ID: id, TraceID: trace, Agent: agent, SessionID: session, Derived: true, Removed: true})
 		}
 	}
 	if err := rs.Close(); err != nil {
-		return err
+		return nil, err
 	}
 	if len(stale) == 0 {
-		return nil
+		return nil, nil
 	}
 	ph := strings.TrimSuffix(strings.Repeat("?,", len(stale)), ",")
 	for _, q := range []string{
@@ -306,10 +314,10 @@ func dropStaleDerived(ctx context.Context, tx *sql.Tx, trace string, runs []obsd
 		`DELETE FROM runs WHERE run_id IN (` + ph + `)`,
 	} {
 		if _, err := tx.ExecContext(ctx, q, stale...); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return gone, nil
 }
 
 // upsertDerived writes a derived run's row whole: every column
@@ -349,7 +357,7 @@ func upsertDerived(ctx context.Context, tx *sql.Tx, r obsdb.RunRow) error {
 // publish sends the batch's frames to the hub before Write returns:
 // every record as ingested (deltas included), the attempt spans
 // (obsdb.AttemptFrame, O17), then the run rows that changed.
-func (d *DB) publish(b obsdb.Batch, ru *runUpdates, derived []string) {
+func (d *DB) publish(b obsdb.Batch, ru *runUpdates, derived []string, removed []obsdb.RunRow) {
 	if d.hub == nil {
 		return
 	}
@@ -375,6 +383,11 @@ func (d *DB) publish(b obsdb.Batch, ru *runUpdates, derived []string) {
 		if row, err := d.runRowByID(ctx, id); err == nil {
 			d.hub.Publish(ctx, obsdb.RunFrame(row))
 		}
+	}
+	// The derived rows the batch folded away (§9): announced Removed, so
+	// an open list drops them.
+	for _, row := range removed {
+		d.hub.Publish(ctx, obsdb.RunFrame(row))
 	}
 }
 

@@ -78,7 +78,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { nest, RUNS_TREE } from "@/lib/delegation"
 import { runLink, tracesLink } from "@/lib/links"
-import { notRunTraces } from "@/lib/honesty"
+import { NOT_RUN_DAYS, notRunTraces } from "@/lib/honesty"
 import type { RunsSearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { ANY_STATUS, statusPick } from "@/lib/status"
@@ -250,17 +250,27 @@ function RunsPage() {
   // The GenAI traces stored that make no run (UX-H-02): a Python or TS
   // app's spans that are traces only — counted, linked to the list of
   // them, where each trace says why.
+  // Over the last NOT_RUN_DAYS days (from that day's start, UTC): the
+  // trace list's since — an index read, not every span stored.
+  const notRunSince = new Date(Date.now() - NOT_RUN_DAYS * 86_400_000)
+    .toISOString()
+    .slice(0, 10)
   const notRun = useQuery({
-    queryKey: ["traces", "not_run", "count"],
+    queryKey: ["traces", "not_run", "count", notRunSince],
     staleTime: 30_000,
-    queryFn: () => fetchTraces({ not_run: true, limit: 1 }),
+    queryFn: () =>
+      fetchTraces({
+        not_run: true,
+        since: `${notRunSince}T00:00:00Z`,
+        limit: 1,
+      }),
     enabled: has("traces"),
   })
   const notRunCount = notRun.data?.total ?? 0
   const notRunLink =
     notRunCount > 0 ? (
       <Link
-        {...tracesLink({ not_run: true })}
+        {...tracesLink({ not_run: true, since: notRunSince })}
         className="font-mono text-xs text-thread-ink hover:underline"
         data-not-run-traces={notRunCount}
       >
@@ -296,6 +306,22 @@ function RunsPage() {
       selector: { agent: agentKey },
       kinds: ["run"],
       onRun: (f) => {
+        // A derived row folded into another (I6-fix2): dropped from every
+        // loaded page; the run it folded into arrives as its own frame.
+        if (f.run.removed) {
+          queryClient.setQueriesData<InfiniteData<RunsPage>>(
+            { queryKey: ["runs", "infinite"] },
+            (old) =>
+              old && {
+                ...old,
+                pages: old.pages.map((p) => ({
+                  ...p,
+                  runs: p.runs.filter((r) => r.id !== f.run.id),
+                })),
+              }
+          )
+          return
+        }
         const lists = queryClient.getQueriesData<InfiniteData<RunsPage>>({
           queryKey: ["runs", "infinite"],
         })

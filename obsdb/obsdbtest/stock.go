@@ -530,6 +530,44 @@ func derivedTopLevel(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("traces = %+v (%v), want the planner's", tp.Traces, err)
 		}
 
+		// O → tool → M → tool → N over two exports (the I6-fix2 review):
+		// M (no conversation id) arrives first with its child N (a
+		// conversation of its own), M's parent not stored — M is a run
+		// and N its child for a while. Then O and its tool: M folds into
+		// O, N's parent becomes O. M's id sorts above O's, so a store
+		// that folds parents by max must rewrite N, not keep M's id.
+		const tr3 = "6c0c0ffee0000000000000000000c004"
+		sp3 := func(id, parent, name string, attrs map[string]any) obsdb.Span {
+			s := sp(id, parent, name, 40*time.Second, attrs)
+			s.TraceID = tr3
+			return s
+		}
+		o := sp3("6c00000000000a01", "", "invoke_agent outer", map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "outer"})
+		oTool := sp3("6c00000000000a02", o.SpanID, "execute_tool delegate", map[string]any{"gen_ai.operation.name": "execute_tool", "gen_ai.tool.call.id": "call_o"})
+		m := sp3("6c00000000000f02", oTool.SpanID, "invoke_agent middle", map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "middle"})
+		mTool := sp3("6c00000000000f03", m.SpanID, "execute_tool ask", map[string]any{"gen_ai.operation.name": "execute_tool", "gen_ai.tool.call.id": "call_m"})
+		n := sp3("6c00000000000f04", mTool.SpanID, "invoke_agent leaf", map[string]any{"gen_ai.operation.name": "invoke_agent",
+			"gen_ai.agent.name": "leaf", "gen_ai.conversation.id": "conv_n"})
+		oID, mID, nID := obsdb.StockRunID(tr3, o.SpanID), obsdb.StockRunID(tr3, m.SpanID), obsdb.StockRunID(tr3, n.SpanID)
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{n, mTool, m}}); err != nil {
+			t.Fatal(err)
+		}
+		if r, err := db.Run(ctx(), nID); err != nil || r.ParentRunID != mID {
+			t.Fatalf("N before O = parent %q (%v), want M %s for now", r.ParentRunID, err, mID)
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{oTool, o}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Run(ctx(), mID); !errors.Is(err, obsdb.ErrNotFound) {
+			t.Errorf("M after O: %v, want not found (folded into O)", err)
+		}
+		if r, err := db.Run(ctx(), nID); err != nil || r.ParentRunID != oID || r.ParentCallID != "call_m" {
+			t.Errorf("N after O = parent %q call %q (%v), want O %s through call_m", r.ParentRunID, r.ParentCallID, err, oID)
+		}
+		if det, err := db.Run(ctx(), oID); err != nil || len(det.Children) != 1 || det.Children[0].ID != nID {
+			t.Errorf("O's children = %v (%v), want N", idsOf(det.Children), err)
+		}
+
 		// A chat-only trace makes no run: NotRun lists it, and only it.
 		const tr2 = "6c0c0ffee0000000000000000000c002"
 		h2 := sp("6c00000000000011", "", "POST /chat", 20*time.Second, nil)

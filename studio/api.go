@@ -743,6 +743,7 @@ func spansFor(r *http.Request, list []obsdb.Span) []obsdb.Span {
 		if a, ok := withoutSystemPrompt(sp.Attrs); ok {
 			sp.Attrs = a
 		}
+		sp.Events = withoutSystemEvents(sp.Events)
 		if namesTools(sp.Attrs) {
 			sp.Attrs = maps.Clone(sp.Attrs)
 			for _, k := range toolNameAttrs {
@@ -759,7 +760,8 @@ func spansFor(r *http.Request, list []obsdb.Span) []obsdb.Span {
 
 // withoutSystemPrompt is a stock span's attributes without the system
 // prompt the GenAI conventions' content attributes carry
-// (docs/record-contract.md §9): gen_ai.system_instructions, the
+// (docs/record-contract.md §9): gen_ai.system_instructions, the plain
+// gen_ai.prompt and gen_ai.content.prompt strings whole, the
 // system-role messages of gen_ai.input.messages (the whole value when it
 // does not parse — it may hold one) and the legacy indexed
 // gen_ai.prompt.N.* of a system-role slot. ok is false when there was
@@ -768,8 +770,12 @@ func withoutSystemPrompt(attrs map[string]any) (map[string]any, bool) {
 	var drop []string
 	var input any
 	setInput := false
-	if _, ok := attrs["gen_ai.system_instructions"]; ok {
-		drop = append(drop, "gen_ai.system_instructions")
+	// The system instructions, and the plain prompt keys whole: their
+	// one string may carry the system prompt and cannot be split.
+	for _, k := range []string{"gen_ai.system_instructions", "gen_ai.prompt", "gen_ai.content.prompt"} {
+		if _, ok := attrs[k]; ok {
+			drop = append(drop, k)
+		}
 	}
 	if v, ok := attrs["gen_ai.input.messages"]; ok {
 		var msgs []map[string]any
@@ -818,6 +824,28 @@ func withoutSystemPrompt(attrs map[string]any) (map[string]any, bool) {
 		out["gen_ai.input.messages"] = input
 	}
 	return out, true
+}
+
+// withoutSystemEvents is a span's events without the event-era
+// gen_ai.system.message events (the system prompt, as older GenAI
+// instrumentations record it), the slice itself when there are none.
+func withoutSystemEvents(evs []obsdb.SpanEvent) []obsdb.SpanEvent {
+	n := 0
+	for _, ev := range evs {
+		if ev.Name == "gen_ai.system.message" {
+			n++
+		}
+	}
+	if n == 0 {
+		return evs
+	}
+	out := make([]obsdb.SpanEvent, 0, len(evs)-n)
+	for _, ev := range evs {
+		if ev.Name != "gen_ai.system.message" {
+			out = append(out, ev)
+		}
+	}
+	return out
 }
 
 func spans(in []obsdb.Span) spansDoc {

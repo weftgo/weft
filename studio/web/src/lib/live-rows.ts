@@ -130,6 +130,13 @@ export function applyRun(
   run: RunRow,
   now = Date.now()
 ): LiveRows {
+  // A derived row folded into another (removed): dropped from the page.
+  if (run.removed) {
+    if (!Object.hasOwn(state.entries, run.id)) return state
+    const entries = { ...state.entries }
+    delete entries[run.id]
+    return { ...state, entries }
+  }
   return put(state, run, now)
 }
 

@@ -1246,7 +1246,7 @@ brings it back by itself. The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
 committed `studio/dist/panel/panel.js`, 293,618 B raw / 98,515 B gzip
-(96.2 KiB, the bundle of the ledger's row "U30.1-fix"; 7,981 B — 7.8 KiB — of headroom under
+(96.2 KiB, the bundle of the ledger's row "I6-fix2"; 7,981 B — 7.8 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

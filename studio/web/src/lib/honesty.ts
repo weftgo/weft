@@ -393,11 +393,17 @@ export const DERIVED_WORDS = {
   notRunChip: "GenAI traces that are not runs",
 } as const
 
+/** NOT_RUN_DAYS is the window the runs page counts the GenAI traces
+ * that make no run over (I6-fix2): the trace list's since, so the count
+ * reads the recent traces by index, never every span stored. */
+export const NOT_RUN_DAYS = 7
+
 /** notRunTraces is the runs page's count of the GenAI traces stored
- * that make no run (UX-H-02): a chat-only instrumentation, an agent
- * span not arrived — the trace page says why for each. */
+ * that make no run (UX-H-02) in the last NOT_RUN_DAYS days: a
+ * chat-only instrumentation, an agent span not arrived — the trace
+ * page says why for each. */
 export function notRunTraces(n: number): string {
-  return `${plural(n, "GenAI trace")} not runs — why`
+  return `${plural(n, "GenAI trace")} not runs in the last ${NOT_RUN_DAYS} days — why`
 }
 
 /** isDerivedRunId: a derived run's id shape (docs/record-contract.md

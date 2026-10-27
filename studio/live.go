@@ -631,6 +631,17 @@ func liveDedupKey(f obsdb.Frame) (liveKey, bool) {
 	return liveKey{run: f.Weft.RunID, kind: f.Weft.Record, pos: f.Weft.Pos}, true
 }
 
+// removedRunDTO is a run frame's row for a run that no longer exists
+// (obsdb.RunRow.Removed): a derived run folded into another.
+type removedRunDTO struct {
+	ID        string `json:"id"`
+	TraceID   string `json:"trace_id"`
+	Agent     string `json:"agent"`
+	SessionID string `json:"session_id"`
+	Derived   bool   `json:"derived"`
+	Removed   bool   `json:"removed"`
+}
+
 // writeFrame writes one SSE frame with the hub's Seq as its id.
 //
 // A run frame's row carries its cost (plan A5) as every run row does:
@@ -661,6 +672,15 @@ func writeFrame(sw *sseWriter, f obsdb.Frame, c *coster) {
 	case obsdb.FrameRun:
 		if f.Run == nil {
 			return
+		}
+		if f.Run.Removed {
+			// A derived row folded away (§9): its id and removed, so an
+			// open list drops it — no row to price.
+			gone, _ := json.Marshal(removedRunDTO{ID: f.Run.ID, TraceID: f.Run.TraceID, Agent: f.Run.Agent,
+				SessionID: f.Run.SessionID, Derived: true, Removed: true})
+			data, _ := json.Marshal(runFrameDTO{Run: gone})
+			sw.frame("id: %d\nevent: run\ndata: %s\n\n", f.Seq, data)
+			break
 		}
 		rowJSON, err := json.Marshal(c.row(*f.Run))
 		if err != nil {

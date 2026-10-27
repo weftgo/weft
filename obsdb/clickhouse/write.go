@@ -91,28 +91,77 @@ func (d *DB) deriveStock(ctx context.Context, spans []obsdb.Span) error {
 			traces = append(traces, s.TraceID)
 		}
 	}
-	return d.rederiveTraces(ctx, traces)
+	_, err := d.rederiveTraces(ctx, traces)
+	return err
 }
 
 // rederiveTraces re-derives each trace's runs from its stored spans
-// (deriveStock's body, and migration 0031's Go step): every run's row
-// inserted, MessageCount into DerivedMessages, and the trace's derived
-// rows the derivation no longer makes deleted (dropStaleDerived).
-func (d *DB) rederiveTraces(ctx context.Context, traces []string) error {
-	var rows []obsdb.RunRow
+// (deriveStock's body, and migration 0031's Go step). Per trace, in this
+// order — so the last writer of a trace sees everything (two batches, or
+// two Studios over one database, racing on it):
+//
+//  1. read the spans, derive, insert every run's row (MessageCount into
+//     DerivedMessages);
+//  2. read the spans again — another writer's spans inserted before its
+//     own derivation are visible now — and derive again;
+//  3. reconcile (reconcileDerived): the rows that derivation no longer
+//     makes are deleted, and a row whose stored parent is not the one it
+//     derives (a parent dropped in 3, the max aggregate keeping its id)
+//     is deleted and inserted again whole.
+//
+// A writer that derived before another's spans arrived thus drops its
+// own interim rows after inserting them, and the other, deriving after
+// its spans, sees them; 3 costs a key-range read per trace and a delete
+// only when a row is stale. removed answers the dropped rows (the live
+// frame's Removed rows).
+func (d *DB) rederiveTraces(ctx context.Context, traces []string) (removed []obsdb.RunRow, err error) {
 	for _, t := range traces {
 		stored, err := d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE TraceId = ?"+spanDedup, t)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		runs := obsdb.DeriveStockRuns(stored)
-		if err := d.dropStaleDerived(ctx, t, runs); err != nil {
-			return err
+		if deriveHook != nil {
+			deriveHook(t)
 		}
-		for _, r := range runs {
-			rows = append(rows, r.Row)
+		if err := d.insertDerived(ctx, rowsOf(runs)); err != nil {
+			return nil, err
 		}
+		fresh, err := d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE TraceId = ?"+spanDedup, t)
+		if err != nil {
+			return nil, err
+		}
+		if reconcileHook != nil {
+			reconcileHook(t)
+		}
+		gone, err := d.reconcileDerived(ctx, t, fresh, obsdb.DeriveStockRuns(fresh))
+		if err != nil {
+			return nil, err
+		}
+		removed = append(removed, gone...)
 	}
+	return removed, nil
+}
+
+// deriveHook, when set (tests), runs between a trace's first derivation
+// and its rows' insert: where another writer may interleave.
+var deriveHook func(trace string)
+
+// reconcileHook, when set (tests), runs between a trace's fresh read and
+// its reconcile: the other place another writer may interleave.
+var reconcileHook func(trace string)
+
+func rowsOf(runs []obsdb.StockRun) []obsdb.RunRow {
+	out := make([]obsdb.RunRow, len(runs))
+	for i, r := range runs {
+		out[i] = r.Row
+	}
+	return out
+}
+
+// insertDerived inserts derived rows into weft_runs (Derived = 1, the
+// max aggregates folding them with the rows already there).
+func (d *DB) insertDerived(ctx context.Context, rows []obsdb.RunRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -138,39 +187,84 @@ func (d *DB) rederiveTraces(ctx context.Context, traces []string) error {
 	return batch.Send()
 }
 
-// dropStaleDerived deletes the trace's derived rows the latest
-// derivation no longer makes (§9): an agent without a conversation id
-// stored before its enclosing agent arrived was a run of its own for a
-// while and now folds into the enclosing run. The spans stay (they are
-// the enclosing run's); the lightweight delete runs only when a row is
-// stale, which only that order of exports makes.
-func (d *DB) dropStaleDerived(ctx context.Context, trace string, runs []obsdb.StockRun) error {
-	keep := make(map[string]bool, len(runs))
+// reconcileDerived brings the trace's stored derived rows to runs, the
+// latest derivation (§9). The rows are read by their id prefix
+// (obsdb.StockRunPrefix: weft_runs' primary key, a key range — never a
+// scan for TraceID). A stored row runs no longer has is stale: an agent
+// without a conversation id that was top-level while its parent was not
+// stored, folded now — dropped only when its root span is in this read
+// (a run whose root this read missed is another writer's, whose spans
+// landed after the read: never this writer's to drop). What this read
+// drops it drops rightly whatever came later: a span with an agent
+// stored above it stays folded as more spans arrive. A row whose stored
+// (max-aggregated) ParentRunID is a run this read knows folded (its root
+// span here, not a root) — a child re-parented when its interim parent
+// folded, whose max keeps the dropped id when it sorts higher — must be
+// rewritten, which an insert cannot do under max: both are deleted (one
+// lightweight DELETE, guarded by Derived = 1, only when one is due —
+// never in the steady state), then the rewritten rows inserted whole.
+// The DELETE waits for its mutation (the server's default
+// lightweight_deletes_sync): it applies to the parts that exist when it
+// is issued, so the re-insert after it is never deleted either way, but
+// a read between an asynchronous delete and its completion would fold
+// the old row into the new one's max. The stale rows come back Removed.
+func (d *DB) reconcileDerived(ctx context.Context, trace string, spans []obsdb.Span, runs []obsdb.StockRun) ([]obsdb.RunRow, error) {
+	want := make(map[string]obsdb.RunRow, len(runs))
 	for _, r := range runs {
-		keep[r.Row.ID] = true
+		want[r.Row.ID] = r.Row
 	}
-	rs, err := d.conn.Query(ctx, `SELECT DISTINCT RunId FROM weft_runs WHERE Derived = 1 AND TraceID = ?`, trace)
+	seen := make(map[string]bool, len(spans))
+	for _, sp := range spans {
+		seen[sp.SpanID] = true
+	}
+	// staleHere: a derived id whose root span this read holds and whose
+	// run this derivation does not make.
+	staleHere := func(id string) bool {
+		_, root, ok := obsdb.ParseStockRunID(id)
+		_, made := want[id]
+		return ok && seen[root] && !made
+	}
+	rs, err := d.conn.Query(ctx, `SELECT RunId, max(ParentRunID), max(Agent), max(SessionID) FROM weft_runs
+		WHERE startsWith(RunId, ?) AND Derived = 1 GROUP BY RunId`, obsdb.StockRunPrefix(trace))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var stale []string
+	var drop []string
+	var gone, rewrite []obsdb.RunRow
 	for rs.Next() {
-		var id string
-		if err := rs.Scan(&id); err != nil {
+		var id, parent, agent, session string
+		if err := rs.Scan(&id, &parent, &agent, &session); err != nil {
 			_ = rs.Close()
-			return err
+			return nil, err
 		}
-		if !keep[id] {
-			stale = append(stale, id)
+		r, ok := want[id]
+		_, root, _ := obsdb.ParseStockRunID(id)
+		switch {
+		case !ok && !seen[root]:
+			// Its root span is not in this read: another writer's run
+			// whose spans landed after it — never this writer's to drop.
+		case !ok:
+			drop = append(drop, id)
+			gone = append(gone, obsdb.RunRow{ID: id, TraceID: trace, Agent: agent, SessionID: session, Derived: true, Removed: true})
+		case parent != r.ParentRunID && staleHere(parent):
+			// Its stored parent is a run this read knows folded (its
+			// root span seen, no longer a root): the max kept a dropped
+			// id. A parent this read does not know is a newer writer's —
+			// left alone.
+			drop = append(drop, id)
+			rewrite = append(rewrite, r)
 		}
 	}
 	if err := rs.Close(); err != nil {
-		return err
+		return nil, err
 	}
-	if len(stale) == 0 {
-		return nil
+	if len(drop) == 0 {
+		return nil, nil
 	}
-	return d.conn.Exec(ctx, `DELETE FROM weft_runs WHERE RunId IN ?`, stale)
+	if err := d.conn.Exec(ctx, `DELETE FROM weft_runs WHERE RunId IN ? AND Derived = 1`, drop); err != nil {
+		return nil, err
+	}
+	return gone, d.insertDerived(ctx, rewrite)
 }
 
 func boolUInt8(b bool) uint8 {

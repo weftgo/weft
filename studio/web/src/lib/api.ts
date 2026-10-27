@@ -186,6 +186,10 @@ export interface RunRow extends CostFields, DelegatedCostFields {
    * events, transcript or request records, requests_badge "derived".
    * Absent on weft's runs. */
   derived?: boolean
+  /** A live frame's word that the row no longer exists (I6-fix2,
+   * obsdb.RunRow.Removed): a derived run folded into another — a list
+   * drops it. Never on a read. */
+  removed?: boolean
   /** On a run document's children[] rows only (A10): the child's own
    * holes (api.go's runHoles), absent when it has none. */
   holes?: StepHole[]

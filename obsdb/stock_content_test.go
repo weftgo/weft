@@ -76,3 +76,25 @@ func TestStockNotRun(t *testing.T) {
 		}
 	}
 }
+
+// StockFoldedRuns (I6-fix2): the agents without a conversation id that
+// the latest derivation folds — announced Removed — and none of the
+// roots it makes.
+func TestStockFoldedRuns(t *testing.T) {
+	const tr = "6f000000000000000000000000000001"
+	outer := obsdb.Span{TraceID: tr, SpanID: "6f00000000000001", Name: "invoke_agent outer"}
+	inner := obsdb.Span{TraceID: tr, SpanID: "6f00000000000002", ParentSpanID: outer.SpanID, Name: "invoke_agent inner",
+		Attrs: map[string]any{"gen_ai.agent.name": "inner"}}
+	conv := obsdb.Span{TraceID: tr, SpanID: "6f00000000000003", ParentSpanID: outer.SpanID, Name: "invoke_agent c",
+		Attrs: map[string]any{"gen_ai.conversation.id": "c"}}
+	if got := obsdb.StockFoldedRuns([]obsdb.Span{inner}); len(got) != 0 {
+		t.Errorf("inner alone (top-level for now) folded = %v, want none", got)
+	}
+	got := obsdb.StockFoldedRuns([]obsdb.Span{outer, inner, conv})
+	if len(got) != 1 || got[0].ID != obsdb.StockRunID(tr, inner.SpanID) || !got[0].Removed || !got[0].Derived || got[0].Agent != "inner" {
+		t.Errorf("folded = %+v, want the inner agent alone, Removed", got)
+	}
+	if p := obsdb.StockRunPrefix("6F000000000000000000000000000001"); p != "otel-"+tr+"-" {
+		t.Errorf("StockRunPrefix = %q", p)
+	}
+}

@@ -1393,7 +1393,9 @@ func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage,
 	}
 	if q.NotRun {
 		conds = append(conds, "GenAIHits > 0", "WeftHits = 0",
-			"TraceId NOT IN (SELECT TraceID FROM weft_runs WHERE Derived = 1)")
+			// The derived runs' traces from their ids (otel-<trace>-<span>):
+			// the 'otel-' key range alone, never a scan for TraceID.
+			"TraceId NOT IN (SELECT substring(RunId, 6, 32) FROM weft_runs WHERE startsWith(RunId, 'otel-') AND Derived = 1)")
 	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "StartNs >= ?")
@@ -1464,9 +1466,9 @@ func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage,
 }
 
 // fillDerivedTraceRuns adds to each trace row the runs derived from its
-// stock GenAI spans (§9): no span names them by run id — their rows in
-// weft_runs carry the trace id — so they are read by trace id, merged
-// into RunIDs sorted, each once.
+// stock GenAI spans (§9): no span names them by run id, so they are read
+// by their ids' trace prefix (a primary-key range per trace), merged into
+// RunIDs sorted, each once.
 func (d *DB) fillDerivedTraceRuns(ctx context.Context, rows []obsdb.TraceRow) error {
 	if len(rows) == 0 {
 		return nil
@@ -1477,8 +1479,16 @@ func (d *DB) fillDerivedTraceRuns(ctx context.Context, rows []obsdb.TraceRow) er
 		ids[i] = rows[i].TraceID
 		byID[rows[i].TraceID] = &rows[i]
 	}
+	// By id prefix (obsdb.StockRunPrefix): weft_runs' primary key, one
+	// key range per trace — a TraceID filter would scan the table.
+	conds := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, t := range ids {
+		conds[i] = "startsWith(RunId, ?)"
+		args[i] = obsdb.StockRunPrefix(t)
+	}
 	rs, err := d.conn.Query(ctx, `SELECT DISTINCT TraceID, RunId FROM weft_runs
-		WHERE Derived = 1 AND TraceID IN ? ORDER BY TraceID, RunId`, ids)
+		WHERE (`+strings.Join(conds, " OR ")+`) AND Derived = 1 ORDER BY TraceID, RunId`, args...)
 	if err != nil {
 		return err
 	}

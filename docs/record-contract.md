@@ -1625,7 +1625,16 @@ top-level is read from the stored spans: its parent not stored yet, it
 is top-level for now — should an enclosing agent arrive in a later
 export (a `BatchSpanProcessor` exports an inner agent before the outer
 one that ends after it), the trace re-derived folds it, and the writers
-delete the row it had (its spans stay: they are the enclosing run's;
+delete the row it had (its spans stay: they are the enclosing run's) and
+announce it on the live lane as a run frame whose row is `removed` (so
+an open list drops it). A writer reconciles after inserting its rows,
+against a fresh read of the trace — the last writer sees everything,
+whether two batches or two Studios race on it — and drops only a run
+whose root span that read holds; a child whose stored parent is such a
+dropped run is rewritten whole (ClickHouse's `max` would keep the
+dropped id). ClickHouse reads a trace's derived rows by their id prefix
+(`otel-<trace id>-`, `obsdb.StockRunPrefix`: its primary key), never a
+scan for the trace id (
 `stock_genai_nested` pins the fold, `DerivedTopLevel` the late parent on
 both backends). A stock agent under a weft span is top-level (the climb
 stops at weft's spans). A trace whose GenAI spans include no
@@ -1766,7 +1775,7 @@ tool calls only: no invoke_agent span opens a run" for GenAI spans with
 no agent span, "no GenAI span" for a trace with none, each fix saying
 what to set on the spans; `/api/traces?not_run=1` lists the GenAI
 traces that make no run (`obsdb.TraceQuery.NotRun`), which Studio's
-runs page counts; `/api/sessions` groups it under its conversation
+runs page counts over the last 7 days (`since`: an index read); `/api/sessions` groups it under its conversation
 id; `/api/runs/{id}` is the row with one hole, `derived`, in the words
 above; `events` and `transcript` are empty with that badge (`transcript?step=N`
 is 409 with it); `spans` are the real spans (the waterfall);

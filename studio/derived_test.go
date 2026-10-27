@@ -764,7 +764,9 @@ func TestDerivedTraceRuns(t *testing.T) {
 // trace's spans without the system prompt its content attributes carry
 // (docs/record-contract.md §9, the I6 review): no
 // gen_ai.system_instructions, no system-role input message, no legacy
-// system slot — the user's messages stay. The server token reads them
+// system slot, no plain gen_ai.prompt / gen_ai.content.prompt string
+// (it cannot be split), no gen_ai.system.message event — the user's
+// messages stay. The server token reads them
 // all.
 func TestDerivedSpansHideSystemPromptFromReadTokens(t *testing.T) {
 	db, err := sqlite.Open(":memory:")
@@ -783,7 +785,14 @@ func TestDerivedSpansHideSystemPromptFromReadTokens(t *testing.T) {
 				"gen_ai.system_instructions": `[{"type":"text","content":"SECRET SYSTEM"}]`,
 				"gen_ai.input.messages":      `[{"role":"system","parts":[{"type":"text","content":"SECRET INLINE"}]},{"role":"user","parts":[{"type":"text","content":"hello there"}]}]`,
 				"gen_ai.prompt.0.role":       "system", "gen_ai.prompt.0.content": "SECRET LEGACY",
-				"gen_ai.prompt.1.role": "user", "gen_ai.prompt.1.content": "legacy user"})},
+				"gen_ai.prompt.1.role": "user", "gen_ai.prompt.1.content": "legacy user",
+				"gen_ai.content.prompt": "SECRET PLAIN CONTENT"}),
+			Events: []obsdb.SpanEvent{
+				{Time: at, Name: "gen_ai.system.message", Attrs: map[string]any{"content": "SECRET EVENT"}},
+				{Time: at, Name: "gen_ai.user.message", Attrs: map[string]any{"content": "user event"}},
+			}},
+		{TraceID: tr, SpanID: "7f00000000000003", ParentSpanID: "7f00000000000001", Name: "chat m", Start: at, End: at.Add(time.Second),
+			Attrs: tag(map[string]any{"gen_ai.operation.name": "chat", "gen_ai.prompt": "SECRET PLAIN"})},
 	}
 	if err := db.Write(context.Background(), obsdb.Batch{Spans: spans}); err != nil {
 		t.Fatal(err)
@@ -798,18 +807,19 @@ func TestDerivedSpansHideSystemPromptFromReadTokens(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("tag token's trace read: %d %s", code, body)
 	}
-	for _, secret := range []string{"SECRET SYSTEM", "SECRET INLINE", "SECRET LEGACY", "gen_ai.system_instructions"} {
+	for _, secret := range []string{"SECRET SYSTEM", "SECRET INLINE", "SECRET LEGACY", "SECRET PLAIN", "SECRET EVENT", "gen_ai.system_instructions"} {
 		if strings.Contains(body, secret) {
 			t.Errorf("a read token's trace carries %q: %s", secret, body)
 		}
 	}
-	for _, kept := range []string{"hello there", "legacy user"} {
+	for _, kept := range []string{"hello there", "legacy user", "user event"} {
 		if !strings.Contains(body, kept) {
 			t.Errorf("a read token's trace lost %q: %s", kept, body)
 		}
 	}
 	if _, full := tcall(t, ts, http.MethodGet, "/api/traces/"+tr, "srv", ""); !strings.Contains(full, "SECRET SYSTEM") ||
-		!strings.Contains(full, "SECRET INLINE") || !strings.Contains(full, "SECRET LEGACY") {
+		!strings.Contains(full, "SECRET INLINE") || !strings.Contains(full, "SECRET LEGACY") ||
+		!strings.Contains(full, "SECRET PLAIN") || !strings.Contains(full, "SECRET EVENT") {
 		t.Errorf("the server token's trace lost the system prompt: %s", full)
 	}
 }

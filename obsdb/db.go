@@ -530,6 +530,13 @@ type RunRow struct {
 	// HoleDerived for it, and the API badges it "derived from spans ·
 	// no events" (HoleNoteFor(HoleDerived, CauseStockSpans)).
 	Derived bool
+	// Removed marks a run frame's row that no longer exists: a derived
+	// run the latest derivation folded into another (a top-level agent
+	// without a conversation id whose enclosing agent arrived in a later
+	// export, docs/record-contract.md §9). Only a live frame carries it
+	// (StockFoldedRuns, the writers' dropped rows) — so an open list drops
+	// the row; no store returns such a row.
+	Removed bool
 	// RootEnded marks a run whose invoke_agent span was stored: the span
 	// is exported only once it ended, so the run is over whatever records
 	// are missing (docs/record-contract.md §6). Its error status is

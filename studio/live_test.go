@@ -888,3 +888,37 @@ func TestLiveResumeSaysAnUnreadableRun(t *testing.T) {
 		t.Errorf("backfill_error frames = %+v, want one naming r_bad", errs)
 	}
 }
+
+// A derived run folded into another (I6-fix2, obsdb.RunRow.Removed) is
+// announced on the live lane as a run frame whose row is its id and
+// removed — no priced row — so an open list drops it; an agent stream
+// sees it by the row's agent.
+func TestLiveRemovedDerivedRun(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	hub := obsdb.NewHub()
+	h := Handler(DB(db), Live(hub))
+	all := subscribeLive(t, h, "?agent=helper&kinds=run", "")
+	if all.StatusCode != http.StatusOK {
+		t.Fatalf("agent stream: %d", all.StatusCode)
+	}
+	const id = "otel-6c0c0ffee0000000000000000000c001-6c00000000000004"
+	hub.Publish(context.Background(), obsdb.RunFrame(obsdb.RunRow{ID: id, TraceID: "6c0c0ffee0000000000000000000c001",
+		Agent: "helper", Derived: true, Removed: true}))
+	frames := readSSE(t, all, 1, 5*time.Second)
+	if len(frames) != 1 || frames[0].event != "run" {
+		t.Fatalf("frames = %+v, want one run frame", frames)
+	}
+	var f struct {
+		Run map[string]any `json:"run"`
+	}
+	if err := json.Unmarshal([]byte(frames[0].data), &f); err != nil {
+		t.Fatal(err)
+	}
+	if f.Run["id"] != id || f.Run["removed"] != true || f.Run["derived"] != true || f.Run["status"] != nil {
+		t.Errorf("removed frame row = %v, want its id, removed and derived, no row fields", f.Run)
+	}
+}

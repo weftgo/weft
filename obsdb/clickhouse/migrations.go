@@ -89,7 +89,8 @@ func rederiveStock(ctx context.Context, conn ch.Conn) error {
 	if err := rs.Close(); err != nil {
 		return err
 	}
-	return (&DB{conn: conn}).rederiveTraces(ctx, traces)
+	_, err = (&DB{conn: conn}).rederiveTraces(ctx, traces)
+	return err
 }
 
 // ErrNewerSchema is returned by Open when the database's

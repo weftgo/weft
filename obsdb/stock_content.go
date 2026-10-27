@@ -149,3 +149,39 @@ func StockNotRun(spans []Span) (reason, fix string) {
 	}
 	return notRunChatOnly, notRunChatOnlyFix
 }
+
+// StockFoldedRuns is the derived runs the spans no longer make that an
+// earlier derivation of the same trace may have (§9): one row per non-weft
+// invoke_agent span without a conversation id that is no root of the
+// latest derivation — an agent that was top-level while its parent was
+// not stored, folded now — each Removed, with the id, trace and agent a
+// live frame needs (RunFrame) and Derived set. A publisher announces them
+// so an open list drops the row; an id no list ever had is a no-op there.
+func StockFoldedRuns(spans []Span) []RunRow {
+	roots := map[string]bool{}
+	for _, r := range DeriveStockRuns(spans) {
+		roots[r.Row.ID] = true
+	}
+	seen := map[string]bool{}
+	var out []RunRow
+	for _, s := range spans {
+		if stockOp(s) != opInvokeAgent || attr(s.Attrs, attrRunID) != "" || attr(s.Attrs, attrConversationID) != "" {
+			continue
+		}
+		id := StockRunID(s.TraceID, s.SpanID)
+		if roots[id] || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, RunRow{ID: id, TraceID: s.TraceID, Agent: attr(s.Attrs, attrAgentName), Derived: true, Removed: true})
+	}
+	return out
+}
+
+// StockRunPrefix is the prefix every derived run id of a trace starts
+// with (StockRunID): "otel-<trace id>-", lowercase. A store keyed by run
+// id reads a trace's derived rows by this prefix — its primary key —
+// instead of scanning for the trace id.
+func StockRunPrefix(traceID string) string {
+	return stockPrefix + strings.ToLower(traceID) + "-"
+}

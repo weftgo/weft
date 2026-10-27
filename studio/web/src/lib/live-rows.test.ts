@@ -198,3 +198,14 @@ describe("the row fold", () => {
     expect(validPeek("x".repeat(200))).toBeUndefined()
   })
 })
+
+describe("a derived row folded away (I6-fix2)", () => {
+  it("a removed frame drops the row; one for a row the page never had changes nothing", () => {
+    const id = "otel-6c0c0ffee0000000000000000000c001-6c00000000000004"
+    let s = applyRun(emptyLiveRows, run(id, { derived: true }), 1_000)
+    expect(s.entries[id]).toBeTruthy()
+    s = applyRun(s, run(id, { derived: true, removed: true }), 2_000)
+    expect(s.entries[id]).toBeUndefined()
+    expect(applyRun(s, run("otel-x", { removed: true }), 3_000)).toBe(s)
+  })
+})

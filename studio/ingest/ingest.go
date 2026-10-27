@@ -213,6 +213,11 @@ func publishRuns(ctx context.Context, db obsdb.DB, hub obsdb.Hub, batch obsdb.Ba
 				for _, r := range obsdb.DeriveStockRuns(spans) {
 					seen[r.Row.ID] = struct{}{}
 				}
+				// The interim rows the batch folded (§9): announced
+				// Removed, so an open list drops them.
+				for _, r := range obsdb.StockFoldedRuns(spans) {
+					hub.Publish(ctx, obsdb.RunFrame(r))
+				}
 			}
 		}
 	}

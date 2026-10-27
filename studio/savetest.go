@@ -234,6 +234,23 @@ func messageLit(m core.Message) (lit string, decoded bool) {
 	return "decodeMessage(" + strconv.Quote(string(b)) + ")", true
 }
 
+// steerLiterals is the wefttest.NewSteers chain's .At calls for the
+// steered steps, and whether a message needs decodeMessage.
+func steerLiterals(steered []int, steers map[int][]core.Message) (string, bool) {
+	var lits []string
+	decode := false
+	for _, k := range steered {
+		args := []string{strconv.Itoa(k)}
+		for _, m := range steers[k] {
+			lit, d := messageLit(m)
+			decode = decode || d
+			args = append(args, lit)
+		}
+		lits = append(lits, ".\n\t\tAt("+strings.Join(args, ", ")+")")
+	}
+	return strings.Join(lits, ""), decode
+}
+
 // render writes the skeleton's Go source, gofmt'ed.
 func (k replaySkeleton) render() ([]byte, error) {
 	set := k.set
@@ -366,42 +383,63 @@ func (k replaySkeleton) render() ([]byte, error) {
 	p("// the real tools and agent, and a changed request fails with wefttest.ErrNoFixture\n")
 	p("// naming it. Re-record with wefttest.Record.\n")
 	p("package %s_test\n\n", replayPackage(k.agent))
+	// What the body uses, so it declares and imports nothing unused (a
+	// run that offered no tools has no stubs, so no recorded results
+	// and no answer handler: AR12).
+	stubs := len(union) > 0
+	readsFixtures := stubs || prompt == nil
+	for _, o := range overrides {
+		readsFixtures = readsFixtures || o.compacted != nil || o.rewritten
+	}
+	steerLits, decode := steerLiterals(steered, steers)
 	p("import (\n\t\"context\"\n")
-	p("\t\"encoding/json\"\n\t\"errors\"\n\t\"fmt\"\n")
-	p("\t\"os\"\n\t\"path/filepath\"\n")
+	if readsFixtures || decode {
+		p("\t\"encoding/json\"\n")
+	}
+	if stubs {
+		p("\t\"errors\"\n")
+	}
+	if readsFixtures {
+		p("\t\"fmt\"\n\t\"os\"\n")
+	}
+	if stubs {
+		p("\t\"path/filepath\"\n")
+	}
 	p("\t\"testing\"\n\n\t\"github.com/weftgo/weft\"\n\t\"github.com/weftgo/weft/wefttest\"\n)\n\n")
 
 	p("// %s replays run %s of agent %s from its fixtures.\n", test, commentText(k.runID, 60), commentText(k.agent, 60))
 	p("func %s(t *testing.T) {\n", test)
 	p("\tconst fixtures = %s\n\n", strconv.Quote(fixtures))
-	p("\t// requestMessages reads one fixture's request messages back.\n")
-	p("\trequestMessages := func(file string) ([]weft.Message, error) {\n")
-	p("\t\tb, err := os.ReadFile(file)\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n")
-	p("\t\tvar fx struct {\n\t\t\tRequest struct {\n\t\t\t\tMessages []weft.Message `json:\"messages\"`\n\t\t\t} `json:\"request\"`\n\t\t}\n")
-	p("\t\tif err := json.Unmarshal(b, &fx); err != nil {\n\t\t\treturn nil, fmt.Errorf(\"%%s: %%w\", file, err)\n\t\t}\n")
-	p("\t\treturn fx.Request.Messages, nil\n\t}\n\n")
-	p("\t// The results the run recorded, by step and call id (a provider may\n")
-	p("\t// reuse a call id across steps): fixture k+1's request ends with step\n")
-	p("\t// k's reply and the tool results that answered it.\n")
-	p("\tfiles, err := filepath.Glob(filepath.Join(fixtures, \"*.json\"))\n")
-	p("\tif err != nil || len(files) == 0 {\n\t\tt.Fatalf(\"no fixtures in %%s: %%v\", fixtures, err)\n\t}\n")
-	p("\ttype stepCall struct {\n\t\tstep int\n\t\tid   string\n\t}\n")
-	p("\trecorded := map[stepCall]weft.ToolResultPart{}\n")
-	p("\tfor k, f := range files[1:] { // files sort in step order\n\t\tmsgs, err := requestMessages(f)\n\t\tif err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n")
-	p("\t\tlast := -1\n\t\tfor i, m := range msgs {\n\t\t\tif m.Role == weft.RoleAssistant {\n\t\t\t\tlast = i\n\t\t\t}\n\t\t}\n")
-	p("\t\tfor _, m := range msgs[last+1:] {\n\t\t\tfor _, part := range m.Content {\n")
-	p("\t\t\t\tif r, ok := part.(weft.ToolResultPart); ok {\n\t\t\t\t\trecorded[stepCall{k, r.CallID}] = r\n\t\t\t\t}\n")
-	p("\t\t\t}\n\t\t}\n\t}\n")
-	p("\t// answer is every stub's handler: the recorded result for the call,\n")
-	p("\t// an error result exactly as the run recorded it.\n")
-	p("\tanswer := func(ctx context.Context, _ json.RawMessage) (string, error) {\n")
-	p("\t\tcall, _ := weft.CallFromContext(ctx)\n")
-	p("\t\tr, ok := recorded[stepCall{call.Step, call.CallID}]\n")
-	p("\t\tswitch {\n\t\tcase !ok:\n")
-	p("\t\t\treturn \"\", errors.New(\"no recorded result for call \" + call.CallID + \" (the recording never ran it)\")\n")
-	p("\t\tcase r.IsError:\n\t\t\treturn \"\", errors.New(r.Content)\n\t\t}\n")
-	p("\t\treturn r.Content, nil\n\t}\n")
-	if len(union) > 0 {
+	if readsFixtures {
+		p("\t// requestMessages reads one fixture's request messages back.\n")
+		p("\trequestMessages := func(file string) ([]weft.Message, error) {\n")
+		p("\t\tb, err := os.ReadFile(file)\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n")
+		p("\t\tvar fx struct {\n\t\t\tRequest struct {\n\t\t\t\tMessages []weft.Message `json:\"messages\"`\n\t\t\t} `json:\"request\"`\n\t\t}\n")
+		p("\t\tif err := json.Unmarshal(b, &fx); err != nil {\n\t\t\treturn nil, fmt.Errorf(\"%%s: %%w\", file, err)\n\t\t}\n")
+		p("\t\treturn fx.Request.Messages, nil\n\t}\n\n")
+	}
+	if stubs {
+		p("\t// The results the run recorded, by step and call id (a provider may\n")
+		p("\t// reuse a call id across steps): fixture k+1's request ends with step\n")
+		p("\t// k's reply and the tool results that answered it.\n")
+		p("\tfiles, err := filepath.Glob(filepath.Join(fixtures, \"*.json\"))\n")
+		p("\tif err != nil || len(files) == 0 {\n\t\tt.Fatalf(\"no fixtures in %%s: %%v\", fixtures, err)\n\t}\n")
+		p("\ttype stepCall struct {\n\t\tstep int\n\t\tid   string\n\t}\n")
+		p("\trecorded := map[stepCall]weft.ToolResultPart{}\n")
+		p("\tfor k, f := range files[1:] { // files sort in step order\n\t\tmsgs, err := requestMessages(f)\n\t\tif err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n")
+		p("\t\tlast := -1\n\t\tfor i, m := range msgs {\n\t\t\tif m.Role == weft.RoleAssistant {\n\t\t\t\tlast = i\n\t\t\t}\n\t\t}\n")
+		p("\t\tfor _, m := range msgs[last+1:] {\n\t\t\tfor _, part := range m.Content {\n")
+		p("\t\t\t\tif r, ok := part.(weft.ToolResultPart); ok {\n\t\t\t\t\trecorded[stepCall{k, r.CallID}] = r\n\t\t\t\t}\n")
+		p("\t\t\t}\n\t\t}\n\t}\n")
+		p("\t// answer is every stub's handler: the recorded result for the call,\n")
+		p("\t// an error result exactly as the run recorded it.\n")
+		p("\tanswer := func(ctx context.Context, _ json.RawMessage) (string, error) {\n")
+		p("\t\tcall, _ := weft.CallFromContext(ctx)\n")
+		p("\t\tr, ok := recorded[stepCall{call.Step, call.CallID}]\n")
+		p("\t\tswitch {\n\t\tcase !ok:\n")
+		p("\t\t\treturn \"\", errors.New(\"no recorded result for call \" + call.CallID + \" (the recording never ran it)\")\n")
+		p("\t\tcase r.IsError:\n\t\t\treturn \"\", errors.New(r.Content)\n\t\t}\n")
+		p("\t\treturn r.Content, nil\n\t}\n")
 		p("\tconst stub = \"recorded tool: replace with the real one\"\n")
 		p("\ttools := map[string]*weft.ToolDef{\n")
 		for _, name := range union {
@@ -482,23 +520,12 @@ func (k replaySkeleton) render() ([]byte, error) {
 	p("\tagt := weft.New(wefttest.Replay(t, \"testdata\"), opts...)\n\n")
 	runOpts := ""
 	if len(steered) > 0 {
-		var lits []string
-		decode := false
-		for _, k := range steered {
-			args := []string{strconv.Itoa(k)}
-			for _, m := range steers[k] {
-				lit, d := messageLit(m)
-				decode = decode || d
-				args = append(args, lit)
-			}
-			lits = append(lits, ".\n\t\tAt("+strings.Join(args, ", ")+")")
-		}
 		if decode {
 			p("\tdecodeMessage := func(s string) weft.Message {\n\t\tvar m weft.Message\n")
 			p("\t\tif err := json.Unmarshal([]byte(s), &m); err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t\treturn m\n\t}\n")
 		}
 		p("\t// The messages the recorded run was steered with, at the steps they followed.\n")
-		p("\tsteers := wefttest.NewSteers()%s\n", strings.Join(lits, ""))
+		p("\tsteers := wefttest.NewSteers()%s\n", steerLits)
 		runOpts = ", steers.Option()"
 	}
 	if prompt != nil {

@@ -296,6 +296,83 @@ func TestSaveAsTestPasses(t *testing.T) {
 	}
 }
 
+// TestSaveAsTestCompilesWithoutTools is AR12: save as test on a run
+// that offered no tools emitted the answer handler (and the recorded
+// results it reads) anyway, so the generated file failed to compile
+// with "declared and not used: answer". The skeletons of a no-tools
+// run and a tools run both pass go vet and go test in a throwaway
+// module joined to this repository's.
+func TestSaveAsTestCompilesWithoutTools(t *testing.T) {
+	gobin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("no go tool on PATH")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts, _ := requestsServer(t)
+	// r_plain: an agent with no tools answering in one step.
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := core.New(wefttest.Script(wefttest.Say("All systems nominal.")), core.Name("ops-console"),
+		core.Instructions("You watch the systems."),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := plain.Generate(ctx, core.RunID("r_plain"), core.Prompt("status?")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// r_tools: the same export with a tool call, the stubs' path.
+	recordScriptedRun(t, ts.URL, "r_tools", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`, ID: "c1"}),
+		wefttest.Say("Found it."),
+	))
+
+	mod := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(mod, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module savetest.example\n\ngo 1.26.0\n")
+	write("go.work", "go 1.26.0\n\nuse (\n\t.\n\t"+root+"\n\t"+filepath.Join(root, "core")+"\n)\n")
+	if b, err := os.ReadFile(filepath.Join(root, "go.work.sum")); err == nil {
+		write("go.work.sum", string(b))
+	}
+	_, body := exportGet(t, ts, "/api/runs/r_plain/export?format=wefttest", settledRun(1))
+	files := unzipTo(t, body, filepath.Join(mod, "plain"))
+	skeleton := files["ops_console_replay_test.go"]
+	if skeleton == "" {
+		t.Fatalf("zip entries = %v, want ops_console_replay_test.go", keys(files))
+	}
+	for _, unwanted := range []string{"answer :=", "recorded :=", `"errors"`, `"path/filepath"`, "requestMessages"} {
+		if strings.Contains(skeleton, unwanted) {
+			t.Errorf("the no-tools skeleton carries %q:\n%s", unwanted, skeleton)
+		}
+	}
+	_, body = exportGet(t, ts, "/api/runs/r_tools/export?format=wefttest", settledRun(2))
+	if s := unzipTo(t, body, filepath.Join(mod, "tools"))["orders_replay_test.go"]; !strings.Contains(s, "weft.RawTool(\"lookup_order\", stub, nil, answer)") {
+		t.Errorf("the tools skeleton lacks its stub:\n%s", s)
+	}
+
+	for _, verb := range []string{"vet", "test"} {
+		cmd := exec.Command(gobin, verb, "./plain", "./tools")
+		cmd.Dir = mod
+		cmd.Env = append(os.Environ(),
+			"GOWORK="+filepath.Join(mod, "go.work"), "GOFLAGS=", "GOPROXY=off", "GOTOOLCHAIN=local",
+			"WEFT_MODEL_REQUESTS=deny")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Errorf("go %s on the extracted skeletons: %v\n%s", verb, err, out)
+		}
+	}
+}
+
 func keys(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

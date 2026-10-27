@@ -6,6 +6,12 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Fixed
+
+- Studio, `weft export --wefttest` (P020.2): save as test on a run that offered no tools writes a test that compiles — it declared a tool-result handler it never used (`declared and not used: answer`); now it declares and imports only what the test uses.
+
 ## 0.20.1 — 2026-10-27
 
 ### Fixed

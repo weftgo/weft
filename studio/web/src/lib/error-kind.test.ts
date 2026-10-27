@@ -128,6 +128,9 @@ describe("error kinds (U4)", () => {
     const f = toolFailure("INTERNAL", { error_masked: "*errors.errorString" })!
     expect(f.word).toBe("INTERNAL ← plain error")
     expect(f.hint).toContain("*errors.errorString")
+    expect(
+      toolFailure("INTERNAL", { error_masked: "*fmt.wrapErrors" })?.word
+    ).toBe("INTERNAL ← joined errors")
     // Any other Go type names something: it stays.
     expect(
       toolFailure("INTERNAL", { error_masked: "*net.OpError" })?.word

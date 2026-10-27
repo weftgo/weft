@@ -74,12 +74,19 @@ export interface CallEffects {
 export const deniedWord = (by: string) =>
   `denied by ${by === "allow" ? "policy" : by}`
 
-/** maskedWord is weft.tool.error_masked as it reads: a plain Go error
- * (errors.New, fmt.Errorf without %w) has no kind but its Go type,
- * *errors.errorString, which says nothing — "plain error"; the hover
- * keeps the recorded kind (P020.1). */
+/** maskedWord is weft.tool.error_masked as it reads (P020.1): the
+ * standard library's own error types say nothing of the error — core's
+ * maskedKind names them as its last resort — so a plain Go error
+ * (errors.New, fmt.Errorf without %w) reads "plain error" and an
+ * errors.Join or a two-%w fmt.Errorf (no one kind to unwrap to)
+ * "joined errors"; an exact match, any other kind as recorded. The
+ * hover keeps the recorded kind. */
 export const maskedWord = (k: string) =>
-  k == "*errors.errorString" ? "plain error" : k
+  k == "*errors.errorString"
+    ? "plain error"
+    : k == "*errors.joinError" || k == "*fmt.wrapErrors"
+      ? "joined errors"
+      : k
 
 /** effectChips is a tool row's chip per effect, outer to inner: "✋
  * allow" (the refusing layer), "⇣ io.EOF" (the error a layer hid),

@@ -301,6 +301,20 @@ describe("the effect chips and the MCP words (both renderers)", () => {
     expect(effectChips(fx)).toEqual(["⇣ plain error"])
     expect(maskedWord("*errors.errorString")).toBe("plain error")
     expect(maskedWord("io.EOF")).toBe("io.EOF")
+    // errors.Join and fmt.Errorf with two %w: no one kind to unwrap to.
+    expect(maskedWord("*errors.joinError")).toBe("joined errors")
+    expect(maskedWord("*fmt.wrapErrors")).toBe("joined errors")
+    // Exact match only: an app type that ends the same is its own.
+    expect(maskedWord("*app.joinError")).toBe("*app.joinError")
+    expect(maskedWord("toString")).toBe("toString")
+    expect(
+      effectChips(
+        effectsOf({
+          "error.type": "INTERNAL",
+          "weft.tool.error_masked": "*errors.joinError",
+        })
+      )
+    ).toEqual(["⇣ joined errors"])
   })
 
   it("isMcpOrigin: mcp and mcp:<server>, never mcpx (U23.2-fix)", () => {

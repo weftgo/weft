@@ -8,8 +8,12 @@ import { describe, expect, it } from "vitest"
 
 import { sources } from "../../scripts/vocab-audit"
 
+/** A leak: a design doc's name; a UX finding (UX-F-28); a U item (U21,
+ * U21.2, U21-fix); another track's item only in its plan shapes — a
+ * sub-item, a fix or a pre-release round (I4-fix, P10b-pre-web-fix2,
+ * O8.1) — so a percentile (P95, p99) or a key (G1, I2) is no leak. */
 const LEAK =
-  /WEFT-[A-Z-]+\.md|\b(?:[UIPOBJG]\d{1,2}(?:\.\d+)?(?:-fix\d*)?|UX-[A-Z0-9]+-\d+)\b/
+  /WEFT-[A-Z-]+\.md|\bUX-[A-Z0-9]+-\d+\b|\bU\d{1,2}(?:\.\d+)?(?:-fix\d*)?\b|\b[IPOBJG]\d{1,2}[a-z]?(?:\.\d+|-fix\d*|-pre-[\w-]+)\b/
 
 /** strings is every string literal, template part and JSX text of a
  * source, with its line. */
@@ -49,6 +53,27 @@ describe("no plan ids on screen (P020.1)", () => {
         .map(([l, s]) => `src/${f.path}:${l}: ${s.trim().slice(0, 120)}`)
     )
     expect(hits).toEqual([])
+  })
+
+  it("a percentile or a key is no leak", () => {
+    for (const t of [
+      "p95 latency",
+      "P95",
+      "duration P99 1.2 s",
+      "G1",
+      "I2",
+      "press G1 then I2",
+    ])
+      expect(LEAK.test(t), t).toBe(false)
+    for (const t of [
+      "see U21",
+      "U21.2",
+      "UX-F-28",
+      "I4-fix",
+      "P10b-pre-web-fix2",
+      "WEFT-PROMPT.md",
+    ])
+      expect(LEAK.test(t), t).toBe(true)
   })
 
   it("the scanner catches a leak", () => {

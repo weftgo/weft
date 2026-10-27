@@ -6,7 +6,7 @@
       "pid": 41237,
       "cwd": "/home/dev/acme-api",
       "studio_url": "http://127.0.0.1:7341",
-      "weft_version": "v0.19.0",
+      "weft_version": "v0.20.0",
       "service": "acme-api",
       "env": "dev",
       "connected_since": "2026-10-09T10:00:00Z",

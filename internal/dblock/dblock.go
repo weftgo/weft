@@ -10,9 +10,16 @@
 // the kernel when the holding process's last descriptor closes — on a
 // clean exit, and equally when the process is killed or crashes — so
 // a stale lock never outlives its Studio and needs no cleanup. The
-// file itself stays (removing it would race the next taker); while
-// held it carries the holder's {url, pid}, written once the listener
-// is bound, which a refused start reads to name it.
+// file itself stays (removing it would race the next taker): Acquire
+// empties it the moment it takes the lock, so a crashed holder's words
+// never name the new one, and the holder writes its {url, pid} once it
+// serves. A refused start reads them only under ReadHolder's rules:
+// the file 0600 and this user's (unix), a loopback IP url and a live
+// pid — anything else names nobody.
+//
+// One file, one lock: the caller passes the database path with its
+// symlinks resolved (cmd/weft does). Hard links, and two spellings of
+// one name on a case-insensitive filesystem, are not detected.
 //
 // Only a database with a file has a lock: ":memory:" and ClickHouse
 // (a server shared by design) are out of scope. On a platform with
@@ -23,6 +30,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
+	"net/url"
 	"os"
 )
 
@@ -57,6 +66,10 @@ func Acquire(dbPath string) (*Lock, error) {
 		_ = f.Close()
 		return nil, err
 	}
+	// A crashed holder's {url, pid} is not this holder's: emptied at
+	// once, and the file kept 0600 whatever created it.
+	_ = f.Truncate(0)
+	_ = f.Chmod(0o600)
 	return &Lock{f: f, path: p}, nil
 }
 
@@ -87,9 +100,18 @@ func (l *Lock) Release() {
 }
 
 // ReadHolder is the holder the lock file beside dbPath names; ok false
-// when it names none (not written yet, released, or unreadable).
+// when it names none — not written yet, released, unreadable — or
+// names one not to be trusted: a file that is not a regular one of
+// mode 0600 owned by this user (unix; Windows skips the owner check),
+// a url whose host is not a loopback IP (the holder is handed the
+// database's token), or a pid not running (a crashed holder's leftover).
 func ReadHolder(dbPath string) (Holder, bool) {
-	f, err := os.Open(Path(dbPath))
+	p := Path(dbPath)
+	fi, err := os.Lstat(p)
+	if err != nil || !fi.Mode().IsRegular() || checkOwner(fi) != nil {
+		return Holder{}, false
+	}
+	f, err := os.Open(p)
 	if err != nil {
 		return Holder{}, false
 	}
@@ -99,8 +121,19 @@ func ReadHolder(dbPath string) (Holder, bool) {
 		return Holder{}, false
 	}
 	var h Holder
-	if json.Unmarshal(b, &h) != nil || h.URL == "" || h.PID <= 0 {
+	if json.Unmarshal(b, &h) != nil || h.PID <= 0 || !loopbackIP(h.URL) || !alive(h.PID) {
 		return Holder{}, false
 	}
 	return h, true
+}
+
+// loopbackIP reports whether raw is an http URL whose host is a
+// loopback IP (127.0.0.0/8, ::1) — not a name to resolve.
+func loopbackIP(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "http" || u.User != nil {
+		return false
+	}
+	ip := net.ParseIP(u.Hostname())
+	return ip != nil && ip.IsLoopback()
 }

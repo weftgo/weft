@@ -101,3 +101,14 @@ func TestOffReason(t *testing.T) {
 		}
 	}
 }
+
+// TestOffReasonUnknownPanics: a name that is no optional capability is
+// a construction error, never silently ignored.
+func TestOffReasonUnknownPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(r.(string), "playgrund") {
+			t.Errorf("recover = %v, want a panic naming the capability", r)
+		}
+	}()
+	_ = New(DB(fixtureDB(t)), OffReason("playgrund", "typo"))
+}

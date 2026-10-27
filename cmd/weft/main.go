@@ -629,12 +629,14 @@ func serveWith(dbFlag string, w want, tokenFlag string, stdout io.Writer, after 
 	if choice.Note != "" {
 		_, _ = fmt.Fprintln(stdout, "studio: "+choice.Note)
 	}
-	lock.SetHolder(dblock.Holder{URL: "http://" + loopbackAddr(choice.Addr), PID: os.Getpid()})
 	srv, err := serveBootWith(dbFlag, choice.Addr, tokenFlag, after.rotate, stdout, append(discoveryOption(), extra...)...)
 	if err != nil {
 		_ = choice.Listener.Close()
 		return err
 	}
+	// The holder is named once it can serve: a refused start, or weft
+	// dev's reuse, never points at a Studio that failed to boot.
+	lock.SetHolder(dblock.Holder{URL: "http://" + loopbackAddr(choice.Addr), PID: os.Getpid()})
 	for _, n := range after.notes {
 		if n != "" {
 			_, _ = fmt.Fprintln(stdout, n)

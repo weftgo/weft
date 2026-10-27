@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weftgo/weft/internal/dblock"
 	"github.com/weftgo/weft/internal/discovery"
 )
 
@@ -207,6 +208,50 @@ func metaDB(addr, db string) string {
 	return m.DB.Path
 }
 
+// starts runs `weft studio` starts in the background and stops every
+// one still serving when the test ends — SIGTERM (signalSelf's guard
+// absorbs a signal nobody waits for), then each waited for, bounded —
+// so a broken lock fails the test instead of leaving Studios serving
+// and the package hung (B7-fix2).
+type starts struct {
+	t       *testing.T
+	results chan error
+	pending int
+}
+
+func newStarts(t *testing.T) *starts {
+	s := &starts{t: t, results: make(chan error, 8)}
+	t.Cleanup(func() {
+		if s.pending == 0 {
+			return
+		}
+		signalSelf(t, syscall.SIGTERM)
+		for s.pending > 0 {
+			if _, ok := s.next(10 * time.Second); !ok {
+				t.Errorf("%d start(s) still serving 10 s after SIGTERM", s.pending)
+				return
+			}
+		}
+	})
+	return s
+}
+
+func (s *starts) start(f func() error) {
+	s.pending++
+	go func() { s.results <- f() }()
+}
+
+// next is the next start to return, within d; ok false when none did.
+func (s *starts) next(d time.Duration) (error, bool) {
+	select {
+	case err := <-s.results:
+		s.pending--
+		return err, true
+	case <-time.After(d):
+		return nil, false
+	}
+}
+
 // TestConcurrentStartsOneServes (B7-fix, review finding 1): two bare
 // `weft studio` starts on one database at the same moment — the
 // second's probe of the busy port would go out bare, get a 401 and
@@ -217,29 +262,22 @@ func TestConcurrentStartsOneServes(t *testing.T) {
 	t.Setenv("WEFT_STUDIO_TOKEN", "")
 	base := freeBase(t, 3)
 	db := filepath.Join(t.TempDir(), "weft.db")
-	type result struct {
-		err error
-		out *syncBuffer
-	}
-	results := make(chan result, 2)
-	start := make(chan struct{})
+	s := newStarts(t)
+	gate := make(chan struct{})
 	for range 2 {
-		go func() {
-			out := &syncBuffer{}
-			<-start
-			results <- result{serveWith("sqlite://"+db, want{addr: loop(base), span: 3}, "", out, afterBoot{}), out}
-		}()
+		s.start(func() error {
+			<-gate
+			return serveWith("sqlite://"+db, want{addr: loop(base), span: 3}, "", &syncBuffer{}, afterBoot{})
+		})
 	}
-	close(start)
-	var refused result
-	select {
-	case refused = <-results:
-	case <-time.After(15 * time.Second):
-		t.Fatal("neither start was refused: both serve the database")
+	close(gate)
+	err, ok := s.next(5 * time.Second)
+	if !ok {
+		t.Fatal("neither start was refused within 5 s: both serve the database")
 	}
-	named := refused.err != nil && (strings.HasPrefix(refused.err.Error(), "studio already running at ") || strings.HasPrefix(refused.err.Error(), "another Studio holds "))
-	if !named || !strings.Contains(refused.err.Error(), db) {
-		t.Fatalf("the refused start = %v (stdout %q), want refused naming %s", refused.err, refused.out.String(), db)
+	named := err != nil && (strings.HasPrefix(err.Error(), "studio already running at ") || strings.HasPrefix(err.Error(), "another Studio holds "))
+	if !named || !strings.Contains(err.Error(), db) {
+		t.Fatalf("the refused start = %v, want refused naming %s", err, db)
 	}
 	serving := 0
 	for deadline := time.Now().Add(10 * time.Second); serving == 0 && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
@@ -253,13 +291,8 @@ func TestConcurrentStartsOneServes(t *testing.T) {
 		t.Fatalf("%d Studios serve %s, want exactly 1", serving, db)
 	}
 	signalSelf(t, syscall.SIGTERM)
-	select {
-	case r := <-results:
-		if r.err != nil {
-			t.Errorf("the serving start after SIGTERM: %v", r.err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the serving start never returned")
+	if err, ok := s.next(10 * time.Second); !ok || err != nil {
+		t.Errorf("the serving start after SIGTERM: %v (returned %v)", err, ok)
 	}
 }
 
@@ -279,8 +312,16 @@ func TestOtherDirectoryRefusedAndRestart(t *testing.T) {
 
 	// Another directory: its discovery locations hold nothing.
 	discoveryDir(t)
+	s := newStarts(t)
 	var second syncBuffer
-	wantRefused(t, serveWith("sqlite://"+db, want{addr: loop(base + 1), pinned: true}, "", &second, afterBoot{}), &second, loop(base))
+	s.start(func() error {
+		return serveWith("sqlite://"+db, want{addr: loop(base + 1), pinned: true}, "", &second, afterBoot{})
+	})
+	err, ok := s.next(5 * time.Second)
+	if !ok {
+		t.Fatal("the second start has not returned in 5 s: it serves the database too")
+	}
+	wantRefused(t, err, &second, loop(base))
 	if metaDB(loop(base+1), db) != "" {
 		t.Error("the refused start serves")
 	}
@@ -299,5 +340,78 @@ func TestOtherDirectoryRefusedAndRestart(t *testing.T) {
 	bareStudio(t, "sqlite://"+db, base, 1, loop(base), "", false, &again)
 	if metaDB(loop(base), db) != db {
 		t.Error("a restart on the released database does not serve")
+	}
+}
+
+// TestUntrustedHolderNamesNobody (B7-fix2, review findings 1 and 2):
+// a lock held by something whose file names a non-loopback url, or a
+// dead pid (a crashed Studio's leftover the new holder has not yet
+// overwritten), names nobody — weft studio's refusal does not print
+// it, and weft dev neither reuses it nor hands it the database's token.
+func TestUntrustedHolderNamesNobody(t *testing.T) {
+	discoveryDir(t)
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	db := filepath.Join(t.TempDir(), "weft.db")
+	if err := os.WriteFile(db+".token", []byte("secret-stable-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, h := range map[string]dblock.Holder{
+		"not loopback": {URL: "http://203.0.113.9:80", PID: os.Getpid()},
+		"dead pid":     {URL: "http://127.0.0.1:1", PID: 999999999},
+	} {
+		l, err := dblock.Acquire(lockPath(db))
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.SetHolder(h)
+		port := freeBase(t, 1)
+		s := newStarts(t)
+		s.start(func() error {
+			return serveWith("sqlite://"+db, want{addr: loop(port), pinned: true}, "", &syncBuffer{}, afterBoot{})
+		})
+		err, ok := s.next(5 * time.Second)
+		if !ok {
+			l.Release()
+			t.Fatalf("%s: weft studio has not returned in 5 s: it serves a held database", name)
+		}
+		if err == nil || !strings.HasPrefix(err.Error(), "another Studio holds "+db) || strings.Contains(err.Error(), h.URL) {
+			t.Errorf("%s: weft studio = %v, want refused naming nobody", name, err)
+		}
+		var dev syncBuffer
+		r, err := devStudio("sqlite://"+db, want{addr: loop(port), pinned: true}, "", false, &dev)
+		if r != nil {
+			r.stop(syscall.SIGTERM) // a Studio it started (it must not have)
+		}
+		if err == nil || r != nil || strings.Contains(dev.String(), "reusing") || strings.Contains(err.Error(), h.URL) {
+			t.Errorf("%s: weft dev = %+v %v %q, want refused, nothing reused", name, r, err, dev.String())
+		}
+		l.Release()
+	}
+}
+
+// TestSymlinkedDBOneLock (B7-fix2, review finding 3): a database
+// reached through a symlinked file has the one lock of the file it
+// names — a second start through the link is refused.
+func TestSymlinkedDBOneLock(t *testing.T) {
+	discoveryDir(t)
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	base := freeBase(t, 2)
+	real := filepath.Join(t.TempDir(), "c.db")
+	var first syncBuffer
+	bareStudio(t, "sqlite://"+real, base, 1, loop(base), "", false, &first)
+	link := filepath.Join(t.TempDir(), "x.db")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	s := newStarts(t)
+	s.start(func() error {
+		return serveWith("sqlite://"+link, want{addr: loop(base + 1), pinned: true}, "", &syncBuffer{}, afterBoot{})
+	})
+	err, ok := s.next(5 * time.Second)
+	if !ok {
+		t.Fatal("the start through the symlink has not returned in 5 s: it serves the same file")
+	}
+	if err == nil || !strings.HasPrefix(err.Error(), "studio already running at http://"+loop(base)+" (pid ") {
+		t.Errorf("start through the symlink = %v, want refused naming the first", err)
 	}
 }

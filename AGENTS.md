@@ -451,7 +451,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    one line per start: studio <url> (bare; #token= only for a fileless DB's generated
 //    //    token) · app pid n · runtime rt_… registered.
 //    //    One Studio per SQLite file: <db>.lock (internal/dblock, flock/LockFileEx, held while serving,
-//    //    released on process death) taken before the port policy; ClickHouse takes none.
+//    //    released on process death; the symlink-resolved file; the holder named only from this user's 0600 file
+//    //    with a loopback-IP url and a live pid) taken before the port policy, weft dev's too; ClickHouse takes none.
 //    //    Port policy (internal/listen): a Studio on the same DB (lock held, busy 7331, or
 //    //    the discovery file's) — a weft studio is refused ("studio already running at … (pid n) on <db>", exit 1; weft dev reuses it),
 //    //    the discovery file's Studio probed first whatever its port (listen.Request.Known); anything else → the

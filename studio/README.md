@@ -83,8 +83,14 @@ directories whose discovery files differ, cannot both serve it; the
 refusal names the holder (`studio already running at
 http://127.0.0.1:7347 (pid n) on …/weft.db`, from the lock file or the
 discovery file, else `another Studio holds <db>`), exit 1; `weft dev`
-reuses it instead. A ClickHouse database is a shared server and takes
-no lock. The port probe still asks `/api/meta` (`db.path`, `pid`, read
+reuses it instead (`weft dev` takes the lock first too). The lock
+stands for the file a symlinked path names; hard links and two
+spellings on a case-insensitive filesystem are not detected. The lock
+file names its holder only while it is yours (0600, your uid; Windows
+skips the owner check), its url a loopback IP and its pid alive — a
+crashed Studio's words name nobody, and `weft dev` hands the database's
+token to no other host. A ClickHouse database is a shared server and
+takes no lock. The port probe still asks `/api/meta` (`db.path`, `pid`, read
 with the stable token — sent only to an address a trusted discovery
 file names), the discovery file's Studio first; anything else on the port
 moves it to the next free one in 7331–7340 with one line saying so.

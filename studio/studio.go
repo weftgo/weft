@@ -176,7 +176,8 @@ func DiscoveryFile(path string) Option {
 // eight) — with the host's own words: `weft studio --no-playground`
 // says "weft studio was started with --no-playground", not the Go
 // option an embedding app would set. It changes words only, never
-// which capabilities are on.
+// which capabilities are on. A capability that is no optional one
+// panics at New (a construction error, as Retain's floor is).
 func OffReason(capability, why string) Option {
 	return func(c *config) {
 		if c.offReasons == nil {
@@ -255,6 +256,11 @@ func New(opts ...Option) *Server {
 	}
 	if c.retain > 0 && c.retain < minRetention {
 		panic("studio: " + retainFloorMsg)
+	}
+	for name := range c.offReasons {
+		if _, ok := optionalCapabilities[name]; !ok {
+			panic("studio: OffReason names " + name + ", which is no optional capability")
+		}
 	}
 	resolvePricing(&c)
 	s := &Server{config: c, now: time.Now, mux: http.NewServeMux(), grantKey: liveGrantKey(c.token), reqs: reqlog.New()}

@@ -4,6 +4,7 @@ package dblock
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 
 	"golang.org/x/sys/windows"
@@ -25,4 +26,23 @@ func lockFile(f *os.File) error {
 
 func unlockFile(f *os.File) error {
 	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, lockRange())
+}
+
+// checkOwner: Windows skips the owner check (the file lives beside the
+// database, under the user's own ACLs); the url and pid rules still
+// apply.
+func checkOwner(fs.FileInfo) error { return nil }
+
+// alive reports whether pid runs: it opens and has not exited.
+func alive(pid int) bool {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return errors.Is(err, windows.ERROR_ACCESS_DENIED)
+	}
+	defer func() { _ = windows.CloseHandle(h) }()
+	var code uint32
+	if windows.GetExitCodeProcess(h, &code) != nil {
+		return false
+	}
+	return code == 259 // STILL_ACTIVE
 }

@@ -252,52 +252,63 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	if err != nil {
 		return nil, err
 	}
-	choice, err := listen.Choose(context.Background(), listen.Request{
-		Addr: w.addr, Pinned: w.pinned, Span: w.span, DBPath: dbPath,
-		Token: fixedToken(tokenFlag), TokenFor: stableProbe(dbPath),
-		Known: knownStudio(dbPath),
-	})
+	choose := func() (listen.Choice, error) {
+		return listen.Choose(context.Background(), listen.Request{
+			Addr: w.addr, Pinned: w.pinned, Span: w.span, DBPath: dbPath,
+			Token: fixedToken(tokenFlag), TokenFor: stableProbe(dbPath),
+			Known: knownStudio(dbPath),
+		})
+	}
+	reuse := func(addr string, pid int, tok string) *devStudioRun {
+		// The app and the one line dial loopback.
+		dial := loopbackAddr(addr)
+		_, _ = fmt.Fprintln(out, listen.Choice{Addr: dial, Reuse: true, PID: pid}.ReuseLine())
+		reuseNotes(out, dial, rotate)
+		return &devStudioRun{addr: dial, url: "http://" + dial, dbPath: dbPath, token: tok, link: uiLink(dial, ""), stop: func(os.Signal) {}}
+	}
+	// The database's lock first, as weft studio takes it (B7-fix2):
+	// held, the holder serves this file — reuse it when something
+	// trusted names it (dblock.ReadHolder's rules: this user's 0600
+	// file, a loopback IP, a live pid — it is handed the database's
+	// token), else let the port probe look for it.
+	lock, err := lockDB(dbPath)
+	if errors.Is(err, errHeld) {
+		if addr, pid, ok := dbHolder(dbPath); ok {
+			tok := fixedToken(tokenFlag)
+			if tok == "" {
+				tok = readTokenFile(tokenPath(dbPath))
+			}
+			return reuse(addr, pid, tok), nil
+		}
+		choice, cerr := choose()
+		if cerr != nil {
+			return nil, cerr
+		}
+		if !choice.Reuse {
+			_ = choice.Listener.Close()
+			return nil, heldError(dbPath)
+		}
+		return reuse(choice.Addr, choice.PID, probeToken(dbPath, tokenFlag, loopbackAddr(choice.Addr))), nil
+	}
 	if err != nil {
 		return nil, err
+	}
+	choice, err := choose()
+	if err != nil {
+		lock.Release()
+		return nil, err
+	}
+	if choice.Reuse {
+		// A Studio serving the file without its lock (a weft before it,
+		// an app's embedded Studio): reused, as before the lock.
+		lock.Release()
+		return reuse(choice.Addr, choice.PID, probeToken(dbPath, tokenFlag, loopbackAddr(choice.Addr))), nil
 	}
 	// The app and the one line dial loopback: a Studio bound to every
 	// interface (--addr 0.0.0.0:7331) is reachable there, and otel's
 	// Studio destination refuses plaintext to a non-loopback host.
 	dial := loopbackAddr(choice.Addr)
 	r := &devStudioRun{addr: dial, url: "http://" + dial, dbPath: dbPath, stop: func(os.Signal) {}}
-	if choice.Reuse {
-		_, _ = fmt.Fprintln(out, choice.ReuseLine())
-		reuseNotes(out, dial, rotate)
-		r.token, r.link = probeToken(dbPath, tokenFlag, dial), uiLink(dial, "")
-		return r, nil
-	}
-	// No Studio found on the ports: take the database's lock before
-	// serving. Held — another Studio serves the file where neither the
-	// probe nor this directory's discovery file looked — reuse it when
-	// its lock file or a discovery file names it.
-	lock, err := lockDB(dbPath)
-	if errors.Is(err, errHeld) {
-		_ = choice.Listener.Close()
-		addr, pid, ok := dbHolder(dbPath)
-		if !ok {
-			return nil, heldError(dbPath)
-		}
-		dial = loopbackAddr(addr)
-		_, _ = fmt.Fprintln(out, listen.Choice{Addr: dial, Reuse: true, PID: pid}.ReuseLine())
-		reuseNotes(out, dial, rotate)
-		// The lock proves the holder serves this database: its stable
-		// token (or the fixed one) is the one it serves.
-		tok := fixedToken(tokenFlag)
-		if tok == "" {
-			tok = readTokenFile(tokenPath(dbPath))
-		}
-		return &devStudioRun{addr: dial, url: "http://" + dial, dbPath: dbPath, token: tok, link: uiLink(dial, ""), stop: func(os.Signal) {}}, nil
-	}
-	if err != nil {
-		_ = choice.Listener.Close()
-		return nil, err
-	}
-	lock.SetHolder(dblock.Holder{URL: r.url, PID: os.Getpid()})
 	if choice.Note != "" {
 		_, _ = fmt.Fprintln(out, "studio: "+choice.Note)
 	}
@@ -308,6 +319,8 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 		lock.Release()
 		return nil, err
 	}
+	// Named once it can serve (never a Studio that failed to boot).
+	lock.SetHolder(dblock.Holder{URL: r.url, PID: os.Getpid()})
 	r.token = srv.token
 	r.noPlayground = srv.Runtime() == nil
 	// A fixed or stable token stays out of the log, link included

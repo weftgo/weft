@@ -55,6 +55,10 @@ func TestReleasedOnCrash(t *testing.T) {
 	}
 	_ = cmd.Process.Kill() // SIGKILL: no deferred Release runs
 	_ = cmd.Wait()
+	// Its words outlive it, but name nobody: the pid is dead.
+	if h, ok := dblock.ReadHolder(db); ok {
+		t.Errorf("a killed holder is still named: %+v", h)
+	}
 	l, err := dblock.Acquire(db)
 	if err != nil {
 		t.Fatalf("after the holder was killed: %v, want the lock", err)

@@ -46,8 +46,8 @@ export const GROUPS: Record<TermGroup, string> = {
 const RC = "docs/record-contract.md"
 const LOOP = "docs/agent-loop-deep-dive.md"
 const THREAD = "docs/thread-operations.md"
-const PG = "studio/README.md#the-playground-weft-playgroundmd"
-const PANEL = "studio/README.md#the-devtools-panel-weft-devtoolsmd"
+const PG = "studio/README.md#the-playground"
+const PANEL = "studio/README.md#the-devtools-panel"
 
 /** short is a status word's tooltip: its STATUS hint. */
 const said = (k: keyof typeof STATUS) => `${STATUS[k].word} — ${STATUS[k].hint}`

@@ -395,7 +395,7 @@ without re-sorting until the next refetch; load more re-reads up to 2,000
 runs; and offset paging over a set that is changing can repeat or skip a
 row.
 
-## The devtools panel (WEFT-DEVTOOLS.md)
+## The devtools panel
 
 **Quickstart** — three setups, each one line of markup or code; the
 rest of this section is the reference.
@@ -1659,7 +1659,7 @@ step, on that tab (story, request, waterfall or raw). The linked tab is
 that visit's: the panel's stored tab is unchanged, and an explicit scope
 on the page (data-scope, mount's scope) wins over the link.
 
-## The playground (WEFT-PLAYGROUND.md)
+## The playground
 
 Your app dials Studio out and executes experiment commands as runs of
 the agents it registers — setup A is five lines
@@ -2592,8 +2592,8 @@ registered prompt: a `registered → proposed` line with the proposal's
 from registered to proposed (the Request pane's prompt-diff renderer),
 **copy proposed** (toasting "copied"), and **withdraw** (`DELETE`, the same gating — a panel
 token sees it disabled with the hint); once on the page, the pointer
-"the durable path is WEFT-PROMPT.md P3: a propose command over the
-runtime link". A read-scoped panel token never reads the manifest (403,
+"to keep it, copy it into the agent's weft.Instructions(…) in your
+code". A read-scoped panel token never reads the manifest (403,
 hidden), so it never sees a proposal.
 
 Notifications (plan H5): one toaster, bottom-right, in the app's theme,

@@ -27,7 +27,13 @@ export type { Scope } from "../lib/scope.js"
 /** Where the dock starts (data-position, D1): the float's corner, or
  * a dock's side. The panel's PanelPlacement, value for value
  * (package.test.ts pins the two unions). */
-export type Position = "bottom-right" | "bottom-left" | "right-dock" | "left-dock" | "top-dock" | "bottom-dock"
+export type Position =
+  | "bottom-right"
+  | "bottom-left"
+  | "right-dock"
+  | "left-dock"
+  | "top-dock"
+  | "bottom-dock"
 
 /** The dock's initial mode (data-mode, D1); the user's stored layout
  * wins once there is one. */
@@ -77,7 +83,10 @@ export interface MountOptions {
 /** The options the element carries as configuration rung 1: mount's,
  * minus where it goes, whether it mounts, and the layout fields mount
  * writes as the element's data-mode / data-push / data-z-index. */
-export type PanelOptions = Omit<MountOptions, "target" | "enabled" | "mode" | "push" | "zIndex">
+export type PanelOptions = Omit<
+  MountOptions,
+  "target" | "enabled" | "mode" | "push" | "zIndex"
+>
 
 /** The registered element, as far as this module touches it: the
  * public members of panel.js's WeftDevtools, the same version's. */
@@ -101,7 +110,10 @@ export interface WeftDevtoolsElement extends HTMLElement {
   /** Selects a turn (and the step, its ordinal, ⤢ carries). */
   select: (runId: string, step?: number) => void
   /** Follows one of this panel's events; returns the unsubscribe. */
-  on: <TEvent extends keyof DevtoolsEvents>(event: TEvent, cb: (detail: DevtoolsEvents[TEvent]) => void) => () => void
+  on: <TEvent extends keyof DevtoolsEvents>(
+    event: TEvent,
+    cb: (detail: DevtoolsEvents[TEvent]) => void
+  ) => () => void
   /** The Studio page of a run (and step); no token, "" before the
    * panel knows its endpoint. */
   studioLink: (runId: string, step?: number) => string
@@ -118,7 +130,13 @@ export interface DevtoolsEvents {
   /** A run started ("running") or changed status ("succeeded",
    * "failed", "parked", "interrupted"), once per transition; step is
    * the run's last step ordinal the panel knows. */
-  run: { runId: string; status: string; publicId?: string; sessionId?: string; step?: number }
+  run: {
+    runId: string
+    status: string
+    publicId?: string
+    sessionId?: string
+    step?: number
+  }
   /** One call a run parked on, once per call. ackId is the id its
    * approval names — the call id weft.Approve/Deny/Resolve and POST
    * /api/runs/{runId}/approvals ({call_id}) take: it equals callId. */
@@ -132,20 +150,25 @@ const TAG = "weft-devtools"
 
 /** Whether there is a page to put a panel in: false on a server (Node,
  * a worker, an edge runtime), where every export is a no-op. */
-const hasDOM = () => typeof document !== "undefined" && typeof HTMLElement !== "undefined"
+const hasDOM = () =>
+  typeof document !== "undefined" && typeof HTMLElement !== "undefined"
 
 // The package's exports are the API: no panel on this page adds
 // window.weft.devtools (the script-tag install's global).
 try {
   if (!hasDOM()) throw new Error("no DOM")
-  const ctor: (CustomElementConstructor & { noGlobal?: boolean; npmEntry?: boolean }) | undefined = customElements.get(TAG)
+  const ctor:
+    | (CustomElementConstructor & { noGlobal?: boolean; npmEntry?: boolean })
+    | undefined = customElements.get(TAG)
   // Imported here, the panel is part of the app's chunk: its rung 4
   // never takes the app's script for its tag (the package's
   // ssr-guard.js marked that before panel.js evaluated; this keeps it).
   if (ctor && "npmEntry" in ctor) ctor.npmEntry = true
   if (ctor && "noGlobal" in ctor) {
     ctor.noGlobal = true
-    for (const n of Array.from(document.querySelectorAll<WeftDevtoolsElement>(TAG)))
+    for (const n of Array.from(
+      document.querySelectorAll<WeftDevtoolsElement>(TAG)
+    ))
       if (typeof n.syncGlobal === "function") n.syncGlobal()
   }
 } catch {
@@ -153,7 +176,9 @@ try {
 }
 
 const elements = (): WeftDevtoolsElement[] =>
-  hasDOM() ? Array.from(document.querySelectorAll<WeftDevtoolsElement>(TAG)) : []
+  hasDOM()
+    ? Array.from(document.querySelectorAll<WeftDevtoolsElement>(TAG))
+    : []
 
 /** later runs fn now, or — while the page is still parsing, before the
  * bundle has mounted its dock — once it has (the bundle's own
@@ -172,13 +197,16 @@ let current: Scope | null = null
 let wantOpen: boolean | null = null
 
 /** isOpen reads the element's open state (its public getter). */
-const openOf = (n: WeftDevtoolsElement) => (n as Partial<WeftDevtoolsElement>).isOpen === true
+const openOf = (n: WeftDevtoolsElement) =>
+  (n as Partial<WeftDevtoolsElement>).isOpen === true
 
 /** The element's methods, when it is the panel's: a foreign element
  * defined under the tag first, or a panel whose boot failed, gets no
  * call — the host's code never sees the panel's TypeError. */
-const rescanOf = (n: WeftDevtoolsElement) => (typeof n.rescan === "function" ? () => n.rescan() : null)
-const toggleOf = (n: WeftDevtoolsElement) => (typeof n.toggle === "function" ? () => n.toggle() : null)
+const rescanOf = (n: WeftDevtoolsElement) =>
+  typeof n.rescan === "function" ? () => n.rescan() : null
+const toggleOf = (n: WeftDevtoolsElement) =>
+  typeof n.toggle === "function" ? () => n.toggle() : null
 
 /** HOST marks the element mount() made (Symbol.for: it survives the
  * module being evaluated again — HMR, a second copy of the package). */
@@ -202,7 +230,10 @@ const rootNow = () => document.documentElement as HTMLElement | null
 /** layout writes the layout options as the element's attributes
  * (rung 2: the panel's options rung does not carry them); an option
  * left out removes what an earlier mount() wrote. */
-function layout(node: Element, o: Pick<MountOptions, "mode" | "push" | "zIndex">): void {
+function layout(
+  node: Element,
+  o: Pick<MountOptions, "mode" | "push" | "zIndex">
+): void {
   const set = (name: string, v: string | undefined) =>
     v === undefined ? node.removeAttribute(name) : node.setAttribute(name, v)
   set("data-mode", o.mode)
@@ -233,15 +264,20 @@ export function mount(opts: MountOptions = {}): WeftDevtoolsElement | null {
   const o: PanelOptions = { ...options }
   // A session-only scope is resolved by the panel (scope() below), not
   // carried as an option.
-  const carry = current && o.publicId === undefined && o.scope === undefined ? current : null
+  const carry =
+    current && o.publicId === undefined && o.scope === undefined
+      ? current
+      : null
   if (carry?.publicId) {
     o.publicId = carry.publicId
     o.scope = { ...carry }
   }
   if (o.open === undefined && wantOpen !== null) o.open = wantOpen
   const scopeOnto = (n: WeftDevtoolsElement) => {
-    if (carry?.publicId) n.setAttribute("data-weft-scope", serializeScope(carry))
-    if (carry && !carry.publicId && typeof n.scope === "function") n.scope({ ...carry })
+    if (carry?.publicId)
+      n.setAttribute("data-weft-scope", serializeScope(carry))
+    if (carry && !carry.publicId && typeof n.scope === "function")
+      n.scope({ ...carry })
   }
 
   const again = hostMounted()
@@ -349,7 +385,8 @@ export function scope(s: Scope | string | null): void {
  * otherwise the panel says "run r_… not in this conversation". */
 export function select(runId: string, step?: number): void {
   later(() => {
-    for (const n of elements()) if (typeof n.select === "function") n.select(runId, step)
+    for (const n of elements())
+      if (typeof n.select === "function") n.select(runId, step)
   })
 }
 
@@ -364,7 +401,8 @@ export function isOpen(): boolean {
  * link its ⤢ carries): never with a token; "" with no panel, or before
  * it knows its endpoint. */
 export function studioLink(runId: string, step?: number): string {
-  for (const n of elements()) if (typeof n.studioLink === "function") return n.studioLink(runId, step)
+  for (const n of elements())
+    if (typeof n.studioLink === "function") return n.studioLink(runId, step)
   return ""
 }
 

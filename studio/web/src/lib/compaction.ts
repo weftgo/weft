@@ -17,38 +17,17 @@ import type { Message, Part, RunCompaction, Transcript } from "./api"
 import { plural, tokens } from "./format"
 import { isRepaired, REPAIRED } from "./error-kind"
 
-/** A session marker (thread's compaction) rather than a run-scope view. */
-export function isSessionMarker(c: RunCompaction): boolean {
-  return c.scope === "session"
-}
-
-/**
- * compactionLine is the marker's words:
- *   - session: "12 messages compacted into 2 · 8.1k → 1.2k tokens"
- *     (the token part only when thread reported both estimates);
- *   - a run-scope view: "2 messages rewritten into 1 by PrepareStep",
- *     or "1 message inserted by PrepareStep" when nothing was replaced
- *     (ADR 0028 §8's insertion: from_seq == to_seq).
- */
-export function compactionLine(c: RunCompaction): string {
-  if (isSessionMarker(c)) {
-    const toks =
-      c.tokens_before && c.tokens_after
-        ? ` · ${tokens(c.tokens_before)} → ${tokens(c.tokens_after)} tokens`
-        : ""
-    return `${plural(c.replaced, "message")} compacted into ${c.entries}${toks}`
-  }
-  if (c.replaced === 0)
-    return `${plural(c.entries, "message")} inserted by PrepareStep`
-  return `${plural(c.replaced, "message")} rewritten into ${c.entries} by PrepareStep`
-}
-
 /** The run's compactions as the document gave them; [] for a document
  * without the field (a Studio older than A9.2). */
 export function compactionsOf(
   doc: { compactions?: RunCompaction[] } | null | undefined
 ): RunCompaction[] {
   return Array.isArray(doc?.compactions) ? doc.compactions : []
+}
+
+/** A session marker (thread's compaction) rather than a run-scope view. */
+export function isSessionMarker(c: RunCompaction): boolean {
+  return c.scope === "session"
 }
 
 /** The session marker's label: ADR 0028 §8 files it under the run that
@@ -131,6 +110,27 @@ export function originalOf(
       gap: `the view replaces messages ${from}–${to - 1}, but the transcript holds ${seq.length} before it`,
     }
   return { messages: seq.slice(from, to), from, to }
+}
+
+/**
+ * compactionLine is the marker's words:
+ *   - session: "12 messages compacted into 2 · 8.1k → 1.2k tokens"
+ *     (the token part only when thread reported both estimates);
+ *   - a run-scope view: "2 messages rewritten into 1 by PrepareStep",
+ *     or "1 message inserted by PrepareStep" when nothing was replaced
+ *     (ADR 0028 §8's insertion: from_seq == to_seq).
+ */
+export function compactionLine(c: RunCompaction): string {
+  if (isSessionMarker(c)) {
+    const toks =
+      c.tokens_before && c.tokens_after
+        ? ` · ${tokens(c.tokens_before)} → ${tokens(c.tokens_after)} tokens`
+        : ""
+    return `${plural(c.replaced, "message")} compacted into ${c.entries}${toks}`
+  }
+  if (c.replaced === 0)
+    return `${plural(c.entries, "message")} inserted by PrepareStep`
+  return `${plural(c.replaced, "message")} rewritten into ${c.entries} by PrepareStep`
 }
 
 /** One message as a line: its role and its words — text, a tool

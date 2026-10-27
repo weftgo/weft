@@ -7,7 +7,11 @@
 // newest runs as a base, then the base's replay source and its agent's
 // runs to compare with; ?b= also takes ids joined by commas.
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  useNavigate,
+  useRouterState,
+} from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
 import { fetchRuns, runQuery, runsQuery } from "@/lib/api"
@@ -56,9 +60,11 @@ export const Route = createFileRoute("/compare")({
       search.step >= 0
         ? search.step
         : undefined
+    // An emptied b is set undefined, never left out: the router keeps
+    // a raw key validateSearch does not return (UX-S5b-07).
     return {
       a,
-      ...(b.length ? { b: runsParam(b) } : {}),
+      b: b.length ? runsParam(b) : undefined,
       ...(step !== undefined ? { step } : {}),
     }
   },
@@ -74,6 +80,17 @@ function ComparePage() {
   const caps = useCapabilities()
   const [add, setAdd] = useState("")
   const others = b.filter((x) => x !== a)
+  // The address says what the page compares (UX-S5b-07): a repeated b
+  // or a b equal to a, dropped by validateSearch, leaves the URL too —
+  // replaced on load, so a shared link is the normalised one.
+  const rawB = useRouterState({
+    select: (st) => (st.location.search as Record<string, unknown>).b,
+  })
+  const extra = splitRuns(rawB).length - b.length
+  useEffect(() => {
+    if (extra > 0)
+      void navigate({ ...compareLink(a, b, step), replace: true })
+  }, [extra, a, b, step, navigate])
   const submit = () => {
     const id = add.trim()
     if (!id) return

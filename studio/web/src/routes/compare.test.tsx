@@ -440,6 +440,22 @@ describe("the compare page", () => {
     ).toHaveLength(2)
   })
 
+  it("the address is the normalised one (UX-S5b-07): a repeated b and a b equal to a leave the URL, replaced", async () => {
+    serve(["diff"], { "r_da|r_db": golden<DiffDoc>("diff") })
+    const { router } = renderApp("/compare?a=r_da&b=r_db,r_db,r_da")
+    await waitFor(() =>
+      expect(router.state.location.searchStr).toBe("?a=r_da&b=r_db")
+    )
+  })
+
+  it("UX-S5b-07: a b that is only a leaves the URL with it", async () => {
+    serve(["diff"], {})
+    const { router } = renderApp("/compare?a=r_da&b=r_da,r_da")
+    await waitFor(() =>
+      expect(router.state.location.searchStr).toBe("?a=r_da")
+    )
+  })
+
   it("H9: opens with a run picker — a base, then the base agent's runs — and ?b= takes commas", async () => {
     const rows = golden<RunsPage>("runs").runs
     const rOK = rows.find((r) => r.id === "r_ok")!

@@ -62,6 +62,14 @@ export const SIDE_EFFECT_WORDS = {
 export const SIDE_EFFECT_TOOL =
   "side-effect tool (ReplayPolicy never): substituted or parked, never re-fired silently — only side effects: allow runs it, if the app opted it in"
 
+/** Beside a RequireApproval tool, both drawers (UX-H-22): its ⚠'s
+ * "never" is the replay class, not "no side effects". */
+export const NEEDS_APPROVAL = "needs approval"
+
+/** NEEDS_APPROVAL's hover (Studio's drawer). */
+export const NEEDS_APPROVAL_HINT =
+  'built with RequireApproval: every live call waits for a decision — its side_effects "never" is the replay class (never re-run on a replay), not "no side effects"'
+
 /** The pointer left where the runtime-wide breakpoints were. */
 export const BREAKPOINTS_MOVED =
   "breakpoints for the whole runtime live on Runtimes"

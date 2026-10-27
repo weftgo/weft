@@ -45,6 +45,57 @@ export interface StatusWords {
   role: Role
 }
 
+/** statusOf words a row. runs are the turns around it (a session's, a
+ * list's, the panel's loaded ones): where a park's resume is looked
+ * for. complete says runs is the row's session's whole turn list: only
+ * then may an unresumed session turn read "awaiting a decision". */
+export function statusOf(
+  r: StatusRow,
+  runs?: readonly StatusRow[] | null,
+  complete?: boolean
+): Status {
+  const n = r.pending ?? 0
+  if (r.status === "failed" && r.error_type === CANCELLED) {
+    const c = r.cancel_cause
+    return {
+      key: "cancelled",
+      ...STATUS.cancelled,
+      ...(c ? { hint: `${CANCELLED} · ${c} — ${STATUS.cancelled.hint}` } : {}),
+    }
+  }
+  if (r.status === "succeeded" && n > 0) {
+    const calls = `${n} ${n > 1 ? "calls" : "call"}`
+    const next = r.resumed_by || (r.turn ? nextTurn(r, runs) : undefined)
+    if (!next) {
+      const d =
+        complete && ownTurn(r)
+          ? `${calls} ${AWAITING}`
+          : `${calls} pending · ${r.session_id ? "no resume recorded here" : "a resume, if any, is not linked yet"}`
+      return { key: "parked", ...STATUS.parked, detail: d, hint: d }
+    }
+    const to = turnTag(next, runs)
+    // "decided · resumed" only on the stored link (W7-prep): the next
+    // turn after a Branch, a Rollback or an undecided Send is no
+    // resume (docs/record-contract.md §7) — it decided the calls or
+    // dropped them.
+    const d = r.resumed_by
+      ? `${calls} decided · resumed in ${to}`
+      : `${calls} · next turn ${to} (decided or dropped)`
+    return {
+      key: "resumed",
+      ...STATUS.resumed,
+      word: `${STATUS.resumed.word} ${to}`,
+      detail: d,
+      hint: `${d} (${next})`,
+      resumedBy: next,
+    }
+  }
+  const k = r.status as StatusKey
+  return Object.hasOwn(STATUS, k)
+    ? { key: k, ...STATUS[k] }
+    : { key: k, word: r.status, hint: r.status, role: "resumed" }
+}
+
 /** A park's open calls (statusOf's detail) and the approvals block's
  * heading on both surfaces: one phrase (W7-prep). */
 export const AWAITING = "awaiting a decision"
@@ -126,57 +177,6 @@ export interface Status extends StatusWords {
   key: StatusKey
   detail?: string
   resumedBy?: string
-}
-
-/** statusOf words a row. runs are the turns around it (a session's, a
- * list's, the panel's loaded ones): where a park's resume is looked
- * for. complete says runs is the row's session's whole turn list: only
- * then may an unresumed session turn read "awaiting a decision". */
-export function statusOf(
-  r: StatusRow,
-  runs?: readonly StatusRow[] | null,
-  complete?: boolean
-): Status {
-  const n = r.pending ?? 0
-  if (r.status === "failed" && r.error_type === CANCELLED) {
-    const c = r.cancel_cause
-    return {
-      key: "cancelled",
-      ...STATUS.cancelled,
-      ...(c ? { hint: `${CANCELLED} · ${c} — ${STATUS.cancelled.hint}` } : {}),
-    }
-  }
-  if (r.status === "succeeded" && n > 0) {
-    const calls = `${n} ${n > 1 ? "calls" : "call"}`
-    const next = r.resumed_by || (r.turn ? nextTurn(r, runs) : undefined)
-    if (!next) {
-      const d =
-        complete && ownTurn(r)
-          ? `${calls} ${AWAITING}`
-          : `${calls} pending · ${r.session_id ? "no resume recorded here" : "a resume, if any, is not linked yet"}`
-      return { key: "parked", ...STATUS.parked, detail: d, hint: d }
-    }
-    const to = turnTag(next, runs)
-    // "decided · resumed" only on the stored link (W7-prep): the next
-    // turn after a Branch, a Rollback or an undecided Send is no
-    // resume (docs/record-contract.md §7) — it decided the calls or
-    // dropped them.
-    const d = r.resumed_by
-      ? `${calls} decided · resumed in ${to}`
-      : `${calls} · next turn ${to} (decided or dropped)`
-    return {
-      key: "resumed",
-      ...STATUS.resumed,
-      word: `${STATUS.resumed.word} ${to}`,
-      detail: d,
-      hint: `${d} (${next})`,
-      resumedBy: next,
-    }
-  }
-  const k = r.status as StatusKey
-  return Object.hasOwn(STATUS, k)
-    ? { key: k, ...STATUS[k] }
-    : { key: k, word: r.status, hint: r.status, role: "resumed" }
 }
 
 /** turnTag names a run by its turn: t<n> (its row's turn among runs,

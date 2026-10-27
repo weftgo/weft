@@ -545,18 +545,6 @@ function foldLive(
   return "folded"
 }
 
-/** restart rebuilds a lane's fold from stored pages (position 0 on). */
-function restart(lane: Lane, events: PosEvent[]): void {
-  const feed = newFold()
-  const seen = new Set<number>()
-  foldInto(feed, seen, events)
-  lane.feed = feed
-  lane.seen = seen
-  lane.events = events
-  lane.pos = seen.size ? Math.max(...seen) : -1
-  lane.stale = true
-}
-
 /** foldInto folds durable events once each, by position. */
 function foldInto(
   feed: FoldFeed,
@@ -625,6 +613,18 @@ function overlay(
   } catch {
     return folded
   }
+}
+
+/** restart rebuilds a lane's fold from stored pages (position 0 on). */
+function restart(lane: Lane, events: PosEvent[]): void {
+  const feed = newFold()
+  const seen = new Set<number>()
+  foldInto(feed, seen, events)
+  lane.feed = feed
+  lane.seen = seen
+  lane.events = events
+  lane.pos = seen.size ? Math.max(...seen) : -1
+  lane.stale = true
 }
 
 const quiet = () => {}

@@ -42,13 +42,6 @@ export interface PanelEndpoint {
   token: string
 }
 
-export function fetchRuntimes(
-  ep: PanelEndpoint,
-  signal?: AbortSignal
-): Promise<{ runtimes: RuntimeView[] }> {
-  return panelGet<{ runtimes: RuntimeView[] }>(ep, "runtimes", signal)
-}
-
 export class PanelApiError extends Error {
   constructor(
     readonly status: number,
@@ -60,6 +53,13 @@ export class PanelApiError extends Error {
   ) {
     super(message)
   }
+}
+
+export function fetchRuntimes(
+  ep: PanelEndpoint,
+  signal?: AbortSignal
+): Promise<{ runtimes: RuntimeView[] }> {
+  return panelGet<{ runtimes: RuntimeView[] }>(ep, "runtimes", signal)
 }
 
 /** apiUrl is path under {endpoint}api/ — every request the panel makes stays
@@ -119,18 +119,6 @@ export async function panelPost<T>(
   })
   if (!res.ok) throw await failure(res)
   return (await res.json()) as T
-}
-
-/** PUT /api/agents/{name}/proposal (plan F6): keep as prompt's
- * proposal, the dev token's only (every panel token is 403). */
-export function putProposal(
-  ep: PanelEndpoint,
-  agent: string,
-  instructions: string
-): Promise<unknown> {
-  return panelPut(ep, `agents/${encodeURIComponent(agent)}/proposal`, {
-    instructions,
-  })
 }
 
 export function fetchCommand(
@@ -240,6 +228,18 @@ export function fetchSessionPublicId(
   return panelGet(ep, `sessions/${encodeURIComponent(id)}/public_id`, signal)
 }
 
+/** PUT /api/agents/{name}/proposal (plan F6): keep as prompt's
+ * proposal, the dev token's only (every panel token is 403). */
+export function putProposal(
+  ep: PanelEndpoint,
+  agent: string,
+  instructions: string
+): Promise<unknown> {
+  return panelPut(ep, `agents/${encodeURIComponent(agent)}/proposal`, {
+    instructions,
+  })
+}
+
 export function fetchSessions(
   ep: PanelEndpoint,
   params: Record<string, string>,
@@ -295,6 +295,8 @@ export interface ToolView {
   name: string
   side_effects: string
   allow: boolean
+  /** Built with RequireApproval (UX-H-22). */
+  approval?: boolean
 }
 export interface AgentView {
   name: string

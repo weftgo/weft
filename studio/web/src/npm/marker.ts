@@ -24,7 +24,8 @@ export interface HelperOptions {
   enabled?: boolean
 }
 
-const asScope = (s: Scope | string): Scope => (typeof s === "string" ? { publicId: s } : s)
+const asScope = (s: Scope | string): Scope =>
+  typeof s === "string" ? { publicId: s } : s
 
 /** attach marks node, mounts and scopes the panel, and returns the undo
  * (which removes the marker if it is still the one set here). */
@@ -43,9 +44,12 @@ function attach(node: Element, o: HelperOptions): () => void {
       // of nothing in particular, its "not reachable" line on a page
       // that asked for none. scope() alone reaches whatever panel the
       // page has, now or mounted later.
-      const all = Array.from(document.querySelectorAll<WeftDevtoolsElement>("weft-devtools"))
+      const all = Array.from(
+        document.querySelectorAll<WeftDevtoolsElement>("weft-devtools")
+      )
       const hosts = all.some((n) => !n.autoMounted)
-      if (!hosts && (o.endpoint || o.token)) api.mount({ endpoint: o.endpoint, token: o.token, enabled: o.enabled })
+      if (!hosts && (o.endpoint || o.token))
+        api.mount({ endpoint: o.endpoint, token: o.token, enabled: o.enabled })
       api.scope(s)
     })
     .catch(() => {
@@ -53,7 +57,8 @@ function attach(node: Element, o: HelperOptions): () => void {
     })
   return () => {
     live = false
-    if (node.getAttribute("data-weft-scope") === value) node.removeAttribute("data-weft-scope")
+    if (node.getAttribute("data-weft-scope") === value)
+      node.removeAttribute("data-weft-scope")
   }
 }
 
@@ -73,7 +78,12 @@ export function binder(get: () => HelperOptions) {
   const bind = (n: Element | null) => {
     if (!n) return unbind()
     const o = get()
-    const k = [serializeScope(asScope(o.scope)), o.endpoint ?? "", o.token ?? "", String(o.enabled !== false)].join("\u0000")
+    const k = [
+      serializeScope(asScope(o.scope)),
+      o.endpoint ?? "",
+      o.token ?? "",
+      String(o.enabled !== false),
+    ].join("\u0000")
     if (n === node && k === key) return
     unbind()
     node = n

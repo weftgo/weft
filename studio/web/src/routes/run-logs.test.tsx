@@ -288,3 +288,64 @@ describe("a run's app logs on Studio's run page (U11.2)", () => {
     expect(d.querySelector("[data-logs-partial]")!.textContent).toBe(reason)
   })
 })
+
+// UX-H-10's UI half: a GenAI log event (event_name gen_ai.user.message,
+// gen_ai.choice) is drawn as a message — its role and content — never
+// as an anonymous line holding its JSON body.
+describe("GenAI log events in the Logs view (UX-H-10)", () => {
+  it("draws gen_ai.user.message and gen_ai.choice as role-labelled messages", async () => {
+    const events: LogRow[] = [
+      {
+        index: 0,
+        time: at(100),
+        severity: "INFO",
+        severity_number: 9,
+        event_name: "gen_ai.user.message",
+        body: `{"content":"where is my order?"}`,
+        attrs: {},
+        span_id: "u_c0",
+      },
+      {
+        index: 1,
+        time: at(900),
+        severity: "INFO",
+        severity_number: 9,
+        event_name: "gen_ai.choice",
+        body: `{"index":0,"finish_reason":"stop","message":{"content":"on its way"}}`,
+        attrs: {},
+        span_id: "u_c0",
+      },
+      { ...WARN, index: 2 },
+    ]
+    serve({ logs: () => ({ logs: events }) })
+    renderApp(`/runs/${UL}?view=logs`)
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll("[data-logs-view] [data-log-event]")
+      ).toHaveLength(2)
+    )
+    const user = document.querySelector<HTMLElement>(
+      '[data-log-event="gen_ai.user.message"]'
+    )!
+    expect(
+      user.querySelector("[data-chat-role]")!.getAttribute("data-chat-role")
+    ).toBe("user")
+    expect(user.textContent).toContain("where is my order?")
+    expect(user.textContent).not.toContain(`"content"`)
+    const choice = document.querySelector<HTMLElement>(
+      '[data-log-event="gen_ai.choice"]'
+    )!
+    expect(
+      choice.querySelector("[data-chat-role]")!.getAttribute("data-chat-role")
+    ).toBe("assistant")
+    expect(choice.textContent).toContain("on its way")
+    expect(choice.textContent).toContain("stop")
+    // A plain line stays a line.
+    expect(document.querySelector("[data-logs-view]")!.textContent).toContain(
+      "slow lookup"
+    )
+    expect(await axeLines(document.querySelector("[data-logs-view]")!)).toEqual(
+      []
+    )
+  })
+})

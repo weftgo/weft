@@ -119,6 +119,16 @@ export function keepPromptWords(o: KeepPrompt): {
   }
 }
 
+/** mayExportTestWith: the verb is drawn under capability "export" for
+ * any identity but a read-scoped panel token (export.go refuses it the
+ * wefttest format: fixtures carry prompts). */
+export function mayExportTestWith(
+  capabilities: readonly string[],
+  token: string
+): boolean {
+  return capabilities.includes("export") && tokenScopeOf(token) !== "read"
+}
+
 /** What a panel token (or a Studio without proposals) is told. */
 export const PROPOSAL_NEEDS_DEV = "a proposal needs the dev token"
 /** The Agents page's pointer, said once. */
@@ -212,14 +222,4 @@ export function saveWords(o: SaveOutcome): { title: string; tone: SaveTone } {
         ? { title: `proposal for ${o.agent} withdrawn`, tone: "success" }
         : { title: `withdraw refused: ${o.message ?? ""}`, tone: "error" }
   }
-}
-
-/** mayExportTestWith: the verb is drawn under capability "export" for
- * any identity but a read-scoped panel token (export.go refuses it the
- * wefttest format: fixtures carry prompts). */
-export function mayExportTestWith(
-  capabilities: readonly string[],
-  token: string
-): boolean {
-  return capabilities.includes("export") && tokenScopeOf(token) !== "read"
 }

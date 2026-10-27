@@ -37,36 +37,6 @@ export const kindOf = (e: ReplayEdit): EditKind =>
 export const editKey = (e: ReplayEdit): string =>
   `${kindOf(e)}:${e.step}:${e.callID ?? ""}:${e.index ?? 0}`
 
-/** editable: the target is one a replay can keep — the from_step it
- * implies (impliedFromStep) within the server's bound (max: the
- * highest from_step it accepts; null: unknown, nothing offered). */
-export function editable(target: ReplayEdit, max: number | null): boolean {
-  return max !== null && target.step >= 0 && impliedFromStep([target]) <= max
-}
-
-/** putEdit replaces the edit on e's target, appends it, or (value
- * empty) drops it. */
-export function putEdit(
-  list: ReplayEdit[],
-  e: ReplayEdit,
-  empty = false
-): ReplayEdit[] {
-  const k = editKey(e)
-  const i = list.findIndex((x) => editKey(x) === k)
-  if (empty) return i < 0 ? list : list.filter((_, j) => j !== i)
-  return i < 0 ? [...list, e] : list.map((x, j) => (j === i ? e : x))
-}
-
-/** impliedFromStep: the prefix keeps every edited step — an edit of
- * step N needs from_step ≥ N + 1, an insert at boundary N from_step ≥ N. */
-export function impliedFromStep(list: ReplayEdit[]): number {
-  let n = 0
-  for (const e of list)
-    n = Math.max(n, kindOf(e) === "insert" ? e.step : e.step + 1)
-  // Edits need from_step > 0 (0 keeps nothing to edit).
-  return list.length ? Math.max(n, 1) : 0
-}
-
 /** editsProblem holds Run while a draft's edits cannot travel: they go
  * only with from_step > 0, so a draft at step 0 is refused, never sent
  * without them (both surfaces). */
@@ -86,26 +56,86 @@ export function editsProblem(
 export const FORK_EDITS =
   "transcript edits belong to an ephemeral replay; a fork starts at step 0 — set Write to: nowhere (ephemeral) or drop the edits"
 
-/** lossy names the first number the browser cannot carry as written:
- * past the doubles' exact integers (9007199254740993 would be sent as
- * …992) or out of range (1e400 would be sent as null). */
-function lossy(path: string, v: unknown): string {
-  const at = (k: string) => (path ? `${path}.${k}` : k)
-  if (v instanceof Number) {
-    const lit = (v as unknown as Num).lit
-    const n = +v
-    if (!Number.isFinite(n))
-      return `field "${path}": the number ${lit ?? n} is out of range here: write it as a string`
-    if (lit && /^-?\d+$/.test(lit) && BigInt(lit) !== BigInt(n))
-      return `field "${path}": the number ${lit} would be sent as ${BigInt(n).toString()} (past the exact integers JSON keeps here): write it as a string or a smaller number`
-    return ""
-  }
-  if (v && typeof v === "object")
-    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-      const m = lossy(at(k), x)
-      if (m) return m
+/** schemaOf is the input schema the run's records hold for tool: the
+ * LAST catalog of the run that names it (steps in order, rows in
+ * order) — what Studio's server checks against (studio/playground.go's
+ * recordedSchemas keys by name over every catalog, the last one
+ * winning, not by the edited step's own catalog: a Go-side debt this
+ * mirrors so the editor and the server never disagree). undefined
+ * where no catalog says. */
+export function schemaOf(
+  steps: Map<number, { rows: { tools?: unknown }[] }> | undefined,
+  tool: string
+): unknown {
+  let out: unknown
+  for (const n of [...(steps?.keys() ?? [])].sort((a, b) => a - b))
+    for (const row of steps?.get(n)?.rows ?? []) {
+      const t = (
+        row.tools as
+          { tools?: { name: string; schema?: unknown }[] } | undefined
+      )?.tools?.find((x) => x.name === tool)
+      if (t?.schema) out = t.schema
     }
-  return ""
+  return out
+}
+
+const textOf = (m: Message) =>
+  (m.content as (Part | null)[])
+    .filter((p) => p?.type === "text")
+    .map((p) => (p as { text: string }).text)
+    .join("")
+
+/** editable: the target is one a replay can keep — the from_step it
+ * implies (impliedFromStep) within the server's bound (max: the
+ * highest from_step it accepts; null: unknown, nothing offered). */
+export function editable(target: ReplayEdit, max: number | null): boolean {
+  return max !== null && target.step >= 0 && impliedFromStep([target]) <= max
+}
+
+/** markedPart is what the replay's input holds for a call token. The
+ * kept prefix is the source's steps 0..fromStep−1, one assistant
+ * message each, at the input's end: the token's step ordinal picks its
+ * assistant message (the key), the call id its part there (a result
+ * in the tool messages before the next). Without fromStep, or where
+ * that place does not hold the id, a call id the input names once
+ * stands; one it names more than once (a reused id) gives "" — the
+ * chip drawn without a value rather than the wrong pair's. */
+export function markedPart(
+  batches: TranscriptBatch[] | undefined,
+  m: EditMark,
+  fromStep?: number
+): string {
+  if (!m.callID || !batches) return ""
+  const input = placeBatches(batches)
+    .filter((b) => b.input)
+    .flatMap((b) => b.messages)
+  const said = (msgs: Message[]): string[] => {
+    const out: string[] = []
+    for (const msg of msgs)
+      for (const p of msg.content as (Part | null)[]) {
+        if (m.what === "args" && p?.type === "tool_call" && p.id === m.callID)
+          out.push(`${p.name}(${JSON.stringify(p.args)})`)
+        if (
+          m.what === "result" &&
+          p?.type === "tool_result" &&
+          p.call_id === m.callID
+        )
+          out.push(String(p.content))
+      }
+    return out
+  }
+  const asst = input.flatMap((x, i) => (x.role === "assistant" ? [i] : []))
+  const at = fromStep === undefined ? -1 : asst.length - fromStep + m.step
+  if (at >= 0 && at < asst.length && m.step < (fromStep ?? 0)) {
+    const own =
+      m.what === "args"
+        ? input.slice(asst[at], asst[at] + 1)
+        : input.slice(asst[at] + 1, asst[at + 1] ?? input.length)
+    const hit = said(own)
+    if (hit.length === 1) return hit[0]
+  }
+  const all = said(input)
+  return all.length === 1 ? all[0] : ""
 }
 
 /** editMarks reads the run's weft.edits (meta): its tokens, and how many
@@ -155,69 +185,15 @@ export function editMarks(
   return { marks, more }
 }
 
-/** One user message of a step as the user edit counts them (studio/
- * edits.go's userSeqs): step 0's turn prompt (the input's last message,
- * when a user message) first, then the user messages the step's own
- * records hold (a steer, a resumed turn's prompt). */
-export interface UserMessage {
-  step: number
-  index: number
-  text: string
+/** impliedFromStep: the prefix keeps every edited step — an edit of
+ * step N needs from_step ≥ N + 1, an insert at boundary N from_step ≥ N. */
+export function impliedFromStep(list: ReplayEdit[]): number {
+  let n = 0
+  for (const e of list)
+    n = Math.max(n, kindOf(e) === "insert" ? e.step : e.step + 1)
+  // Edits need from_step > 0 (0 keeps nothing to edit).
+  return list.length ? Math.max(n, 1) : 0
 }
-
-const textOf = (m: Message) =>
-  (m.content as (Part | null)[])
-    .filter((p) => p?.type === "text")
-    .map((p) => (p as { text: string }).text)
-    .join("")
-
-/** schemaOf is the input schema the run's records hold for tool: the
- * LAST catalog of the run that names it (steps in order, rows in
- * order) — what Studio's server checks against (studio/playground.go's
- * recordedSchemas keys by name over every catalog, the last one
- * winning, not by the edited step's own catalog: a Go-side debt this
- * mirrors so the editor and the server never disagree). undefined
- * where no catalog says. */
-export function schemaOf(
-  steps: Map<number, { rows: { tools?: unknown }[] }> | undefined,
-  tool: string
-): unknown {
-  let out: unknown
-  for (const n of [...(steps?.keys() ?? [])].sort((a, b) => a - b))
-    for (const row of steps?.get(n)?.rows ?? []) {
-      const t = (
-        row.tools as
-          { tools?: { name: string; schema?: unknown }[] } | undefined
-      )?.tools?.find((x) => x.name === tool)
-      if (t?.schema) out = t.schema
-    }
-  return out
-}
-
-/** wireEdits is §5.1's transcript_edits: kind always sent, each kind
- * with the fields it takes and no other (studio/edits.go's editKindOf
- * refuses the rest), args an object. */
-export function wireEdits(list: ReplayEdit[]): unknown[] {
-  return list.map((e) => {
-    const kind = kindOf(e)
-    const w: Record<string, unknown> = { kind, step: e.step }
-    if (kind === "tool_result" || kind === "tool_args") w.call_id = e.callID
-    if (kind === "tool_result") w.tool_result = e.toolResult
-    else if (kind === "tool_args") w.args = e.args
-    else w.content = e.content
-    if (kind === "user" && e.index) w.index = e.index
-    return w
-  })
-}
-
-// ── The editor's schema check ─────────────────────────────────────
-// obsdb.CheckToolArgs, rule for rule: type (a name or a list; integer
-// is an integral literal), enum, required, properties, additional-
-// Properties (false refuses, a schema checks), items; a null field is
-// absent (encoding/json's rule). Its sentence is the loop's
-// INVALID_INPUT, field named.
-
-type Num = number & { lit?: string }
 const kind = (v: unknown): string =>
   v === null
     ? "null"
@@ -260,6 +236,19 @@ const fits = (t: string, v: unknown): boolean =>
     : !["object", "array", "string", "boolean", "null", "number"].includes(t) ||
       kind(v) === (t === "boolean" ? "bool" : t)
 type Schema = Record<string, unknown>
+
+/** putEdit replaces the edit on e's target, appends it, or (value
+ * empty) drops it. */
+export function putEdit(
+  list: ReplayEdit[],
+  e: ReplayEdit,
+  empty = false
+): ReplayEdit[] {
+  const k = editKey(e)
+  const i = list.findIndex((x) => editKey(x) === k)
+  if (empty) return i < 0 ? list : list.filter((_, j) => j !== i)
+  return i < 0 ? [...list, e] : list.map((x, j) => (j === i ? e : x))
+}
 
 function walk(path: string, s: Schema, v: unknown): string {
   if (v === null && path) return ""
@@ -405,6 +394,31 @@ export const EDIT_FIELD = {
   same: "same as the recording · not an edit",
 } as const
 
+/** wireEdits is §5.1's transcript_edits: kind always sent, each kind
+ * with the fields it takes and no other (studio/edits.go's editKindOf
+ * refuses the rest), args an object. */
+export function wireEdits(list: ReplayEdit[]): unknown[] {
+  return list.map((e) => {
+    const k = kindOf(e)
+    const w: Record<string, unknown> = { kind: k, step: e.step }
+    if (k === "tool_result" || k === "tool_args") w.call_id = e.callID
+    if (k === "tool_result") w.tool_result = e.toolResult
+    else if (k === "tool_args") w.args = e.args
+    else w.content = e.content
+    if (k === "user" && e.index) w.index = e.index
+    return w
+  })
+}
+
+// ── The editor's schema check ─────────────────────────────────────
+// obsdb.CheckToolArgs, rule for rule: type (a name or a list; integer
+// is an integral literal), enum, required, properties, additional-
+// Properties (false refuses, a schema checks), items; a null field is
+// absent (encoding/json's rule). Its sentence is the loop's
+// INVALID_INPUT, field named.
+
+type Num = number & { lit?: string }
+
 /** The chip each token draws on the replayed run's Story. */
 export const MARK_CHIPS: Record<EditMark["what"], string> = {
   args: "args edited",
@@ -412,6 +426,28 @@ export const MARK_CHIPS: Record<EditMark["what"], string> = {
   reply: "edited",
   user: "edited",
   insert: "inserted",
+}
+
+/** lossy names the first number the browser cannot carry as written:
+ * past the doubles' exact integers (9007199254740993 would be sent as
+ * …992) or out of range (1e400 would be sent as null). */
+function lossy(path: string, v: unknown): string {
+  const at = (k: string) => (path ? `${path}.${k}` : k)
+  if (v instanceof Number) {
+    const lit = (v as unknown as Num).lit
+    const n = +v
+    if (!Number.isFinite(n))
+      return `field "${path}": the number ${lit ?? n} is out of range here: write it as a string`
+    if (lit && /^-?\d+$/.test(lit) && BigInt(lit) !== BigInt(n))
+      return `field "${path}": the number ${lit} would be sent as ${BigInt(n).toString()} (past the exact integers JSON keeps here): write it as a string or a smaller number`
+    return ""
+  }
+  if (v && typeof v === "object")
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      const m = lossy(at(k), x)
+      if (m) return m
+    }
+  return ""
 }
 
 /** markLine is a token's place in words. */
@@ -443,48 +479,54 @@ export function editLine(e: ReplayEdit): string {
   return `${k} · ${at}${who} → ${v.length > 60 ? `${v.slice(0, 59)}…` : v}`
 }
 
-/** markedPart is what the replay's input holds for a call token. The
- * kept prefix is the source's steps 0..fromStep−1, one assistant
- * message each, at the input's end: the token's step ordinal picks its
- * assistant message (the key), the call id its part there (a result
- * in the tool messages before the next). Without fromStep, or where
- * that place does not hold the id, a call id the input names once
- * stands; one it names more than once (a reused id) gives "" — the
- * chip drawn without a value rather than the wrong pair's. */
-export function markedPart(
-  batches: TranscriptBatch[] | undefined,
-  m: EditMark,
-  fromStep?: number
-): string {
-  if (!m.callID || !batches) return ""
-  const input = placeBatches(batches)
-    .filter((b) => b.input)
-    .flatMap((b) => b.messages)
-  const said = (msgs: Message[]): string[] => {
-    const out: string[] = []
-    for (const msg of msgs)
-      for (const p of msg.content as (Part | null)[]) {
-        if (m.what === "args" && p?.type === "tool_call" && p.id === m.callID)
-          out.push(`${p.name}(${JSON.stringify(p.args)})`)
-        if (
-          m.what === "result" &&
-          p?.type === "tool_result" &&
-          p.call_id === m.callID
-        )
-          out.push(String(p.content))
-      }
-    return out
-  }
-  const asst = input.flatMap((x, i) => (x.role === "assistant" ? [i] : []))
-  const at = fromStep === undefined ? -1 : asst.length - fromStep + m.step
-  if (at >= 0 && at < asst.length && m.step < (fromStep ?? 0)) {
-    const own =
-      m.what === "args"
-        ? input.slice(asst[at], asst[at] + 1)
-        : input.slice(asst[at] + 1, asst[at + 1] ?? input.length)
-    const hit = said(own)
-    if (hit.length === 1) return hit[0]
-  }
-  const all = said(input)
-  return all.length === 1 ? all[0] : ""
+/** editsSummary is a replay's weft.edits in words (UX-S5b-04): "5
+ * edits (user, args, result, insert)" — the count (the "+N more" the
+ * mark's cap left out included), then each kind once in first-seen
+ * order; "" for a run with no mark (a child run's inherited one
+ * included). Kinds only, never content. */
+export function editsSummary(row: Parameters<typeof editMarks>[0]): string {
+  const { marks, more } = editMarks(row)
+  const n = marks.length + more
+  return n
+    ? `${n} edit${n > 1 ? "s" : ""} (${[...new Set(marks.map((m) => m.what))].join(", ")})`
+    : ""
+}
+
+/** replayViewWords is a replay's weft.replay.view in words (UX-S5b-04;
+ * ADR 0029 §2): what the model was fed at the step the replay
+ * continued from — "fed the compacted view #7"; a view the records
+ * did not place reads "prefix derived" / "prefix view unknown" (the
+ * header's derived badge says why); "" for the plain transcript or no
+ * mark. */
+export function replayViewWords(v: string | undefined): string {
+  const c = /^compacted:(\d+)$/.exec(v ?? "")
+  return c
+    ? `fed the compacted view #${c[1]}`
+    : v == "derived"
+      ? "prefix derived"
+      : v == "unknown"
+        ? "prefix view unknown"
+        : ""
+}
+
+/** The run metadata a replay's header sentence says in words, kept
+ * behind its "details" (UX-S5b-04): the raw chips stay one click away. */
+export const PROVENANCE_KEYS = [
+  "weft.edits",
+  "weft.replay.view",
+  "weft.playground.command",
+  "weft.playground.actor",
+]
+
+/** The disclosure that holds PROVENANCE_KEYS' raw chips. */
+export const PROVENANCE_DETAILS = "details"
+
+/** One user message of a step as the user edit counts them (studio/
+ * edits.go's userSeqs): step 0's turn prompt (the input's last message,
+ * when a user message) first, then the user messages the step's own
+ * records hold (a steer, a resumed turn's prompt). */
+export interface UserMessage {
+  step: number
+  index: number
+  text: string
 }

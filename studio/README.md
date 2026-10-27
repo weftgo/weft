@@ -74,7 +74,10 @@ itself, and Python's exporter, which defaults to gRPC, needs
 `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` (the JS one defaults to it).
 A stock `invoke_agent` span makes a run, and `gen_ai.conversation.id`
 groups runs into a session ([record-contract §9](../docs/record-contract.md#9-deriving-a-run-from-stock-spans));
-any other span is a trace (`/traces`).
+any other span is a trace (`/traces`). Such a session is marked "derived
+(stock OTel)" on the sessions list and its page (the session row's
+`derived: true`), and its page numbers its turns by start order (the
+session document's `turn`, 1..n; the run's own row keeps 0; UX-H-35).
 
 The dev token is stable per database — `<db>.token` beside the SQLite
 file, 0600, never printed (`--rotate-token` renews it;
@@ -314,7 +317,13 @@ could not be computed) with `cost_reason`; `scripted` marks a known `$0`
 (above). A figure that sums runs — a delegated figure, a session's, an
 experiment's — says why it is unknown in one line counting them ("2 of 9
 turns unpriced: no price for openai/x, acme/y", "1 of 3 subagent runs'
-cost not known yet (…)"), never a clause per run, and `unpriced_models`
+cost not known yet (…)"; "not known", without "yet", when every unknown
+part is a derived run whose spans report no usage — it never becomes
+known, UX-H-07), never a clause per run; such an unknown figure carries
+`cost_partial` `{usd, priced, of}` — the priced parts' sum and count of
+the set's, absent when none is priced — which Studio's sessions list and
+session page draw as the panel's header does, "≥ $x · k of n turns
+priced"; and `unpriced_models`
 (a run row's `delegated_unpriced_models` for its subagents) lists the
 models without a price behind a figure, deduped, so a page can say it once
 — five at most, a sixth and more one last element `"(+n)"` (the reason's
@@ -1100,9 +1109,10 @@ again on every window resize (a passive listener, removed on
 disconnect) — or docks to the `left`, `right`, `bottom` or `top` edge,
 resized along that edge (pointer events with pointer capture, no
 library; touch works through them). Collapsed it is the pill: the live
-dot and step count above, and the current turn's cost — its tokens
-in→out once the run has finished, `—` while it runs (Studio prices no
-usage, so tokens are the cost). Hidden draws nothing: the element, its
+dot and step count above, and the current turn's cost — its figure
+(`· $0.0029`) when Studio priced it, else its tokens in→out once the run
+has finished (`· 300 in · 58 out`: an unpriced model, a Studio without the
+`pricing` capability), `—` while it runs (UX-H-31). Hidden draws nothing: the element, its
 API and its events stay, and `Alt+W` or `open()` bring the dock back.
 Under 640 px of panel width the turn column is a dropdown and the
 header's actions wrap — the default 520 px float is that narrow, so the
@@ -1287,8 +1297,12 @@ mints (`POST /api/panel-tokens`), never a dev or server token.
 
 No Studio answering: the dock the script mounted by itself removes
 itself silently unless the endpoint is one you named on loopback (production safety)
-— no console, at most two requests (`panel-config.json`, then meta;
-`panel-config.json` gives up after 3 s). On a loopback endpoint you
+— at most two requests (`panel-config.json`, then meta;
+`panel-config.json` gives up after 3 s), and no console line unless its
+`<script>` tag names no endpoint and carries no `data-weft` (a bare
+include, which 0.10 recognised by its file name): then one `console.warn`,
+"weft devtools: no endpoint found; add data-weft or data-endpoint on the
+panel's <script> tag" (UX-S5b-10). On a loopback endpoint you
 named (your own Studio, not started yet), and on a mount you made (a
 `<weft-devtools>` element in your markup, `mount(opts)`, or
 `data-auto="false"`), it shows one quiet line instead, `Studio not
@@ -1308,8 +1322,8 @@ retries one `/api/meta` read a minute, while the page is visible,
 brings it back by itself. The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 293,795 B raw / 98,637 B gzip
-(96.3 KiB, the bundle of the ledger's row "U30.3"; 7,859 B — 7.7 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 294,336 B raw / 98,745 B gzip
+(96.4 KiB, the bundle of the ledger's row "U33.2"; 7,751 B — 7.6 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1671,7 +1685,11 @@ is a 409, on a finished one a no-op. Safety: off unless `WEFT_ENV=dev` or
 call is substituted with its recorded result or parked
 (`weft.Replay(weft.ReplaySafe)` vouches a read, `AllowSideEffects`
 opts a tool into allow mode); budgets cap each experiment; the app's
-own runs are never touched. The command's `overrides` carry
+own runs are never touched. Both drawers' Tools lists mark a
+side-effect tool ⚠ and a tool built with `RequireApproval` "needs
+approval" beside it (`/api/runtimes`' `approval: true`, UX-H-22): its
+`side_effects: never` is the replay class — never re-run on a replay —
+not "no side effects". The command's `overrides` carry
 `instructions`, `tools_enabled`, `model`, `thinking`, the numeric
 `options` (`max_steps` and `parallelism` lower only, `temperature`
 0..2) and the option lab's typed knobs: `params` `{top_p?, max_tokens?,
@@ -1929,7 +1947,14 @@ with "kept prefix edited": one chip per token — "args edited", "result
 edited", "edited" (a user message or a reply), "inserted" — at its
 source coordinates, a call's edited args or result read from the
 replay's input by call id (the kept prefix is positional); a child run
-inherits the mark and draws none.
+inherits the mark and draws none. The run header says the same keys in
+words beside "replay of …" (UX-S5b-04): "5 edits (user, args, result,
+insert)" from `weft.edits` (kinds only) and "fed the compacted view #7"
+from `weft.replay.view` (`prefix derived` / `prefix view unknown` beside
+the derived badge; nothing for the plain transcript); the raw
+`weft.edits`, `weft.replay.view`, `weft.playground.command` and
+`weft.playground.actor` chips wait behind "details". The panel's replay
+chip carries the same edit summary in its title.
 An editor follows its command: Escape inside a Story textarea is the
 field's (the drawer stays); closing the drawer, another verb's opening,
 a drop from the list or the drawer's own field rewriting the edit resets
@@ -1959,7 +1984,9 @@ beside it — never a change by themselves — and its holes are badges
 from the one table, as is the response's own `truncated`
 (`response_cap`). Both surfaces read `GET /api/diff` through one module,
 `src/lib/stepdiff.ts`: Studio's `/compare?a=<run>&b=["<run>",…]&step=N` page
-(`b=r1,r2` reads the same; it opens with a run picker — H9,
+(`b=r1,r2` reads the same; a repeated `b` or a `b` equal to `a` is
+dropped from the page and from the address, replaced on load —
+UX-S5b-07; it opens with a run picker — H9,
 `lib/compare-picker.ts`: the newest runs as a base, then the base's
 replay source and its agent's runs to compare with, one click each;
 the table scrolls inside its own frame, never the page;
@@ -2235,7 +2262,12 @@ OTel). The run's **logs** view (`?view=logs`, key `l`, U11.2) lists
 every line with a severity filter (`?lsev=info|warn|error`, the route's
 `severity=`) and per line **jump to span** — `?sel=t:<span id>`, the row
 that span (or its nearest drawn ancestor) is behind, its Logs tab open.
-A tree row a WARN / ERROR line landed on carries a tick ("E1 W2", read
+A GenAI log event — a row whose `event_name` is `gen_ai.<role>.message`
+or `gen_ai.choice` (an instrumentation that logs its messages rather than
+putting them on its spans) — is drawn as that message, its role and
+content as the trace page's chat view draws one, never as a line holding
+its JSON body; a derived run's Story lists those messages below its step
+cards ("messages the app logged", UX-H-10). A tree row a WARN / ERROR line landed on carries a tick ("E1 W2", read
 at `severity=warn` only when the run document counts such lines;
 "≥E1 W2" when that read hit the 10,000-line cap); its click opens that
 row's Logs tab. While the run runs the lines are read again every 5 s

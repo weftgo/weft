@@ -304,3 +304,71 @@ export function genaiChat(attrs: Record<string, unknown>): GenAIChat {
 /** The honesty line's reason when a model call carries no messages. */
 export const NO_MESSAGES_REASON =
   "this span carries no gen_ai messages (gen_ai.input.messages / gen_ai.output.messages, or the legacy gen_ai.prompt / gen_ai.completion): content capture was off, or the instrumentation keeps messages off its spans (weft's own chat spans do: a weft run's messages are on its run page)"
+
+/** The event-era GenAI log events (OTel's gen_ai.<role>.message and
+ * gen_ai.choice): an OTLP log record whose EventName is one of them
+ * carries one message as its body's JSON. */
+const EVENT_ROLE = /^gen_ai\.(system|user|assistant|tool)\.message$/
+
+/**
+ * eventMessage reads a GenAI log event (UX-H-10) — an app log row whose
+ * event_name is gen_ai.<role>.message or gen_ai.choice — as one
+ * message: the role from the name (gen_ai.choice: the message's own,
+ * else assistant, on the output side), its content as text or parts,
+ * an assistant's tool_calls ({id, function: {name, arguments}}) and a
+ * tool message's id as their parts, a choice's finish_reason. A body
+ * that is not JSON is the message's text. Undefined for any other row:
+ * a plain log line. Nothing is read that the row did not carry — the
+ * logs route's own rules (a read token reads no logs) stand.
+ */
+export function eventMessage(
+  eventName: string | undefined,
+  body: string
+): ChatMessage | undefined {
+  const m = eventName ? EVENT_ROLE.exec(eventName) : null
+  const choice = eventName === "gen_ai.choice"
+  if (!m && !choice) return undefined
+  const parsed = jsonValue(body)
+  const o = (
+    parsed.ok && parsed.value && typeof parsed.value === "object"
+      ? parsed.value
+      : { content: body }
+  ) as Record<string, unknown>
+  const msg = (
+    choice && o.message && typeof o.message === "object" ? o.message : o
+  ) as Record<string, unknown>
+  const role = m ? m[1] : str(msg.role) || "assistant"
+  const parts: ChatPart[] = []
+  const c = msg.content
+  if (role === "tool" && msg.id !== undefined)
+    parts.push({ kind: "tool_result", id: str(msg.id), response: c ?? "" })
+  else if (Array.isArray(c)) parts.push(...c.map(part))
+  else if (c !== undefined && c !== null && c !== "") parts.push(part(c))
+  if (Array.isArray(msg.tool_calls))
+    for (const raw of msg.tool_calls as unknown[]) {
+      const tc = (raw && typeof raw === "object" ? raw : {}) as Record<
+        string,
+        unknown
+      >
+      const fn = (
+        tc.function && typeof tc.function === "object" ? tc.function : tc
+      ) as Record<string, unknown>
+      parts.push({
+        kind: "tool_call",
+        id: str(tc.id),
+        name: str(fn.name),
+        arguments:
+          typeof fn.arguments === "string"
+            ? parsedOrText(fn.arguments)
+            : fn.arguments,
+      })
+    }
+  const out: ChatMessage = {
+    role,
+    parts,
+    side: choice ? "output" : "input",
+  }
+  if (typeof o.finish_reason === "string" && o.finish_reason)
+    out.finishReason = o.finish_reason
+  return out
+}

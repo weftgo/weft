@@ -16,7 +16,8 @@ import { useQuery } from "@tanstack/react-query"
 
 import { spansQuery, stepQuery } from "@/lib/api"
 import type { RunDoc, Span, StepDoc, StepToolCall } from "@/lib/api"
-import { genaiChat } from "@/lib/genai"
+import { eventMessage, genaiChat } from "@/lib/genai"
+import { allLogsQuery, LOGS } from "@/lib/logs"
 import { DERIVED_HOLE, DERIVED_WORDS, derivedUsageUnknown } from "@/lib/honesty"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { Cost, useCostCapable } from "@/components/studio/cost"
@@ -203,6 +204,36 @@ function DerivedStepCard({
   )
 }
 
+/** LoggedMessages draws a derived run's GenAI log events beside its
+ * story (UX-H-10): an instrumentation that emits its messages as log
+ * records (gen_ai.user.message, gen_ai.choice) rather than span
+ * attributes still has them read as messages, in log order. Nothing
+ * when the run's logs hold none, or cannot be read (the Logs view
+ * says why: a read token reads no logs, a run without a log bridge). */
+function LoggedMessages({ runId }: { runId: string }) {
+  const q = useQuery({ ...allLogsQuery(runId), retry: false })
+  const msgs = (q.data?.logs ?? []).flatMap((l) => {
+    const m = eventMessage(l.event_name, l.body)
+    return m ? [m] : []
+  })
+  if (!msgs.length) return null
+  return (
+    <section
+      className="space-y-2 rounded-lg border border-dashed px-4 py-3"
+      aria-label={LOGS.events}
+      data-derived-logged={msgs.length}
+    >
+      <div
+        className="font-mono text-xs text-muted-foreground"
+        title={LOGS.eventsHint}
+      >
+        {LOGS.events}
+      </div>
+      <ChatMessages messages={msgs} />
+    </section>
+  )
+}
+
 /** DerivedStory is the story tab of a derived run. */
 export function DerivedStory({ doc }: { doc: RunDoc }) {
   const { has } = useCapabilities()
@@ -219,6 +250,7 @@ export function DerivedStory({ doc }: { doc: RunDoc }) {
           chat={chatSpanOf(spans.data?.spans, n)}
         />
       ))}
+      {has("logs") ? <LoggedMessages runId={doc.id} /> : null}
     </div>
   )
 }

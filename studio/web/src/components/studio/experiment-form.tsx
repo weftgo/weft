@@ -24,6 +24,8 @@ import {
 import type { Engine, EngineChoice, StepCost } from "@/lib/engine"
 import {
   DRAWER_TITLES,
+  NEEDS_APPROVAL,
+  NEEDS_APPROVAL_HINT,
   SIDE_EFFECT_TOOL,
   SIDE_EFFECT_WORDS,
   WRITE_TO,
@@ -185,6 +187,15 @@ export function ChangeFields({
               {(t.side_effects === "never" || !t.side_effects) && (
                 <span title={SIDE_EFFECT_TOOL}>⚠</span>
               )}
+              {t.approval ? (
+                <span
+                  className="rounded-sm border px-1 text-[10px] text-muted-foreground"
+                  title={NEEDS_APPROVAL_HINT}
+                  data-tool-approval
+                >
+                  {NEEDS_APPROVAL}
+                </span>
+              ) : null}
             </label>
           ))}
         </div>

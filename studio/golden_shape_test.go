@@ -215,8 +215,9 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// The fixture's s_orders failed a turn; this run failed none, so its
 		// sessions carry no failed_turns (U16; the SessionTurnFacts
 		// conformance case pins the counts on every backend).
-		{"sessions.golden.json", "/api/sessions", []string{".sessions[].cost_usd=<nil>", ".sessions[].summarizer_usage", ".sessions[].failed_turns"}},
-		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".summarizer_usage", ".failed_turns"}},
+		// cost_partial (U33.2): only on an unknown set figure with a priced part; the real run is priced.
+		{"sessions.golden.json", "/api/sessions", []string{".sessions[].cost_usd=<nil>", ".sessions[].summarizer_usage", ".sessions[].failed_turns", ".sessions[].cost_partial"}},
+		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".summarizer_usage", ".failed_turns", ".cost_partial"}},
 		{"public.golden.json", "/api/public/pub_x", nil},
 		{"session-public-id.golden.json", "/api/sessions/s_x/public_id", nil},
 		// The step goldens are recorded from TestStepRoute's real run;

@@ -30,6 +30,7 @@ import {
   rowHoles,
 } from "@/lib/honesty"
 import { DRAWER } from "@/lib/run-tree"
+import { LOGS } from "@/lib/logs"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, apiError, golden, pagedEvents } from "@/test/fake-studio"
@@ -258,6 +259,43 @@ describe("a derived run's page (the Done line)", () => {
       return n!
     })
     expect(none.textContent).toBe(DERIVED_WORDS.noContent)
+  })
+
+  it("GenAI log events beside the story (UX-H-10): read as messages, the run's spans holding none", async () => {
+    serve().on(`GET runs/${DERIVED_FAILED}/logs`, {
+      logs: [
+        {
+          index: 0,
+          time: "2026-10-01T10:01:00.1Z",
+          severity: "INFO",
+          severity_number: 9,
+          event_name: "gen_ai.user.message",
+          body: `{"content":"cancel my order"}`,
+          attrs: {},
+        },
+        {
+          index: 1,
+          time: "2026-10-01T10:01:00.2Z",
+          severity: "INFO",
+          severity_number: 9,
+          body: "an app line",
+          attrs: {},
+        },
+      ],
+    })
+    renderApp(`/runs/${DERIVED_FAILED}?view=story`)
+    const logged = await waitFor(() => {
+      const n = document.querySelector<HTMLElement>("[data-derived-logged]")
+      expect(n).toBeTruthy()
+      return n!
+    })
+    expect(logged.getAttribute("data-derived-logged")).toBe("1")
+    expect(logged.getAttribute("aria-label")).toBe(LOGS.events)
+    expect(
+      logged.querySelector("[data-chat-role]")!.getAttribute("data-chat-role")
+    ).toBe("user")
+    expect(logged.textContent).toContain("cancel my order")
+    expect(logged.textContent).not.toContain("an app line")
   })
 
   it("no usage reported: the step and the row read unknown with the API's reason, never 0 as known", async () => {
@@ -641,6 +679,29 @@ describe("a derived run in the lists", () => {
       document.querySelector("[data-turn] [data-derived-chip]")!.textContent,
       "session turn"
     )
+    // UX-H-35: the session says what it is, and its turns are numbered
+    // by start order (the server's session document), never all "0".
+    expect(
+      document.querySelector("[data-session-derived]")!.textContent
+    ).toContain(DERIVED_WORDS.session)
+    const leads = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-turn]")
+    ).map((n) => n.textContent)
+    expect(leads.some((t) => t.includes("t1"))).toBe(true)
+    expect(leads.some((t) => t.includes("t2"))).toBe(true)
+  })
+
+  it("the sessions list marks a stock OTel conversation derived (UX-H-35)", async () => {
+    serve()
+    renderApp("/sessions")
+    const mark = await waitFor(() => {
+      const n = document.querySelector<HTMLElement>("[data-session-derived]")
+      expect(n).toBeTruthy()
+      return n!
+    })
+    expect(mark.textContent).toContain(DERIVED_WORDS.session)
+    expect(document.body.textContent).toContain("1 session")
+    expect(document.body.textContent).not.toMatch(/\bthreads?\b/)
   })
 
   it("the live page badges a derived row from its live frame", async () => {

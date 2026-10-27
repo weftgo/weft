@@ -3,22 +3,6 @@
 // render these in Geist Mono (plan §5.4).
 import type { Usage } from "./api"
 
-/** tokenPair is the one token format both surfaces write (U21.1,
- * UX-F-16): "60 in · 30 out" — compact ("12.4k in · 3.1k out"), or
- * with exact the whole counts ("12,400 in · 3,100 out"). A missing
- * side is 0. */
-export function tokenPair(
-  input: number | undefined,
-  output: number | undefined,
-  exact = false
-): string {
-  const n = (v: number | undefined) => {
-    const x = Number.isFinite(v) ? (v as number) : 0
-    return exact ? x.toLocaleString("en-US") : tokens(x)
-  }
-  return `${n(input)} in · ${n(output)} out`
-}
-
 /** "2026-09-28 09:00:12 UTC+2" — the absolute stamp shown on hover:
  * the viewer's wall clock, with its offset named so the stamp can be
  * lined up with a server log. */
@@ -49,14 +33,6 @@ export function duration(started: string, finished: string | null): string {
   return spanMs(b - a)
 }
 
-/** byteSize is a byte count in words: "92 B", "12.3 KB" — or, with
- * i = "i", "12.3 KiB" (a badge's: lib/honesty.ts's kib). */
-export function byteSize(n: number, i = ""): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} K${i}B`
-  return `${(n / (1024 * 1024)).toFixed(1)} M${i}B`
-}
-
 /** A run whose agent has no name (UX-A-26): one word on every page —
  * the run header, the runs list, the run tree, a subagent row — drawn
  * muted, with UNNAMED_AGENT_HINT on hover. */
@@ -73,6 +49,14 @@ export const plural = (k: number, one: string, many = one + "s") =>
 
 export const UNNAMED_AGENT = "unnamed agent"
 export const UNNAMED_AGENT_HINT = "the agent has no name: set weft.Name(…)"
+
+/** byteSize is a byte count in words: "92 B", "12.3 KB" — or, with
+ * i = "i", "12.3 KiB" (a badge's: lib/honesty.ts's kib). */
+export function byteSize(n: number, i = ""): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} K${i}B`
+  return `${(n / (1024 * 1024)).toFixed(1)} M${i}B`
+}
 
 /** "12.4k / 3.1k" — token counts stay compact; exact values on hover. */
 export function tokens(n: number): string {
@@ -142,6 +126,22 @@ export function spanMs(ms: number): string {
  * "60 in · 30 out"; a single total says "tokens" in full — never "tok". */
 export const tokenTotal = (n: number) =>
   `${tokens(n)} ${n === 1 ? "token" : "tokens"}`
+
+/** tokenPair is the one token format both surfaces write (U21.1,
+ * UX-F-16): "60 in · 30 out" — compact ("12.4k in · 3.1k out"), or
+ * with exact the whole counts ("12,400 in · 3,100 out"). A missing
+ * side is 0. */
+export function tokenPair(
+  input: number | undefined,
+  output: number | undefined,
+  exact = false
+): string {
+  const n = (v: number | undefined) => {
+    const x = Number.isFinite(v) ? (v as number) : 0
+    return exact ? x.toLocaleString("en-US") : tokens(x)
+  }
+  return `${n(input)} in · ${n(output)} out`
+}
 
 /** The time to first token's words on both surfaces (UX-F-16): "first
  * token 180 ms" — never "ttft". */

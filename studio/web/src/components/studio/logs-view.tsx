@@ -1,6 +1,7 @@
 // A run's app log lines (U11.2, audit §6.9): LogLines draws a list —
-// severity in its tone, the body, the attributes, and per line "jump to
-// span" when the run-level view gives one — and the page's honesty: the
+// severity in its tone, the body (a GenAI event's message as the chat
+// view draws it, lib/genai.ts eventMessage; UX-H-10), the attributes,
+// and per line "jump to span" when the run-level view gives one — and the page's honesty: the
 // route's holes (a run recorded without otel.Slog(), a read token's
 // hidden), a list cut at lib/logs.ts's page cap (truncated), a running
 // run's partial reason. LogsView is the run page's Logs view: the
@@ -10,6 +11,8 @@ import { useQuery } from "@tanstack/react-query"
 
 import type { LogRow } from "@/lib/api"
 import { absoluteTime, spanMs } from "@/lib/format"
+import { eventMessage } from "@/lib/genai"
+import { ChatMessages } from "@/components/studio/genai-chat"
 import { allLogsQuery, LOG_LEVELS, LOGS, severityClass } from "@/lib/logs"
 import type { AllLogs, LogLevel } from "@/lib/logs"
 import { DRAWER } from "@/lib/run-tree"
@@ -68,6 +71,9 @@ export function LogLines({
     <ul className="space-y-0.5 font-mono text-[11px]">
       {lines.map((l) => {
         const attrs = attrsLine(l.attrs)
+        // A GenAI event (UX-H-10): its message, role and content, as
+        // the chat view draws one — never its JSON body as a line.
+        const msg = eventMessage(l.event_name, l.body)
         return (
           <li
             key={l.index}
@@ -87,12 +93,16 @@ export function LogLines({
             >
               {l.severity || "—"}
             </span>
-            <span className="min-w-0 flex-1 break-words">
-              {l.body}
+            <div
+              className="min-w-0 flex-1 break-words"
+              data-log-event={msg ? l.event_name : undefined}
+              title={msg ? l.event_name : undefined}
+            >
+              {msg ? <ChatMessages messages={[msg]} /> : l.body}
               {attrs ? (
                 <span className="ml-2 text-muted-foreground">{attrs}</span>
               ) : null}
-            </span>
+            </div>
             {onJump ? (
               l.span_id ? (
                 <button

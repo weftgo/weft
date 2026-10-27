@@ -15,7 +15,9 @@ export type { Scope } from "../lib/scope.js"
  * mounts the panel when endpoint or token is given and the page has
  * none, and calls scope(); on unmount
  * it removes the marker. */
-export function useWeftDevtools(opts: HelperOptions | (() => HelperOptions)): (el: unknown) => void {
+export function useWeftDevtools(
+  opts: HelperOptions | (() => HelperOptions)
+): (el: unknown) => void {
   const b = binder(typeof opts === "function" ? opts : () => opts)
   return (el) => b.bind(el instanceof Element ? el : null)
 }

@@ -15,26 +15,49 @@ describe("@weftgo/devtools/scope without a DOM", () => {
   it("imports and round-trips where document, window and HTMLElement do not exist", async () => {
     expect(typeof document).toBe("undefined")
     expect(typeof HTMLElement).toBe("undefined")
-    const { parseScope, serializeScope } = await import("@weftgo/devtools/scope")
-    const form = serializeScope({ publicId: "pub_1", session: "s_2", run: "r_3" })
+    const { parseScope, serializeScope } =
+      await import("@weftgo/devtools/scope")
+    const form = serializeScope({
+      publicId: "pub_1",
+      session: "s_2",
+      run: "r_3",
+    })
     expect(form).toBe("pub_1;session=s_2;run=r_3")
-    expect(parseScope(form)).toEqual({ publicId: "pub_1", session: "s_2", run: "r_3" })
+    expect(parseScope(form)).toEqual({
+      publicId: "pub_1",
+      session: "s_2",
+      run: "r_3",
+    })
   })
 })
 
-describe.runIf(process.env.WEFT_DEVTOOLS_PKG === "1")("the assembled package on a server (node -e)", () => {
-  const pkg = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../npm")
-  const node = (code: string) => {
-    const r = spawnSync(process.env.NODE ?? "node", ["--input-type=module", "-e", code], { cwd: pkg, encoding: "utf8" })
-    return `${r.stdout}${r.stderr}`.trim()
-  }
+describe.runIf(process.env.WEFT_DEVTOOLS_PKG === "1")(
+  "the assembled package on a server (node -e)",
+  () => {
+    const pkg = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../npm"
+    )
+    const node = (code: string) => {
+      const r = spawnSync(
+        process.env.NODE ?? "node",
+        ["--input-type=module", "-e", code],
+        { cwd: pkg, encoding: "utf8" }
+      )
+      return `${r.stdout}${r.stderr}`.trim()
+    }
 
-  it.each(["index", "marker", "react", "vue", "svelte", "scope"])("import('./%s.js') prints ok", (entry) => {
-    expect(node(`await import("./${entry}.js"); console.log("ok")`)).toBe("ok")
-  })
+    it.each(["index", "marker", "react", "vue", "svelte", "scope"])(
+      "import('./%s.js') prints ok",
+      (entry) => {
+        expect(node(`await import("./${entry}.js"); console.log("ok")`)).toBe(
+          "ok"
+        )
+      }
+    )
 
-  it("every export of the root entry is an inert no-op without a DOM", () => {
-    const code = `
+    it("every export of the root entry is an inert no-op without a DOM", () => {
+      const code = `
       const api = await import("./index.js")
       const checks = [
         typeof HTMLElement === "undefined" && !("__weftDevtoolsSSRGuard" in globalThis) && !("__weftDevtoolsNpm" in globalThis), // the guard leaves nothing behind
@@ -54,6 +77,7 @@ describe.runIf(process.env.WEFT_DEVTOOLS_PKG === "1")("the assembled package on 
       api.on("run", () => {})()
       console.log(checks.every(Boolean) ? "ok" : JSON.stringify(checks))
     `
-    expect(node(code)).toBe("ok")
-  })
-})
+      expect(node(code)).toBe("ok")
+    })
+  }
+)

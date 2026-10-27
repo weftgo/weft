@@ -460,33 +460,6 @@ export type StudioLink =
   | LiveLink
   | AgentsLink
 
-/** A whole, non-negative number, or undefined. */
-function ordinal(n: number | undefined): number | undefined {
-  return ordinalOf(n)
-}
-
-/** runLink is a run page: the run, and optionally the step (its
- * ordinal), the call or span selected, the view, the scale and the
- * replay position — runPage's keys, then the raw view's and the replay
- * drawer's. */
-export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
-  const link = runPage(id, opts)
-  const search = link.search
-  if (opts.raw) {
-    const raw = rawSearch(opts.raw)
-    if (raw.q !== undefined) search.q = raw.q
-    if (raw.hide !== undefined) search.hide = raw.hide
-    if (raw.ev !== undefined) search.ev = raw.ev
-  }
-  if (opts.replay) {
-    const r = replaySearch(opts.replay)
-    search.replay = r.replay
-    search.from = r.from
-    if (r.of) search.of = r.of
-  }
-  return link
-}
-
 /** runsParam is ?b= for these ids: one comma list, or the array when
  * an id holds a comma (a comma list would split it). */
 export function runsParam(b: string[]): string | string[] {
@@ -547,6 +520,33 @@ function searchValue(v: unknown): string {
     }
   }
   return typeof v === "object" ? JSON.stringify(v) : String(v)
+}
+
+/** A whole, non-negative number, or undefined. */
+function ordinal(n: number | undefined): number | undefined {
+  return ordinalOf(n)
+}
+
+/** runLink is a run page: the run, and optionally the step (its
+ * ordinal), the call or span selected, the view, the scale and the
+ * replay position — runPage's keys, then the raw view's and the replay
+ * drawer's. */
+export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
+  const link = runPage(id, opts)
+  const search = link.search
+  if (opts.raw) {
+    const raw = rawSearch(opts.raw)
+    if (raw.q !== undefined) search.q = raw.q
+    if (raw.hide !== undefined) search.hide = raw.hide
+    if (raw.ev !== undefined) search.ev = raw.ev
+  }
+  if (opts.replay) {
+    const r = replaySearch(opts.replay)
+    search.replay = r.replay
+    search.from = r.from
+    if (r.of) search.of = r.of
+  }
+  return link
 }
 
 /** href is a link as an absolute URL under a Studio base (the panel's
@@ -684,6 +684,78 @@ export function runtimesLink(
   search: { runtime?: string; agent?: string } = {}
 ): RuntimesLink {
   return { to: "/runtimes", search }
+}
+
+/** playgroundLink is the playground with the hand-off carried over
+ * (in the fragment). An empty hand-off is the bare playground. */
+export function playgroundLink(
+  handoff: PlaygroundHandoff = {}
+): PlaygroundLink {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(handoff) as [
+    keyof PlaygroundHandoff,
+    unknown,
+  ][]) {
+    if (v === undefined || v === "") continue
+    if (k === "step" && ordinal(v as number) === undefined) continue
+    p.set(k, String(v))
+  }
+  const hash = p.toString()
+  return hash
+    ? { to: "/playground", search: {}, hash }
+    : { to: "/playground", search: {} }
+}
+
+/** compareLink is the step-aligned compare of a base run with others
+ * (rows by step ordinal; N-way is N−1 diffs against a), optionally
+ * landing on one step (its ordinal). Empty ids and the base itself are
+ * dropped from others, duplicates kept once; they go as one comma list
+ * (UX-F-30), never a JSON array. */
+export function compareLink(
+  a: string,
+  others: string[] = [],
+  step?: number
+): CompareLink {
+  const b = [...new Set(others.filter((x) => x && x !== a))]
+  const search: CompareSearch = { a }
+  if (b.length) search.b = runsParam(b)
+  const n = ordinal(step)
+  if (n !== undefined) search.step = n
+  return { to: "/compare", search }
+}
+
+/** Search keys a copied link never carries: credentials, a panel
+ * scope string, and prompt text (a playground hand-off's input=,
+ * instructions=, edits= — tool results and user words — and lab=,
+ * which an old or hand-built link may still carry in its query; the
+ * hand-off rides the fragment).
+ * Studio's own pages strip a handed-over token on arrival (adoptTokenFromLocation); this is the second wall, so a
+ * "copy link" can never leak one. */
+const STRIPPED_KEYS = [
+  "token",
+  "access_token",
+  "sig",
+  "weft_scope",
+  "input",
+  "instructions",
+  "edits",
+  "lab",
+]
+
+/**
+ * canonical is the page's link as a reader copies it (G2's copy link):
+ * the absolute URL with its search — every bit of page state — and
+ * without a fragment (a hand-off or a token, never page state) or a
+ * credential key. A copied link is the bare page URL: never a token,
+ * never a panel scope string, never prompt text.
+ */
+export function canonical(url: string | URL): string {
+  const u = new URL(url)
+  u.hash = ""
+  // Only a present key is deleted: a delete re-serializes the query.
+  for (const k of STRIPPED_KEYS)
+    if (u.searchParams.has(k)) u.searchParams.delete(k)
+  return u.toString()
 }
 
 /** conversationLink is a public id's conversation page (U16): every
@@ -849,26 +921,6 @@ export function playgroundShareLink(state: string): PlaygroundLink {
   return { to: "/playground", search: {}, hash: `state=${state}` }
 }
 
-/** playgroundLink is the playground with the hand-off carried over
- * (in the fragment). An empty hand-off is the bare playground. */
-export function playgroundLink(
-  handoff: PlaygroundHandoff = {}
-): PlaygroundLink {
-  const p = new URLSearchParams()
-  for (const [k, v] of Object.entries(handoff) as [
-    keyof PlaygroundHandoff,
-    unknown,
-  ][]) {
-    if (v === undefined || v === "") continue
-    if (k === "step" && ordinal(v as number) === undefined) continue
-    p.set(k, String(v))
-  }
-  const hash = p.toString()
-  return hash
-    ? { to: "/playground", search: {}, hash }
-    : { to: "/playground", search: {} }
-}
-
 /** liveLink is the live page filtered (?q=) and narrowed to one agent. */
 export function liveLink(
   search: { q?: string; agent?: string } = {}
@@ -882,58 +934,6 @@ export function liveLink(
 /** agentsLink is the agents page with one agent's card opened. */
 export function agentsLink(agent?: string): AgentsLink {
   return { to: "/agents", search: agent ? { agent } : {} }
-}
-
-/** compareLink is the step-aligned compare of a base run with others
- * (rows by step ordinal; N-way is N−1 diffs against a), optionally
- * landing on one step (its ordinal). Empty ids and the base itself are
- * dropped from others, duplicates kept once; they go as one comma list
- * (UX-F-30), never a JSON array. */
-export function compareLink(
-  a: string,
-  others: string[] = [],
-  step?: number
-): CompareLink {
-  const b = [...new Set(others.filter((x) => x && x !== a))]
-  const search: CompareSearch = { a }
-  if (b.length) search.b = runsParam(b)
-  const n = ordinal(step)
-  if (n !== undefined) search.step = n
-  return { to: "/compare", search }
-}
-
-/** Search keys a copied link never carries: credentials, a panel
- * scope string, and prompt text (a playground hand-off's input=,
- * instructions=, edits= — tool results and user words — and lab=,
- * which an old or hand-built link may still carry in its query; the
- * hand-off rides the fragment).
- * Studio's own pages strip a handed-over token on arrival (adoptTokenFromLocation); this is the second wall, so a
- * "copy link" can never leak one. */
-const STRIPPED_KEYS = [
-  "token",
-  "access_token",
-  "sig",
-  "weft_scope",
-  "input",
-  "instructions",
-  "edits",
-  "lab",
-]
-
-/**
- * canonical is the page's link as a reader copies it (G2's copy link):
- * the absolute URL with its search — every bit of page state — and
- * without a fragment (a hand-off or a token, never page state) or a
- * credential key. A copied link is the bare page URL: never a token,
- * never a panel scope string, never prompt text.
- */
-export function canonical(url: string | URL): string {
-  const u = new URL(url)
-  u.hash = ""
-  // Only a present key is deleted: a delete re-serializes the query.
-  for (const k of STRIPPED_KEYS)
-    if (u.searchParams.has(k)) u.searchParams.delete(k)
-  return u.toString()
 }
 
 // ── Save as test (plan F6) ──────────────────────────────────────────

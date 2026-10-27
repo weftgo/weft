@@ -322,6 +322,31 @@ describe("the sessions list", () => {
     expect(document.querySelector("[data-cost-cell]")).toBeNull()
   })
 
+  it("UX-H-07: an unknown session figure with a priced part reads the panel header's words, the reason its title", async () => {
+    const sessions = golden<SessionsPage>("sessions")
+    const reason =
+      "1 of 2 turns' cost not known (the stock spans report no (or zero) usage (gen_ai.usage.* absent or 0 on the root and its chat spans): the cost is unknown)"
+    const partial = {
+      ...sessions.sessions[0],
+      cost_usd: null,
+      cost_known: false,
+      cost_badge: "unknown" as const,
+      cost_reason: reason,
+      cost_partial: { usd: 0.0029, priced: 1, of: 2 },
+    }
+    studio.on("GET meta", meta(["pricing"])).on("GET sessions", {
+      ...sessions,
+      sessions: [partial, sessions.sessions[1]],
+    })
+    renderApp("/sessions")
+    await screen.findByText("s_orders")
+    const cell = document.querySelectorAll("[data-cost-cell]")[0]
+    expect(visible(cell)).toBe("≥ $0.0029 · 1 of 2 turns priced")
+    expect(cell.querySelector("[data-cost]")!.getAttribute("title")).toBe(
+      reason
+    )
+  })
+
   it("U7: the cost cell is a number or —; the unpriced turns are said once over the list, with the pricing link", async () => {
     const sessions = golden<SessionsPage>("sessions")
     const unpriced = {

@@ -91,6 +91,7 @@ import { ForkOfLine } from "@/components/studio/fork-of"
 import { LineageLine } from "@/components/studio/lineage"
 import { Cost, CostText, useCostCapable } from "@/components/studio/cost"
 import { HoleBadge } from "@/components/studio/hole-badge"
+import { DERIVED_HOLE, DERIVED_WORDS } from "@/lib/honesty"
 import { THREAD_LINK, STATUS_TEXT } from "@/lib/status-class"
 import { AWAITING_TITLE, DECIDE } from "@/lib/session-states"
 import { SessionCounts } from "@/components/studio/session-state"
@@ -291,6 +292,13 @@ function SessionPage() {
             <TitleText t={sessionTitle(s, turns[0])} />
           </h1>
           <IdChip id={s.id} noun="session id" />
+          {/* A stock OTel conversation (UX-H-35): its turns are derived
+              runs, numbered by start order. */}
+          {s.derived ? (
+            <span data-session-derived>
+              <HoleBadge {...DERIVED_HOLE} label={DERIVED_WORDS.session} />
+            </span>
+          ) : null}
           {lineage ? (
             <LineageLine
               lineage={lineage}

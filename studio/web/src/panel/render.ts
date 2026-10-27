@@ -43,6 +43,41 @@ export function el(
   return n
 }
 
+/** option appends one <option> to sel and returns it: its words, its
+ * attributes in the order given (value among them), and — when given —
+ * its selectedness, set before it joins the list. */
+export function option(
+  sel: HTMLElement,
+  text: string,
+  attrs: Record<string, string>,
+  selected?: boolean
+): HTMLOptionElement {
+  const o = el("option", "", text, attrs) as HTMLOptionElement
+  if (selected !== undefined) o.selected = selected
+  sel.append(o)
+  return o
+}
+
+/** clear removes a node's children in one go. */
+export function clear(n: HTMLElement): HTMLElement {
+  while (n.firstChild) n.removeChild(n.firstChild)
+  return n
+}
+
+/** fmtArgs renders a tool call's arguments: parsed JSON when the call
+ * executed with structured args, the streamed fragment while it is
+ * still being written, "…" when nothing is known yet. */
+export function fmtArgs(args: unknown, streamed: string): string {
+  if (args !== undefined && args !== null) {
+    try {
+      return JSON.stringify(args)
+    } catch {
+      return String(args)
+    }
+  }
+  return streamed || "…"
+}
+
 /** on attaches a handler the patch carries to the node kept on
  * screen; the handler gets that live node, never a discarded build. */
 export function on(
@@ -132,41 +167,6 @@ const keyOf = (n: Node) =>
 const like = (a: Node, b: Node) =>
   a.nodeName === b.nodeName && keyOf(a) === keyOf(b)
 const cls = (n: Node) => (n.nodeType === 1 ? (n as Element).className : "")
-
-/** option appends one <option> to sel and returns it: its words, its
- * attributes in the order given (value among them), and — when given —
- * its selectedness, set before it joins the list. */
-export function option(
-  sel: HTMLElement,
-  text: string,
-  attrs: Record<string, string>,
-  selected?: boolean
-): HTMLOptionElement {
-  const o = el("option", "", text, attrs) as HTMLOptionElement
-  if (selected !== undefined) o.selected = selected
-  sel.append(o)
-  return o
-}
-
-/** clear removes a node's children in one go. */
-export function clear(n: HTMLElement): HTMLElement {
-  while (n.firstChild) n.removeChild(n.firstChild)
-  return n
-}
-
-/** fmtArgs renders a tool call's arguments: parsed JSON when the call
- * executed with structured args, the streamed fragment while it is
- * still being written, "…" when nothing is known yet. */
-export function fmtArgs(args: unknown, streamed: string): string {
-  if (args !== undefined && args !== null) {
-    try {
-      return JSON.stringify(args)
-    } catch {
-      return String(args)
-    }
-  }
-  return streamed || "…"
-}
 
 /** stringify is JSON.stringify with its honest type: undefined for a
  * value JSON cannot carry (undefined, a function, a symbol). */

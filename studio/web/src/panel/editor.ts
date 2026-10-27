@@ -20,6 +20,9 @@ import type { PreviewDoc } from "../lib/preview"
 import { badge } from "./badges"
 import { el, on } from "./render"
 
+const line = (cls: string, text: string, attrs: Record<string, string>) =>
+  el("div", cls, text, attrs)
+
 /** marksBlock is a replayed run's weft.edits read back (Studio's
  * EditsMark): none on a child run, which inherits its parent's. */
 export function marksBlock(
@@ -77,9 +80,6 @@ export interface PanelPreview {
   /** The draft changed and its answer is not in yet: Run waits. */
   pending?: boolean
 }
-
-const line = (cls: string, text: string, attrs: Record<string, string>) =>
-  el("div", cls, text, attrs)
 
 /** editList is the drawer's list of the command's edits by kind, each
  * droppable (Studio's EditList). */

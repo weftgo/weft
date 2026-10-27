@@ -10,6 +10,7 @@ import {
   COST_PARTS,
   costView,
   delegatedView,
+  partialView,
   SCRIPTED_HINT,
   scriptedChip,
   unpricedLine,
@@ -138,15 +139,19 @@ export function Cost({
   className,
   label,
   chip,
+  noun,
 }: {
   fields: CostFields | null | undefined
   className?: string
   label?: string
   chip?: boolean
+  /** A set's part ("turn", "run"): an unknown set figure with a priced
+   * part reads "≥ $x · k of n turns priced" (UX-H-07). */
+  noun?: string
 }) {
   return (
     <CostText
-      v={costView(fields)}
+      v={partialView(fields, noun) ?? costView(fields)}
       className={className}
       label={label}
       chip={chip}

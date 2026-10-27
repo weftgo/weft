@@ -146,23 +146,6 @@ export function dominantKind(kinds: EventKind[]): EventKind {
   return best
 }
 
-/** clip is s on one line (whitespace runs one space), cut to n
- * characters with "…"; "" for a non-string. */
-export function clip(s: unknown, n: number): string {
-  if (typeof s !== "string") return ""
-  const one = s.replace(/\s+/g, " ").trim()
-  return one.length > n ? `${one.slice(0, n - 1)}…` : one
-}
-
-function short(v: unknown, n: number): string {
-  if (v === undefined) return ""
-  try {
-    return clip(JSON.stringify(v), n)
-  } catch {
-    return ""
-  }
-}
-
 export const bytes = (n: number): string => byteSize(n)
 
 /** The event's type name as the wire spells it. */
@@ -384,8 +367,38 @@ export interface SentFacts {
   catalogChanged?: boolean
 }
 
+function short(v: unknown, n: number): string {
+  if (v === undefined) return ""
+  try {
+    return clip(JSON.stringify(v), n)
+  } catch {
+    return ""
+  }
+}
+
+/** thenLine is what came after the step: the next step, or how the
+ * run ended there (lib/stopped-by.ts's end card, at this step). */
+export function thenLine(
+  step: AnswerStep,
+  run: AnswerRun,
+  hasNext: boolean
+): string {
+  if (hasNext) return `→ step ${step.index + 1}`
+  if (run.status === "running") return "running…"
+  // The last step drawn is where the run ended: its end card names it.
+  return endCard(run, step.index) ?? `■ ${run.status || "ended"}`
+}
+
 export const SENT_NOT_RECORDED = "— no request record for this step"
 export const SENT_UNCHANGED = "unchanged since the step before"
+
+/** clip is s on one line (whitespace runs one space), cut to n
+ * characters with "…"; "" for a non-string. */
+export function clip(s: unknown, n: number): string {
+  if (typeof s !== "string") return ""
+  const one = s.replace(/\s+/g, " ").trim()
+  return one.length > n ? `${one.slice(0, n - 1)}…` : one
+}
 
 /** repliedLine is the model's reply in a line: its words, the calls it
  * asked for, or why there is none. */
@@ -440,19 +453,6 @@ export function toolsLine(
 /** A max_tokens step's calls (rule 11): counted apart, never as
  * "never finished" — the loop chose not to run them. */
 export const NOT_EXECUTED = "not executed"
-
-/** thenLine is what came after the step: the next step, or how the
- * run ended there (lib/stopped-by.ts's end card, at this step). */
-export function thenLine(
-  step: AnswerStep,
-  run: AnswerRun,
-  hasNext: boolean
-): string {
-  if (hasNext) return `→ step ${step.index + 1}`
-  if (run.status === "running") return "running…"
-  // The last step drawn is where the run ended: its end card names it.
-  return endCard(run, step.index) ?? `■ ${run.status || "ended"}`
-}
 
 /** sentLine is "5 messages (1 new) · 1 tool offered · unchanged since
  * the step before" — or the marks the step carries, which the Request

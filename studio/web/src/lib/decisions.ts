@@ -11,6 +11,60 @@ import type { DecidedCall, DecisionDoc, SessionMark } from "./api"
 import { absoluteTime, clockTime, plural, spanMs } from "./format"
 import type { TONE } from "./palette"
 
+/** expiryText is expiryWords' words and state without the hover, which
+ * the panel takes from expiryTitle beside them. lapsed is thread's rule
+ * (approval.go: now.After(expiry)): at the stamp itself it is still
+ * open. */
+export function expiryText(
+  expiry: string,
+  now: number
+): { text: string; lapsed: boolean } {
+  const at = Date.parse(expiry)
+  const lapsed = at < now
+  const hms = clockTime(expiry, false)
+  return {
+    text: lapsed
+      ? `⏱ expired ${hms} — denied at the next touch (lazy expiry)`
+      : `expires ${hms} (in ${spanMs(at - now)})`,
+    lapsed,
+  }
+}
+
+/** expiryNext is how long until an expiry's words next change (ms),
+ * the instant it lapses included; 0 once lapsed (no clock). What
+ * spanMs prints of the remainder r: from an hour on h:mm, the minute
+ * dropping as the rounded seconds cross one (59m59s at 3,599,499 ms) —
+ * the clock waits for it; below, m:ss and then tenths of a second,
+ * redrawn once a second as Studio's clock ticks: on the rounding edge
+ * of each second (m:ss), on its whole tenth (n.0s) under a minute. */
+export function expiryNext(expiry: string, now: number): number {
+  const r = Date.parse(expiry) - now
+  return r < 0
+    ? 0
+    : Math.min(
+        r + 1,
+        ((r + (r < 59_950 ? 950 : 500)) % (r < 3_599_500 ? 1e3 : 6e4)) + 1
+      )
+}
+
+/** decisionWords is decisionLine without the turn (the devtools
+ * panel draws that one as its own button). */
+export function decisionWords(c: DecidedCall, d: DecisionDoc): string {
+  const o = outcomeOf(c.outcome)
+  const who = decider(c, d)
+  const parts = c.approved_by
+    ? [
+        `${o.icon} ${o.word}${who && ` by ${who}`}`,
+        `${OUTCOME.approved.word} by ${c.approved_by}`,
+      ]
+    : [`${o.icon} ${o.word}`, who]
+  // An expired row says "expired" once: thread's reason opens with it.
+  const why =
+    c.outcome === "expired" ? c.reason?.replace(/^expired: /, "") : c.reason
+  if (why) parts.push(`'${why}'`)
+  return parts.filter(Boolean).join(" · ")
+}
+
 /** The three decision verbs, as every button and toast says them. */
 export const VERB = {
   approve: "approve",
@@ -29,6 +83,33 @@ export const VERB_TITLE: Record<Verb, string> = {
 
 /** The live page's word on a parked run's cancel cell. */
 export const PARKED_LIVE = `a parked run is over until its pending calls are decided: ${VERB.approve}, ${VERB.deny} or ${VERB.resolve} on its page`
+
+/** The decider a call names: thread's who, else the signing key, else
+ * the resume's one actor (weft.approval.actor — several are the run's,
+ * not this call's; nor is it a split verdict's denier, or a decider the
+ * server hid). "" when nothing names one. */
+export function decider(c: DecidedCall, d: DecisionDoc): string {
+  return (
+    c.who ||
+    c.key_id ||
+    (d.actor && !d.actor.includes(",") && !c.who_hidden && !c.approved_by
+      ? d.actor
+      : "")
+  )
+}
+
+/** One decided call's line: "✋ denied · agent-7 · 'need a photo' → t2"
+ * — the outcome, the decider, a denial's reason (quoted; absent when
+ * hidden or not captured: the badge says that) and, given, the turn the
+ * decision resumed in. A split verdict names both sides: "✋ denied by
+ * bob · approved by alice". */
+export function decisionLine(
+  c: DecidedCall,
+  d: DecisionDoc,
+  to?: string
+): string {
+  return decisionWords(c, d) + (to ? ` → ${to}` : "")
+}
 
 /** The one field beside the verbs: a resolve's result, a deny's reason. */
 export const DECIDE_FIELD = "result to resolve with · reason to deny"
@@ -142,33 +223,6 @@ export const RUN_MARKS_HOLE = {
   fix: "page the rest: GET /api/sessions/{id}/entries?run=<run>&offset=1000",
 }
 
-/** The decider a call names: thread's who, else the signing key, else
- * the resume's one actor (weft.approval.actor — several are the run's,
- * not this call's; nor is it a split verdict's denier, or a decider the
- * server hid). "" when nothing names one. */
-export function decider(c: DecidedCall, d: DecisionDoc): string {
-  return (
-    c.who ||
-    c.key_id ||
-    (d.actor && !d.actor.includes(",") && !c.who_hidden && !c.approved_by
-      ? d.actor
-      : "")
-  )
-}
-
-/** One decided call's line: "✋ denied · agent-7 · 'need a photo' → t2"
- * — the outcome, the decider, a denial's reason (quoted; absent when
- * hidden or not captured: the badge says that) and, given, the turn the
- * decision resumed in. A split verdict names both sides: "✋ denied by
- * bob · approved by alice". */
-export function decisionLine(
-  c: DecidedCall,
-  d: DecisionDoc,
-  to?: string
-): string {
-  return decisionWords(c, d) + (to ? ` → ${to}` : "")
-}
-
 /** How and when: "via signed · key k_alice · grant e_… · <time>" — the
  * decision's own time when a record names one, else the resume's start;
  * time the surface's clock (Studio's absoluteTime, local with its zone;
@@ -258,49 +312,6 @@ export function withoutDecided<
 export const decidedCall = (d: DecisionDoc | undefined, id?: string) =>
   d?.calls.find((c) => c.call_id === id)
 
-/** decisionWords is decisionLine without the turn (the devtools
- * panel draws that one as its own button). */
-export function decisionWords(c: DecidedCall, d: DecisionDoc): string {
-  const o = outcomeOf(c.outcome)
-  const who = decider(c, d)
-  const parts = c.approved_by
-    ? [
-        `${o.icon} ${o.word}${who && ` by ${who}`}`,
-        `${OUTCOME.approved.word} by ${c.approved_by}`,
-      ]
-    : [`${o.icon} ${o.word}`, who]
-  // An expired row says "expired" once: thread's reason opens with it.
-  const why =
-    c.outcome === "expired" ? c.reason?.replace(/^expired: /, "") : c.reason
-  if (why) parts.push(`'${why}'`)
-  return parts.filter(Boolean).join(" · ")
-}
-
-/** requestExpiries is each parked call's request expiry (UX-B-41):
- * the approval.request records filed under runID whose expiry field
- * (thread.RequestExpiry, RFC 3339) is set and parses, by call id — an
- * unparsable stamp is dropped here, for both surfaces, never drawn as
- * a clock that cannot lapse. Empty when the session's state log was
- * not read or no request has one. */
-export function requestExpiries(
-  marks: readonly SessionMark[],
-  runID: string
-): Map<string, string> {
-  const out = new Map<string, string>()
-  for (const m of marks) {
-    if (m.kind !== "approval.request" || m.run_id !== runID) continue
-    const call = m.fields.call_id
-    const exp = m.fields.expiry
-    if (
-      typeof call === "string" &&
-      typeof exp === "string" &&
-      !Number.isNaN(Date.parse(exp))
-    )
-      out.set(call, exp)
-  }
-  return out
-}
-
 /** The path of one run's own state-log marks, in one read (GET
  * /entries?run=, ≤ 1,000): lib/api.ts fetchRunMarks's and the panel's
  * request-expiry read. */
@@ -333,43 +344,32 @@ export function expiryWords(
   return { ...expiryText(expiry, now), title: expiryTitle(expiry) }
 }
 
-/** expiryText is expiryWords' words and state without the hover, which
- * the panel takes from expiryTitle beside them. lapsed is thread's rule
- * (approval.go: now.After(expiry)): at the stamp itself it is still
- * open. */
-export function expiryText(
-  expiry: string,
-  now: number
-): { text: string; lapsed: boolean } {
-  const at = Date.parse(expiry)
-  const lapsed = at < now
-  const hms = clockTime(expiry, false)
-  return {
-    text: lapsed
-      ? `⏱ expired ${hms} — denied at the next touch (lazy expiry)`
-      : `expires ${hms} (in ${spanMs(at - now)})`,
-    lapsed,
-  }
-}
-
 /** expiryTitle is the expiry's hover: the absolute stamp and the lazy
  * rule. */
 export const expiryTitle = (expiry: string) =>
   `the request expires ${absoluteTime(expiry)} (thread.RequestExpiry): an expired request is denied the next time the session is touched — a decide, a send, a resume — never on a timer`
 
-/** expiryNext is how long until an expiry's words next change (ms),
- * the instant it lapses included; 0 once lapsed (no clock). What
- * spanMs prints of the remainder r: from an hour on h:mm, the minute
- * dropping as the rounded seconds cross one (59m59s at 3,599,499 ms) —
- * the clock waits for it; below, m:ss and then tenths of a second,
- * redrawn once a second as Studio's clock ticks: on the rounding edge
- * of each second (m:ss), on its whole tenth (n.0s) under a minute. */
-export function expiryNext(expiry: string, now: number): number {
-  const r = Date.parse(expiry) - now
-  return r < 0
-    ? 0
-    : Math.min(
-        r + 1,
-        ((r + (r < 59_950 ? 950 : 500)) % (r < 3_599_500 ? 1e3 : 6e4)) + 1
-      )
+/** requestExpiries is each parked call's request expiry (UX-B-41):
+ * the approval.request records filed under runID whose expiry field
+ * (thread.RequestExpiry, RFC 3339) is set and parses, by call id — an
+ * unparsable stamp is dropped here, for both surfaces, never drawn as
+ * a clock that cannot lapse. Empty when the session's state log was
+ * not read or no request has one. */
+export function requestExpiries(
+  marks: readonly SessionMark[],
+  runID: string
+): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const m of marks) {
+    if (m.kind !== "approval.request" || m.run_id !== runID) continue
+    const call = m.fields.call_id
+    const exp = m.fields.expiry
+    if (
+      typeof call === "string" &&
+      typeof exp === "string" &&
+      !Number.isNaN(Date.parse(exp))
+    )
+      out.set(call, exp)
+  }
+  return out
 }

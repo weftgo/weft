@@ -153,6 +153,17 @@ export function targetCheck(f: TargetFacts): TargetCheck {
     : c("build", "", "", build)
 }
 
+/** The command's lifecycle as its result head says it: the run's
+ * status word (lib/status.ts) once the command finished — "failed",
+ * never "finished" over a failed run — "running" while accepted, else
+ * the command's own state (queued, rejected, lost). */
+export function outcomeWord(state: string, status?: string): string {
+  if (state === "finished" && status && status in STATUS)
+    return STATUS[status as keyof typeof STATUS].word
+  if (state === "accepted") return STATUS.running.word
+  return state
+}
+
 /** agentOptions lists every registered agent for the target picker,
  * those whose tool set is the recorded one first (UX-C-02). */
 export function agentOptions(
@@ -192,31 +203,6 @@ export const registers = (
 const targetKey = (f: TargetFacts) =>
   `${f.at}|${f.source}|${f.runtime}|${f.agent?.name}@${f.agent?.manifest_hash}`
 
-/** The command's lifecycle as its result head says it: the run's
- * status word (lib/status.ts) once the command finished — "failed",
- * never "finished" over a failed run — "running" while accepted, else
- * the command's own state (queued, rejected, lost). */
-export function outcomeWord(state: string, status?: string): string {
-  if (state === "finished" && status && status in STATUS)
-    return STATUS[status as keyof typeof STATUS].word
-  if (state === "accepted") return STATUS.running.word
-  return state
-}
-
-/** crossAgentOf says the body sends cross_agent: true — the reader
- * released a cross-agent hold under the target it has now. */
-export const crossAgentOf = (c: TargetCheck, escaped?: string): boolean =>
-  c.kind === "cross_agent" && escaped === c.key
-
-/** One agent a picker offers: its runtime, its name, and whether its
- * tools are the recorded ones. */
-export interface AgentOption {
-  runtime: string
-  agent: string
-  label: string
-  matches: boolean
-}
-
 /** recordedToolsOf reads the tool names the source step was offered:
  * the preview's was_sent (the record), else the step's catalog. */
 export function recordedToolsOf(
@@ -236,6 +222,20 @@ export function recordedToolsOf(
 /** The option value of a pick. */
 export const optionValue = (o: Pick<AgentOption, "runtime" | "agent">) =>
   `${o.runtime}\u0000${o.agent}`
+
+/** crossAgentOf says the body sends cross_agent: true — the reader
+ * released a cross-agent hold under the target it has now. */
+export const crossAgentOf = (c: TargetCheck, escaped?: string): boolean =>
+  c.kind === "cross_agent" && escaped === c.key
+
+/** One agent a picker offers: its runtime, its name, and whether its
+ * tools are the recorded ones. */
+export interface AgentOption {
+  runtime: string
+  agent: string
+  label: string
+  matches: boolean
+}
 
 /** toolsDiff is the recorded tool names against the registered ones:
  * what the build removed and added (null when the recording is

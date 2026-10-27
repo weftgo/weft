@@ -1102,3 +1102,35 @@ func TestPricingCasesShared(t *testing.T) {
 		}
 	}
 }
+
+// A set whose unknown turn is a derived run with no usage is "not
+// known", never "not known yet" (UX-H-07: it never becomes known), and
+// an unknown set figure carries its known part — what the panel's
+// header draws from its turns ("≥ $x · k of n turns priced").
+func TestTallyDerivedNeverAndPartial(t *testing.T) {
+	derived := runCost{id: "otel-x", own: cost{badge: costUnknown, reason: derivedUsageUnknown}, delegated: cost{known: true}}
+	priced := runCost{id: "r1", own: cost{known: true, usd: 0.00003}, delegated: cost{known: true}}
+	running := runCost{id: "r2", own: cost{badge: costUnknown, reason: "running: usage arrives at run end"}, delegated: cost{known: true}}
+
+	got := tally([]runCost{priced, derived}, "turn", false)
+	if want := "1 of 2 turns' cost not known (the stock spans"; got.known || !strings.HasPrefix(got.reason, want) {
+		t.Errorf("reason = %q, want prefix %q", got.reason, want)
+	}
+	f := got.fields()
+	if f.CostUSD != nil || f.CostPartial == nil || *f.CostPartial != (costPartial{USD: 0.00003, Priced: 1, Of: 2}) {
+		t.Errorf("fields = %+v (partial %+v), want cost_usd null and the partial 0.00003, 1 of 2", f, f.CostPartial)
+	}
+
+	// A running turn may still be priced: "yet" stays.
+	got = tally([]runCost{priced, derived, running}, "turn", false)
+	if want := "2 of 3 turns' cost not known yet ("; !strings.HasPrefix(got.reason, want) {
+		t.Errorf("reason = %q, want prefix %q", got.reason, want)
+	}
+	// No part priced: no partial; a known figure: none either.
+	if f := tally([]runCost{derived}, "turn", false).fields(); f.CostPartial != nil {
+		t.Errorf("no part priced: partial = %+v, want none", f.CostPartial)
+	}
+	if f := tally([]runCost{priced}, "turn", false).fields(); f.CostPartial != nil || !f.CostKnown {
+		t.Errorf("all priced: %+v, want known and no partial", f)
+	}
+}

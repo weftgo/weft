@@ -19,48 +19,6 @@ export interface AttemptFacts {
   answered?: string
 }
 
-/** attemptsHole is a finished step's not_recorded hole when it was
- * written by a weft before attempt reporting: no step_finish latency
- * (every A4 step_finish carries one, rounded up, never 0) and no
- * attempt rows. The reason says what the client checked; the fix is
- * the shared table's. Null otherwise. */
-export function attemptsHole(
-  finish: { latencyMs?: number } | undefined,
-  rows: number
-): { hole: "not_recorded"; reason: string } | null {
-  if (finish === undefined || finish.latencyMs || rows !== 0) return null
-  return {
-    hole: "not_recorded",
-    reason:
-      "this step's step_finish has no timing and its request record no attempt rows: it was recorded by a weft before attempt reporting (A4)",
-  }
-}
-
-/** attemptLayer is an attempt span's weft.attempt.layer — the run's
- * span for that step and attempt — what the attempts lists label
- * "fallback" when the step route (StepAttempt.layer) is not what they
- * draw from. */
-export function attemptLayer(
-  spans: { name: string; attrs: Record<string, unknown> }[] | null | undefined,
-  runId: string,
-  step: number,
-  n: number
-): string | undefined {
-  return spans?.find(
-    ({ name, attrs: a }) =>
-      name === "attempt" &&
-      a["weft.run.id"] === runId &&
-      a["weft.step.index"] === step &&
-      a["weft.attempt.index"] === n
-  )?.attrs["weft.attempt.layer"] as string | undefined
-}
-
-/** The request-record row's fields the line reads (RequestRow's). */
-interface RowLike {
-  attempt: number
-  body: { model: { name?: string } }
-}
-
 /** attemptLine is the header's words: "attempt 4 of 4 · fallback to
  * glm-b" when the answering attempt is not the first — "· retry" when
  * the same model answered, "· fallback to X" when another did — and
@@ -143,9 +101,47 @@ export function factsFromRows(
   }
 }
 
-/** msText is a measured interval as the timing line says it: "180 ms",
- * "1.2 s", "1m03s" — lib/format.ts's spanMs, the one format (UX-F-16). */
-export const msText = spanMs
+/** attemptsHole is a finished step's not_recorded hole when it was
+ * written by a weft before attempt reporting: no step_finish latency
+ * (every A4 step_finish carries one, rounded up, never 0) and no
+ * attempt rows. The reason says what the client checked; the fix is
+ * the shared table's. Null otherwise. */
+export function attemptsHole(
+  finish: { latencyMs?: number } | undefined,
+  rows: number
+): { hole: "not_recorded"; reason: string } | null {
+  if (finish === undefined || finish.latencyMs || rows !== 0) return null
+  return {
+    hole: "not_recorded",
+    reason:
+      "this step's step_finish has no timing and its request record no attempt rows: it was recorded by a weft before attempt reporting (A4)",
+  }
+}
+
+/** attemptLayer is an attempt span's weft.attempt.layer — the run's
+ * span for that step and attempt — what the attempts lists label
+ * "fallback" when the step route (StepAttempt.layer) is not what they
+ * draw from. */
+export function attemptLayer(
+  spans: { name: string; attrs: Record<string, unknown> }[] | null | undefined,
+  runId: string,
+  step: number,
+  n: number
+): string | undefined {
+  return spans?.find(
+    ({ name, attrs: a }) =>
+      name === "attempt" &&
+      a["weft.run.id"] === runId &&
+      a["weft.step.index"] === step &&
+      a["weft.attempt.index"] === n
+  )?.attrs["weft.attempt.layer"] as string | undefined
+}
+
+/** The request-record row's fields the line reads (RequestRow's). */
+interface RowLike {
+  attempt: number
+  body: { model: { name?: string } }
+}
 
 /** timingLine is the step's latency and TTFT: "1.2 s · first token
  * 180 ms", both surfaces (FIRST_TOKEN, U21.1). An absent value is not
@@ -200,3 +196,7 @@ export function relMs(
   if (!Number.isFinite(a) || !Number.isFinite(b)) return null
   return `+${msText(Math.max(0, a - b))}`
 }
+
+/** msText is a measured interval as the timing line says it: "180 ms",
+ * "1.2 s", "1m03s" — lib/format.ts's spanMs, the one format (UX-F-16). */
+export const msText = spanMs

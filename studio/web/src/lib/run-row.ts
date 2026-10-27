@@ -14,47 +14,6 @@ import type { Status, StatusRow } from "./status"
 import { shortId } from "./title"
 import type { RunRow } from "./api"
 
-/** The run an experiment was forked from, and the step it continued
- * at: forked_from is "<run id>#<from_step>". A run id may itself hold
- * a "#", so the step is whatever follows the LAST one. */
-export function forkSource(row: Pick<RunRow, "forked_from">): {
-  runID: string
-  fromStep: number
-} | null {
-  const ff = row.forked_from
-  if (!ff) return null
-  const i = ff.lastIndexOf("#")
-  if (i < 0) return { runID: ff, fromStep: 0 }
-  const step = Number(ff.slice(i + 1))
-  if (!Number.isInteger(step) || step < 0) return { runID: ff, fromStep: 0 }
-  return { runID: ff.slice(0, i), fromStep: step }
-}
-
-/** The lineage glyphs: ↻ a replay (a playground run of a source run),
- * ⑃ a thread fork's run (a session continued from an entry). */
-export const LINEAGE_GLYPH = { replay: "↻", fork: "⑃" } as const
-
-/** One lineage chip: its kind, its words, its hover (the attribute it
- * is read from), and for a replay the source run and step it links to. */
-export interface Lineage {
-  kind: "replay" | "fork" | "experiment"
-  text: string
-  title: string
-  src?: string
-  step?: number
-}
-
-/** sourceLabel names a source run: t<n> when the rows hold it with a
- * turn (or its id is a thread turn's, <session>-t<n>), else its short
- * id (lib/title.ts) — the same on both surfaces. */
-export function sourceLabel(
-  id: string,
-  runs?: readonly { id: string; turn?: number }[] | null
-): string {
-  const n = runs?.find((x) => x.id === id)?.turn || /-t(\d+)$/.exec(id)?.[1]
-  return n ? `t${n}` : shortId(id)
-}
-
 /** lineageOf is a run's lineage chips, in order: the thread fork its
  * session continues ("⑃ fork of s_01#12"), the replay it is ("↻ replay
  * of t3 · step 1"), else an experiment with no source ("experiment"). */
@@ -121,4 +80,45 @@ export function rowView(
     engine: scriptedChip(r),
     lineage: lineageOf(r, runs),
   }
+}
+
+/** The run an experiment was forked from, and the step it continued
+ * at: forked_from is "<run id>#<from_step>". A run id may itself hold
+ * a "#", so the step is whatever follows the LAST one. */
+export function forkSource(row: Pick<RunRow, "forked_from">): {
+  runID: string
+  fromStep: number
+} | null {
+  const ff = row.forked_from
+  if (!ff) return null
+  const i = ff.lastIndexOf("#")
+  if (i < 0) return { runID: ff, fromStep: 0 }
+  const step = Number(ff.slice(i + 1))
+  if (!Number.isInteger(step) || step < 0) return { runID: ff, fromStep: 0 }
+  return { runID: ff.slice(0, i), fromStep: step }
+}
+
+/** The lineage glyphs: ↻ a replay (a playground run of a source run),
+ * ⑃ a thread fork's run (a session continued from an entry). */
+export const LINEAGE_GLYPH = { replay: "↻", fork: "⑃" } as const
+
+/** One lineage chip: its kind, its words, its hover (the attribute it
+ * is read from), and for a replay the source run and step it links to. */
+export interface Lineage {
+  kind: "replay" | "fork" | "experiment"
+  text: string
+  title: string
+  src?: string
+  step?: number
+}
+
+/** sourceLabel names a source run: t<n> when the rows hold it with a
+ * turn (or its id is a thread turn's, <session>-t<n>), else its short
+ * id (lib/title.ts) — the same on both surfaces. */
+export function sourceLabel(
+  id: string,
+  runs?: readonly { id: string; turn?: number }[] | null
+): string {
+  const n = runs?.find((x) => x.id === id)?.turn || /-t(\d+)$/.exec(id)?.[1]
+  return n ? `t${n}` : shortId(id)
 }

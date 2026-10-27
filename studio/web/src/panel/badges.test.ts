@@ -434,6 +434,10 @@ describe("no panel-only badge strings", () => {
       "BUSY_CAUSE — thread's cancel cause, matched to word a busy-policy end (U16), not the hole",
     "turn-chips:the session was compacted after this turn":
       "TURN_CHIP.compactedTitle — the turn list's ⌗ chip (U16), not the hole",
+    "edits:fed the compacted view #":
+      "replayViewWords — the run header's replay sentence (UX-S5b-04): weft.replay.view in words, not the hole; Studio only (tree-shaken from the panel)",
+    "edits:prefix derived":
+      "replayViewWords — weft.replay.view derived in words (UX-S5b-04); the run header's derived badge is the hole",
     "experiment-body:max_tokens must be ":
       "labOverrides — both drawers' option lab (plan F3): the server's refusal, naming the param, not the hole",
   }
@@ -464,6 +468,7 @@ describe("no panel-only badge strings", () => {
   // one of these, by what its line says — none of them a hole.
   const NON_HOLE_BADGES = [
     "element.ts|⚠", // a tool's side-effect class (the drawer)
+    "element.ts|NEEDS_APPROVAL", // a RequireApproval tool (the drawer, UX-H-22)
     "element.ts|DONE[decided", // the decision taken on a parked call (lib/decisions.ts DONE)
     'element.ts|"parked"', // a parked call (approvals, read-only)
     "element.ts|data-weft-attempts", // the attempt line (lib/attempts)

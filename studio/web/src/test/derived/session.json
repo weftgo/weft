@@ -30,7 +30,7 @@
       "service": "py-support",
       "session_id": "conv_7f3a",
       "public_id": "",
-      "turn": 0,
+      "turn": 1,
       "playground": false,
       "experiment_id": "",
       "forked_from": "",
@@ -77,7 +77,7 @@
       "service": "py-support",
       "session_id": "conv_7f3a",
       "public_id": "",
-      "turn": 0,
+      "turn": 2,
       "playground": false,
       "experiment_id": "",
       "forked_from": "",
@@ -109,5 +109,6 @@
       "requests_badge": "derived",
       "derived": true
     }
-  ]
+  ],
+  "derived": true
 }

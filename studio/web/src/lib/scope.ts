@@ -27,34 +27,6 @@ export interface Scope {
   tags?: Record<string, string>
 }
 
-/** The optional fields, in their serialised order (the tags after). */
-const KEYS = ["session", "flow", "run", "agent"] as const
-
-/** enc percent-encodes a value; a string encodeURIComponent refuses
- * (a lone surrogate) has only the marker's own delimiters and the
- * control characters (below U+0020, and U+007F) encoded — the marker
- * is set inside a host's ref or action, where a throw would be the
- * host's, and a raw CR/LF must never reach a Weft-Scope header (the
- * Go side's fallback, scope.String, does the same). */
-const enc = (v: string) => {
-  try {
-    return encodeURIComponent(v)
-  } catch {
-    return v.replace(
-      // eslint-disable-next-line no-control-regex
-      /[%;=\x00-\x1f\x7f]/g,
-      (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`
-    )
-  }
-}
-const dec = (v: string) => {
-  try {
-    return decodeURIComponent(v)
-  } catch {
-    return v
-  }
-}
-
 /** serializeScope is the marker's string form: publicId first, then
  * session=, flow=, run=, agent= for each one set and tag.<k>=<v> per
  * tag in key order (empty counts as unset). */
@@ -109,4 +81,32 @@ export function parseScope(str: string): Scope {
     }
   }
   return out
+}
+
+/** The optional fields, in their serialised order (the tags after). */
+const KEYS = ["session", "flow", "run", "agent"] as const
+
+/** enc percent-encodes a value; a string encodeURIComponent refuses
+ * (a lone surrogate) has only the marker's own delimiters and the
+ * control characters (below U+0020, and U+007F) encoded — the marker
+ * is set inside a host's ref or action, where a throw would be the
+ * host's, and a raw CR/LF must never reach a Weft-Scope header (the
+ * Go side's fallback, scope.String, does the same). */
+const enc = (v: string) => {
+  try {
+    return encodeURIComponent(v)
+  } catch {
+    return v.replace(
+      // eslint-disable-next-line no-control-regex
+      /[%;=\x00-\x1f\x7f]/g,
+      (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`
+    )
+  }
+}
+const dec = (v: string) => {
+  try {
+    return decodeURIComponent(v)
+  } catch {
+    return v
+  }
 }

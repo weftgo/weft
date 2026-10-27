@@ -20,6 +20,45 @@ import { isDerived } from "./honesty"
 import { CELL_REASONS, CELL_WORDS } from "./stepdiff"
 import type { CellState } from "./stepdiff"
 
+/** knownPart is a partial sum as drawn: "≥ $x · k of n turns priced".
+ * Under $0.0001 formatUSD says "<$0.0001": "≥" over it would claim
+ * more than is known, so the known part reads "> $0" (exact in the
+ * title). */
+function knownPart(
+  usd: number,
+  priced: string,
+  title: string,
+  badge: string
+): CostView {
+  const tiny = usd < 0.0001
+  return {
+    known: false,
+    text: `${tiny ? "> $0" : `≥ ${formatUSD(usd)}`}${priced ? ` · ${priced}` : ""}`,
+    title: tiny ? `known part $${usd.toFixed(6)} USD · ${title}` : title,
+    badge,
+    usd,
+  }
+}
+
+/** partialView is a set's unknown figure (a session's, an
+ * experiment's) with the known part the API sent (cost_partial,
+ * UX-H-07) in the panel header's words — atLeastCost's over the same
+ * turns: "≥ $x · k of n turns priced", the reason its title. Undefined
+ * for a known figure or one with no priced part (costView's "—"). */
+export function partialView(
+  f: CostFields | null | undefined,
+  noun = "turn"
+): CostView | undefined {
+  const p = f?.cost_partial
+  if (f?.cost_known || !p?.priced || !p.usd) return undefined
+  return knownPart(
+    p.usd,
+    `${p.priced} of ${p.of} ${noun}s priced`,
+    f?.cost_reason ?? "",
+    f?.cost_badge ?? "unknown"
+  )
+}
+
 /** costView reads an object's own cost block. */
 export function costView(f: CostFields | null | undefined): CostView {
   return view(
@@ -194,22 +233,6 @@ const UNPRICED_WORDS =
  * unknown then, whatever unpriced child it goes on to count. */
 const UNKNOWN_LEAD = /not known yet/
 
-/** scriptedTitle is a scripted sum's title: sumCost's words. */
-function scriptedTitle(rows: readonly unknown[]): string {
-  return rows.length > 1 ? "every run a scripted model's" : ""
-}
-
-/** The reason a lost matrix cell's cost carries: Studio stopped
- * following its command, so the run it may have started is not read
- * and the variant's total cannot be known. */
-export const LOST_CELL_REASON =
-  "a lost cell has no cost: Studio stopped following its command, so the run it started is not read"
-
-/** lostCellCost is a lost cell's figure: unknown, its own reason. */
-export function lostCellCost(): CostView {
-  return view(null, false, LOST_CELL_REASON, "unknown")
-}
-
 /** unpricedLine is the one line a page draws over its rows (the runs
  * list, the sessions list, a run header, the panel's header) when any
  * is unpriced: "N runs unpriced: no row for openai/x, acme/y (+2)" —
@@ -338,6 +361,44 @@ export function sumCost(
   })
 }
 
+/** scriptedTitle is a scripted sum's title: sumCost's words. */
+function scriptedTitle(rows: readonly unknown[]): string {
+  return rows.length > 1 ? "every run a scripted model's" : ""
+}
+
+/** The reason a lost matrix cell's cost carries: Studio stopped
+ * following its command, so the run it may have started is not read
+ * and the variant's total cannot be known. */
+export const LOST_CELL_REASON =
+  "a lost cell has no cost: Studio stopped following its command, so the run it started is not read"
+
+/** lostCellCost is a lost cell's figure: unknown, its own reason. */
+export function lostCellCost(): CostView {
+  return view(null, false, LOST_CELL_REASON, "unknown")
+}
+
+/** total adds the rows' parts, in order: the first unknown part is the
+ * total; every run a scripted model's $0 is "$0 · scripted" too. */
+function total<TRow>(rows: readonly TRow[], part: (r: TRow) => Part): CostView {
+  if (!rows.length) return view(null, false, "no run to total")
+  let usd = 0
+  let scripted = true
+  for (const r of rows) {
+    const p = part(r)
+    if (!Array.isArray(p)) return p
+    usd += p[0]
+    scripted &&= p[1]
+  }
+  return scripted
+    ? view(0, true, scriptedTitle(rows) || undefined, "scripted")
+    : view(usd, true, undefined)
+}
+
+/** A row sumCost and atLeastCost read: its cost blocks and, on a run
+ * row, its derived mark (lib/honesty.ts's isDerived). */
+type CostRow = CostFields &
+  DelegatedCostFields & { derived?: boolean; requests_badge?: string }
+
 /** sumRuns is sumCost over run rows alone — every one read, none a
  * figure already drawn: atLeastCost's total and the devtools panel's,
  * whose bundle so carries no other kind of row. */
@@ -347,6 +408,13 @@ export const sumRuns = (rows: readonly CostRow[]): CostView =>
 /** One row's part of a total: its known figure and whether it is a
  * scripted model's exact $0, or the unknown view that is the total. */
 type Part = [usd: number, scripted: boolean] | CostView
+
+/** cacheNotReported: the figure was priced without cache splits. */
+export function cacheNotReported(
+  f: Pick<CostFields, "cache"> | null | undefined
+): boolean {
+  return !!f?.cache && f.cache !== "exact"
+}
 
 /** atLeastCost totals runs' whole bills where an unknown run must not
  * hide the known ones (the panel's header over its turns, its replays
@@ -412,46 +480,8 @@ export function atLeastCost(
     }
   }
   if (!usd) return view(null, false, title, badge || "unknown")
-  // Under $0.0001 formatUSD says "<$0.0001": "≥" over it would claim
-  // more than is known, so the known part reads "> $0" (exact in the title).
-  const tiny = usd < 0.0001
-  return {
-    known: false,
-    text: `${tiny ? "> $0" : `≥ ${formatUSD(usd)}`}${priced ? ` · ${priced}` : ""}`,
-    title: tiny ? `known part $${usd.toFixed(6)} USD · ${title}` : title,
-    badge: badge || "unknown",
-    usd,
-  }
+  return knownPart(usd, priced, title, badge || "unknown")
 }
-
-/** cacheNotReported: the figure was priced without cache splits. */
-export function cacheNotReported(
-  f: Pick<CostFields, "cache"> | null | undefined
-): boolean {
-  return !!f?.cache && f.cache !== "exact"
-}
-
-/** total adds the rows' parts, in order: the first unknown part is the
- * total; every run a scripted model's $0 is "$0 · scripted" too. */
-function total<TRow>(rows: readonly TRow[], part: (r: TRow) => Part): CostView {
-  if (!rows.length) return view(null, false, "no run to total")
-  let usd = 0
-  let scripted = true
-  for (const r of rows) {
-    const p = part(r)
-    if (!Array.isArray(p)) return p
-    usd += p[0]
-    scripted &&= p[1]
-  }
-  return scripted
-    ? view(0, true, scriptedTitle(rows) || undefined, "scripted")
-    : view(usd, true, undefined)
-}
-
-/** A row sumCost and atLeastCost read: its cost blocks and, on a run
- * row, its derived mark (lib/honesty.ts's isDerived). */
-type CostRow = CostFields &
-  DelegatedCostFields & { derived?: boolean; requests_badge?: string }
 
 /** runPart is a run's whole bill as a total's part. A scripted parent
  * whose subagents bill is not scripted: its whole bill (runTotal,

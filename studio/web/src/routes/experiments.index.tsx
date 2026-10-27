@@ -30,7 +30,7 @@ import {
 import type { RunRow } from "@/lib/api"
 import { absoluteTime, relativeTime } from "@/lib/format"
 import { statusClass, STATUS_TEXT } from "@/lib/status-class"
-import { costView, sumCost } from "@/lib/cost"
+import { costView, partialView, sumCost } from "@/lib/cost"
 import {
   EXPERIMENT_CELLS,
   REPLAY_WORDS,
@@ -557,7 +557,13 @@ function ExperimentList() {
                         className="text-right text-xs"
                         data-experiment-cost
                       >
-                        <CostText v={e.run_count ? costView(e) : sumCost([])} />
+                        <CostText
+                          v={
+                            e.run_count
+                              ? (partialView(e, "run") ?? costView(e))
+                              : sumCost([])
+                          }
+                        />
                       </TableCell>
                     ) : null}
                   </TableRow>

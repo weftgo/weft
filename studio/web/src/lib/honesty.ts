@@ -32,6 +32,79 @@ export interface HoleNote {
   tone: "loss" | "note"
 }
 
+export function isHole(s: string | undefined): s is Hole {
+  return s !== undefined && Object.hasOwn(HOLES, s)
+}
+
+/** One hole as a surface holds it: the badge, and the words a response
+ * or the fold gave for this instance (the table's otherwise). bytes is
+ * what a recorder cap cut, summed (truncated). */
+export interface HoleMark {
+  hole: string
+  reason?: string
+  fix?: string
+  bytes?: number
+  /** A known cause (CAUSES): its words before the badge's own. fix
+   * "" (rather than absent) says no fix applies. */
+  cause?: string
+  /** hidden: how many runs the scope left out (StepHole.count). */
+  count?: number
+  /** The badge's visible words after its label, when not holeWords'
+   * (a delegated block's hidden sessions). */
+  note?: string
+}
+
+/** The weft.content.* attributes an event row or a live frame carries
+ * (api.go's posEvent): absent when the chain left the content as
+ * emitted. */
+export interface ContentAttrs {
+  "weft.content"?: string
+  "weft.content.truncated_bytes"?: number
+}
+
+/** holeWords is what a badge says: its label — truncated with bytes
+ * reads "shortened by the recorder: 12.3 KiB cut" — and the reason and
+ * fix, the mark's own winning over the table's. An unknown badge reads
+ * verbatim. */
+export function holeWords(m: HoleMark): {
+  label: string
+  reason: string
+  fix?: string
+  tone: "loss" | "note"
+  /** Visible words after the label: a hidden hole's count. */
+  note?: string
+} {
+  const note = isHole(m.hole) ? HOLES[m.hole] : undefined
+  // Own keys only: the cause is the record's ("constructor" names none).
+  const causes = isHole(m.hole) ? CAUSES[m.hole] : undefined
+  const why =
+    m.cause && causes && Object.hasOwn(causes, m.cause)
+      ? causes[m.cause]
+      : undefined
+  const label =
+    m.hole === "truncated" && m.bytes && !m.cause
+      ? `shortened by the recorder: ${kib(m.bytes)} cut`
+      : (note?.label ?? m.hole)
+  return {
+    label,
+    reason: m.reason || why?.reason || note?.reason || m.hole,
+    // An explicit "" says no fix applies here (an unrun call the loop
+    // already retried): the table's is not added.
+    fix: m.fix === "" ? undefined : m.fix || why?.fix || note?.fix,
+    tone: note?.tone ?? "loss",
+    note:
+      m.hole === "hidden" && m.count ? plural(m.count, "child run") : undefined,
+  }
+}
+
+/** derivedWords is the stock_spans badge's reason and fix as one line
+ * — a disabled verb's title and accessible text (save as test, the
+ * replay verbs) on a derived run. */
+export function derivedWords(): string {
+  const w = holeWords(DERIVED_HOLE)
+  return `${w.reason}${w.fix ? ` — fix: ${w.fix}` : ""}`
+}
+
 /** A dropped record's fix (gap and its causes): one string, four uses. */
 const QUEUE_FIX =
   "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev (or otel.DevMode()); the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
@@ -195,80 +268,72 @@ export const CAUSES: Partial<
 /** The table's order: the order every list of holes renders in. */
 export const HOLE_ORDER = Object.keys(HOLES) as Hole[]
 
-export function isHole(s: string | undefined): s is Hole {
-  return s !== undefined && Object.hasOwn(HOLES, s)
-}
-
-/** One hole as a surface holds it: the badge, and the words a response
- * or the fold gave for this instance (the table's otherwise). bytes is
- * what a recorder cap cut, summed (truncated). */
-export interface HoleMark {
-  hole: string
-  reason?: string
-  fix?: string
-  bytes?: number
-  /** A known cause (CAUSES): its words before the badge's own. fix
-   * "" (rather than absent) says no fix applies. */
-  cause?: string
-  /** hidden: how many runs the scope left out (StepHole.count). */
-  count?: number
-  /** The badge's visible words after its label, when not holeWords'
-   * (a delegated block's hidden sessions). */
-  note?: string
-}
-
-/** The weft.content.* attributes an event row or a live frame carries
- * (api.go's posEvent): absent when the chain left the content as
- * emitted. */
-export interface ContentAttrs {
-  "weft.content"?: string
-  "weft.content.truncated_bytes"?: number
-}
-
 /** kib is a byte count as a badge says it: "92 B", "12.3 KiB". */
 export const kib = (n: number): string => byteSize(n, "i")
 
-/** holeWords is what a badge says: its label — truncated with bytes
- * reads "shortened by the recorder: 12.3 KiB cut" — and the reason and
- * fix, the mark's own winning over the table's. An unknown badge reads
- * verbatim. */
-export function holeWords(m: HoleMark): {
-  label: string
-  reason: string
-  fix?: string
-  tone: "loss" | "note"
-  /** Visible words after the label: a hidden hole's count. */
-  note?: string
-} {
-  const note = isHole(m.hole) ? HOLES[m.hole] : undefined
-  // Own keys only: the cause is the record's ("constructor" names none).
-  const causes = isHole(m.hole) ? CAUSES[m.hole] : undefined
-  const why =
-    m.cause && causes && Object.hasOwn(causes, m.cause)
-      ? causes[m.cause]
-      : undefined
-  const label =
-    m.hole === "truncated" && m.bytes && !m.cause
-      ? `shortened by the recorder: ${kib(m.bytes)} cut`
-      : (note?.label ?? m.hole)
-  return {
-    label,
-    reason: m.reason || why?.reason || note?.reason || m.hole,
-    // An explicit "" says no fix applies here (an unrun call the loop
-    // already retried): the table's is not added.
-    fix: m.fix === "" ? undefined : m.fix || why?.fix || note?.fix,
-    tone: note?.tone ?? "loss",
-    note:
-      m.hole === "hidden" && m.count ? plural(m.count, "child run") : undefined,
-  }
+/** DERIVED_HOLE is a derived run's one hole (docs/record-contract.md
+ * §9, plan I1): derived, cause stock_spans — "derived from spans · no
+ * events", its fix naming the record contract. A list row carries no
+ * holes[]; its `derived: true` is this mark. */
+export const DERIVED_HOLE: HoleMark = { hole: "derived", cause: "stock_spans" }
+
+/** DERIVED_VERBS is why a derived run offers no replay, save as test,
+ * open in app or compare (I6, UX-S4-03): hidden on both surfaces, said
+ * once — its own export, so the panel bundles this line alone. */
+export const DERIVED_VERBS =
+  "replay, save as test, open in app and compare are hidden: they need weft's records"
+
+/** The words a derived run's page says beside the one header note
+ * (I6; UX-H-01, UX-S4-02, UX-S4-03): the header says DERIVED_HOLE's
+ * reason and fix once; every block read off the producer's spans
+ * carries only DERIVED_CHIP (its tooltip the header's words). */
+export const DERIVED_WORDS = {
+  /** A block drawn from the span attributes (gen_ai.input.messages, a
+   * tool call's arguments and result). */
+  chip: "derived · from span attributes",
+  /** A step's chat span that carries no content attributes. */
+  noContent:
+    "no messages on this span: the producer captured no content (OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true puts them on its spans)",
+  /** A derived tool call whose span carries no gen_ai.tool.call.*. */
+  noCall: "arguments and result not captured on the span",
+  /** The raw view: a derived run has no event stream. */
+  events: "no weft events: the run was read off its spans",
+  /** The waterfall before the spans are read (or when they cannot be). */
+  waterfall: "the run's spans are not read yet",
+  /** The request (prompt, params, catalog): never on stock spans. */
+  noRequest: "request: not recorded for derived runs",
+  /** A per-block chip's screen-reader words: the sentence is the
+   * header's, said once (the chip's title keeps it for the pointer). */
+  srBrief: "derived, see the header",
+  /** The verbs a derived run hides — one rule on both surfaces. */
+  verbs: DERIVED_VERBS,
+  /** A session every turn of which is a derived run (UX-H-35): the
+   * sessions list's and the session page's mark. */
+  session: "derived (stock OTel)",
+  /** A trace whose spans make no run (api.go's not_run). */
+  notRun: "not a run",
+  /** The trace list's filter to those traces (?not_run=1). */
+  notRunChip: "GenAI traces that are not runs",
+} as const
+
+/** NOT_RUN_DAYS is the window the runs page counts the GenAI traces
+ * that make no run over (I6-fix2): the trace list's since, so the count
+ * reads the recent traces by index, never every span stored. */
+export const NOT_RUN_DAYS = 7
+
+/** notRunTraces is the runs page's count of the GenAI traces stored
+ * that make no run (UX-H-02) in the last NOT_RUN_DAYS days: a
+ * chat-only instrumentation, an agent span not arrived — the trace
+ * page says why for each. */
+export function notRunTraces(n: number): string {
+  return `${plural(n, "GenAI trace")} not runs in the last ${NOT_RUN_DAYS} days — why`
 }
 
-/** derivedWords is the stock_spans badge's reason and fix as one line
- * — a disabled verb's title and accessible text (save as test, the
- * replay verbs) on a derived run. */
-export function derivedWords(): string {
-  const w = holeWords(DERIVED_HOLE)
-  return `${w.reason}${w.fix ? ` — fix: ${w.fix}` : ""}`
+/** isDerivedRunId: a derived run's id shape (docs/record-contract.md
+ * §9: otel-<32 hex trace id>-<16 hex root span id>) — the trace list
+ * names derived runs in run_ids beside weft's own. */
+export function isDerivedRunId(id: string): boolean {
+  return /^otel-[0-9a-f]{32}-[0-9a-f]{16}$/.test(id)
 }
 
 /** refusalWords is the read-only line's message and fix in the
@@ -351,98 +416,6 @@ export function refusalWords(
   }
 }
 
-/** DERIVED_HOLE is a derived run's one hole (docs/record-contract.md
- * §9, plan I1): derived, cause stock_spans — "derived from spans · no
- * events", its fix naming the record contract. A list row carries no
- * holes[]; its `derived: true` is this mark. */
-export const DERIVED_HOLE: HoleMark = { hole: "derived", cause: "stock_spans" }
-
-/** DERIVED_VERBS is why a derived run offers no replay, save as test,
- * open in app or compare (I6, UX-S4-03): hidden on both surfaces, said
- * once — its own export, so the panel bundles this line alone. */
-export const DERIVED_VERBS =
-  "replay, save as test, open in app and compare are hidden: they need weft's records"
-
-/** The words a derived run's page says beside the one header note
- * (I6; UX-H-01, UX-S4-02, UX-S4-03): the header says DERIVED_HOLE's
- * reason and fix once; every block read off the producer's spans
- * carries only DERIVED_CHIP (its tooltip the header's words). */
-export const DERIVED_WORDS = {
-  /** A block drawn from the span attributes (gen_ai.input.messages, a
-   * tool call's arguments and result). */
-  chip: "derived · from span attributes",
-  /** A step's chat span that carries no content attributes. */
-  noContent:
-    "no messages on this span: the producer captured no content (OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true puts them on its spans)",
-  /** A derived tool call whose span carries no gen_ai.tool.call.*. */
-  noCall: "arguments and result not captured on the span",
-  /** The raw view: a derived run has no event stream. */
-  events: "no weft events: the run was read off its spans",
-  /** The waterfall before the spans are read (or when they cannot be). */
-  waterfall: "the run's spans are not read yet",
-  /** The request (prompt, params, catalog): never on stock spans. */
-  noRequest: "request: not recorded for derived runs",
-  /** A per-block chip's screen-reader words: the sentence is the
-   * header's, said once (the chip's title keeps it for the pointer). */
-  srBrief: "derived, see the header",
-  /** The verbs a derived run hides — one rule on both surfaces. */
-  verbs: DERIVED_VERBS,
-  /** A trace whose spans make no run (api.go's not_run). */
-  notRun: "not a run",
-  /** The trace list's filter to those traces (?not_run=1). */
-  notRunChip: "GenAI traces that are not runs",
-} as const
-
-/** NOT_RUN_DAYS is the window the runs page counts the GenAI traces
- * that make no run over (I6-fix2): the trace list's since, so the count
- * reads the recent traces by index, never every span stored. */
-export const NOT_RUN_DAYS = 7
-
-/** notRunTraces is the runs page's count of the GenAI traces stored
- * that make no run (UX-H-02) in the last NOT_RUN_DAYS days: a
- * chat-only instrumentation, an agent span not arrived — the trace
- * page says why for each. */
-export function notRunTraces(n: number): string {
-  return `${plural(n, "GenAI trace")} not runs in the last ${NOT_RUN_DAYS} days — why`
-}
-
-/** isDerivedRunId: a derived run's id shape (docs/record-contract.md
- * §9: otel-<32 hex trace id>-<16 hex root span id>) — the trace list
- * names derived runs in run_ids beside weft's own. */
-export function isDerivedRunId(id: string): boolean {
-  return /^otel-[0-9a-f]{32}-[0-9a-f]{16}$/.test(id)
-}
-
-/** isDerived says a run row was built by the reader from stock OTel
- * GenAI spans (api.go's runRow.Derived): no events, transcript or
- * request records — every pane that would read them carries
- * DERIVED_HOLE instead, and nothing replays it (there is no transcript;
- * the playground refuses the source 400). requests_badge "derived"
- * says the same on a Studio row that predates the field. */
-export function isDerived(
-  row: { derived?: boolean; requests_badge?: string } | null | undefined
-): boolean {
-  return row?.derived === true || row?.requests_badge === "derived"
-}
-
-/** derivedUsageUnknown: a derived run (or step) whose spans reported
- * no usage reads zero tokens, and Studio prices it unknown — the zeros
- * are "not reported", never a known 0 (§9's usage row). The words are
- * the API's cost_reason. */
-export function derivedUsageUnknown(
-  row: {
-    derived?: boolean
-    requests_badge?: string
-    cost_known?: boolean
-    usage?: { input_tokens: number; output_tokens: number }
-  },
-  derived = isDerived(row)
-): boolean {
-  if (!derived || row.cost_known === true) return false
-  const u = row.usage
-  return !u || (u.input_tokens === 0 && u.output_tokens === 0)
-}
-
 /** rowHoles is a run row's holes: a run document's children[] row
  * carries the child's own (api.go's runHoles, A10 — stripped, gap,
  * derived…); beside them, what the row alone tells — a run older than
@@ -478,6 +451,113 @@ export function contentHoles(attrs: unknown): HoleMark[] {
     out.push({ hole: "truncated", bytes: cut })
   return out
 }
+
+/** usageKnown says whether a run row's usage is a number to show: the
+ * record sets it only when the run ends (run_finish, the run span's
+ * end), so a running row's zeros are "not yet" and an interrupted
+ * one's are "never" (its badge says why) — neither is 0 tokens. */
+export function usageKnown(status: string): boolean {
+  return status === "succeeded" || status === "failed"
+}
+
+/** appVerbWords is one app-turn verb's line under its call, the same
+ * on both surfaces: in flight ("queued…"), the decision's word
+ * (approved, denied, resolved — lib/decisions.ts's DONE) or
+ * "steered" for a steer (with the turn the finished command names, when
+ * it is another run), or the runtime's rejection / the route's refusal
+ * word for word (bad) — "(no reason given)" when the row carries none.
+ * verb names which; absent, a verb that carries a decision is one (both
+ * surfaces send every decision with it, a steer never). */
+export function appVerbWords(
+  v: {
+    state: string
+    decision?: string
+    error?: string
+    fix?: string
+    run?: string
+  },
+  runID: string,
+  verb: "decide" | "steer" = v.decision ? "decide" : "steer"
+): { text: string; bad: boolean; resumed?: string } {
+  if (v.state === "finished")
+    return {
+      text:
+        verb === "steer" ? "steered" : (DONE[v.decision ?? ""] ?? "decided"),
+      bad: false,
+      ...(v.run && v.run !== runID ? { resumed: v.run } : {}),
+    }
+  const bad = ["refused", "rejected", "failed", "lost"].includes(v.state)
+  if (!bad) return { text: `${v.state}…`, bad }
+  return {
+    text: `${v.state}${v.error ? `: ${v.error}` : " (no reason given)"}${v.fix ? ` — fix: ${v.fix}` : ""}`,
+    bad,
+  }
+}
+
+/** derivedUsageUnknown: a derived run (or step) whose spans reported
+ * no usage reads zero tokens, and Studio prices it unknown — the zeros
+ * are "not reported", never a known 0 (§9's usage row). The words are
+ * the API's cost_reason. */
+export function derivedUsageUnknown(
+  row: {
+    derived?: boolean
+    requests_badge?: string
+    cost_known?: boolean
+    usage?: { input_tokens: number; output_tokens: number }
+  },
+  derived = isDerived(row)
+): boolean {
+  if (!derived || row.cost_known === true) return false
+  const u = row.usage
+  return !u || (u.input_tokens === 0 && u.output_tokens === 0)
+}
+
+/** The header's note while a run settles (both surfaces): its status
+ * word stays, and this says why the story may stop short. */
+export const SETTLING_WORD = "settling"
+export const SETTLING_HINT =
+  "the run's root span is stored and its last records may still arrive (up to 30 s): the story can stop short until they land"
+
+/** isLive says a run's records may still arrive: it reads running, or
+ * it is settling (api.go's runRow.settling, docs/record-contract.md §6
+ * — its root span stored, so its status already reads succeeded or
+ * failed, its run_finish not, heard from within 30 s). Every tail,
+ * poll and done check on both surfaces reads it, never status ===
+ * "running" alone: a run opened in that window is still followed. */
+export function isLive(
+  r: { status?: string; settling?: boolean } | null | undefined
+): boolean {
+  return !!r && (r.status === "running" || r.settling === true)
+}
+
+/** USAGE_AT_FINISH is what a running child's usage reads. */
+export const USAGE_AT_FINISH = "usage at finish"
+
+// ── The app's own turns (plan F4.3) ───────────────────────────────
+// A parked run no runtime started is the app's. Its approval verbs (and
+// steer while it runs) are offered when a connected runtime of the
+// run's own service registered runtime.Sessions (GET /api/runtimes'
+// sessions: true) and the run is the latest turn of a thread session
+// with a public id; they post to the playground's own routes and answer
+// 202 + a command to poll. Otherwise the verbs are drawn refused in the
+// server's words (studio/appturn.go, studio/auth.go; appturn.test.ts
+// pins them there): a refusal of a verb, never a hole. Cancel is never
+// offered on an app turn (the runtime refuses it: thread has no
+// per-turn cancel).
+
+/** OWN_RUNTIME is meta.debug_scope while some connected runtime acts
+ * on the app's own turns (Sessions or breakpoints_own) — a global
+ * word: the verbs gate on the run's own service (appTurnRuntime). */
+export const OWN_RUNTIME = "own+runtime"
+/** The playground header's two readings of debug_scope. */
+export const SCOPE_OWN =
+  "runtime-started runs and the app's own turns (runtime.Sessions or runtime.Breakpoints)"
+export const SCOPE_RUNTIME_ONLY = "only (the app's own turns are viewer-only)"
+/** The app-owned refusal's head (appturn.go's appOwned + " · read-only"). */
+export const APP_OWNED = "app-owned turn · read-only"
+/** appturn.go's fix when no runtime of the service is connected. */
+export const APP_LINK_FIX =
+  "open the runtime link in the app: WEFT_ENV=dev (or runtime.Enabled(true)) at runtime.Install, with runtime.Sessions(resolver)"
 
 /** parkedKind gates the verbs. Its decision table, first match wins:
  *
@@ -528,135 +608,6 @@ export function parkedKind(
   if (!row.public_id) return "no-public-id"
   if (next) return "resumed"
   return live(runtimes, row.service, true) ? "decide" : "read-only"
-}
-
-/** usageKnown says whether a run row's usage is a number to show: the
- * record sets it only when the run ends (run_finish, the run span's
- * end), so a running row's zeros are "not yet" and an interrupted
- * one's are "never" (its badge says why) — neither is 0 tokens. */
-export function usageKnown(status: string): boolean {
-  return status === "succeeded" || status === "failed"
-}
-
-/** appVerbWords is one app-turn verb's line under its call, the same
- * on both surfaces: in flight ("queued…"), the decision's word
- * (approved, denied, resolved — lib/decisions.ts's DONE) or
- * "steered" for a steer (with the turn the finished command names, when
- * it is another run), or the runtime's rejection / the route's refusal
- * word for word (bad) — "(no reason given)" when the row carries none.
- * verb names which; absent, a verb that carries a decision is one (both
- * surfaces send every decision with it, a steer never). */
-export function appVerbWords(
-  v: {
-    state: string
-    decision?: string
-    error?: string
-    fix?: string
-    run?: string
-  },
-  runID: string,
-  verb: "decide" | "steer" = v.decision ? "decide" : "steer"
-): { text: string; bad: boolean; resumed?: string } {
-  if (v.state === "finished")
-    return {
-      text:
-        verb === "steer" ? "steered" : (DONE[v.decision ?? ""] ?? "decided"),
-      bad: false,
-      ...(v.run && v.run !== runID ? { resumed: v.run } : {}),
-    }
-  const bad = ["refused", "rejected", "failed", "lost"].includes(v.state)
-  if (!bad) return { text: `${v.state}…`, bad }
-  return {
-    text: `${v.state}${v.error ? `: ${v.error}` : " (no reason given)"}${v.fix ? ` — fix: ${v.fix}` : ""}`,
-    bad,
-  }
-}
-
-/** The header's note while a run settles (both surfaces): its status
- * word stays, and this says why the story may stop short. */
-export const SETTLING_WORD = "settling"
-export const SETTLING_HINT =
-  "the run's root span is stored and its last records may still arrive (up to 30 s): the story can stop short until they land"
-
-/** isLive says a run's records may still arrive: it reads running, or
- * it is settling (api.go's runRow.settling, docs/record-contract.md §6
- * — its root span stored, so its status already reads succeeded or
- * failed, its run_finish not, heard from within 30 s). Every tail,
- * poll and done check on both surfaces reads it, never status ===
- * "running" alone: a run opened in that window is still followed. */
-export function isLive(
-  r: { status?: string; settling?: boolean } | null | undefined
-): boolean {
-  return !!r && (r.status === "running" || r.settling === true)
-}
-
-/** USAGE_AT_FINISH is what a running child's usage reads. */
-export const USAGE_AT_FINISH = "usage at finish"
-
-// ── The app's own turns (plan F4.3) ───────────────────────────────
-// A parked run no runtime started is the app's. Its approval verbs (and
-// steer while it runs) are offered when a connected runtime of the
-// run's own service registered runtime.Sessions (GET /api/runtimes'
-// sessions: true) and the run is the latest turn of a thread session
-// with a public id; they post to the playground's own routes and answer
-// 202 + a command to poll. Otherwise the verbs are drawn refused in the
-// server's words (studio/appturn.go, studio/auth.go; appturn.test.ts
-// pins them there): a refusal of a verb, never a hole. Cancel is never
-// offered on an app turn (the runtime refuses it: thread has no
-// per-turn cancel).
-
-/** OWN_RUNTIME is meta.debug_scope while some connected runtime acts
- * on the app's own turns (Sessions or breakpoints_own) — a global
- * word: the verbs gate on the run's own service (appTurnRuntime). */
-export const OWN_RUNTIME = "own+runtime"
-/** The playground header's two readings of debug_scope. */
-export const SCOPE_OWN =
-  "runtime-started runs and the app's own turns (runtime.Sessions or runtime.Breakpoints)"
-export const SCOPE_RUNTIME_ONLY = "only (the app's own turns are viewer-only)"
-/** The app-owned refusal's head (appturn.go's appOwned + " · read-only"). */
-export const APP_OWNED = "app-owned turn · read-only"
-/** appturn.go's fix when no runtime of the service is connected. */
-export const APP_LINK_FIX =
-  "open the runtime link in the app: WEFT_ENV=dev (or runtime.Enabled(true)) at runtime.Install, with runtime.Sessions(resolver)"
-/** An opted-in app whose runtime is gone (U20.2, UX-H-14): no runtime
- * of the run's service is connected, but one that registered
- * runtime.Sessions is listed disconnected (the first, /api/runtimes'
- * newest seen) — the app stopped, or Studio restarted under it and it
- * is not back yet (/runtimes says which). Never "add runtime.Sessions"
- * or "open the link": appturn.go's appGoneWords, last seen to the
- * second, in UTC. null while a Sessions runtime of the service is
- * connected (appturn.go never refuses then). */
-export function appGone(
-  rts: readonly RuntimeLike[] | null | undefined,
-  service: string | undefined
-): { words: string; fix: string; rt?: boolean } | null {
-  const rt = rts?.find(
-    (r) =>
-      service && r.connected === false && r.sessions && r.service === service
-  )
-  // A connected Sessions runtime of the service (a restart under a new
-  // id, a stale registration beside it) acts: nothing is gone.
-  return rt && !live(rts, service, true)
-    ? {
-        words: `${APP_OWNED}: the app's runtime ${rt.id} of service ${service} disconnected${rt.last_seen ? ` — last seen ${new Date(rt.last_seen).toISOString().slice(0, 19)}Z` : ""}`,
-        fix: "restart the app: its runtime link registers again",
-        rt: true,
-      }
-    : null
-}
-/** The playground header's reading of the app's own turns while the
- * opted-in app is gone (U20.2-fix, UX-H-14): appGone's words and fix,
- * for the first service whose opted-in runtime is gone and none of
- * whose Sessions runtimes is connected — never "viewer-only" for an app
- * that opted in. "" when none is. */
-export function appGoneScope(
-  rts: readonly RuntimeLike[] | null | undefined
-): string {
-  for (const r of rts ?? []) {
-    const w = appGone(rts, r.service)
-    if (w) return `· the app's own turns: ${refusalLine(w)}`
-  }
-  return ""
 }
 /** A decision that never landed (U20.2, UX-H-15): the run's lost
  * command (GET /api/runs/{id}/commands), said on the parked call after
@@ -798,6 +749,46 @@ export function mergeHoles(...lists: (HoleMark[] | undefined)[]): HoleMark[] {
   }
   return [...by.values()].sort((a, b) => rank(a.hole) - rank(b.hole))
 }
+/** An opted-in app whose runtime is gone (U20.2, UX-H-14): no runtime
+ * of the run's service is connected, but one that registered
+ * runtime.Sessions is listed disconnected (the first, /api/runtimes'
+ * newest seen) — the app stopped, or Studio restarted under it and it
+ * is not back yet (/runtimes says which). Never "add runtime.Sessions"
+ * or "open the link": appturn.go's appGoneWords, last seen to the
+ * second, in UTC. null while a Sessions runtime of the service is
+ * connected (appturn.go never refuses then). */
+export function appGone(
+  rts: readonly RuntimeLike[] | null | undefined,
+  service: string | undefined
+): { words: string; fix: string; rt?: boolean } | null {
+  const rt = rts?.find(
+    (r) =>
+      service && r.connected === false && r.sessions && r.service === service
+  )
+  // A connected Sessions runtime of the service (a restart under a new
+  // id, a stale registration beside it) acts: nothing is gone.
+  return rt && !live(rts, service, true)
+    ? {
+        words: `${APP_OWNED}: the app's runtime ${rt.id} of service ${service} disconnected${rt.last_seen ? ` — last seen ${new Date(rt.last_seen).toISOString().slice(0, 19)}Z` : ""}`,
+        fix: "restart the app: its runtime link registers again",
+        rt: true,
+      }
+    : null
+}
+/** The playground header's reading of the app's own turns while the
+ * opted-in app is gone (U20.2-fix, UX-H-14): appGone's words and fix,
+ * for the first service whose opted-in runtime is gone and none of
+ * whose Sessions runtimes is connected — never "viewer-only" for an app
+ * that opted in. "" when none is. */
+export function appGoneScope(
+  rts: readonly RuntimeLike[] | null | undefined
+): string {
+  for (const r of rts ?? []) {
+    const w = appGone(rts, r.service)
+    if (w) return `· the app's own turns: ${refusalLine(w)}`
+  }
+  return ""
+}
 
 /** subagentRun: a core Subagent's child — its id under its parent's
  * (`<parent>/<step>/<call>`, core's id rule; pricing.go's subagents()
@@ -898,6 +889,18 @@ export const appTurn = (row: AppRow) => {
   return (
     (k === "read-only" || k === "decide") && !!row.session_id && !!row.public_id
   )
+}
+
+/** isDerived says a run row was built by the reader from stock OTel
+ * GenAI spans (api.go's runRow.Derived): no events, transcript or
+ * request records — every pane that would read them carries
+ * DERIVED_HOLE instead, and nothing replays it (there is no transcript;
+ * the playground refuses the source 400). requests_badge "derived"
+ * says the same on a Studio row that predates the field. */
+export function isDerived(
+  row: { derived?: boolean; requests_badge?: string } | null | undefined
+): boolean {
+  return row?.derived === true || row?.requests_badge === "derived"
 }
 
 /** A pool child's line: POOL_CHILD, the parent session's id and, when

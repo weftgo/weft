@@ -296,7 +296,7 @@ function registeredCatalog(agent: AgentView | undefined): CatalogTool[] {
   return (agent?.tools ?? []).map((t) => ({
     name: t.name,
     replay: t.side_effects === "safe" ? "safe" : "never",
-    approval: false,
+    approval: !!t.approval,
   }))
 }
 

@@ -12,9 +12,26 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type * as Devtools from "@weftgo/devtools"
 import { weftVersion } from "../../scripts/weft-version.ts"
-import type { MountOptions as LadderOptions, PanelPlacement } from "../panel/config"
-import type { DevtoolsAPI, DevtoolsEvents as PanelEvents } from "../panel/element"
-import { baseRoutes, FakeEventSource, fakeStudio, META, page, runEvents, runRow, settle, setup, teardown } from "../panel/testkit"
+import type {
+  MountOptions as LadderOptions,
+  PanelPlacement,
+} from "../panel/config"
+import type {
+  DevtoolsAPI,
+  DevtoolsEvents as PanelEvents,
+} from "../panel/element"
+import {
+  baseRoutes,
+  FakeEventSource,
+  fakeStudio,
+  META,
+  page,
+  runEvents,
+  runRow,
+  settle,
+  setup,
+  teardown,
+} from "../panel/testkit"
 
 const load = () => import("@weftgo/devtools")
 const STUDIO = "http://studio.test/studio/"
@@ -87,13 +104,21 @@ describe('import "@weftgo/devtools" (the Done line)', () => {
     expect(shadow(".weft-note.weft-warn")).toBeNull()
   })
 
-  it.runIf(process.env.WEFT_DEVTOOLS_PKG === "1")("ships the served bundle byte for byte (sha256)", () => {
-    const here = path.dirname(fileURLToPath(import.meta.url))
-    const sum = (p: string) => createHash("sha256").update(readFileSync(path.resolve(here, p))).digest("hex")
-    const served = sum("../../../dist/panel/panel.js")
-    expect(sum("../../npm/panel.js")).toBe(served)
-    expect(readFileSync(path.resolve(here, "../../npm/panel.js.sha256"), "utf8")).toBe(`${served}  panel.js\n`)
-  })
+  it.runIf(process.env.WEFT_DEVTOOLS_PKG === "1")(
+    "ships the served bundle byte for byte (sha256)",
+    () => {
+      const here = path.dirname(fileURLToPath(import.meta.url))
+      const sum = (p: string) =>
+        createHash("sha256")
+          .update(readFileSync(path.resolve(here, p)))
+          .digest("hex")
+      const served = sum("../../../dist/panel/panel.js")
+      expect(sum("../../npm/panel.js")).toBe(served)
+      expect(
+        readFileSync(path.resolve(here, "../../npm/panel.js.sha256"), "utf8")
+      ).toBe(`${served}  panel.js\n`)
+    }
+  )
 })
 
 // Bundled into an app (Vite, webpack), panel.js is part of the app's
@@ -104,29 +129,45 @@ describe('import "@weftgo/devtools" (the Done line)', () => {
 // panel.js URL — what import.meta.url reads in this suite, as the
 // chunk's would in the app. Package mode only: under the sources the
 // entry imports the served bundle with no guard in front of it.
-describe.runIf(process.env.WEFT_DEVTOOLS_PKG === "1")("the app's chunk under the npm entry (rung 4)", () => {
-  it("is not the panel's tag: endpoint the page's directory, no panel-config.json beside the chunk", async () => {
-    const prev = location.href
-    history.pushState(null, "", "/app/")
-    try {
-      const chunk = document.createElement("script")
-      chunk.type = "module"
-      chunk.src = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../npm/panel.js")).href
-      chunk.setAttribute("data-endpoint", "/assets/api-proxy/")
-      document.head.appendChild(chunk)
-      const studio = fakeStudio(baseRoutes())
-      await load()
-      await settle()
-      expect(dock()?.autoMounted).toBe(true)
-      expect(dock()?.studioLink("r_1").startsWith(`${location.origin}/app/`)).toBe(true)
-      const urls = studio.fetchMock.mock.calls.map((c) => new URL(String(c[0]), location.href).href)
-      expect(urls).toContain(`${location.origin}/app/api/meta`)
-      expect(urls.some((u) => u.includes("panel-config.json") || u.includes("api-proxy"))).toBe(false)
-    } finally {
-      history.pushState(null, "", prev)
-    }
-  })
-})
+describe.runIf(process.env.WEFT_DEVTOOLS_PKG === "1")(
+  "the app's chunk under the npm entry (rung 4)",
+  () => {
+    it("is not the panel's tag: endpoint the page's directory, no panel-config.json beside the chunk", async () => {
+      const prev = location.href
+      history.pushState(null, "", "/app/")
+      try {
+        const chunk = document.createElement("script")
+        chunk.type = "module"
+        chunk.src = pathToFileURL(
+          path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            "../../npm/panel.js"
+          )
+        ).href
+        chunk.setAttribute("data-endpoint", "/assets/api-proxy/")
+        document.head.appendChild(chunk)
+        const studio = fakeStudio(baseRoutes())
+        await load()
+        await settle()
+        expect(dock()?.autoMounted).toBe(true)
+        expect(
+          dock()?.studioLink("r_1").startsWith(`${location.origin}/app/`)
+        ).toBe(true)
+        const urls = studio.fetchMock.mock.calls.map(
+          (c) => new URL(String(c[0]), location.href).href
+        )
+        expect(urls).toContain(`${location.origin}/app/api/meta`)
+        expect(
+          urls.some(
+            (u) => u.includes("panel-config.json") || u.includes("api-proxy")
+          )
+        ).toBe(false)
+      } finally {
+        history.pushState(null, "", prev)
+      }
+    })
+  }
+)
 
 describe("mount", () => {
   it("is the host's mount: replaces the bundle's own dock, configured by its options (rung 1)", async () => {
@@ -134,13 +175,17 @@ describe("mount", () => {
     const api = await load()
     await settle()
     expect(dock()?.autoMounted).toBe(true)
-    const node = mounted(api.mount({ endpoint: STUDIO, publicId: "pub_orders", open: true }))
+    const node = mounted(
+      api.mount({ endpoint: STUDIO, publicId: "pub_orders", open: true })
+    )
     await settle()
     expect(docks()).toEqual([node])
     expect(node.autoMounted).toBe(false)
     expect(scopes()).toEqual(["pub_orders"])
     expect(shadow(".weft-dock")).not.toBeNull()
-    const metas = studio.fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/api/meta"))
+    const metas = studio.fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => u.includes("/api/meta"))
     expect(metas.at(-1)).toBe(`${STUDIO}api/meta`)
   })
 
@@ -164,7 +209,9 @@ describe("mount", () => {
     expect(docks()).toHaveLength(0) // the bundle's own dock: gone, silently
     api.mount({ endpoint: STUDIO })
     await settle()
-    expect(shadow(".weft-unreachable")?.textContent).toContain(`Studio not reachable at ${STUDIO}`)
+    expect(shadow(".weft-unreachable")?.textContent).toContain(
+      `Studio not reachable at ${STUDIO}`
+    )
   })
 
   it("its options are configuration rung 1, field for field", () => {
@@ -175,7 +222,16 @@ describe("mount", () => {
     type Ladder = Omit<LadderOptions, "position">
     const toLadder = (o: Pkg): Ladder => o
     const toPkg = (o: Ladder): Pkg => o
-    const all: Required<Pkg> = { endpoint: STUDIO, scope: "p;run=r", publicId: "p", token: "t", detect: "headers", open: true, auto: false, theme: "light" }
+    const all: Required<Pkg> = {
+      endpoint: STUDIO,
+      scope: "p;run=r",
+      publicId: "p",
+      token: "t",
+      detect: "headers",
+      open: true,
+      auto: false,
+      theme: "light",
+    }
     expect(toPkg(toLadder(all))).toEqual(all)
     const toPlacement = (p: Devtools.Position): PanelPlacement => p
     const toPosition = (p: PanelPlacement): Devtools.Position => p
@@ -188,7 +244,15 @@ describe("mount", () => {
     fakeStudio(baseRoutes())
     const api = await load()
     await settle()
-    const node = mounted(api.mount({ endpoint: STUDIO, position: "left-dock", mode: "dock", push: true, zIndex: 50 }))
+    const node = mounted(
+      api.mount({
+        endpoint: STUDIO,
+        position: "left-dock",
+        mode: "dock",
+        push: true,
+        zIndex: 50,
+      })
+    )
     expect(node.getAttribute("data-mode")).toBe("dock")
     expect(node.getAttribute("data-push")).toBe("true")
     expect(node.getAttribute("data-z-index")).toBe("50")
@@ -219,7 +283,9 @@ describe("mount", () => {
     // A new target moves it.
     const box = document.createElement("section")
     document.body.appendChild(box)
-    expect(api.mount({ endpoint: STUDIO, target: box })?.parentElement).toBe(box)
+    expect(api.mount({ endpoint: STUDIO, target: box })?.parentElement).toBe(
+      box
+    )
   })
 
   it("enabled: false mounts nothing and returns null", async () => {
@@ -230,13 +296,20 @@ describe("mount", () => {
     expect(api.mount({ endpoint: STUDIO, enabled: false })).toBeNull()
     await settle()
     expect(docks()).toEqual(before)
-    expect(studio.fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith(STUDIO))).toHaveLength(0)
+    expect(
+      studio.fetchMock.mock.calls
+        .map((c) => String(c[0]))
+        .filter((u) => u.startsWith(STUDIO))
+    ).toHaveLength(0)
   })
 
   it("before <body> exists (a bundle in <head>) it returns the element and appends it on DOMContentLoaded", async () => {
     fakeStudio(baseRoutes())
     const state = Object.getOwnPropertyDescriptor(document, "readyState")
-    Object.defineProperty(document, "readyState", { configurable: true, get: () => "loading" })
+    Object.defineProperty(document, "readyState", {
+      configurable: true,
+      get: () => "loading",
+    })
     const body = document.body
     let api: typeof Devtools
     let node: Dock
@@ -266,17 +339,25 @@ describe("mount", () => {
 describe("scope", () => {
   it("rescopes the panel (over an explicit data-public-id) and marks the element with the serialised scope", async () => {
     const routes = baseRoutes()
-    routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
+    routes["runs?public_id=pub_b&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
     const studio = fakeStudio(routes)
     const api = await load()
-    const node = mounted(api.mount({ endpoint: STUDIO, publicId: "pub_orders" }))
+    const node = mounted(
+      api.mount({ endpoint: STUDIO, publicId: "pub_orders" })
+    )
     node.setAttribute("data-public-id", "pub_orders")
     await settle()
     expect(scopes()).toEqual(["pub_orders"])
     api.scope({ publicId: "pub_b", session: "s_1", run: "r_1" })
     await settle()
     expect(scopes()).toEqual(["pub_b"])
-    expect(node.getAttribute("data-weft-scope")).toBe("pub_b;session=s_1;run=r_1")
+    expect(node.getAttribute("data-weft-scope")).toBe(
+      "pub_b;session=s_1;run=r_1"
+    )
     expect(studio.gets("meta")).toHaveLength(2) // the bundle's dock, then the host's: rescoped, not restarted
     api.scope("pub_orders")
     await settle()
@@ -296,24 +377,54 @@ describe("scope", () => {
 
   it("passes the full scope through (C3.2): session narrows, run pins, flow filters (U22) and is a chip; a mount after it starts there", async () => {
     const routes = baseRoutes()
-    const t1 = (routes["runs?public_id=pub_orders&limit=50"] as { runs: object[] }).runs[0]
+    const t1 = (
+      routes["runs?public_id=pub_orders&limit=50"] as { runs: object[] }
+    ).runs[0]
     // The flow is run metadata: every read asks flow= (studio filters on weft.flow).
-    routes["runs?session=s_01&flow=f_1&limit=50"] = { total: 1, runs: [t1], next_before: null }
-    const t2 = { ...(routes["runs?public_id=pub_orders&limit=50"] as { runs: object[] }).runs[0], id: "s_01-t2", session_id: "s_02" }
+    routes["runs?session=s_01&flow=f_1&limit=50"] = {
+      total: 1,
+      runs: [t1],
+      next_before: null,
+    }
+    const t2 = {
+      ...(routes["runs?public_id=pub_orders&limit=50"] as { runs: object[] })
+        .runs[0],
+      id: "s_01-t2",
+      session_id: "s_02",
+    }
     routes["runs?public_id=pub_orders&limit=50"] = {
       total: 2,
-      runs: [t2, ...(routes["runs?public_id=pub_orders&limit=50"] as { runs: object[] }).runs],
+      runs: [
+        t2,
+        ...(routes["runs?public_id=pub_orders&limit=50"] as { runs: object[] })
+          .runs,
+      ],
       next_before: null,
     }
     fakeStudio(routes)
     const api = await load()
-    api.scope({ publicId: "pub_orders", session: "s_01", flow: "f_1", run: "s_01-t1" })
+    api.scope({
+      publicId: "pub_orders",
+      session: "s_01",
+      flow: "f_1",
+      run: "s_01-t1",
+    })
     const node = mounted(api.mount({ endpoint: STUDIO, open: true }))
     await settle()
-    expect(node.options?.scope).toEqual({ publicId: "pub_orders", session: "s_01", flow: "f_1", run: "s_01-t1" })
-    const q = (sel: string) => Array.from(node.shadowRoot?.querySelectorAll(sel) ?? []).map((n) => n.textContent)
+    expect(node.options?.scope).toEqual({
+      publicId: "pub_orders",
+      session: "s_01",
+      flow: "f_1",
+      run: "s_01-t1",
+    })
+    const q = (sel: string) =>
+      Array.from(node.shadowRoot?.querySelectorAll(sel) ?? []).map(
+        (n) => n.textContent
+      )
     const runs = (sel: string) =>
-      Array.from(node.shadowRoot?.querySelectorAll(sel) ?? []).map((n) => n.getAttribute("data-weft-run"))
+      Array.from(node.shadowRoot?.querySelectorAll(sel) ?? []).map((n) =>
+        n.getAttribute("data-weft-run")
+      )
     expect(runs(".weft-turn")).toEqual(["s_01-t1"]) // s_02's turn narrowed away
     expect(runs(".weft-turn.weft-sel")).toEqual(["s_01-t1"])
     expect(q(".weft-scope-chip")).toEqual(["session s_01", "flow f_1"])
@@ -326,7 +437,10 @@ describe("scope", () => {
   it("scope and open called while the page is still parsing apply once the bundle has mounted its dock", async () => {
     fakeStudio(baseRoutes())
     const state = Object.getOwnPropertyDescriptor(document, "readyState")
-    Object.defineProperty(document, "readyState", { configurable: true, get: () => "loading" })
+    Object.defineProperty(document, "readyState", {
+      configurable: true,
+      get: () => "loading",
+    })
     let api: typeof Devtools
     try {
       api = await load()
@@ -361,7 +475,6 @@ describe("open, close, toggle", () => {
     expect(shadow(".weft-dock")).not.toBeNull()
   })
 
-
   it("drive the dock's open state", async () => {
     fakeStudio(baseRoutes())
     const api = await load()
@@ -389,7 +502,11 @@ describe("on", () => {
     const off = api.on("run", (d) => seen.push(d))
     const fire = () =>
       dock()?.dispatchEvent(
-        new CustomEvent("weft:run", { detail: { runId: "r_1", status: "succeeded" }, bubbles: true, composed: true })
+        new CustomEvent("weft:run", {
+          detail: { runId: "r_1", status: "succeeded" },
+          bubbles: true,
+          composed: true,
+        })
       )
     fire()
     expect(seen).toEqual([{ runId: "r_1", status: "succeeded" }])
@@ -403,14 +520,19 @@ describe("on", () => {
     const t2 = { id: "s_01-t2", started: "2026-10-01T09:05:00Z" }
     routes["runs/s_01-t2"] = { ...runRow(t2), children: [] }
     routes["runs/s_01-t2/events?after=0&limit=500"] = page(
-      runEvents("s_01-t2", { pending: [{ type: "tool_call", id: "call_9", name: "refund", args: {} }] })
+      runEvents("s_01-t2", {
+        pending: [
+          { type: "tool_call", id: "call_9", name: "refund", args: {} },
+        ],
+      })
     )
     routes["runs/s_01-t2/transcript"] = { batches: [] }
     routes["runs/s_01-t2/spans"] = { spans: [] }
     fakeStudio(routes)
     const api = await load()
     const seen: unknown[] = []
-    for (const k of ["run", "parked", "error"] as const) api.on(k, (d) => seen.push([k, d]))
+    for (const k of ["run", "parked", "error"] as const)
+      api.on(k, (d) => seen.push([k, d]))
     // A throwing listener is the host's: swallowed, the others still hear.
     api.on("run", () => {
       throw new Error("host bug")
@@ -420,17 +542,56 @@ describe("on", () => {
     await settle()
     expect(seen).toEqual([]) // the conversation's history is not a transition
     const lane = FakeEventSource.last("public_id=")!
-    lane.emit("run", { run: runRow({ ...t2, status: "running", finished: null }) })
+    lane.emit("run", {
+      run: runRow({ ...t2, status: "running", finished: null }),
+    })
     await settle()
     lane.emit("run", { run: runRow({ ...t2, pending: 1 }) })
     await settle()
-    lane.emit("run", { run: runRow({ id: "s_01-t3", started: "2026-10-01T09:07:00Z", status: "failed", err: "boom" }) })
+    lane.emit("run", {
+      run: runRow({
+        id: "s_01-t3",
+        started: "2026-10-01T09:07:00Z",
+        status: "failed",
+        err: "boom",
+      }),
+    })
     await settle()
     expect(seen).toEqual([
-      ["run", { runId: "s_01-t2", status: "running", publicId: "pub_orders", sessionId: "s_01", step: 0 }],
-      ["run", { runId: "s_01-t2", status: "parked", publicId: "pub_orders", sessionId: "s_01", step: 0 }],
-      ["parked", { runId: "s_01-t2", callId: "call_9", ackId: "call_9", name: "refund" }],
-      ["run", { runId: "s_01-t3", status: "failed", publicId: "pub_orders", sessionId: "s_01", step: 0 }],
+      [
+        "run",
+        {
+          runId: "s_01-t2",
+          status: "running",
+          publicId: "pub_orders",
+          sessionId: "s_01",
+          step: 0,
+        },
+      ],
+      [
+        "run",
+        {
+          runId: "s_01-t2",
+          status: "parked",
+          publicId: "pub_orders",
+          sessionId: "s_01",
+          step: 0,
+        },
+      ],
+      [
+        "parked",
+        { runId: "s_01-t2", callId: "call_9", ackId: "call_9", name: "refund" },
+      ],
+      [
+        "run",
+        {
+          runId: "s_01-t3",
+          status: "failed",
+          publicId: "pub_orders",
+          sessionId: "s_01",
+          step: 0,
+        },
+      ],
       ["error", { message: "boom", runId: "s_01-t3" }],
     ])
     expect(errorSpy).not.toHaveBeenCalled()
@@ -441,23 +602,38 @@ describe("select, isOpen, studioLink, scope(null) (C4)", () => {
   it("select picks the turn and step in the panel; studioLink carries the step, never the token", async () => {
     const routes = baseRoutes()
     const t2 = runRow({ id: "s_01-t2", started: "2026-10-01T09:05:00Z" })
-    routes["runs?public_id=pub_orders&limit=50"] = { total: 2, runs: [t2, runRow({})], next_before: null }
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 2,
+      runs: [t2, runRow({})],
+      next_before: null,
+    }
     routes["runs/s_01-t2"] = { ...t2, children: [] }
     routes["runs/s_01-t2/events?after=0&limit=500"] = page(runEvents("s_01-t2"))
     routes["runs/s_01-t2/transcript"] = { batches: [] }
     routes["runs/s_01-t2/spans"] = { spans: [] }
     fakeStudio(routes)
     const api = await load()
-    api.mount({ endpoint: STUDIO, publicId: "pub_orders", token: "dev_tok", open: true })
+    api.mount({
+      endpoint: STUDIO,
+      publicId: "pub_orders",
+      token: "dev_tok",
+      open: true,
+    })
     await settle()
-    expect(shadow(".weft-turn.weft-sel")?.getAttribute("data-weft-run")).toBe("s_01-t2")
+    expect(shadow(".weft-turn.weft-sel")?.getAttribute("data-weft-run")).toBe(
+      "s_01-t2"
+    )
     api.select("s_01-t1", 0)
     await settle()
-    expect(shadow(".weft-turn.weft-sel")?.getAttribute("data-weft-run")).toBe("s_01-t1")
+    expect(shadow(".weft-turn.weft-sel")?.getAttribute("data-weft-run")).toBe(
+      "s_01-t1"
+    )
     const link = api.studioLink("s_01-t1", 0)
     expect(link).toBe(`${STUDIO}runs/s_01-t1?step=0&view=story`)
     expect(link).not.toContain("dev_tok")
-    const arrow = Array.from(dock()?.shadowRoot?.querySelectorAll("a") ?? []).find((a) => a.textContent === "⤢")
+    const arrow = Array.from(
+      dock()?.shadowRoot?.querySelectorAll("a") ?? []
+    ).find((a) => a.textContent === "⤢")
     expect(arrow?.getAttribute("href")).toBe(link)
     expect(api.isOpen()).toBe(true)
     api.close()
@@ -467,7 +643,11 @@ describe("select, isOpen, studioLink, scope(null) (C4)", () => {
 
   it("scope(string) is the serialised form; scope(null) hands the scope back to the ladder", async () => {
     const routes = baseRoutes()
-    routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
+    routes["runs?public_id=pub_b&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
     fakeStudio(routes)
     const api = await load()
     const node = mounted(api.mount({ endpoint: STUDIO }))
@@ -488,12 +668,20 @@ describe("select, isOpen, studioLink, scope(null) (C4)", () => {
     const toPanel = (e: Devtools.DevtoolsEvents): PanelEvents => e
     const toPkg = (e: PanelEvents): Devtools.DevtoolsEvents => e
     const ev: Devtools.DevtoolsEvents = {
-      run: { runId: "r", status: "running", publicId: "p", sessionId: "s", step: 0 },
+      run: {
+        runId: "r",
+        status: "running",
+        publicId: "p",
+        sessionId: "s",
+        step: 0,
+      },
       parked: { runId: "r", callId: "c", ackId: "c", name: "refund" },
       error: { message: "m", runId: "r" },
     }
     expect(toPkg(toPanel(ev))).toEqual(ev)
-    const api = (n: Devtools.WeftDevtoolsElement): Omit<DevtoolsAPI, "isOpen"> & { isOpen: boolean } => n
+    const api = (
+      n: Devtools.WeftDevtoolsElement
+    ): Omit<DevtoolsAPI, "isOpen"> & { isOpen: boolean } => n
     expect(typeof api).toBe("function")
   })
 
@@ -514,13 +702,18 @@ describe("the framework helpers", () => {
     expect(docks()).toHaveLength(0)
     const host = document.createElement("div")
     document.body.appendChild(host)
-    const ref = useWeftDevtools({ scope: { publicId: "pub_orders", session: "s_01" }, endpoint: STUDIO })
+    const ref = useWeftDevtools({
+      scope: { publicId: "pub_orders", session: "s_01" },
+      endpoint: STUDIO,
+    })
     const cleanup = ref(host)
     expect(host.getAttribute("data-weft-scope")).toBe("pub_orders;session=s_01")
     await settle()
     expect(docks()).toHaveLength(1)
     expect(dock()?.autoMounted).toBe(false) // the helper's mount, at the endpoint it named
-    expect(dock()?.getAttribute("data-weft-scope")).toBe("pub_orders;session=s_01")
+    expect(dock()?.getAttribute("data-weft-scope")).toBe(
+      "pub_orders;session=s_01"
+    )
     expect(scopes()).toEqual(["pub_orders"])
     cleanup?.() // React 19: unbinds at the end of the commit…
     await Promise.resolve()
@@ -536,15 +729,22 @@ describe("the framework helpers", () => {
     fakeStudio(baseRoutes())
     await load()
     await settle()
-    const proto = (customElements.get("weft-devtools") as CustomElementConstructor).prototype as Dock
+    const proto = (
+      customElements.get("weft-devtools") as CustomElementConstructor
+    ).prototype as Dock
     const rescan = vi.spyOn(proto, "rescan")
     const { useWeftDevtools } = await import("@weftgo/devtools/react")
     const host = document.createElement("div")
     document.body.appendChild(host)
     const opts = () => ({ scope: { publicId: "pub_orders" }, endpoint: STUDIO })
     const changes: (string | null)[] = []
-    const watch = new MutationObserver((rs) => rs.forEach(() => changes.push(host.getAttribute("data-weft-scope"))))
-    watch.observe(host, { attributes: true, attributeFilter: ["data-weft-scope"] })
+    const watch = new MutationObserver((rs) =>
+      rs.forEach(() => changes.push(host.getAttribute("data-weft-scope")))
+    )
+    watch.observe(host, {
+      attributes: true,
+      attributeFilter: ["data-weft-scope"],
+    })
     // React 19's commit for each render: the previous ref's cleanup,
     // then the new ref — a new closure every render, the renders apart.
     let cleanup = useWeftDevtools(opts())(host)
@@ -567,10 +767,22 @@ describe("the framework helpers", () => {
     const { useWeftDevtools } = await import("@weftgo/devtools/react")
     const vue = await import("@weftgo/devtools/vue")
     const svelte = await import("@weftgo/devtools/svelte")
-    const hosts = [0, 1, 2].map(() => document.body.appendChild(document.createElement("div")))
-    useWeftDevtools({ scope: "pub_orders", endpoint: STUDIO, enabled: false })(hosts[0])
-    vue.useWeftDevtools({ scope: "pub_orders", endpoint: STUDIO, enabled: false })(hosts[1])
-    const action = svelte.weftDevtools(hosts[2], { scope: "pub_orders", endpoint: STUDIO, enabled: false })
+    const hosts = [0, 1, 2].map(() =>
+      document.body.appendChild(document.createElement("div"))
+    )
+    useWeftDevtools({ scope: "pub_orders", endpoint: STUDIO, enabled: false })(
+      hosts[0]
+    )
+    vue.useWeftDevtools({
+      scope: "pub_orders",
+      endpoint: STUDIO,
+      enabled: false,
+    })(hosts[1])
+    const action = svelte.weftDevtools(hosts[2], {
+      scope: "pub_orders",
+      endpoint: STUDIO,
+      enabled: false,
+    })
     await settle()
     for (const h of hosts) expect(h.hasAttribute("data-weft-scope")).toBe(false)
     expect(docks()).toHaveLength(0)
@@ -614,7 +826,11 @@ describe("the framework helpers", () => {
 
   it("react alone, the header rung off: the DOM marker scopes the page, window.fetch untouched (C3's Done line)", async () => {
     const routes = baseRoutes()
-    routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
+    routes["runs?public_id=pub_b&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
     const studio = fakeStudio(routes)
     // Production mode: only the marker rung is named; the endpoint is
     // off loopback, so the header rung keeps its default (off).
@@ -632,11 +848,16 @@ describe("the framework helpers", () => {
     }
     const a = chat("pub_orders")
     await settle()
-    type Panel = Dock & { detectWord: () => string; markerScopes: () => { scope: { publicId: string }; element: Element }[] }
+    type Panel = Dock & {
+      detectWord: () => string
+      markerScopes: () => { scope: { publicId: string }; element: Element }[]
+    }
     const panel = dock() as Panel
     expect(window.fetch).toBe(studio.fetchMock) // no global touched
     expect(panel.detectWord()).toBe("markers")
-    expect(panel.markerScopes()).toEqual([{ scope: { publicId: "pub_orders" }, element: a }])
+    expect(panel.markerScopes()).toEqual([
+      { scope: { publicId: "pub_orders" }, element: a },
+    ])
     expect(scopes()).toEqual(["pub_orders"])
     // A second chat's helper calls scope("pub_b") last; the marker the
     // user is in decides, not the last scope() call.
@@ -651,7 +872,11 @@ describe("the framework helpers", () => {
 
   it("vue: the function ref follows a getter, rebinding only when the scope changes", async () => {
     const routes = baseRoutes()
-    routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
+    routes["runs?public_id=pub_b&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
     fakeStudio(routes)
     const { useWeftDevtools } = await import("@weftgo/devtools/vue")
     expect(docks()).toHaveLength(0)
@@ -676,14 +901,18 @@ describe("the framework helpers", () => {
 
   it("svelte: the action marks on mount, rebinds on update, unmarks on destroy; the page's own panel is kept", async () => {
     fakeStudio(baseRoutes())
-    const { weftDevtools, useWeftDevtools } = await import("@weftgo/devtools/svelte")
+    const { weftDevtools, useWeftDevtools } =
+      await import("@weftgo/devtools/svelte")
     expect(useWeftDevtools).toBe(weftDevtools)
     const markup = document.createElement("weft-devtools")
     markup.setAttribute("data-endpoint", STUDIO)
     document.body.appendChild(markup)
     const host = document.createElement("div")
     document.body.appendChild(host)
-    const action = weftDevtools(host, { scope: "pub_orders", endpoint: "http://elsewhere.test/" })
+    const action = weftDevtools(host, {
+      scope: "pub_orders",
+      endpoint: "http://elsewhere.test/",
+    })
     expect(host.getAttribute("data-weft-scope")).toBe("pub_orders")
     await settle()
     expect(docks()).toEqual([markup]) // the page's own element: no second panel

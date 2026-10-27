@@ -132,36 +132,6 @@ export interface Registered {
   verified: boolean
 }
 
-/** overrideOf reads the run's own invoke_agent span (by weft.run.id; a
- * subagent child's span in the same trace is not this run's) for the
- * override fingerprint. Undefined when the run carries none. */
-export function overrideOf(
-  spans: Span[] | undefined,
-  runId: string
-): RunOverride | undefined {
-  const span = spans?.find(
-    (s) =>
-      s.attrs["gen_ai.operation.name"] === "invoke_agent" &&
-      s.attrs["weft.run.id"] === runId
-  )
-  if (!span) return undefined
-  const fields: string[] = []
-  let hash: string | undefined
-  for (const [k, v] of Object.entries(span.attrs)) {
-    if (!k.startsWith(OVERRIDE)) continue
-    const name = k.slice(OVERRIDE.length)
-    if (name === "hash") hash = typeof v === "string" ? v : String(v)
-    else fields.push(name)
-  }
-  if (!hash && fields.length === 0) return undefined
-  const ins = span.attrs[`${OVERRIDE}instructions`]
-  return {
-    hash,
-    instructions: ins === true || ins === "true",
-    fields: fields.sort(),
-  }
-}
-
 /** registeredAgent picks the manifest's agent for a run: the one with
  * the run's own manifest hash, else the one with its name (unverified
  * unless the file source lists that name under the run's hash). */
@@ -202,6 +172,50 @@ export function snippetsOf(
   )
   if (names.some((n) => !byName.has(n))) return undefined
   return names.map((n) => byName.get(n) ?? "")
+}
+
+/**
+ * composedFromInstructions says whether the first recorded step's
+ * system text is the run's configured instructions (instructions_hash)
+ * plus nothing but the offered tools' PromptSnippets — the loop's own
+ * composition, no PrepareStep. true or false when the hashes and texts
+ * decide it; undefined when they cannot: the text is not here, no
+ * WebCrypto, or tools were offered and the snippets are unknown or
+ * unverified (a stale weft.json, a ToolSource tool) — then only an
+ * exact match decides, and a mismatch is undefined, never false.
+ * `snippets` must come from a verified agent to decide a mismatch.
+ */
+export async function composedFromInstructions(
+  row: RequestRow,
+  instructionsHash: string,
+  snippets: string[] | undefined
+): Promise<boolean | undefined> {
+  const sys = row.system_hash
+  if (sys === instructionsHash) return true
+  if (sys === "" && instructionsHash === EMPTY_SHA256) return true
+  const text = promptText(row)
+  if (text === undefined) return undefined
+  if (snippets === undefined) {
+    // Without the snippets only an exact match decides; a step that
+    // offered no tools has no snippets to compose.
+    if (row.body.tools.names.length > 0) {
+      const h = await sha256Hex(text)
+      return h === undefined || h !== instructionsHash ? undefined : true
+    }
+    snippets = []
+  }
+  const parts = snippets.filter(Boolean)
+  // From here the snippets are the verified agent's: a mismatch is the
+  // text's, not the manifest's.
+  if (parts.length === 0) {
+    const h = await sha256Hex(text)
+    return h === undefined ? undefined : h === instructionsHash
+  }
+  const tail = parts.join("\n\n")
+  if (instructionsHash === EMPTY_SHA256) return text === tail
+  if (!text.endsWith(`\n\n${tail}`)) return false
+  const h = await sha256Hex(text.slice(0, text.length - tail.length - 2))
+  return h === undefined ? undefined : h === instructionsHash
 }
 
 /**
@@ -281,18 +295,6 @@ export function proposalOf(
   }
 }
 
-/** sha256Hex is the lowercase hex sha256 of the UTF-8 bytes — the
- * encoding every ADR 0028 hash uses. Undefined where the page has no
- * WebCrypto (an insecure, non-loopback origin). */
-export async function sha256Hex(text: string): Promise<string | undefined> {
-  const subtle = (globalThis.crypto as Crypto | undefined)?.subtle
-  if (!subtle) return undefined
-  const sum = await subtle.digest("SHA-256", new TextEncoder().encode(text))
-  return Array.from(new Uint8Array(sum), (b) =>
-    b.toString(16).padStart(2, "0")
-  ).join("")
-}
-
 /** The previous recorded step's last row, for each step that has one. */
 export function previousRows(rows: RequestRow[]): Map<number, RequestRow> {
   const sorted = [...rows].sort((a, b) => a.step - b.step || a.index - b.index)
@@ -322,6 +324,36 @@ export interface PromptBaseline {
   overridden?: boolean
 }
 
+/** overrideOf reads the run's own invoke_agent span (by weft.run.id; a
+ * subagent child's span in the same trace is not this run's) for the
+ * override fingerprint. Undefined when the run carries none. */
+export function overrideOf(
+  spans: Span[] | undefined,
+  runId: string
+): RunOverride | undefined {
+  const span = spans?.find(
+    (s) =>
+      s.attrs["gen_ai.operation.name"] === "invoke_agent" &&
+      s.attrs["weft.run.id"] === runId
+  )
+  if (!span) return undefined
+  const fields: string[] = []
+  let hash: string | undefined
+  for (const [k, v] of Object.entries(span.attrs)) {
+    if (!k.startsWith(OVERRIDE)) continue
+    const name = k.slice(OVERRIDE.length)
+    if (name === "hash") hash = typeof v === "string" ? v : String(v)
+    else fields.push(name)
+  }
+  if (!hash && fields.length === 0) return undefined
+  const ins = span.attrs[`${OVERRIDE}instructions`]
+  return {
+    hash,
+    instructions: ins === true || ins === "true",
+    fields: fields.sort(),
+  }
+}
+
 /** The diff's caption. */
 export function baselineCaption(b: PromptBaseline): string {
   if (b.kind === "previous") return `diff vs step ${b.step}`
@@ -332,48 +364,16 @@ export function baselineCaption(b: PromptBaseline): string {
     : "diff vs the registered instructions"
 }
 
-/**
- * composedFromInstructions says whether the first recorded step's
- * system text is the run's configured instructions (instructions_hash)
- * plus nothing but the offered tools' PromptSnippets — the loop's own
- * composition, no PrepareStep. true or false when the hashes and texts
- * decide it; undefined when they cannot: the text is not here, no
- * WebCrypto, or tools were offered and the snippets are unknown or
- * unverified (a stale weft.json, a ToolSource tool) — then only an
- * exact match decides, and a mismatch is undefined, never false.
- * `snippets` must come from a verified agent to decide a mismatch.
- */
-export async function composedFromInstructions(
-  row: RequestRow,
-  instructionsHash: string,
-  snippets: string[] | undefined
-): Promise<boolean | undefined> {
-  const sys = row.system_hash
-  if (sys === instructionsHash) return true
-  if (sys === "" && instructionsHash === EMPTY_SHA256) return true
-  const text = promptText(row)
-  if (text === undefined) return undefined
-  if (snippets === undefined) {
-    // Without the snippets only an exact match decides; a step that
-    // offered no tools has no snippets to compose.
-    if (row.body.tools.names.length > 0) {
-      const h = await sha256Hex(text)
-      return h === undefined || h !== instructionsHash ? undefined : true
-    }
-    snippets = []
-  }
-  const parts = snippets.filter(Boolean)
-  // From here the snippets are the verified agent's: a mismatch is the
-  // text's, not the manifest's.
-  if (parts.length === 0) {
-    const h = await sha256Hex(text)
-    return h === undefined ? undefined : h === instructionsHash
-  }
-  const tail = parts.join("\n\n")
-  if (instructionsHash === EMPTY_SHA256) return text === tail
-  if (!text.endsWith(`\n\n${tail}`)) return false
-  const h = await sha256Hex(text.slice(0, text.length - tail.length - 2))
-  return h === undefined ? undefined : h === instructionsHash
+/** sha256Hex is the lowercase hex sha256 of the UTF-8 bytes — the
+ * encoding every ADR 0028 hash uses. Undefined where the page has no
+ * WebCrypto (an insecure, non-loopback origin). */
+export async function sha256Hex(text: string): Promise<string | undefined> {
+  const subtle = (globalThis.crypto as Crypto | undefined)?.subtle
+  if (!subtle) return undefined
+  const sum = await subtle.digest("SHA-256", new TextEncoder().encode(text))
+  return Array.from(new Uint8Array(sum), (b) =>
+    b.toString(16).padStart(2, "0")
+  ).join("")
 }
 
 /** composeSystem mirrors core/loop.go's: the instructions, then each

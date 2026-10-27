@@ -14,7 +14,9 @@ export type { Scope } from "../lib/scope.js"
  * (mount({endpoint, token})), and calls scope(opts.scope); on detach
  * it removes the marker. A re-render with the same options does
  * nothing (one binding per element, whichever render's ref holds it). */
-export function useWeftDevtools(opts: HelperOptions): (node: Element | null) => (() => void) | undefined {
+export function useWeftDevtools(
+  opts: HelperOptions
+): (node: Element | null) => (() => void) | undefined {
   let last: Element | null = null
   return (node) => {
     if (!node) {

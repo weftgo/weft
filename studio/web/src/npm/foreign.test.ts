@@ -15,7 +15,10 @@ afterEach(() => {
 describe("a foreign element under the tag", () => {
   it("scope, open, close, toggle and mount do not throw into the host", async () => {
     customElements.define("weft-devtools", Foreign)
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("no", { status: 404 })))
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("no", { status: 404 }))
+    )
     const api = await import("@weftgo/devtools")
     const node = document.createElement("weft-devtools")
     document.body.appendChild(node)

@@ -72,6 +72,11 @@ export interface VerdictInput {
   breakpoints?: string[]
 }
 
+/** A whole, non-negative number, or 0. */
+function pos(n: number): number {
+  return Number.isInteger(n) && n >= 0 ? n : 0
+}
+
 /** tokenClaimsOf reads a panel token's claims (scope, public_id, tags)
  * — a hint, never a check; null for any other bearer, {} for a panel
  * token that does not parse. */
@@ -107,11 +112,6 @@ export function editResultAndReplay(step: number, callID: string): ReplayDraft {
     focus: "edit",
     at: { step: at, callID },
   }
-}
-
-/** A whole, non-negative number, or 0. */
-function pos(n: number): number {
-  return Number.isInteger(n) && n >= 0 ? n : 0
 }
 
 /** replay from this step: steps 0..n-1 kept, step n run fresh. */
@@ -363,6 +363,15 @@ export function replayVerdicts(input: VerdictInput): ToolVerdict[] {
   })
 }
 
+/** The token scope a bearer carries: a panel token (weft_pt.<claims>.
+ * <sig>) names "read" or "playground"; any other bearer (the dev or
+ * server token, none) is "". An unreadable panel token is the default
+ * mint, read. */
+export function tokenScopeOf(token: string): "" | "read" | "playground" {
+  const c = tokenClaimsOf(token)
+  return !c ? "" : c.scope === "playground" ? "playground" : "read"
+}
+
 /** endsInAnsweredCalls is studio/edits.go's (and the runtime's) rule
  * for a from_step AT the step count: over the run's own messages in
  * order, the last assistant message made at least one tool call and
@@ -403,15 +412,6 @@ export function transcriptStepCount(
   return n
 }
 
-/** The token scope a bearer carries: a panel token (weft_pt.<claims>.
- * <sig>) names "read" or "playground"; any other bearer (the dev or
- * server token, none) is "". An unreadable panel token is the default
- * mint, read. */
-export function tokenScopeOf(token: string): "" | "read" | "playground" {
-  const c = tokenClaimsOf(token)
-  return !c ? "" : c.scope === "playground" ? "playground" : "read"
-}
-
 /** maxFromStep is the highest from_step the server accepts: the step
  * count when the kept prefix ends in answered calls, else one less (a
  * from_step past it is a 400). -1 when the run has no step. */
@@ -429,6 +429,32 @@ export function prefixLine(fromStep: number, compacted: boolean): string {
     ? `${kept} · the compacted prefix (what the model saw at step ${fromStep})`
     : kept
 }
+
+/** The replay vocabulary (UX-D-14), both surfaces: a run made by the
+ * drawer is a "replay" — its chip and header line "replay of t7 ·
+ * step 0", its result head "Replay 2 of t7 · scripted · finished"
+ * (the name, the engine, the state). */
+export const REPLAY_WORDS = {
+  of: (src: string, step?: number | string) =>
+    `replay of ${src}${step !== undefined && step !== "" ? ` · step ${step}` : ""}`,
+  /** A replay's name: the n-th of its source turn. */
+  head: (n: number, src: string) => `Replay ${n} of ${src}`,
+} as const
+
+/** The replay drawer's title per verb, both drawers (UX-F-17, UX-C-22):
+ * a drawer opened with no verb (the turn's ✎ Replay…) says REPLAY_TITLE. */
+export const VERB_TITLES: Record<ReplayVerb, string> = {
+  from_step: "Replay from this step",
+  edit_result: "Edit this result and replay",
+  edit_prompt: "Edit the prompt and replay",
+  rerun: "Re-run",
+  continue: "Continue here with a new message",
+  edit: "Edit the transcript and replay",
+}
+
+/** The turn's drawer button and the drawer it opens with no verb. */
+export const REPLAY_OPEN = "✎ Replay…"
+export const REPLAY_TITLE = "Replay"
 
 /** canReplay: the replay verbs are offered when the server reports the
  * playground AND the bearer may act — a read-scoped panel token is
@@ -493,29 +519,3 @@ export function replayOffWhy(
   if (running) return REPLAY_OFF.running
   return undefined
 }
-
-/** The replay vocabulary (UX-D-14), both surfaces: a run made by the
- * drawer is a "replay" — its chip and header line "replay of t7 ·
- * step 0", its result head "Replay 2 of t7 · scripted · finished"
- * (the name, the engine, the state). */
-export const REPLAY_WORDS = {
-  of: (src: string, step?: number | string) =>
-    `replay of ${src}${step !== undefined && step !== "" ? ` · step ${step}` : ""}`,
-  /** A replay's name: the n-th of its source turn. */
-  head: (n: number, src: string) => `Replay ${n} of ${src}`,
-} as const
-
-/** The replay drawer's title per verb, both drawers (UX-F-17, UX-C-22):
- * a drawer opened with no verb (the turn's ✎ Replay…) says REPLAY_TITLE. */
-export const VERB_TITLES: Record<ReplayVerb, string> = {
-  from_step: "Replay from this step",
-  edit_result: "Edit this result and replay",
-  edit_prompt: "Edit the prompt and replay",
-  rerun: "Re-run",
-  continue: "Continue here with a new message",
-  edit: "Edit the transcript and replay",
-}
-
-/** The turn's drawer button and the drawer it opens with no verb. */
-export const REPLAY_OPEN = "✎ Replay…"
-export const REPLAY_TITLE = "Replay"

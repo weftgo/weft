@@ -125,18 +125,22 @@ export interface WaterfallModel {
   unplaced: number
 }
 
-// ── Times ──────────────────────────────────────────────────────────
+/** The earliest parseable start, in epoch ms; NaN when none parses.
+ * A loop, not Math.min(...spread): a large trace overflows the
+ * argument stack. */
+export function earliestStart(timed: readonly TimedSpan[]): number {
+  let t0 = NaN
+  for (const s of timed) {
+    const t = instantMs(s.start)
+    if (Number.isFinite(t) && !(t >= t0)) t0 = t
+  }
+  return t0
+}
 
-/** An RFC 3339 instant in epoch ms, keeping the sub-millisecond digits
- * Date.parse drops (a 15µs model call must not read 0) — to about a
- * quarter of a microsecond, a double's grain at epoch scale. NaN when it
- * does not parse. */
-export function instantMs(iso: string): number {
-  const m = /^(.*T\d\d:\d\d:\d\d)(?:\.(\d+))?(.*)$/.exec(iso)
-  if (!m) return Date.parse(iso)
-  const base = Date.parse(m[1] + m[3])
-  const frac = m[2] ? Number(`0.${m[2]}`) * 1000 : 0
-  return base + frac
+function stepGist(names: string[], text: string | undefined): string {
+  if (names.length)
+    return `${plural(names.length, "tool")}: ${names.join(", ")}`
+  return text ? quote(text) : ""
 }
 
 /** A row's extent as text: its duration on the time scale, its
@@ -151,154 +155,19 @@ export function extent(row: WaterfallRow, scale: Scale): string {
  * into its tool's range, so they keep one decimal at most. */
 const pos = (v: number) => +v.toFixed(1)
 
-/** The earliest parseable start, in epoch ms; NaN when none parses.
- * A loop, not Math.min(...spread): a large trace overflows the
- * argument stack. */
-export function earliestStart(timed: readonly TimedSpan[]): number {
-  let t0 = NaN
-  for (const s of timed) {
-    const t = instantMs(s.start)
-    if (Number.isFinite(t) && !(t >= t0)) t0 = t
-  }
-  return t0
+// ── Times ──────────────────────────────────────────────────────────
+
+/** An RFC 3339 instant in epoch ms, keeping the sub-millisecond digits
+ * Date.parse drops (a 15µs model call must not read 0) — to about a
+ * quarter of a microsecond, a double's grain at epoch scale. NaN when it
+ * does not parse. */
+export function instantMs(iso: string): number {
+  const m = /^(.*T\d\d:\d\d:\d\d)(?:\.(\d+))?(.*)$/.exec(iso)
+  if (!m) return Date.parse(iso)
+  const base = Date.parse(m[1] + m[3])
+  const frac = m[2] ? Number(`0.${m[2]}`) * 1000 : 0
+  return base + frac
 }
-
-/** Marks the critical path (the chain that set the run's length):
- * from a row's end backwards, the child that ends last, then the one
- * that ended last before that child started, and so on — serial steps
- * all mark, of overlapping calls only the one that ended last; then
- * the same inside each marked child. */
-function markCritical(root: Node) {
-  for (const st = [root]; st.length;) {
-    const n = st.pop()!
-    n.critical = true
-    const kids = [...n.kids].sort((a, b) => endOf(b) - endOf(a))
-    let bound = Infinity
-    for (const k of kids)
-      if (endOf(k) <= bound) {
-        st.push(k)
-        bound = k.start
-      }
-  }
-}
-
-/** An attempt's key from its model call's key. */
-export const attemptKey = (model: string, n: number) =>
-  `${model.replace(/:m$/, "")}:a${n}`
-
-type Keys = ReturnType<typeof rowKeys>
-
-// ── The generic span tree ──────────────────────────────────────────
-
-export interface TreeNode {
-  span: TimedSpan
-  /** The parent's span id, when the parent is in the set. */
-  parent?: string
-  depth: number
-}
-
-/** A span's identity: span ids are unique within a trace only. */
-export const spanRef = (s: TimedSpan, id = s.span_id) => `${s.trace_id}/${id}`
-
-// ── Attributes ─────────────────────────────────────────────────────
-
-/** A span's attributes; {} for a span that arrived without any (a
- * hand-built or foreign one: the type promises them, the wire may not). */
-export function attrsOf(s: TimedSpan | undefined): Record<string, unknown> {
-  return (s as { attrs?: Record<string, unknown> } | undefined)?.attrs ?? {}
-}
-
-/** The span's GenAI operation; the name's first word for spans that
- * carry none ("invoke_agent planner"). */
-export function opOf(s: TimedSpan): string {
-  return str(attrsOf(s)["gen_ai.operation.name"]) ?? s.name.split(" ")[0]
-}
-
-/** The time axis's domain: [0, the latest end] in milliseconds. */
-export function timeDomain(timed: readonly TimedSpan[]): [number, number] {
-  const t0 = earliestStart(timed)
-  if (!Number.isFinite(t0)) return [0, 1]
-  let hi = 1
-  for (const s of timed) {
-    const end = instantMs(s.end)
-    if (Number.isFinite(end) && end - t0 > hi) hi = end - t0
-  }
-  return [0, hi]
-}
-
-function stepGist(names: string[], text: string | undefined): string {
-  if (names.length)
-    return `${plural(names.length, "tool")}: ${names.join(", ")}`
-  return text ? quote(text) : ""
-}
-
-export const str = (v: unknown) => (typeof v === "string" ? v : undefined)
-
-/** The first finish reason: a list, or the list as a JSON string (the
- * ClickHouse fallback map), or one reason. */
-function finishOf(v: unknown): string | undefined {
-  if (typeof v === "string" && v.startsWith("["))
-    try {
-      v = JSON.parse(v)
-    } catch {
-      /* the string itself */
-    }
-  return Array.isArray(v) ? str(v[0]) : str(v)
-}
-
-/** A boolean attribute; ClickHouse's fallback map stores "true". */
-export const bool = (v: unknown) => v === true || v === "true"
-
-/** A resumed (approved, before step 0's model call) or denied
- * (zero-length, at the resume) call: the run's own, keyed "resume". */
-export const resumedCall = (a: Record<string, unknown>) =>
-  bool(a["weft.tool.approved"]) || bool(a["weft.tool.denied"])
-
-// ── Keys ───────────────────────────────────────────────────────────
-
-/**
- * rowKeys is THE selection-key scheme: the run tree's rows here and the
- * trace page's rows (lib/trace-sel.ts) take their keys from it, so a
- * /traces ?sel= names the same row on the run page. The root run's keys
- * are bare, every other run's run-qualified:
- *
- *   r:<run>                      the run (its invoke_agent span)
- *   s<step>        s:<run>:<step>           the step
- *   s<step>:m      s:<run>:<step>:m         its model call (the first
- *                                           by start; a second :m2, …)
- *   s<step>:a<n>   s<step>:m2:a<n>          an attempt of that call
- *   c:<step>:<call>  c:<run>:<step>:<call>  a tool execution
- *   c:resume:<call>  c:<run>:resume:<call>  a resumed or denied call
- *   t:<span>       t:<run>:<span>           any other span
- *
- * Old forms (a chat span keyed s<step>, a root run qualified, a denied
- * call keyed by its step) still resolve: lib/trace-sel.ts's resolveSel.
- */
-export function rowKeys(run: string, qualify: boolean) {
-  const q = qualify ? `${run}:` : ""
-  const step = (n: number | string) => (qualify ? `s:${q}${n}` : `s${n}`)
-  return {
-    step,
-    model: (n: number | string, i = 0) => `${step(n)}:m${i ? i + 1 : ""}`,
-    call: (at: number | string, id: string) => `c:${q}${at}:${id}`,
-    span: (id: string) => `t:${q}${id}`,
-  }
-}
-
-export function int(v: unknown): number | undefined {
-  if (typeof v === "number" && Number.isInteger(v)) return v
-  if (typeof v === "string" && /^\d+$/.test(v)) return Number(v)
-  return undefined
-}
-
-// ── Gists ──────────────────────────────────────────────────────────
-
-const GIST = 60
-
-const quote = (s: string) => `“${clip(s, GIST)}”`
-
-/** A ToolError renders "CODE: message" — the code is the error. */
-const CODED = /^([A-Z][A-Z0-9_]+): /
 
 /** A duration in ms in the tightest unit that reads: 15 µs, 9.5 ms,
  * 120 ms, 7.7 s (lib/format.ts's spanMs from 100 ms up, its spaced
@@ -329,6 +198,85 @@ interface Node extends WaterfallRow {
 }
 
 type Base = Omit<WaterfallRow, "depth" | "critical">
+
+/** Marks the critical path (the chain that set the run's length):
+ * from a row's end backwards, the child that ends last, then the one
+ * that ended last before that child started, and so on — serial steps
+ * all mark, of overlapping calls only the one that ended last; then
+ * the same inside each marked child. */
+function markCritical(root: Node) {
+  for (const st = [root]; st.length;) {
+    const n = st.pop()!
+    n.critical = true
+    const kids = [...n.kids].sort((a, b) => endOf(b) - endOf(a))
+    let bound = Infinity
+    for (const k of kids)
+      if (endOf(k) <= bound) {
+        st.push(k)
+        bound = k.start
+      }
+  }
+}
+
+/** The span's GenAI operation; the name's first word for spans that
+ * carry none ("invoke_agent planner"). */
+export function opOf(s: TimedSpan): string {
+  return str(attrsOf(s)["gen_ai.operation.name"]) ?? s.name.split(" ")[0]
+}
+
+/** The time axis's domain: [0, the latest end] in milliseconds. */
+export function timeDomain(timed: readonly TimedSpan[]): [number, number] {
+  const t0 = earliestStart(timed)
+  if (!Number.isFinite(t0)) return [0, 1]
+  let hi = 1
+  for (const s of timed) {
+    const end = instantMs(s.end)
+    if (Number.isFinite(end) && end - t0 > hi) hi = end - t0
+  }
+  return [0, hi]
+}
+
+/** An attempt's key from its model call's key. */
+export const attemptKey = (model: string, n: number) =>
+  `${model.replace(/:m$/, "")}:a${n}`
+
+type Keys = ReturnType<typeof rowKeys>
+
+// ── The generic span tree ──────────────────────────────────────────
+
+export interface TreeNode {
+  span: TimedSpan
+  /** The parent's span id, when the parent is in the set. */
+  parent?: string
+  depth: number
+}
+
+/** A span's identity: span ids are unique within a trace only. */
+export const spanRef = (s: TimedSpan, id = s.span_id) => `${s.trace_id}/${id}`
+
+export const str = (v: unknown) => (typeof v === "string" ? v : undefined)
+
+function spanStatus(s: TimedSpan): RowStatus {
+  if (s.status === "error") return "error"
+  return bool(attrsOf(s)["weft.tool.pending"]) ? "pending" : "ok"
+}
+
+/** A boolean attribute; ClickHouse's fallback map stores "true". */
+export const bool = (v: unknown) => v === true || v === "true"
+
+/** A resumed (approved, before step 0's model call) or denied
+ * (zero-length, at the resume) call: the run's own, keyed "resume". */
+export const resumedCall = (a: Record<string, unknown>) =>
+  bool(a["weft.tool.approved"]) || bool(a["weft.tool.denied"])
+
+// ── Gists ──────────────────────────────────────────────────────────
+
+const GIST = 60
+
+const quote = (s: string) => `“${clip(s, GIST)}”`
+
+/** A ToolError renders "CODE: message" — the code is the error. */
+const CODED = /^([A-Z][A-Z0-9_]+): /
 
 const node = (r: Base): Node => ({ ...r, depth: 0, critical: false, kids: [] })
 
@@ -444,68 +392,8 @@ const toolRow = (
         : undefined),
   })
 
-function spanStatus(s: TimedSpan): RowStatus {
-  if (s.status === "error") return "error"
-  return bool(attrsOf(s)["weft.tool.pending"]) ? "pending" : "ok"
-}
-
 const endOf = (n: WaterfallRow) =>
   n.took === null ? Infinity : n.start + n.took
-
-/**
- * spanTree orders spans as a tree: a span, then its whole subtree,
- * siblings by start, whatever order the API returned. A span whose
- * parent is not in the set (the same trace's) is a root; a parent
- * chain that loops (a span naming itself, two naming each other —
- * ingest stores what it is sent) is cut where the walk would revisit,
- * so every span appears exactly once and no consumer can loop on
- * `parent`. Iterative: a deep trace must not overflow the stack.
- */
-export function spanTree(timed: readonly TimedSpan[]): TreeNode[] {
-  const t0 = earliestStart(timed)
-  const startOf = (s: TimedSpan) => {
-    const t = instantMs(s.start)
-    return Number.isFinite(t) && Number.isFinite(t0) ? t - t0 : 0
-  }
-  const byID = new Map<string, TimedSpan>()
-  for (const s of timed) if (!byID.has(spanRef(s))) byID.set(spanRef(s), s)
-  const kids = new Map<string, TimedSpan[]>()
-  const roots: TimedSpan[] = []
-  for (const s of timed) {
-    const p = s.parent_span_id && spanRef(s, s.parent_span_id)
-    if (p && s.parent_span_id !== s.span_id && byID.has(p)) {
-      const list = kids.get(p)
-      if (list) list.push(s)
-      else kids.set(p, [s])
-    } else roots.push(s)
-  }
-  const byStart = (a: TimedSpan, b: TimedSpan) => startOf(a) - startOf(b)
-  const out: TreeNode[] = []
-  const placed = new Set<TimedSpan>()
-  const walk = (start: TimedSpan[]) => {
-    const stack: TreeNode[] = [...start]
-      .sort(byStart)
-      .reverse()
-      .map((span) => ({ span, depth: 0 }))
-    for (let n = stack.pop(); n; n = stack.pop()) {
-      if (placed.has(n.span)) continue
-      placed.add(n.span)
-      out.push(n)
-      const children = (kids.get(spanRef(n.span)) ?? []).slice().sort(byStart)
-      for (let i = children.length - 1; i >= 0; i--)
-        stack.push({
-          span: children[i],
-          parent: n.span.span_id,
-          depth: n.depth + 1,
-        })
-    }
-  }
-  walk(roots)
-  // Whatever no root reaches sits on a parent cycle: each remaining
-  // span opens its own tree (the cycle is cut at the revisit).
-  for (const s of timed) if (!placed.has(s)) walk([s])
-  return out
-}
 
 /** The rows in tree order. A key met twice (a call id a step repeats,
  * spans ingest stored twice) yields to the span's own t: key, else a
@@ -583,6 +471,153 @@ function assignLanes(step: Node) {
     t.lane = i + 1
   }
   step.lanes = ends.length
+}
+
+// ── The order scale ────────────────────────────────────────────────
+
+function orderRows(input: WaterfallInput): WaterfallModel {
+  const fold = input.fold
+  const status = input.status ?? ""
+  const running = status === "running"
+  const total = Math.max(0, (input.total ?? 0) - 1)
+  if (!fold) return { scale: "order", rows: [], domain: [0, 1], unplaced: 0 }
+  const span = (f: FoldedRun) => {
+    const a = f.startPos ?? f.steps.at(0)?.from ?? 0
+    let b = f.finishPos ?? a
+    for (const s of f.steps) b = Math.max(b, s.to)
+    return [a, b]
+  }
+
+  // A child's positions are its own stream's: drawn inside its tool's
+  // range, scaled linearly (map).
+  const buildRun = (
+    f: FoldedRun,
+    isChild: boolean,
+    map: (p: number) => number
+  ): Node => {
+    const run = f.runId
+    const k = rowKeys(run, isChild)
+    const [first, last] = span(f)
+    const a = isChild ? map(first) : 0
+    const b = isChild ? map(last) : f.finished ? Math.max(last, total) : last
+    const root = runRow(
+      run,
+      isChild,
+      f.agent,
+      f.steps.length,
+      a,
+      f.finished || !running ? b - a : null,
+      f.finished
+        ? "ok"
+        : running
+          ? "running"
+          : status === "failed"
+            ? "error"
+            : "never"
+    )
+    const callNode = (
+      c: FoldedToolCall,
+      at: number | string,
+      step?: number
+    ) => {
+      const open = c.finishPos === undefined
+      const t = toolRow(
+        k.call(at, c.callId),
+        run,
+        step,
+        c.callId,
+        c.name,
+        c,
+        undefined,
+        map(c.startPos),
+        open ? (running ? null : 0) : map(c.finishPos!) - map(c.startPos),
+        open
+          ? running
+            ? "running"
+            : "never"
+          : c.result?.isError
+            ? "error"
+            : "ok"
+      )
+      const id = c.childRunId
+      if (id) {
+        const expanded = !!input.expanded?.has(id)
+        const cf = input.children?.get(id)
+        const lo = t.start
+        const hi = t.took === null ? map(total) : t.start + t.took
+        let child: Node
+        if (expanded && cf) {
+          const [c0, c1] = span(cf)
+          const w = Math.max(1, c1 - c0)
+          child = buildRun(cf, true, (p) => lo + ((p - c0) / w) * (hi - lo))
+        } else
+          child = runRow(
+            id,
+            true,
+            cf?.agent || input.agents?.get(id) || c.name,
+            cf?.steps.length,
+            lo,
+            t.took,
+            t.status
+          )
+        child.child = { runId: id, collapsed: !expanded, loaded: !!cf }
+        t.kids.push(child)
+      }
+      return t
+    }
+    for (const s of f.steps) {
+      const open = !s.finish && running
+      const own = s.toolCalls.filter((c) => !c.resumed)
+      for (const c of s.toolCalls)
+        if (c.resumed) root.kids.push(callNode(c, "resume"))
+      const st = stepRow(
+        k,
+        run,
+        s.index,
+        own.map((c) => c.name),
+        s.text,
+        map(s.from),
+        open ? null : map(s.to) - map(s.from),
+        s.finish
+          ? "ok"
+          : open
+            ? "running"
+            : status === "failed"
+              ? "error"
+              : "never",
+        s.finish?.reason
+      )
+      root.kids.push(st)
+      // The model call: from the step's start to its first tool call
+      // (the stream says no more on positions).
+      const mEnd = own.length ? own[0].startPos : s.finish ? s.to : undefined
+      st.kids.push(
+        modelRow(
+          k.model(s.index),
+          run,
+          s.index,
+          f.model?.name,
+          own.length,
+          s.text,
+          map(s.from),
+          mEnd === undefined ? null : map(mEnd) - map(s.from),
+          st.status,
+          s.finish?.reason,
+          s.finish?.ttftMs
+        ),
+        ...own.map((c) => callNode(c, s.index, s.index))
+      )
+      assignLanes(st)
+    }
+    return root
+  }
+
+  const root = buildRun(fold, false, (p) => p)
+  markCritical(root)
+  const rows = flatten(root, fold.runId)
+  let hi = total
+  for (const r of rows) hi = Math.max(hi, r.start + (r.took ?? 0))
+  return { scale: "order", rows, domain: [0, Math.max(1, hi)], unplaced: 0 }
 }
 
 /**
@@ -1023,166 +1058,65 @@ function place(span: TimedSpan, t0: number): Placed | undefined {
     : undefined
 }
 
-// ── The order scale ────────────────────────────────────────────────
-
-function orderRows(input: WaterfallInput): WaterfallModel {
-  const fold = input.fold
-  const status = input.status ?? ""
-  const running = status === "running"
-  const total = Math.max(0, (input.total ?? 0) - 1)
-  if (!fold) return { scale: "order", rows: [], domain: [0, 1], unplaced: 0 }
-  const span = (f: FoldedRun) => {
-    const a = f.startPos ?? f.steps.at(0)?.from ?? 0
-    let b = f.finishPos ?? a
-    for (const s of f.steps) b = Math.max(b, s.to)
-    return [a, b]
+/**
+ * spanTree orders spans as a tree: a span, then its whole subtree,
+ * siblings by start, whatever order the API returned. A span whose
+ * parent is not in the set (the same trace's) is a root; a parent
+ * chain that loops (a span naming itself, two naming each other —
+ * ingest stores what it is sent) is cut where the walk would revisit,
+ * so every span appears exactly once and no consumer can loop on
+ * `parent`. Iterative: a deep trace must not overflow the stack.
+ */
+export function spanTree(timed: readonly TimedSpan[]): TreeNode[] {
+  const t0 = earliestStart(timed)
+  const startOf = (s: TimedSpan) => {
+    const t = instantMs(s.start)
+    return Number.isFinite(t) && Number.isFinite(t0) ? t - t0 : 0
   }
-
-  // A child's positions are its own stream's: drawn inside its tool's
-  // range, scaled linearly (map).
-  const buildRun = (
-    f: FoldedRun,
-    isChild: boolean,
-    map: (p: number) => number
-  ): Node => {
-    const run = f.runId
-    const k = rowKeys(run, isChild)
-    const [first, last] = span(f)
-    const a = isChild ? map(first) : 0
-    const b = isChild ? map(last) : f.finished ? Math.max(last, total) : last
-    const root = runRow(
-      run,
-      isChild,
-      f.agent,
-      f.steps.length,
-      a,
-      f.finished || !running ? b - a : null,
-      f.finished
-        ? "ok"
-        : running
-          ? "running"
-          : status === "failed"
-            ? "error"
-            : "never"
-    )
-    const callNode = (
-      c: FoldedToolCall,
-      at: number | string,
-      step?: number
-    ) => {
-      const open = c.finishPos === undefined
-      const t = toolRow(
-        k.call(at, c.callId),
-        run,
-        step,
-        c.callId,
-        c.name,
-        c,
-        undefined,
-        map(c.startPos),
-        open ? (running ? null : 0) : map(c.finishPos!) - map(c.startPos),
-        open
-          ? running
-            ? "running"
-            : "never"
-          : c.result?.isError
-            ? "error"
-            : "ok"
-      )
-      const id = c.childRunId
-      if (id) {
-        const expanded = !!input.expanded?.has(id)
-        const cf = input.children?.get(id)
-        const lo = t.start
-        const hi = t.took === null ? map(total) : t.start + t.took
-        let child: Node
-        if (expanded && cf) {
-          const [c0, c1] = span(cf)
-          const w = Math.max(1, c1 - c0)
-          child = buildRun(cf, true, (p) => lo + ((p - c0) / w) * (hi - lo))
-        } else
-          child = runRow(
-            id,
-            true,
-            cf?.agent || input.agents?.get(id) || c.name,
-            cf?.steps.length,
-            lo,
-            t.took,
-            t.status
-          )
-        child.child = { runId: id, collapsed: !expanded, loaded: !!cf }
-        t.kids.push(child)
-      }
-      return t
-    }
-    for (const s of f.steps) {
-      const open = !s.finish && running
-      const own = s.toolCalls.filter((c) => !c.resumed)
-      for (const c of s.toolCalls)
-        if (c.resumed) root.kids.push(callNode(c, "resume"))
-      const st = stepRow(
-        k,
-        run,
-        s.index,
-        own.map((c) => c.name),
-        s.text,
-        map(s.from),
-        open ? null : map(s.to) - map(s.from),
-        s.finish
-          ? "ok"
-          : open
-            ? "running"
-            : status === "failed"
-              ? "error"
-              : "never",
-        s.finish?.reason
-      )
-      root.kids.push(st)
-      // The model call: from the step's start to its first tool call
-      // (the stream says no more on positions).
-      const mEnd = own.length ? own[0].startPos : s.finish ? s.to : undefined
-      st.kids.push(
-        modelRow(
-          k.model(s.index),
-          run,
-          s.index,
-          f.model?.name,
-          own.length,
-          s.text,
-          map(s.from),
-          mEnd === undefined ? null : map(mEnd) - map(s.from),
-          st.status,
-          s.finish?.reason,
-          s.finish?.ttftMs
-        ),
-        ...own.map((c) => callNode(c, s.index, s.index))
-      )
-      assignLanes(st)
-    }
-    return root
+  const byID = new Map<string, TimedSpan>()
+  for (const s of timed) if (!byID.has(spanRef(s))) byID.set(spanRef(s), s)
+  const kids = new Map<string, TimedSpan[]>()
+  const roots: TimedSpan[] = []
+  for (const s of timed) {
+    const p = s.parent_span_id && spanRef(s, s.parent_span_id)
+    if (p && s.parent_span_id !== s.span_id && byID.has(p)) {
+      const list = kids.get(p)
+      if (list) list.push(s)
+      else kids.set(p, [s])
+    } else roots.push(s)
   }
-
-  const root = buildRun(fold, false, (p) => p)
-  markCritical(root)
-  const rows = flatten(root, fold.runId)
-  let hi = total
-  for (const r of rows) hi = Math.max(hi, r.start + (r.took ?? 0))
-  return { scale: "order", rows, domain: [0, Math.max(1, hi)], unplaced: 0 }
+  const byStart = (a: TimedSpan, b: TimedSpan) => startOf(a) - startOf(b)
+  const out: TreeNode[] = []
+  const placed = new Set<TimedSpan>()
+  const walk = (start: TimedSpan[]) => {
+    const stack: TreeNode[] = [...start]
+      .sort(byStart)
+      .reverse()
+      .map((span) => ({ span, depth: 0 }))
+    for (let n = stack.pop(); n; n = stack.pop()) {
+      if (placed.has(n.span)) continue
+      placed.add(n.span)
+      out.push(n)
+      const children = (kids.get(spanRef(n.span)) ?? []).slice().sort(byStart)
+      for (let i = children.length - 1; i >= 0; i--)
+        stack.push({
+          span: children[i],
+          parent: n.span.span_id,
+          depth: n.depth + 1,
+        })
+    }
+  }
+  walk(roots)
+  // Whatever no root reaches sits on a parent cycle: each remaining
+  // span opens its own tree (the cycle is cut at the revisit).
+  for (const s of timed) if (!placed.has(s)) walk([s])
+  return out
 }
 
-// ── Words ──────────────────────────────────────────────────────────
-// The renderers' words for a row (U8.2): the badge, the critical path,
-// the lanes, the child's link — one place, both surfaces.
-
-/** A row's badge: the error's kind; an open row's state (running,
- * pending, never); a finished step or model call's finish reason; "ok"
- * on a tool or child run; nothing on a finished root (the header says
- * how the run ended). */
-export function rowBadge(r: WaterfallRow): string | undefined {
-  if (r.status === "error") return r.error ?? "error"
-  if (r.status !== "ok") return r.status
-  if (r.kind === "step" || r.kind === "model") return r.finish
-  return r.kind === "tool" || r.kind === "child" ? "ok" : undefined
+export function int(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isInteger(v)) return v
+  if (typeof v === "string" && /^\d+$/.test(v)) return Number(v)
+  return undefined
 }
 
 /** The kind each renderer draws a row as (the Waterfall's SpanKind: a
@@ -1340,4 +1274,70 @@ export function dimRows(rows: readonly WaterfallRow[], dim: Dim): Set<string> {
   }
   for (const r of rows) if (!lit.has(r.key)) out.add(r.key)
   return out
+}
+
+// ── Words ──────────────────────────────────────────────────────────
+// The renderers' words for a row (U8.2): the badge, the critical path,
+// the lanes, the child's link — one place, both surfaces.
+
+/** A row's badge: the error's kind; an open row's state (running,
+ * pending, never); a finished step or model call's finish reason; "ok"
+ * on a tool or child run; nothing on a finished root (the header says
+ * how the run ended). */
+export function rowBadge(r: WaterfallRow): string | undefined {
+  if (r.status === "error") return r.error ?? "error"
+  if (r.status !== "ok") return r.status
+  if (r.kind === "step" || r.kind === "model") return r.finish
+  return r.kind === "tool" || r.kind === "child" ? "ok" : undefined
+}
+
+// ── Attributes ─────────────────────────────────────────────────────
+
+/** A span's attributes; {} for a span that arrived without any (a
+ * hand-built or foreign one: the type promises them, the wire may not). */
+export function attrsOf(s: TimedSpan | undefined): Record<string, unknown> {
+  return (s as { attrs?: Record<string, unknown> } | undefined)?.attrs ?? {}
+}
+
+// ── Keys ───────────────────────────────────────────────────────────
+
+/**
+ * rowKeys is THE selection-key scheme: the run tree's rows here and the
+ * trace page's rows (lib/trace-sel.ts) take their keys from it, so a
+ * /traces ?sel= names the same row on the run page. The root run's keys
+ * are bare, every other run's run-qualified:
+ *
+ *   r:<run>                      the run (its invoke_agent span)
+ *   s<step>        s:<run>:<step>           the step
+ *   s<step>:m      s:<run>:<step>:m         its model call (the first
+ *                                           by start; a second :m2, …)
+ *   s<step>:a<n>   s<step>:m2:a<n>          an attempt of that call
+ *   c:<step>:<call>  c:<run>:<step>:<call>  a tool execution
+ *   c:resume:<call>  c:<run>:resume:<call>  a resumed or denied call
+ *   t:<span>       t:<run>:<span>           any other span
+ *
+ * Old forms (a chat span keyed s<step>, a root run qualified, a denied
+ * call keyed by its step) still resolve: lib/trace-sel.ts's resolveSel.
+ */
+export function rowKeys(run: string, qualify: boolean) {
+  const q = qualify ? `${run}:` : ""
+  const step = (n: number | string) => (qualify ? `s:${q}${n}` : `s${n}`)
+  return {
+    step,
+    model: (n: number | string, i = 0) => `${step(n)}:m${i ? i + 1 : ""}`,
+    call: (at: number | string, id: string) => `c:${q}${at}:${id}`,
+    span: (id: string) => `t:${q}${id}`,
+  }
+}
+
+/** The first finish reason: a list, or the list as a JSON string (the
+ * ClickHouse fallback map), or one reason. */
+function finishOf(v: unknown): string | undefined {
+  if (typeof v === "string" && v.startsWith("["))
+    try {
+      v = JSON.parse(v)
+    } catch {
+      /* the string itself */
+    }
+  return Array.isArray(v) ? str(v[0]) : str(v)
 }

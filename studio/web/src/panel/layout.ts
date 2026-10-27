@@ -7,6 +7,27 @@ import type { PanelPlacement } from "./config"
 
 export type Side = "left" | "right" | "bottom" | "top"
 
+/** storage is localStorage, or null where reading it throws. */
+function storage(): Storage | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+/** pillPlace is where the pill sits: the float's corner (the half of
+ * the viewport its box is in), a dock's side. */
+export function pillPlace(l: Layout): string {
+  if (l.mode === "float")
+    return l.x + l.w / 2 < vw() / 2 ? "bottom-left" : "bottom-right"
+  return l.side === "left"
+    ? "bottom-left"
+    : l.side === "top"
+      ? "top-right"
+      : "bottom-right"
+}
+
 /** The order Alt+Shift+W (and the header's dock button) cycles. */
 export const CYCLE = ["float", "right", "bottom", "left", "top"] as const
 
@@ -57,27 +78,6 @@ const clamp = (v: number, lo: number, hi: number) =>
 const vw = () => window.innerWidth || 1024
 const vh = () => window.innerHeight || 768
 
-/** pillPlace is where the pill sits: the float's corner (the half of
- * the viewport its box is in), a dock's side. */
-export function pillPlace(l: Layout): string {
-  if (l.mode === "float")
-    return l.x + l.w / 2 < vw() / 2 ? "bottom-left" : "bottom-right"
-  return l.side === "left"
-    ? "bottom-left"
-    : l.side === "top"
-      ? "top-right"
-      : "bottom-right"
-}
-
-/** storage is localStorage, or null where reading it throws. */
-function storage(): Storage | null {
-  try {
-    return window.localStorage
-  } catch {
-    return null
-  }
-}
-
 /** readStore reads the stored layout: version 1 only, each field of
  * the right type kept, anything else ignored. Never throws. */
 export function readStore(): Partial<Layout> {
@@ -125,37 +125,6 @@ export const PLACE = ["mode", "side", "open", "hidden", "x", "y", "w", "h", "d"]
 export const placedIn = (st: Partial<Layout>) =>
   PLACE.some((k) => Object.hasOwn(st, k))
 
-/** initialLayout is what the data-* attributes say (data-position,
- * data-open, data-mode), before storage. */
-export function initialLayout(
-  position: PanelPlacement,
-  open: boolean,
-  mode: string
-): Layout {
-  const dock = position.endsWith("-dock")
-  const w = 520
-  const h = 560
-  const l: Layout = {
-    // An explicit data-mode float|dock wins over what the position implies.
-    mode:
-      mode === "float" ? "float" : dock || mode === "dock" ? "dock" : "float",
-    side: dock ? (position.slice(0, -5) as Side) : "right",
-    open: mode === "pill" ? false : mode === "float" || mode === "dock" || open,
-    hidden: mode === "hidden",
-    x: position === "bottom-left" ? GAP : vw() - w - GAP,
-    y: vh() - h - GAP,
-    w,
-    h,
-    d: 460,
-    run: "",
-    theme: "",
-    raw: false,
-    tab: "story",
-    debug: false,
-  }
-  return l
-}
-
 /** writeStore writes the layout under STORE_KEY (its placement only
  * when placed); a private window (or a full quota) just forgets. */
 export function writeStore(l: Layout, placed: boolean): void {
@@ -200,6 +169,37 @@ export interface Geometry {
   style: Record<string, string>
   width: number
   sheet: boolean
+}
+
+/** initialLayout is what the data-* attributes say (data-position,
+ * data-open, data-mode), before storage. */
+export function initialLayout(
+  position: PanelPlacement,
+  open: boolean,
+  mode: string
+): Layout {
+  const dock = position.endsWith("-dock")
+  const w = 520
+  const h = 560
+  const l: Layout = {
+    // An explicit data-mode float|dock wins over what the position implies.
+    mode:
+      mode === "float" ? "float" : dock || mode === "dock" ? "dock" : "float",
+    side: dock ? (position.slice(0, -5) as Side) : "right",
+    open: mode === "pill" ? false : mode === "float" || mode === "dock" || open,
+    hidden: mode === "hidden",
+    x: position === "bottom-left" ? GAP : vw() - w - GAP,
+    y: vh() - h - GAP,
+    w,
+    h,
+    d: 460,
+    run: "",
+    theme: "",
+    raw: false,
+    tab: "story",
+    debug: false,
+  }
+  return l
 }
 
 /** geometry places the dock: under SHEET_VW of viewport a bottom

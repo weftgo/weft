@@ -62,6 +62,9 @@ export interface CostFields {
   /** "exact" | "not_reported" ("unknown" from a Studio before the
    * rename) — compared against "exact" only. */
   cache?: string
+  /** An unknown set figure's known part (a session's, an
+   * experiment's; UX-H-07): the priced parts' sum, priced of of. */
+  cost_partial?: { usd: number; priced: number; of: number }
 }
 
 /** A run's subagent bill beside its own (pricing.go's
@@ -516,6 +519,9 @@ export interface SessionRow extends CostFields {
   turns: number
   first_seen: string
   last_seen: string
+  /** Every turn is a derived run (stock OTel spans; UX-H-35): "derived
+   * (stock OTel)". Absent when not. */
+  derived?: boolean
   /** The newest turn's outcome (obsdb.OutcomeOf): the word ?status=
    * filters by, so a row and the filter agree — a cancelled or
    * busy-ended turn is not failed, a parked or decided one not
@@ -2267,6 +2273,9 @@ export interface LogRow {
   time: string
   severity: string
   severity_number: number
+  /** The OTLP record's EventName (gen_ai.user.message: a GenAI event,
+   * its body the event's JSON); absent on a plain line (UX-H-10). */
+  event_name?: string
   body: string
   attrs: Record<string, unknown>
   span_id?: string
@@ -2539,11 +2548,14 @@ export function manifestQuery() {
 // bodies — V6, one API two clients) ───────────────────────────────
 
 /** One tool of a connected runtime's agent: its side-effect class
- * (ReplayPolicy; "never" or absent is the ⚠) and its allow flag. */
+ * (ReplayPolicy; "never" or absent is the ⚠ — the replay class, never
+ * re-run on a replay, not "no side effects"), its allow flag, and
+ * approval for a tool built with RequireApproval (UX-H-22). */
 export interface ToolView {
   name: string
   side_effects: string
   allow: boolean
+  approval?: boolean
 }
 
 /** A tool choice on the wire: mode auto | any | none | named, and the

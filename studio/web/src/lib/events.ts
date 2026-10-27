@@ -165,6 +165,18 @@ export function foldMore(
   return feed
 }
 
+/** A wire string, or "" when the field is missing or not a string. */
+function text(v: unknown): string {
+  return typeof v === "string" ? v : ""
+}
+
+/** The event's usage, zeros when it carries none. */
+/** posInt: a measured millisecond count (whole, above 0 — 0 means
+ * "not measured", ADR 0016's A4 note). */
+function posInt(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0
+}
+
 /**
  * applyTranscript overlays the finished words onto a fold: the sinks
  * do not store deltas (S4.3/S4.7), so a run loaded from history has
@@ -268,22 +280,48 @@ export function applyTranscript(
   return out
 }
 
-/** callState is what the UI shows for a call that never finished:
- * "running" while the run is live; "never" on a run that ended
- * without the call closing (crash or the repair case) — rendered
- * honestly, never as complete.
- */
-export function callState(
-  call: FoldedToolCall,
-  runStatus: string
-): "running" | "done" | "never" {
-  if (call.state === "done") return "done"
-  return runStatus === "running" ? "running" : "never"
+/** A batch's messages, whatever the body held: only objects count,
+ * and a message's content is always an array of parts. */
+function messagesOf(b: TranscriptBatch | null | undefined): Message[] {
+  const raw: unknown = b?.messages
+  if (!Array.isArray(raw)) return []
+  const out: Message[] = []
+  for (const m of raw as unknown[]) {
+    if (typeof m !== "object" || m === null) continue
+    const msg = m as Message
+    out.push(Array.isArray(msg.content) ? msg : { ...msg, content: [] })
+  }
+  return out
 }
 
-/** A wire string, or "" when the field is missing or not a string. */
-function text(v: unknown): string {
-  return typeof v === "string" ? v : ""
+function usageOf(u: Usage | undefined): Usage {
+  const o = typeof u === "object" ? u : null
+  return {
+    ...o,
+    input_tokens: o?.input_tokens ?? 0,
+    output_tokens: o?.output_tokens ?? 0,
+  }
+}
+
+/** runHoles is what the run header badges: the run document's own
+ * (api.go's runHoles: not_recorded, interrupted, derived, stripped,
+ * gap) and the fold's (the recorder's cuts on any event). */
+export function runHoles(
+  doc: { holes?: HoleMark[] } | null | undefined,
+  view: FoldedRun
+): HoleMark[] {
+  return mergeHoles(Array.isArray(doc?.holes) ? doc.holes : [], view.holes)
+}
+
+/** A batch placed: the step it joined and whether it is the run's
+ * input. `derived` is ADR 0028 §11's badge — the record stored no step
+ * (a pre-0004 ClickHouse row, a Studio older than the field), so the
+ * reader inferred it; a stored placement never carries it. */
+export interface PlacedBatch {
+  step: number
+  input: boolean
+  derived: boolean
+  messages: Message[]
 }
 
 export function newFold(): FoldFeed {
@@ -461,79 +499,6 @@ export function newFold(): FoldFeed {
   }
 }
 
-/** The event's usage, zeros when it carries none. */
-/** posInt: a measured millisecond count (whole, above 0 — 0 means
- * "not measured", ADR 0016's A4 note). */
-function posInt(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v) && v > 0
-}
-
-/** A step index off the wire, or the fallback when it is not one. */
-function stepIndex(v: unknown, fallback: number): number {
-  return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : fallback
-}
-
-/** A transcript batch as the fold reads it: its messages, and the
- * stored facts the API carries beside them (api.go's transcriptBatch,
- * ADR 0028 §8). */
-export interface TranscriptBatch {
-  messages: Message[]
-  /** The step the batch joined (weft.step.index, as the core stamped
-   * it); -1 when the record carried none (badge "not_recorded"). */
-  step?: number
-  /** True on the run's input record (weft.messages.input). */
-  input?: boolean
-  /** "not_recorded" when the record carried no step. */
-  badge?: string
-  /** The stored body did not read as messages (lib/api.ts's
-   * asTranscript): its messages are not the record's. */
-  unreadable?: true
-}
-
-/** A batch's messages, whatever the body held: only objects count,
- * and a message's content is always an array of parts. */
-function messagesOf(b: TranscriptBatch | null | undefined): Message[] {
-  const raw: unknown = b?.messages
-  if (!Array.isArray(raw)) return []
-  const out: Message[] = []
-  for (const m of raw as unknown[]) {
-    if (typeof m !== "object" || m === null) continue
-    const msg = m as Message
-    out.push(Array.isArray(msg.content) ? msg : { ...msg, content: [] })
-  }
-  return out
-}
-
-/** runHoles is what the run header badges: the run document's own
- * (api.go's runHoles: not_recorded, interrupted, derived, stripped,
- * gap) and the fold's (the recorder's cuts on any event). */
-export function runHoles(
-  doc: { holes?: HoleMark[] } | null | undefined,
-  view: FoldedRun
-): HoleMark[] {
-  return mergeHoles(Array.isArray(doc?.holes) ? doc.holes : [], view.holes)
-}
-
-/** A batch placed: the step it joined and whether it is the run's
- * input. `derived` is ADR 0028 §11's badge — the record stored no step
- * (a pre-0004 ClickHouse row, a Studio older than the field), so the
- * reader inferred it; a stored placement never carries it. */
-export interface PlacedBatch {
-  step: number
-  input: boolean
-  derived: boolean
-  messages: Message[]
-}
-
-function usageOf(u: Usage | undefined): Usage {
-  const o = typeof u === "object" ? u : null
-  return {
-    ...o,
-    input_tokens: o?.input_tokens ?? 0,
-    output_tokens: o?.output_tokens ?? 0,
-  }
-}
-
 /**
  * stepHoles is what a step card badges (ADR 0028 §11): the union of
  * the step route's holes when the page has them cached (A7's
@@ -568,36 +533,6 @@ export function stepHoles(
       (h) => h.hole === "not_recorded" || h.hole === "stripped"
     )
   )
-}
-
-/**
- * placeBatches reads each batch's step and input from the batch — the
- * stored values (ADR 0028 §8); nothing is inferred from the order of
- * the batches. Only a batch without a stored step falls back to
- * inference, and that placement is marked `derived`: step -1 (the
- * record carried none, badge not_recorded), a batch whose input flag
- * the backend inferred (badge derived), or no input flag beside
- * the step — a Studio older than the flag served a step it did not
- * store (0 for every batch).
- */
-export function placeBatches(batches: TranscriptBatch[]): PlacedBatch[] {
-  const list = Array.isArray(batches) ? batches : []
-  const derived = derivedPlacement(list)
-  return list.map((b, i) => {
-    const messages = messagesOf(b)
-    const step = (b as TranscriptBatch | null)?.step
-    const input = (b as TranscriptBatch | null)?.input
-    const badge = (b as TranscriptBatch | null)?.badge
-    if (
-      typeof step === "number" &&
-      step >= 0 &&
-      typeof input === "boolean" &&
-      badge !== "derived"
-    ) {
-      return { step, input, derived: false, messages }
-    }
-    return { ...derived[i], derived: true, messages }
-  })
 }
 
 /**
@@ -639,6 +574,28 @@ export function producedText(batches: TranscriptBatch[]): string {
   return producedTexts(batches).join("\n")
 }
 
+/** A step index off the wire, or the fallback when it is not one. */
+function stepIndex(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : fallback
+}
+
+/** A transcript batch as the fold reads it: its messages, and the
+ * stored facts the API carries beside them (api.go's transcriptBatch,
+ * ADR 0028 §8). */
+export interface TranscriptBatch {
+  messages: Message[]
+  /** The step the batch joined (weft.step.index, as the core stamped
+   * it); -1 when the record carried none (badge "not_recorded"). */
+  step?: number
+  /** True on the run's input record (weft.messages.input). */
+  input?: boolean
+  /** "not_recorded" when the record carried no step. */
+  badge?: string
+  /** The stored body did not read as messages (lib/api.ts's
+   * asTranscript): its messages are not the record's. */
+  unreadable?: true
+}
+
 /**
  * splitTranscript separates what a run was FED from what it PRODUCED.
  * The run's input record (ADR 0024 D1) is everything it was fed — for
@@ -668,52 +625,6 @@ export function turnPrompt(batches: TranscriptBatch[]): string | null {
   }
   return null
 }
-
-/** The text parts of a message, joined. Files and other parts are not
- * rendered — the words are the turn. */
-function messageText(
-  m: { content: Part[] } | null | undefined,
-  sep = ""
-): string {
-  const parts: unknown = m?.content
-  if (!Array.isArray(parts)) return ""
-  return (parts as (Part | null)[])
-    .filter(
-      (p): p is Extract<Part, { type: "text" }> =>
-        p?.type === "text" && typeof p.text === "string"
-    )
-    .map((p) => p.text)
-    .join(sep)
-}
-
-export function truncation(content: string): Truncation | null {
-  const bytes = TRUNCATED_BYTES.exec(content)
-  if (bytes) return { kind: "bytes", bytes: Number(bytes[1]) }
-  const call = TRUNCATED_CALL.exec(content)
-  if (call) return { kind: "call", tool: call[1] }
-  return null
-}
-
-// ── Truncation honesty (B9) ───────────────────────────────────────
-// The Go side owns these strings (weft/loop.go); the regexes mirror
-// them and the tests pin the literals. A result is never shown as
-// complete when it isn't.
-
-/** loop.go capResult: "\n…[truncated %d bytes]". */
-const TRUNCATED_BYTES = /…\[truncated (\d+) bytes\]/u
-
-/** loop.go truncatedCallResult: the max_tokens fail-truncated call. */
-const TRUNCATED_CALL =
-  /^tool call (.+) was not executed: the response hit the output token limit$/
-
-/** What a call the max_tokens step never ran says as its badge's
- * reason (rule 11: the loop already retried with a full budget, so no
- * fix applies). Both surfaces word it from here. */
-export const UNRUN_CALL_REASON =
-  "this call was not executed: the response hit the output token limit, and the loop retried the step with a full budget"
-
-export type Truncation =
-  { kind: "bytes"; bytes: number } | { kind: "call"; tool: string }
 
 /**
  * linkView stamps a run's subagent runs onto a folded view's calls: a
@@ -774,4 +685,93 @@ export function linkView(
   for (const child of children)
     if (child.parent_call_id && !named.has(child)) link(child, view.steps, true)
   return view
+}
+
+/** callState is what the UI shows for a call that never finished:
+ * "running" while the run is live; "never" on a run that ended
+ * without the call closing (crash or the repair case) — rendered
+ * honestly, never as complete.
+ */
+export function callState(
+  call: FoldedToolCall,
+  runStatus: string
+): "running" | "done" | "never" {
+  if (call.state === "done") return "done"
+  return runStatus === "running" ? "running" : "never"
+}
+
+// ── Truncation honesty (B9) ───────────────────────────────────────
+// The Go side owns these strings (weft/loop.go); the regexes mirror
+// them and the tests pin the literals. A result is never shown as
+// complete when it isn't.
+
+/** loop.go capResult: "\n…[truncated %d bytes]". */
+const TRUNCATED_BYTES = /…\[truncated (\d+) bytes\]/u
+
+/** loop.go truncatedCallResult: the max_tokens fail-truncated call. */
+const TRUNCATED_CALL =
+  /^tool call (.+) was not executed: the response hit the output token limit$/
+
+/** What a call the max_tokens step never ran says as its badge's
+ * reason (rule 11: the loop already retried with a full budget, so no
+ * fix applies). Both surfaces word it from here. */
+export const UNRUN_CALL_REASON =
+  "this call was not executed: the response hit the output token limit, and the loop retried the step with a full budget"
+
+export type Truncation =
+  { kind: "bytes"; bytes: number } | { kind: "call"; tool: string }
+
+/**
+ * placeBatches reads each batch's step and input from the batch — the
+ * stored values (ADR 0028 §8); nothing is inferred from the order of
+ * the batches. Only a batch without a stored step falls back to
+ * inference, and that placement is marked `derived`: step -1 (the
+ * record carried none, badge not_recorded), a batch whose input flag
+ * the backend inferred (badge derived), or no input flag beside
+ * the step — a Studio older than the flag served a step it did not
+ * store (0 for every batch).
+ */
+export function placeBatches(batches: TranscriptBatch[]): PlacedBatch[] {
+  const list = Array.isArray(batches) ? batches : []
+  const derived = derivedPlacement(list)
+  return list.map((b, i) => {
+    const messages = messagesOf(b)
+    const step = (b as TranscriptBatch | null)?.step
+    const input = (b as TranscriptBatch | null)?.input
+    const badge = (b as TranscriptBatch | null)?.badge
+    if (
+      typeof step === "number" &&
+      step >= 0 &&
+      typeof input === "boolean" &&
+      badge !== "derived"
+    ) {
+      return { step, input, derived: false, messages }
+    }
+    return { ...derived[i], derived: true, messages }
+  })
+}
+
+/** The text parts of a message, joined. Files and other parts are not
+ * rendered — the words are the turn. */
+function messageText(
+  m: { content: Part[] } | null | undefined,
+  sep = ""
+): string {
+  const parts: unknown = m?.content
+  if (!Array.isArray(parts)) return ""
+  return (parts as (Part | null)[])
+    .filter(
+      (p): p is Extract<Part, { type: "text" }> =>
+        p?.type === "text" && typeof p.text === "string"
+    )
+    .map((p) => p.text)
+    .join(sep)
+}
+
+export function truncation(content: string): Truncation | null {
+  const bytes = TRUNCATED_BYTES.exec(content)
+  if (bytes) return { kind: "bytes", bytes: Number(bytes[1]) }
+  const call = TRUNCATED_CALL.exec(content)
+  if (call) return { kind: "call", tool: call[1] }
+  return null
 }

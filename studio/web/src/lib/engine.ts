@@ -87,6 +87,19 @@ export interface EngineChoice {
   }
 }
 
+/** engineChoice is the rule (see the header). */
+export function engineChoice(f: EngineFacts): EngineChoice {
+  const reason = scriptedBlock(f)
+  return {
+    default: reason ? "live" : "scripted",
+    scripted: { enabled: !reason, reason },
+    live: {
+      model: f.model || f.ownModel || ENGINE_WORDS.ownModel,
+      ...liveEstimate(f),
+    },
+  }
+}
+
 /** The engine words, both surfaces. */
 export const ENGINE_WORDS = {
   scripted: "scripted · 0 tokens · replays the recorded answers",
@@ -121,19 +134,6 @@ export function runEngineWords(r: Pick<RunRow, "model">): string {
   if (runEngine(r) === "scripted") return RAN_WORDS.scripted
   const m = [r.model.provider, r.model.name].filter(Boolean).join("/")
   return RAN_WORDS.live(m || ENGINE_WORDS.ownModel)
-}
-
-/** engineChoice is the rule (see the header). */
-export function engineChoice(f: EngineFacts): EngineChoice {
-  const reason = scriptedBlock(f)
-  return {
-    default: reason ? "live" : "scripted",
-    scripted: { enabled: !reason, reason },
-    live: {
-      model: f.model || f.ownModel || ENGINE_WORDS.ownModel,
-      ...liveEstimate(f),
-    },
-  }
 }
 
 /** liveEstimate is the live engine's cost line: the source's usage

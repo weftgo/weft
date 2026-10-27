@@ -28,6 +28,7 @@ import {
   requestCappedWords,
 } from "../lib/requests"
 import { UNRUN_CALL_REASON } from "../lib/events"
+import { editsSummary } from "../lib/edits"
 import { TURN_CHIP } from "../lib/turn-chips"
 import type { Truncation } from "../lib/events"
 import {
@@ -56,147 +57,26 @@ export interface BadgeNote {
   count?: number
 }
 
-/** cutBadge is the badge for a tool result the loop cut (the
- * model-visible marker lib/events reads): a result cap's cut is
- * truncated (result_cap), a call the max_tokens step never ran is
- * max_tokens. */
-export function cutBadge(cut: Truncation): HTMLElement {
-  if (cut.kind === "bytes")
-    return badge("truncated", {
-      cause: "result_cap",
-      reason: resultCapReason(cut.bytes),
-    })
-  // The loop already retried the step: no fix applies to this call.
-  return badge("max_tokens", { reason: UNRUN_CALL_REASON, fix: "" })
-}
-
-/** The not_recorded line a session lookup says (C4.1's cause): the
- * response's reason and fix first (api.go sends them), the cause's
- * words else. */
-export function noPublicIdWords(reason?: string, fix?: string): string {
-  const w = holeWords({
+/** The ack preview's holes for a step the request record has no row
+ * of (the run page's words): a step that never ran (at or past the
+ * transcript's step count) — its tools unknown; one past the request
+ * pages the panel read; one of a run still running. */
+export function catalogNotRecorded(): HoleMark {
+  return {
     hole: "not_recorded",
-    cause: "no_public_id",
-    reason,
-    fix,
-  })
-  return `${w.label}: ${w.reason} · fix: ${w.fix}`
-}
-
-/** badgeLabel is a badge's visible words (its first text). */
-export function badgeLabel(b: Element | null | undefined): string {
-  return b?.firstChild?.nodeType === 3 ? (b.firstChild.textContent ?? "") : ""
-}
-
-/** A turn's chips (D5): what its record says it is, beside its id —
- * each plain text, its title naming the attribute it is read from.
- * runs are the turns the list holds: a replay's source reads "t3" when
- * it is one of them (lib/run-row.ts's lineageOf, Studio's runs list's
- * words). status is the turn's statusOf key (problemBadges: a decided
- * park draws no parked part). */
-export function turnChips(
-  r: RunRow,
-  runs: readonly { id: string; turn?: number }[] | null,
-  status?: string
-): HTMLElement[] {
-  const out: HTMLElement[] = []
-  const chip = (text: string, title: string, kind: string) =>
-    out.push(
-      el("span", "weft-chip weft-tag", text, { title, "data-weft-chip": kind })
-    )
-  // The scripted engine answers as its own model (runtime/scripted.go's
-  // ModelInfo): the run's model, not a weft.* attr — none is stamped.
-  const sc = scriptedChip(r)
-  if (sc) chip(sc, SCRIPTED_HINT, "scripted")
-  // Its lineage (U21.1, UX-F-06): "⑃ fork of s_01#12", "↻ replay of
-  // t3 · step 1" — Studio's runs list's chips, lib/run-row.ts's words.
-  for (const l of lineageOf(r, runs))
-    chip(l.text, l.title, l.kind === "fork" ? "fork" : "experiment")
-  // The turn's state marks (U16, UX-B-30; lib/turn-chips.ts): thread
-  // compacted the session after it, the sessions its calls delegated.
-  if (r.session_compactions)
-    chip(TURN_CHIP.compacted, TURN_CHIP.compactedTitle, "compacted")
-  if (r.delegated_sessions)
-    chip(
-      TURN_CHIP.delegated(r.delegated_sessions),
-      TURN_CHIP.delegatedTitle,
-      "delegated"
-    )
-  // Settling (U2-fix2): the root is stored, its records may still
-  // trail — the run page's header note, its words.
-  if (r.settling) chip(SETTLING_WORD, SETTLING_HINT, "settling")
-  // What ended the turn (U3.2): the run page's header chip, its words.
-  const stop = stopChip(r, true)
-  if (stop) chip(stop.text, stop.title, "stopped-by")
-  // The failed run's kind and its problems (U4): the runs table's
-  // badges, one chip each, lib/error-kind.ts's words.
-  const kind = kindChip(r.error_type)
-  if (kind) {
-    chip(kind.text, kind.title, "error-type")
-    out[out.length - 1].setAttribute("data-tone", kind.tone)
+    reason:
+      "the step carries no request record: the tools it offered are unknown",
   }
-  const probs = problemBadges(r, status)
-  if (probs.length) {
-    const words = probs.map((b) => b.label).join("; ")
-    chip(probs.map((b) => b.glyph).join(" "), words, "problems")
-    // Glyphs and a hover only: named, as Studio's badges (W7-prep).
-    out[out.length - 1].setAttribute("role", "img")
-    out[out.length - 1].setAttribute("aria-label", words)
+}
+export function promptNotRecorded(): HoleMark {
+  return {
+    hole: "not_recorded",
+    reason:
+      "the step carries no request record: the system prompt it was called with is unknown",
   }
-  // Built by the reader from stock OTel GenAI spans (plan I1.3): the
-  // derived badge in the stock_spans words, as Studio's row chip.
-  if (isDerived(r)) {
-    const b = badge(DERIVED_HOLE.hole, DERIVED_HOLE)
-    b.setAttribute("data-weft-chip", "derived")
-    out.push(b)
-  }
-  return out
 }
-
-/** title is a badge's tooltip: the reason, and the fix where one
- * exists — the run page's HoleBadge words it the same. */
-export function badgeTitle(reason: string, fix?: string): string {
-  return fix ? `${reason} — fix: ${fix}` : reason
-}
-
-/** requestCapped is the badge for a step past the request pages the
- * panel reads: the record is whole, the panel read the first n. */
-export function requestCapped(n: number): HTMLElement {
-  return badge("truncated", {
-    label: `request: ${HOLES.truncated.label} — first ${n.toLocaleString("en-US").replace(",", " ")} requests`,
-    ...requestCappedWords(n),
-  })
-}
-
-/** holeBadges draws a list of holes (a step's, a call's, a turn's):
- * one badge each, in the order given (mergeHoles sorts by the table). */
-export function holeBadges(holes: HoleMark[]): HTMLElement | null {
-  if (!holes.length) return null
-  const box = el("span", "weft-holes")
-  for (const m of holes) box.append(badge(m.hole, m))
-  return box
-}
-
-/** requestLabel is a request hole's badge text: the table's label,
- * prefixed where it does not name the request; not_recorded names the
- * version that kept no record (the run page's words). */
-export function requestLabel(hole: string, cause?: string): string {
-  // The version's words are the default cause's alone (not_served: the
-  // record may exist, this Studio does not serve it).
-  const label =
-    hole === "not_recorded" && !cause
-      ? REQUEST_NOT_RECORDED_LABEL
-      : holeWords({ hole }).label
-  return label.startsWith("request") ? label : `request: ${label}`
-}
-
-/** The words for a content-off mark: "none" is the core's own (the
- * agent captured nothing — weft.Content(false), or no destination
- * takes content, core/observe.go's captureOn), "stripped" a
- * destination chain's (otel.NoContent()). */
-export const CONTENT_OFF: Record<string, string> = {
-  none: "captured none (weft.Content(false), or no destination takes content)",
-  stripped: "otel.NoContent()",
+export function catalogNotStored(): HoleMark {
+  return { hole: "not_recorded", reason: `request: ${REQUEST_NOT_STORED}` }
 }
 
 /** capLine is the footer's content line (D5), said only on evidence:
@@ -270,6 +150,69 @@ export function capLine(
 
 export { SCRIPTED_MODEL }
 
+/** requestLabel is a request hole's badge text: the table's label,
+ * prefixed where it does not name the request; not_recorded names the
+ * version that kept no record (the run page's words). */
+export function requestLabel(hole: string, cause?: string): string {
+  // The version's words are the default cause's alone (not_served: the
+  // record may exist, this Studio does not serve it).
+  const label =
+    hole === "not_recorded" && !cause
+      ? REQUEST_NOT_RECORDED_LABEL
+      : holeWords({ hole }).label
+  return label.startsWith("request") ? label : `request: ${label}`
+}
+
+/** The words for a content-off mark: "none" is the core's own (the
+ * agent captured nothing — weft.Content(false), or no destination
+ * takes content, core/observe.go's captureOn), "stripped" a
+ * destination chain's (otel.NoContent()). */
+export const CONTENT_OFF: Record<string, string> = {
+  none: "captured none (weft.Content(false), or no destination takes content)",
+  stripped: "otel.NoContent()",
+}
+
+/** title is a badge's tooltip: the reason, and the fix where one
+ * exists — the run page's HoleBadge words it the same. */
+export function badgeTitle(reason: string, fix?: string): string {
+  return fix ? `${reason} — fix: ${fix}` : reason
+}
+
+/** requestCapped is the badge for a step past the request pages the
+ * panel reads: the record is whole, the panel read the first n. */
+export function requestCapped(n: number): HTMLElement {
+  return badge("truncated", {
+    label: `request: ${HOLES.truncated.label} — first ${n.toLocaleString("en-US").replace(",", " ")} requests`,
+    ...requestCappedWords(n),
+  })
+}
+
+/** catalogReadError is the ack preview's hole when the step's catalog
+ * could not be read (plan F1, the run page's catalogOfStep words): the
+ * verdicts are the runtime's registration's, derived. */
+export function catalogReadError(error: string): HoleMark {
+  return {
+    hole: "derived",
+    reason: `the step's catalog could not be read (${error}): the list is the runtime's registration`,
+  }
+}
+
+export function promptReadError(error: string): HoleMark {
+  return {
+    hole: "derived",
+    reason: `the step's prompt could not be read (${error}): the registered prompt is pre-filled`,
+  }
+}
+
+/** holeBadges draws a list of holes (a step's, a call's, a turn's):
+ * one badge each, in the order given (mergeHoles sorts by the table). */
+export function holeBadges(holes: HoleMark[]): HTMLElement | null {
+  if (!holes.length) return null
+  const box = el("span", "weft-holes")
+  for (const m of holes) box.append(badge(m.hole, m))
+  return box
+}
+
 /** badge renders one hole as the panel draws it everywhere: the
  * span, the label, the reason and fix as its title. */
 export function badge(hole: string, note: BadgeNote = {}): HTMLElement {
@@ -292,6 +235,24 @@ export function badge(hole: string, note: BadgeNote = {}): HTMLElement {
   // badgeLabel reads the label back.
   b.append(el("span", "weft-sr", ` — ${badgeTitle(w.reason, w.fix)}`))
   return b
+}
+
+/** ackCatalogHole is the ack preview's line for a catalog it cannot
+ * read (the run page's ReplayAck): the hole's badge, its words said,
+ * then what the verdicts cover instead — never an empty list. */
+export function ackCatalogHole(m: HoleMark, registered: boolean): HTMLElement {
+  const box = holeLine(m)
+  box.setAttribute("data-weft-catalog-hole", m.hole)
+  box.append(
+    el(
+      "div",
+      "weft-reason",
+      registered
+        ? "the step's catalog is not readable here: the verdicts below cover the tools the runtime registers"
+        : "the step's catalog is not readable here, and no runtime registers the agent"
+    )
+  )
+  return box
 }
 
 /** holeLine is a hole said in full (the turn's notes): the badge, then
@@ -326,13 +287,6 @@ export function requestHole(hole: string, note: BadgeNote = {}): HTMLElement[] {
   ]
 }
 
-export function promptReadError(error: string): HoleMark {
-  return {
-    hole: "derived",
-    reason: `the step's prompt could not be read (${error}): the registered prompt is pre-filled`,
-  }
-}
-
 /** The edit-the-prompt fallback's hole when the step's prompt cannot
  * be read: the server serves no request record (not_served), the
  * record has no row for the step (its prompt unknown), or the read
@@ -341,26 +295,134 @@ export function promptNotServed(): HoleMark {
   return { hole: "not_recorded", cause: "not_served" }
 }
 
-/** The ack preview's holes for a step the request record has no row
- * of (the run page's words): a step that never ran (at or past the
- * transcript's step count) — its tools unknown; one past the request
- * pages the panel read; one of a run still running. */
-export function catalogNotRecorded(): HoleMark {
-  return {
+/** The not_recorded line a session lookup says (C4.1's cause): the
+ * response's reason and fix first (api.go sends them), the cause's
+ * words else. */
+export function noPublicIdWords(reason?: string, fix?: string): string {
+  const w = holeWords({
     hole: "not_recorded",
-    reason:
-      "the step carries no request record: the tools it offered are unknown",
-  }
+    cause: "no_public_id",
+    reason,
+    fix,
+  })
+  return `${w.label}: ${w.reason} · fix: ${w.fix}`
 }
-export function catalogNotStored(): HoleMark {
-  return { hole: "not_recorded", reason: `request: ${REQUEST_NOT_STORED}` }
+
+/** badgeLabel is a badge's visible words (its first text). */
+export function badgeLabel(b: Element | null | undefined): string {
+  return b?.firstChild?.nodeType === 3 ? (b.firstChild.textContent ?? "") : ""
 }
-export function promptNotRecorded(): HoleMark {
-  return {
-    hole: "not_recorded",
-    reason:
-      "the step carries no request record: the system prompt it was called with is unknown",
+
+/** A turn's chips (D5): what its record says it is, beside its id —
+ * each plain text, its title naming the attribute it is read from.
+ * runs are the turns the list holds: a replay's source reads "t3" when
+ * it is one of them (lib/run-row.ts's lineageOf, Studio's runs list's
+ * words). status is the turn's statusOf key (problemBadges: a decided
+ * park draws no parked part). */
+export function turnChips(
+  r: RunRow,
+  runs: readonly { id: string; turn?: number }[] | null,
+  status?: string
+): HTMLElement[] {
+  const out: HTMLElement[] = []
+  const chip = (text: string, title: string, kind: string) =>
+    out.push(
+      el("span", "weft-chip weft-tag", text, { title, "data-weft-chip": kind })
+    )
+  // The scripted engine answers as its own model (runtime/scripted.go's
+  // ModelInfo): the run's model, not a weft.* attr — none is stamped.
+  const sc = scriptedChip(r)
+  if (sc) chip(sc, SCRIPTED_HINT, "scripted")
+  // Its lineage (U21.1, UX-F-06): "⑃ fork of s_01#12", "↻ replay of
+  // t3 · step 1" — Studio's runs list's chips, lib/run-row.ts's words.
+  // A replay's title says what it changed (UX-S5b-04): weft.edits.
+  const ed = editsSummary(r)
+  for (const l of lineageOf(r, runs))
+    chip(
+      l.text,
+      l.src && ed ? `${l.title} · ${ed}` : l.title,
+      l.kind === "fork" ? "fork" : "experiment"
+    )
+  // The turn's state marks (U16, UX-B-30; lib/turn-chips.ts): thread
+  // compacted the session after it, the sessions its calls delegated.
+  if (r.session_compactions)
+    chip(TURN_CHIP.compacted, TURN_CHIP.compactedTitle, "compacted")
+  if (r.delegated_sessions)
+    chip(
+      TURN_CHIP.delegated(r.delegated_sessions),
+      TURN_CHIP.delegatedTitle,
+      "delegated"
+    )
+  // Settling (U2-fix2): the root is stored, its records may still
+  // trail — the run page's header note, its words.
+  if (r.settling) chip(SETTLING_WORD, SETTLING_HINT, "settling")
+  // What ended the turn (U3.2): the run page's header chip, its words.
+  const stop = stopChip(r, true)
+  if (stop) chip(stop.text, stop.title, "stopped-by")
+  // The failed run's kind and its problems (U4): the runs table's
+  // badges, one chip each, lib/error-kind.ts's words.
+  const kind = kindChip(r.error_type)
+  if (kind) {
+    chip(kind.text, kind.title, "error-type")
+    out[out.length - 1].setAttribute("data-tone", kind.tone)
   }
+  const probs = problemBadges(r, status)
+  if (probs.length) {
+    const words = probs.map((b) => b.label).join("; ")
+    chip(probs.map((b) => b.glyph).join(" "), words, "problems")
+    // Glyphs and a hover only: named, as Studio's badges (W7-prep).
+    out[out.length - 1].setAttribute("role", "img")
+    out[out.length - 1].setAttribute("aria-label", words)
+  }
+  // Built by the reader from stock OTel GenAI spans (plan I1.3): the
+  // derived badge in the stock_spans words, as Studio's row chip.
+  if (isDerived(r)) {
+    const b = badge(DERIVED_HOLE.hole, DERIVED_HOLE)
+    b.setAttribute("data-weft-chip", "derived")
+    out.push(b)
+  }
+  return out
+}
+
+/** cutBadge is the badge for a tool result the loop cut (the
+ * model-visible marker lib/events reads): a result cap's cut is
+ * truncated (result_cap), a call the max_tokens step never ran is
+ * max_tokens. */
+export function cutBadge(cut: Truncation): HTMLElement {
+  if (cut.kind === "bytes")
+    return badge("truncated", {
+      cause: "result_cap",
+      reason: resultCapReason(cut.bytes),
+    })
+  // The loop already retried the step: no fix applies to this call.
+  return badge("max_tokens", { reason: UNRUN_CALL_REASON, fix: "" })
+}
+export function catalogCapped(n: number): HoleMark {
+  return { hole: "truncated", ...requestCappedWords(n) }
+}
+
+// ── Cost (A5.3) ──────────────────────────────────────────────────
+
+/** costText draws one figure as Studio's CostText does: lib/cost.ts's
+ * words and title; an unknown one says its reason in the accessible
+ * text too (" not known: <reason>", the badge's pattern), a partial sum
+ * " partial: <title>" —
+ * "—" is never a 0. */
+export function costText(v: CostView): HTMLElement {
+  const n = el("span", "", v.text, {
+    title: v.title,
+    "data-weft-cost": v.known ? String(v.usd) : "unknown",
+  })
+  // A partial sum (atLeastCost's "≥ $x", usd its known part) is not "not known".
+  if (!v.known)
+    n.append(
+      el(
+        "span",
+        "weft-sr",
+        `${v.usd === undefined ? " not known" : " partial"}: ${v.title}`
+      )
+    )
+  return n
 }
 
 /** turnCost is a turn's own figure and, when its subagents cost
@@ -397,59 +459,4 @@ export function turnCost(r: RunRow, sum?: CostView | null): HTMLElement {
   // The open turn's summarizer (U16): "+ summarizer $x", apart.
   if (sum) n.append(" ", costText(sum))
   return n
-}
-
-// ── Cost (A5.3) ──────────────────────────────────────────────────
-
-/** costText draws one figure as Studio's CostText does: lib/cost.ts's
- * words and title; an unknown one says its reason in the accessible
- * text too (" not known: <reason>", the badge's pattern), a partial sum
- * " partial: <title>" —
- * "—" is never a 0. */
-export function costText(v: CostView): HTMLElement {
-  const n = el("span", "", v.text, {
-    title: v.title,
-    "data-weft-cost": v.known ? String(v.usd) : "unknown",
-  })
-  // A partial sum (atLeastCost's "≥ $x", usd its known part) is not "not known".
-  if (!v.known)
-    n.append(
-      el(
-        "span",
-        "weft-sr",
-        `${v.usd === undefined ? " not known" : " partial"}: ${v.title}`
-      )
-    )
-  return n
-}
-
-/** ackCatalogHole is the ack preview's line for a catalog it cannot
- * read (the run page's ReplayAck): the hole's badge, its words said,
- * then what the verdicts cover instead — never an empty list. */
-export function ackCatalogHole(m: HoleMark, registered: boolean): HTMLElement {
-  const box = holeLine(m)
-  box.setAttribute("data-weft-catalog-hole", m.hole)
-  box.append(
-    el(
-      "div",
-      "weft-reason",
-      registered
-        ? "the step's catalog is not readable here: the verdicts below cover the tools the runtime registers"
-        : "the step's catalog is not readable here, and no runtime registers the agent"
-    )
-  )
-  return box
-}
-
-/** catalogReadError is the ack preview's hole when the step's catalog
- * could not be read (plan F1, the run page's catalogOfStep words): the
- * verdicts are the runtime's registration's, derived. */
-export function catalogReadError(error: string): HoleMark {
-  return {
-    hole: "derived",
-    reason: `the step's catalog could not be read (${error}): the list is the runtime's registration`,
-  }
-}
-export function catalogCapped(n: number): HoleMark {
-  return { hole: "truncated", ...requestCappedWords(n) }
 }

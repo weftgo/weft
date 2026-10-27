@@ -878,3 +878,66 @@ func TestDerivedTraceRootRun(t *testing.T) {
 		t.Errorf("root run %+v failed %d, want the planner (no parent) and the worker's failure counted", got.RootRun, got.FailedRuns)
 	}
 }
+
+// A stock conversation reads as one (UX-H-35): the sessions list and
+// the session document mark it derived, and the document numbers its
+// derived turns 1..n by start order — never every one turn 0 — while
+// the run's own row keeps the 0 the record holds.
+func TestDerivedSessionMarkedAndNumbered(t *testing.T) {
+	h := derivedFixture(t)
+	type turn struct {
+		ID   string `json:"id"`
+		Turn int    `json:"turn"`
+	}
+	var list struct {
+		Sessions []struct {
+			ID      string `json:"id"`
+			Derived bool   `json:"derived"`
+		} `json:"sessions"`
+	}
+	_, _, body := get(t, h, "/studio/api/sessions")
+	decode(t, body, &list)
+	if len(list.Sessions) != 1 || !list.Sessions[0].Derived {
+		t.Errorf("sessions = %s, want conv_7f3a marked derived", body)
+	}
+	var doc struct {
+		Derived bool   `json:"derived"`
+		Runs    []turn `json:"runs"`
+	}
+	_, _, body = get(t, h, "/studio/api/sessions/conv_7f3a")
+	decode(t, body, &doc)
+	got := map[string]int{}
+	for _, r := range doc.Runs {
+		got[r.ID] = r.Turn
+	}
+	if !doc.Derived || got[derivedOK] != 1 || got[derivedFail] != 2 {
+		t.Errorf("session = derived %v, turns %v; want derived, %s turn 1 (10:00), %s turn 2 (10:01)", doc.Derived, got, derivedOK, derivedFail)
+	}
+	var run turn
+	_, _, body = get(t, h, "/studio/api/runs/"+derivedOK)
+	decode(t, body, &run)
+	if run.Turn != 0 {
+		t.Errorf("run row turn = %d, want the record's 0 (the numbering is the session page's)", run.Turn)
+	}
+}
+
+// numberDerivedTurns leaves a thread's numbers and child runs alone,
+// and orders a start tie by id.
+func TestNumberDerivedTurns(t *testing.T) {
+	at := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	rows := []runRow{
+		{ID: "otel-b", Started: at, Derived: true},
+		{ID: "s-t4", Started: at.Add(-time.Hour), Turn: 4},
+		{ID: "otel-a", Started: at, Derived: true},
+		{ID: "otel-c", Started: at.Add(-time.Minute), Derived: true},
+		{ID: "otel-kid", ParentRunID: "otel-a", Started: at.Add(-2 * time.Minute), Derived: true},
+	}
+	numberDerivedTurns(rows)
+	got := []int{}
+	for _, r := range rows {
+		got = append(got, r.Turn)
+	}
+	if want := []int{3, 4, 2, 1, 0}; !slices.Equal(got, want) {
+		t.Errorf("turns = %v, want %v", got, want)
+	}
+}

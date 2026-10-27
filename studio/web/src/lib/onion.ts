@@ -15,6 +15,32 @@ import { msText } from "./attempts"
 import { plural } from "./format"
 
 type Attrs = Record<string, unknown>
+
+/** stepEffectsOf indexes a run's model calls' chips by step
+ * (stepChips): the story's step header. Steps with none are absent. */
+export function stepEffectsOf(
+  spans: readonly OnionSpan[] | null | undefined,
+  runId: string
+): Map<number, string[]> {
+  const out = new Map<number, string[]>()
+  for (const s of spans ?? []) {
+    if (!isChat(s) || s.attrs?.["weft.run.id"] !== runId) continue
+    const step = num(s.attrs["weft.step.index"])
+    // The counts stepChips reads, without modelCallFacts' full parse
+    // (the panel bundles this path).
+    const kids = (spans ?? []).filter(
+      (a) => a.name === "attempt" && a.parent_span_id === s.span_id
+    )
+    const layer = (a: OnionSpan) => a.attrs?.["weft.attempt.layer"]
+    const chips = fxChips(
+      kids.filter((a) => layer(a) === "retry").length,
+      kids.some((a) => layer(a) === "fallback" && a.status === "ok"),
+      s.events?.filter((e) => e.name === "weft.repair").length ?? 0
+    )
+    if (step !== undefined && chips.length) out.set(step, chips)
+  }
+  return out
+}
 /** str (exported as attrStr) is a span attribute's non-empty string,
  * else undefined; one body for the lib modules that read attributes
  * (U30.1's trim). */
@@ -106,6 +132,152 @@ export const MCP_FAILURE: Record<
     hint: "the MCP server answered and said its tool failed: isError (error.type mcp_tool_error)",
   },
 }
+
+/** effectsOf reads an execute_tool span's attributes. */
+export function effectsOf(a: Attrs): CallEffects {
+  return {
+    deniedBy: str(a["weft.tool.denied_by"]),
+    masked: str(a["weft.tool.error_masked"]),
+    repaired: a["weft.tool.args_repaired"] === true || undefined,
+    origin: str(a["weft.tool.origin"]),
+  }
+}
+
+/** The step chips' hover. */
+export const STEP_CHIPS_HINT =
+  "what the model middleware did on this step's call: retries (mw.Retry), a fallback that answered (mw.Fallback), arguments repaired (mw.RepairJSON) — the drawer's onion names each layer"
+
+// ── The tool call's facts and its onion ────────────────────────────
+
+/** What an execute_tool span says about one call. */
+export interface ToolCallFacts extends CallEffects {
+  errorType?: string
+  failed: boolean
+  /** weft.tool.timeout_ms: the deadline the call ran under. */
+  timeoutMs?: number
+}
+
+/** toolCallFacts reads an execute_tool span. */
+export function toolCallFacts(sp: OnionSpan): ToolCallFacts {
+  const a = sp.attrs ?? {}
+  return {
+    ...effectsOf(a),
+    errorType: str(a["error.type"]),
+    failed: sp.status === "error",
+    timeoutMs: num(a["weft.tool.timeout_ms"]),
+  }
+}
+
+function toolDecision(
+  l: LayerInfo,
+  f: ToolCallFacts
+): { decision?: string; attrs: [string, string][] } {
+  switch (l.name) {
+    case "mw.Allow":
+      return f.deniedBy === "allow"
+        ? {
+            decision: `✋ ${deniedWord("allow")}`,
+            attrs: [["weft.tool.denied_by", "allow"]],
+          }
+        : { attrs: [] }
+    case "mw.MapErrors":
+      return f.masked
+        ? {
+            decision: `${f.errorType ?? "error"} ← ${f.masked}`,
+            attrs: [["weft.tool.error_masked", f.masked]],
+          }
+        : { attrs: [] }
+  }
+  return { attrs: [] }
+}
+
+/** The layers a tool call's record implies when no manifest lists the
+ * chain: Allow and MapErrors as they reported, a refusing layer of the
+ * app's own by its word. */
+function inferredTool(f: ToolCallFacts): LayerInfo[] {
+  const out: LayerInfo[] = []
+  if (f.deniedBy === "allow") out.push({ name: "mw.Allow" })
+  if (f.masked) out.push({ name: "mw.MapErrors" })
+  return out
+}
+
+/** toolOnion draws a tool call's chain, outer to inner, each layer's
+ * decision from the execute_tool span, the handler at the end — "not
+ * reached" when a layer refused the call. A refusal by a layer the
+ * chain cannot name (an app's own word) is its own row. */
+export function toolOnion(
+  chain: readonly LayerInfo[] | undefined,
+  f: ToolCallFacts
+): OnionLayer[] {
+  const list = chain ?? inferredTool(f)
+  const layers = decideOnce(list, (l) => toolDecision(l, f))
+  // The call's Timeout (weft.tool.timeout_ms, UX-A-43): the deadline
+  // wraps the whole chain, so it is the outermost layer — acting when
+  // it cut the call (error.type timeout).
+  if (f.timeoutMs)
+    layers.unshift({
+      name: ONION.timeout,
+      full: ONION.timeout,
+      config: msText(f.timeoutMs),
+      decision:
+        f.errorType === "timeout"
+          ? `⏱ cut at ${msText(f.timeoutMs)}`
+          : undefined,
+      idle: f.errorType !== "timeout",
+      attrs: [["weft.tool.timeout_ms", String(f.timeoutMs)]],
+    })
+  const named =
+    f.deniedBy === "allow" && list.some((l) => l.name === "mw.Allow")
+  if (
+    f.deniedBy &&
+    !named &&
+    f.deniedBy !== "approval" &&
+    f.deniedBy !== "grant"
+  )
+    layers.push({
+      name: f.deniedBy,
+      full: f.deniedBy,
+      decision: `✋ ${deniedWord(f.deniedBy)}`,
+      idle: false,
+      attrs: [["weft.tool.denied_by", f.deniedBy]],
+    })
+  const refused = !!f.deniedBy
+  layers.push({
+    name: ONION.handler,
+    full: ONION.handler,
+    decision: refused
+      ? "not reached"
+      : f.failed
+        ? `error · ${f.errorType && f.errorType in MCP_FAILURE ? MCP_FAILURE[f.errorType].word : (f.errorType ?? "error")}`
+        : "ran",
+    idle: refused,
+    attrs: f.origin ? [["weft.tool.origin", f.origin]] : [],
+    end: true,
+  })
+  return layers
+}
+
+/** isOnion says the chain has a layer worth drawing: any middleware,
+ * or a decision the record holds. */
+export const isOnion = (layers: readonly OnionLayer[]) =>
+  layers.some((l) => !l.end)
+
+// ── The Agents card: the chain without a call ──────────────────────
+
+/** chainLayers is an agent's chain as the Agents card draws it: each
+ * layer's short name and configuration, the end named. */
+export function chainLayers(
+  chain: readonly LayerInfo[] | undefined,
+  end: string
+): OnionLayer[] {
+  return [
+    ...(chain ?? []).map((l) => layerOf(l, { attrs: [] })),
+    { name: end, full: end, idle: false, attrs: [], end: true },
+  ].map((l) => ({ ...l, idle: false }))
+}
+
+/** The onion's separator, outer › inner. */
+export const ONION_SEP = " › "
 
 /** isMcpOrigin: a tool's origin is an MCP server's — "mcp" (unnamed)
  * or "mcp:<server>" (U23.2-fix: never "mcpx"). */
@@ -451,32 +623,6 @@ export function stepChips(f: ModelCallFacts): string[] {
   )
 }
 
-/** stepEffectsOf indexes a run's model calls' chips by step
- * (stepChips): the story's step header. Steps with none are absent. */
-export function stepEffectsOf(
-  spans: readonly OnionSpan[] | null | undefined,
-  runId: string
-): Map<number, string[]> {
-  const out = new Map<number, string[]>()
-  for (const s of spans ?? []) {
-    if (!isChat(s) || s.attrs?.["weft.run.id"] !== runId) continue
-    const step = num(s.attrs["weft.step.index"])
-    // The counts stepChips reads, without modelCallFacts' full parse
-    // (the panel bundles this path).
-    const kids = (spans ?? []).filter(
-      (a) => a.name === "attempt" && a.parent_span_id === s.span_id
-    )
-    const layer = (a: OnionSpan) => a.attrs?.["weft.attempt.layer"]
-    const chips = fxChips(
-      kids.filter((a) => layer(a) === "retry").length,
-      kids.some((a) => layer(a) === "fallback" && a.status === "ok"),
-      s.events?.filter((e) => e.name === "weft.repair").length ?? 0
-    )
-    if (step !== undefined && chips.length) out.set(step, chips)
-  }
-  return out
-}
-
 /** The chat span's step and run (a model call is a step of its run). */
 const isChat = (s: OnionSpan) =>
   s.attrs?.["gen_ai.operation.name"] === "chat" &&
@@ -495,149 +641,3 @@ export function chatSpanOf<TSpan extends OnionSpan>(
       num(s.attrs["weft.step.index"]) === step
   )
 }
-
-/** effectsOf reads an execute_tool span's attributes. */
-export function effectsOf(a: Attrs): CallEffects {
-  return {
-    deniedBy: str(a["weft.tool.denied_by"]),
-    masked: str(a["weft.tool.error_masked"]),
-    repaired: a["weft.tool.args_repaired"] === true || undefined,
-    origin: str(a["weft.tool.origin"]),
-  }
-}
-
-/** The step chips' hover. */
-export const STEP_CHIPS_HINT =
-  "what the model middleware did on this step's call: retries (mw.Retry), a fallback that answered (mw.Fallback), arguments repaired (mw.RepairJSON) — the drawer's onion names each layer"
-
-// ── The tool call's facts and its onion ────────────────────────────
-
-/** What an execute_tool span says about one call. */
-export interface ToolCallFacts extends CallEffects {
-  errorType?: string
-  failed: boolean
-  /** weft.tool.timeout_ms: the deadline the call ran under. */
-  timeoutMs?: number
-}
-
-/** toolCallFacts reads an execute_tool span. */
-export function toolCallFacts(sp: OnionSpan): ToolCallFacts {
-  const a = sp.attrs ?? {}
-  return {
-    ...effectsOf(a),
-    errorType: str(a["error.type"]),
-    failed: sp.status === "error",
-    timeoutMs: num(a["weft.tool.timeout_ms"]),
-  }
-}
-
-function toolDecision(
-  l: LayerInfo,
-  f: ToolCallFacts
-): { decision?: string; attrs: [string, string][] } {
-  switch (l.name) {
-    case "mw.Allow":
-      return f.deniedBy === "allow"
-        ? {
-            decision: `✋ ${deniedWord("allow")}`,
-            attrs: [["weft.tool.denied_by", "allow"]],
-          }
-        : { attrs: [] }
-    case "mw.MapErrors":
-      return f.masked
-        ? {
-            decision: `${f.errorType ?? "error"} ← ${f.masked}`,
-            attrs: [["weft.tool.error_masked", f.masked]],
-          }
-        : { attrs: [] }
-  }
-  return { attrs: [] }
-}
-
-/** The layers a tool call's record implies when no manifest lists the
- * chain: Allow and MapErrors as they reported, a refusing layer of the
- * app's own by its word. */
-function inferredTool(f: ToolCallFacts): LayerInfo[] {
-  const out: LayerInfo[] = []
-  if (f.deniedBy === "allow") out.push({ name: "mw.Allow" })
-  if (f.masked) out.push({ name: "mw.MapErrors" })
-  return out
-}
-
-/** toolOnion draws a tool call's chain, outer to inner, each layer's
- * decision from the execute_tool span, the handler at the end — "not
- * reached" when a layer refused the call. A refusal by a layer the
- * chain cannot name (an app's own word) is its own row. */
-export function toolOnion(
-  chain: readonly LayerInfo[] | undefined,
-  f: ToolCallFacts
-): OnionLayer[] {
-  const list = chain ?? inferredTool(f)
-  const layers = decideOnce(list, (l) => toolDecision(l, f))
-  // The call's Timeout (weft.tool.timeout_ms, UX-A-43): the deadline
-  // wraps the whole chain, so it is the outermost layer — acting when
-  // it cut the call (error.type timeout).
-  if (f.timeoutMs)
-    layers.unshift({
-      name: ONION.timeout,
-      full: ONION.timeout,
-      config: msText(f.timeoutMs),
-      decision:
-        f.errorType === "timeout"
-          ? `⏱ cut at ${msText(f.timeoutMs)}`
-          : undefined,
-      idle: f.errorType !== "timeout",
-      attrs: [["weft.tool.timeout_ms", String(f.timeoutMs)]],
-    })
-  const named =
-    f.deniedBy === "allow" && list.some((l) => l.name === "mw.Allow")
-  if (
-    f.deniedBy &&
-    !named &&
-    f.deniedBy !== "approval" &&
-    f.deniedBy !== "grant"
-  )
-    layers.push({
-      name: f.deniedBy,
-      full: f.deniedBy,
-      decision: `✋ ${deniedWord(f.deniedBy)}`,
-      idle: false,
-      attrs: [["weft.tool.denied_by", f.deniedBy]],
-    })
-  const refused = !!f.deniedBy
-  layers.push({
-    name: ONION.handler,
-    full: ONION.handler,
-    decision: refused
-      ? "not reached"
-      : f.failed
-        ? `error · ${f.errorType && f.errorType in MCP_FAILURE ? MCP_FAILURE[f.errorType].word : (f.errorType ?? "error")}`
-        : "ran",
-    idle: refused,
-    attrs: f.origin ? [["weft.tool.origin", f.origin]] : [],
-    end: true,
-  })
-  return layers
-}
-
-/** isOnion says the chain has a layer worth drawing: any middleware,
- * or a decision the record holds. */
-export const isOnion = (layers: readonly OnionLayer[]) =>
-  layers.some((l) => !l.end)
-
-// ── The Agents card: the chain without a call ──────────────────────
-
-/** chainLayers is an agent's chain as the Agents card draws it: each
- * layer's short name and configuration, the end named. */
-export function chainLayers(
-  chain: readonly LayerInfo[] | undefined,
-  end: string
-): OnionLayer[] {
-  return [
-    ...(chain ?? []).map((l) => layerOf(l, { attrs: [] })),
-    { name: end, full: end, idle: false, attrs: [], end: true },
-  ].map((l) => ({ ...l, idle: false }))
-}
-
-/** The onion's separator, outer › inner. */
-export const ONION_SEP = " › "

@@ -79,6 +79,12 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { forkSource } from "@/lib/experiments"
 import {
+  editsSummary,
+  PROVENANCE_DETAILS,
+  PROVENANCE_KEYS,
+  replayViewWords,
+} from "@/lib/edits"
+import {
   appLink,
   compareLink,
   experimentLink,
@@ -429,6 +435,22 @@ function useNow(active: boolean): number {
   return now
 }
 
+/** metaChips draws metadata pairs as the runs list's filter links
+ * (UX-S4-14): a click lists the runs with that pair. */
+function metaChips(pairs: [string, string][]) {
+  return pairs.map(([k, v]) => (
+    <Link
+      key={k}
+      {...runsLink({ tag: `${k}=${v}` })}
+      className="font-mono hover:text-foreground hover:underline"
+      title={`metadata ${k} — list the runs with ${k}=${v}`}
+      data-meta-chip={k}
+    >
+      {k}={v}
+    </Link>
+  ))
+}
+
 /**
  * ReplayOf is a replayed run's link back to its source step (plan F1):
  * forked_from is "<source run id>#<from_step>" (weft/runtime stamps
@@ -439,10 +461,22 @@ function useNow(active: boolean): number {
 export function ReplayOf({
   doc,
 }: {
-  doc: Pick<RunDoc, "forked_from" | "experiment_id">
+  doc: Pick<RunDoc, "forked_from" | "experiment_id"> &
+    Partial<
+      Pick<
+        RunDoc,
+        "meta" | "id" | "session_id" | "parent_run_id" | "caller_run_id"
+      >
+    >
 }) {
   const src = forkSource(doc)
   if (!src) return null
+  // What the replay changed and what the model was fed, in words
+  // (UX-S5b-04): weft.edits and weft.replay.view, kinds only.
+  const said = [
+    editsSummary(doc),
+    replayViewWords(doc.meta?.["weft.replay.view"]),
+  ].filter(Boolean)
   return (
     <span
       className="flex items-center gap-2 font-mono text-[11px] text-faint"
@@ -455,6 +489,11 @@ export function ReplayOf({
       >
         {REPLAY_WORDS.of(src.runID, src.fromStep)}
       </Link>
+      {said.map((w) => (
+        <span key={w} data-replay-said>
+          · {w}
+        </span>
+      ))}
       {doc.experiment_id ? (
         <Link
           {...experimentLink(doc.experiment_id)}
@@ -591,6 +630,11 @@ export function RunHeader({
   // A delegated session's turn names its parent session (U14).
   const lineage = lineageOfRun(doc)
   const forked = forkOf(doc.meta)
+  // A replay's provenance chips (UX-S5b-04): behind "details".
+  const replayed = !!forkSource(doc)
+  const provenance = Object.entries(doc.meta).filter(([k]) =>
+    PROVENANCE_KEYS.includes(k)
+  )
   // A turn a newer message ended (UX-B-09): neutral, named.
   const ended = useBusyEnd(doc)
   // The words this run was asked: the last user message it was fed
@@ -1015,20 +1059,24 @@ export function RunHeader({
             )}
           </TermWrap>
         ) : null}
-        {Object.entries(doc.meta)
-          .filter(([k]) => !lineage || !LINEAGE_KEYS.includes(k))
-          .filter(([k]) => !forked || k !== "weft.session.forked_from")
-          .map(([k, v]) => (
-            <Link
-              key={k}
-              {...runsLink({ tag: `${k}=${v}` })}
-              className="font-mono hover:text-foreground hover:underline"
-              title={`metadata ${k} — list the runs with ${k}=${v}`}
-              data-meta-chip={k}
-            >
-              {k}={v}
-            </Link>
-          ))}
+        {metaChips(
+          Object.entries(doc.meta)
+            .filter(([k]) => !lineage || !LINEAGE_KEYS.includes(k))
+            .filter(([k]) => !forked || k !== "weft.session.forked_from")
+            .filter(([k]) => !replayed || !PROVENANCE_KEYS.includes(k))
+        )}
+        {/* A replay's provenance keys (UX-S5b-04): the header sentence
+            says them (ReplayOf); the raw chips wait behind "details". */}
+        {replayed && provenance.length ? (
+          <details className="font-mono" data-provenance>
+            <summary className="cursor-pointer hover:text-foreground">
+              {PROVENANCE_DETAILS}
+            </summary>
+            <span className="flex flex-wrap gap-x-3">
+              {metaChips(provenance)}
+            </span>
+          </details>
+        ) : null}
         {doc.trace_id ? (
           <Link
             {...traceLink(doc.trace_id)}

@@ -17,6 +17,15 @@ import type { Theme } from "../lib/palette"
 
 export type ThemeSetting = "auto" | Theme
 
+/** media is matchMedia's answer for q, null where there is none. */
+function media(q: string): MediaQueryList | null {
+  try {
+    return typeof window.matchMedia === "function" ? window.matchMedia(q) : null
+  } catch {
+    return null
+  }
+}
+
 /** themeSetting reads a data-theme / stored value: light, dark or auto
  * (anything else is auto). */
 export function themeSetting(v: string | null | undefined): ThemeSetting {
@@ -45,25 +54,6 @@ export function hostTheme(): Theme | "" {
   }
 }
 
-const DARK_QUERY = "(prefers-color-scheme: dark)"
-
-/** media is matchMedia's answer for q, null where there is none. */
-function media(q: string): MediaQueryList | null {
-  try {
-    return typeof window.matchMedia === "function" ? window.matchMedia(q) : null
-  } catch {
-    return null
-  }
-}
-
-/** systemTheme is prefers-color-scheme, "" without matchMedia. */
-export function systemTheme(): Theme | "" {
-  const dark = media(DARK_QUERY)
-  if (!dark) return ""
-  if (dark.matches) return "dark"
-  return media("(prefers-color-scheme: light)")?.matches ? "light" : ""
-}
-
 /** resolveTheme: explicit, then stored, then the host page, then the
  * system, then dark. host reads the page (a ThemeWatch's cache). */
 export function resolveTheme(
@@ -73,6 +63,16 @@ export function resolveTheme(
 ): Theme {
   if (explicit !== "auto") return explicit
   return word(stored) || host() || systemTheme() || "dark"
+}
+
+const DARK_QUERY = "(prefers-color-scheme: dark)"
+
+/** systemTheme is prefers-color-scheme, "" without matchMedia. */
+export function systemTheme(): Theme | "" {
+  const dark = media(DARK_QUERY)
+  if (!dark) return ""
+  if (dark.matches) return "dark"
+  return media("(prefers-color-scheme: light)")?.matches ? "light" : ""
 }
 
 /** The theme button's cycle: auto → light → dark → auto. */

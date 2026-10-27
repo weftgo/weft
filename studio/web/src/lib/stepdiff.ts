@@ -172,6 +172,18 @@ export const ARRIVAL = {
   again: "read the compare again",
 } as const
 
+/** rowNote is a sibling row's note ("" for any other row). */
+export function rowNote(
+  row: Pick<DiffRowDoc, "kept_by" | "a" | "b">,
+  state: RowState
+): string {
+  if (!row.kept_by) return ""
+  return SOURCE_ROW.note(
+    row.kept_by,
+    !row.a || !row.b ? SOURCE_ROW.notCompared : ROW_WORDS[state]
+  )
+}
+
 /** The API path of one 2-way diff (relative to /api/): both clients
  * fetch it with their own transport. */
 export function diffPath(a: string, b: string): string {
@@ -227,27 +239,15 @@ export const SOURCE_ROW = {
   notCompared: "not compared: the source could not be read",
 } as const
 
-/** rowState reads a row from its cells: kept or missing when every
- * cell is, else changed (the server's flag) or same. */
-export function rowState(
-  cells: Record<DiffColumn, CellState>,
-  changed: boolean
-): RowState {
-  for (const s of ["kept", "missing"] as const)
-    if (DIFF_COLUMNS.every((c) => cells[c] === s)) return s
-  return changed ? "changed" : "same"
-}
-
-/** sideHoles is a side's holes as badges: the server's words, in the
- * table's order. */
-export function sideHoles(side: DiffSide | null): HoleMark[] {
-  return side ? mergeHoles(list(side.holes)) : []
-}
-
 /** The cost cell's reason when the server marked a side's usage not
  * comparable (a derived run's, a pre-A1 run's, a gap's): cost follows
  * usage, so two priced figures are not compared either. */
 export const COST_FOLLOWS_USAGE = `cost follows usage: ${CELL_REASONS.unknown}`
+
+function argsText(args: unknown): string {
+  if (args === undefined || args === null) return ""
+  return typeof args === "string" ? args : JSON.stringify(args)
+}
 
 /** list reads a list the response may have left out (a thin row, a
  * side with no request record) as none: never a throw. */
@@ -286,34 +286,21 @@ const MARK_WORDS: Record<string, { label: string; title: string }> = {
   error: { label: "error", title: "this step ended in an error" },
 }
 
-function argsText(args: unknown): string {
-  if (args === undefined || args === null) return ""
-  return typeof args === "string" ? args : JSON.stringify(args)
+/** cellHole is the hole a compared cell carries beside its state: the
+ * hidden badge in the system column when either side's prompt is
+ * withheld — a "same" there is the hashes', the words unseen. */
+export function cellHole(
+  col: DiffColumn,
+  ...sides: (DiffSide | null)[]
+): "hidden" | undefined {
+  return col === "system" && sides.some(systemHidden) ? "hidden" : undefined
 }
 
-/** docHoles is the response's own holes: a truncated diff is the
- * response_cap cause (the step cap, nothing lost). */
-export function docHoles(doc: Pick<DiffDoc, "holes">): HoleMark[] {
-  return mergeHoles(
-    (Array.isArray(doc.holes) ? doc.holes : []).map((h) =>
-      h.hole === "truncated" && !h.cause ? { ...h, cause: "response_cap" } : h
-    )
-  )
+/** sideHoles is a side's holes as badges: the server's words, in the
+ * table's order. */
+export function sideHoles(side: DiffSide | null): HoleMark[] {
+  return side ? mergeHoles(list(side.holes)) : []
 }
-
-/** systemHidden: the side's system prompt is withheld from this
- * token (a read-scoped panel token: system null, the side's
- * system_hidden). Its hash still compares, so the cell keeps the
- * server's state. A hidden hole alone — child runs a panel token's
- * scope left out (StepHole.count) — hides no prompt (P8-pre-web #7). */
-export function systemHidden(side: DiffSide | null): boolean {
-  return !!side && side.system == null && side.system_hidden === true
-}
-
-// ── Cell words ────────────────────────────────────────────────────
-
-/** The longest a cell's value is drawn; the rest is "…". */
-export const CELL_CHARS = 160
 
 /** cellText is what a side holds in a column, in one short line both
  * surfaces print the same: the system prompt (or its hash's head when
@@ -354,26 +341,28 @@ export function cellText(side: DiffSide | null, col: DiffColumn): string {
   }
 }
 
-/** cellHole is the hole a compared cell carries beside its state: the
- * hidden badge in the system column when either side's prompt is
- * withheld — a "same" there is the hashes', the words unseen. */
-export function cellHole(
-  col: DiffColumn,
-  ...sides: (DiffSide | null)[]
-): "hidden" | undefined {
-  return col === "system" && sides.some(systemHidden) ? "hidden" : undefined
+/** systemHidden: the side's system prompt is withheld from this
+ * token (a read-scoped panel token: system null, the side's
+ * system_hidden). Its hash still compares, so the cell keeps the
+ * server's state. A hidden hole alone — child runs a panel token's
+ * scope left out (StepHole.count) — hides no prompt (P8-pre-web #7). */
+export function systemHidden(side: DiffSide | null): boolean {
+  return !!side && side.system == null && side.system_hidden === true
 }
 
-/** sideView is a side as drawn: its holes, and its marks less any
- * mark its holes already carry (the server lists max_tokens and
- * interrupted in both) — one badge per hole per side. A mark that is a
- * hole (hole set) is drawn as that hole's badge on both surfaces. */
-export function sideView(side: DiffSide | null): SideView {
-  const holes = sideHoles(side)
-  const marks = (side?.marks ?? [])
-    .filter((m) => !holes.some((h) => h.hole === m))
-    .map(markChip)
-  return { side, marks, holes }
+// ── Cell words ────────────────────────────────────────────────────
+
+/** The longest a cell's value is drawn; the rest is "…". */
+export const CELL_CHARS = 160
+
+/** docHoles is the response's own holes: a truncated diff is the
+ * response_cap cause (the step cap, nothing lost). */
+export function docHoles(doc: Pick<DiffDoc, "holes">): HoleMark[] {
+  return mergeHoles(
+    (Array.isArray(doc.holes) ? doc.holes : []).map((h) =>
+      h.hole === "truncated" && !h.cause ? { ...h, cause: "response_cap" } : h
+    )
+  )
 }
 
 function cellsOf(row: DiffRowDoc): Record<DiffColumn, CellState> {
@@ -440,6 +429,18 @@ export interface StepDiffView {
   differs: number
 }
 
+/** sideView is a side as drawn: its holes, and its marks less any
+ * mark its holes already carry (the server lists max_tokens and
+ * interrupted in both) — one badge per hole per side. A mark that is a
+ * hole (hole set) is drawn as that hole's badge on both surfaces. */
+export function sideView(side: DiffSide | null): SideView {
+  const holes = sideHoles(side)
+  const marks = (side?.marks ?? [])
+    .filter((m) => !holes.some((h) => h.hole === m))
+    .map(markChip)
+  return { side, marks, holes }
+}
+
 /** stepDiffView reads one response into the rows a renderer draws. */
 export function stepDiffView(doc: DiffDoc): StepDiffView {
   const rows = [...list(doc.steps)]
@@ -481,6 +482,17 @@ export function stepDiffView(doc: DiffDoc): StepDiffView {
   }
 }
 
+/** rowState reads a row from its cells: kept or missing when every
+ * cell is, else changed (the server's flag) or same. */
+export function rowState(
+  cells: Record<DiffColumn, CellState>,
+  changed: boolean
+): RowState {
+  for (const s of ["kept", "missing"] as const)
+    if (DIFF_COLUMNS.every((c) => cells[c] === s)) return s
+  return changed ? "changed" : "same"
+}
+
 /** cellOf reads one column of one row as the server compared it. */
 export function cellOf(row: DiffRowDoc, col: DiffColumn): CellState {
   if (row.kept) return "kept"
@@ -492,18 +504,6 @@ export function cellOf(row: DiffRowDoc, col: DiffColumn): CellState {
   if (changes.includes(col)) return "changed"
   if (list(row.differs).includes(col)) return "differs"
   return "same"
-}
-
-/** rowNote is a sibling row's note ("" for any other row). */
-export function rowNote(
-  row: Pick<DiffRowDoc, "kept_by" | "a" | "b">,
-  state: RowState
-): string {
-  if (!row.kept_by) return ""
-  return SOURCE_ROW.note(
-    row.kept_by,
-    !row.a || !row.b ? SOURCE_ROW.notCompared : ROW_WORDS[state]
-  )
 }
 
 /** markerWords is a changed step's marker: "changed at step 3", the

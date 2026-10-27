@@ -78,39 +78,6 @@ export interface PreviewRow {
   will: string
 }
 
-/** messageLine is one message in a line: the text, the calls as
- * name(args), a result as → content. */
-export function messageLine(m: Message | undefined): string {
-  if (!m) return ""
-  const s = (m.content as (Part | null)[])
-    .map((p) =>
-      p?.type === "text"
-        ? p.text
-        : p?.type === "tool_call"
-          ? `${p.name}(${JSON.stringify(p.args)})`
-          : p?.type === "tool_result"
-            ? `${p.call_id} → ${String(p.content)}`
-            : (p?.type ?? "")
-    )
-    .join(" ")
-  return s.length > 160 ? `${s.slice(0, 159)}…` : s
-}
-
-export interface PreviewView {
-  /** null when the messages are hidden (a compaction view, read token). */
-  rows: PreviewRow[] | null
-  system: string
-  /** The knobs the replay changes (model, params, thinking, tool choice). */
-  changed: string[]
-  added: string[]
-  removed: string[]
-  /** Every hole either side names, once: badges from the one table. */
-  holes: HoleMark[]
-  warnings: { kind: string; message: string }[]
-  /** The line naming what only a runtime checks; "" when nothing. */
-  unchecked: string
-}
-
 export function previewView(doc: PreviewDoc): PreviewView {
   const d = doc.diff
   const was = doc.was_sent.messages ?? []
@@ -148,6 +115,42 @@ export function previewView(doc: PreviewDoc): PreviewView {
   }
 }
 
+/** messageLine is one message in a line: the text, the calls as
+ * name(args), a result as → content. */
+export function messageLine(m: Message | undefined): string {
+  if (!m) return ""
+  const s = (m.content as (Part | null)[])
+    .map((p) =>
+      p?.type === "text"
+        ? p.text
+        : p?.type === "tool_call"
+          ? `${p.name}(${JSON.stringify(p.args)})`
+          : p?.type === "tool_result"
+            ? `${p.call_id} → ${String(p.content)}`
+            : (p?.type ?? "")
+    )
+    .join(" ")
+  return s.length > 160 ? `${s.slice(0, 159)}…` : s
+}
+
+export interface PreviewView {
+  /** null when the messages are hidden (a compaction view, read token). */
+  rows: PreviewRow[] | null
+  system: string
+  /** The knobs the replay changes (model, params, thinking, tool choice). */
+  changed: string[]
+  added: string[]
+  removed: string[]
+  /** Every hole either side names, once: badges from the one table. */
+  holes: HoleMark[]
+  warnings: { kind: string; message: string }[]
+  /** The line naming what only a runtime checks; "" when nothing. */
+  unchecked: string
+}
+
+/** The folded group's summary. */
+export const sameLine = (n: number): string => `${n} same`
+
 /** previewGroups folds the rows for the drawer (UX-D-36): each run of
  * consecutive "same" rows one group, drawn folded as "N same"; every
  * other row its own group, drawn open — the changes read first. */
@@ -160,6 +163,3 @@ export function previewGroups(rows: PreviewRow[]): PreviewRow[][] {
   }
   return out
 }
-
-/** The folded group's summary. */
-export const sameLine = (n: number): string => `${n} same`

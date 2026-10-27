@@ -15,7 +15,10 @@ const doc = JSON.parse(
   )
 ) as SpansDoc
 
-const DOC_KEYS = ["spans", "holes"] as const satisfies readonly (keyof SpansDoc)[]
+const DOC_KEYS = [
+  "spans",
+  "holes",
+] as const satisfies readonly (keyof SpansDoc)[]
 const HOLE_KEYS = [
   "hole",
   "cause",

@@ -56,6 +56,8 @@ import { statusClass, STATUS_TEXT } from "@/lib/status-class"
 import { forkOf } from "@/lib/timeline"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { Term } from "@/components/studio/term"
+import { HoleBadge } from "@/components/studio/hole-badge"
+import { DERIVED_HOLE, DERIVED_WORDS } from "@/lib/honesty"
 
 interface SessionsSearch {
   agent?: string
@@ -432,6 +434,14 @@ function SessionsPage() {
                             lineage={lin}
                             className="flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-faint"
                           />
+                        ) : null}
+                        {s.derived ? (
+                          <div data-session-derived>
+                            <HoleBadge
+                              {...DERIVED_HOLE}
+                              label={DERIVED_WORDS.session}
+                            />
+                          </div>
                         ) : null}
                         {fork ? (
                           <div className="min-w-0 truncate font-mono text-[11px] text-faint">

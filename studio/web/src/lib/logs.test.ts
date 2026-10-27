@@ -150,6 +150,7 @@ describe("fetchLogs over the Go goldens", () => {
 // (Record<keyof T, true>), so a field added on either side without the
 // other fails here or in tsc.
 const STEP_DOC_KEYS: Record<keyof StepDoc, true> = {
+  cost_partial: true,
   run_id: true,
   step: true,
   status: true,
@@ -205,6 +206,7 @@ const LOGS_PAGE_KEYS: Record<keyof LogsPage, true> = {
   fix: true,
 }
 const LOG_ROW_KEYS: Record<keyof LogRow, true> = {
+  event_name: true,
   index: true,
   time: true,
   severity: true,

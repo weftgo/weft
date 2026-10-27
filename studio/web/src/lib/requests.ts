@@ -16,47 +16,6 @@ export interface StepRequests {
   catalogChanged: boolean
 }
 
-/** byStep groups request rows by step. A step's marks compare its
- * first attempt's hashes with the previous recorded step's last
- * attempt; the first recorded step has nothing to differ from. */
-export function byStep(rows: RequestRow[]): Map<number, StepRequests> {
-  const out = new Map<number, StepRequests>()
-  const sorted = [...rows].sort((a, b) => a.step - b.step || a.index - b.index)
-  let prev: RequestRow | undefined
-  for (const row of sorted) {
-    let cur = out.get(row.step)
-    if (!cur) {
-      cur = {
-        step: row.step,
-        rows: [],
-        promptChanged:
-          prev !== undefined && prev.system_hash !== row.system_hash,
-        catalogChanged:
-          prev !== undefined && prev.catalog_hash !== row.catalog_hash,
-      }
-      out.set(row.step, cur)
-    }
-    cur.rows.push(row)
-    prev = row
-  }
-  return out
-}
-
-/** hasWire: the row carries its attempt's provider exchange (plan A6)
- * — the Studio Wire tab draws it, the panel links to that tab. */
-export function hasWire(
-  row: Pick<RequestRow, "raw">
-): row is { raw: RawRecord } {
-  return row.raw != null
-}
-
-/** paramsLine is paramFields on one line (the panel's). */
-export function paramsLine(row: RequestRow): string {
-  return paramFields(row)
-    .map(([k, v]) => `${k} ${v}`)
-    .join(" · ")
-}
-
 /** paramFields is the request's params, every field named, as text:
  * an absent field is the adapter's default — except stop on a stripped
  * row, which a content-off chain removed (unknown, not default). */
@@ -76,6 +35,21 @@ export function paramFields(row: RequestRow): [string, string][] {
     ],
     ["seed", v(p.seed)],
   ]
+}
+
+/** hasWire: the row carries its attempt's provider exchange (plan A6)
+ * — the Studio Wire tab draws it, the panel links to that tab. */
+export function hasWire(
+  row: Pick<RequestRow, "raw">
+): row is { raw: RawRecord } {
+  return row.raw != null
+}
+
+/** paramsLine is paramFields on one line (the panel's). */
+export function paramsLine(row: RequestRow): string {
+  return paramFields(row)
+    .map(([k, v]) => `${k} ${v}`)
+    .join(" · ")
 }
 
 /** A step past the request pages the panel reads (MAX_REQUEST_PAGES ×
@@ -115,3 +89,29 @@ export const REQUEST_DIFF_CUT_LABEL = "diff not drawn: the prompt was cut"
 
 /** A step with no row while the run is still running. */
 export const REQUEST_NOT_STORED = "not stored yet — the run is still running"
+
+/** byStep groups request rows by step. A step's marks compare its
+ * first attempt's hashes with the previous recorded step's last
+ * attempt; the first recorded step has nothing to differ from. */
+export function byStep(rows: RequestRow[]): Map<number, StepRequests> {
+  const out = new Map<number, StepRequests>()
+  const sorted = [...rows].sort((a, b) => a.step - b.step || a.index - b.index)
+  let prev: RequestRow | undefined
+  for (const row of sorted) {
+    let cur = out.get(row.step)
+    if (!cur) {
+      cur = {
+        step: row.step,
+        rows: [],
+        promptChanged:
+          prev !== undefined && prev.system_hash !== row.system_hash,
+        catalogChanged:
+          prev !== undefined && prev.catalog_hash !== row.catalog_hash,
+      }
+      out.set(row.step, cur)
+    }
+    cur.rows.push(row)
+    prev = row
+  }
+  return out
+}

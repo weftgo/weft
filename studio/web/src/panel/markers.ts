@@ -35,42 +35,6 @@ export function scanMarkers(root: Document = document): Marker[] {
   return out
 }
 
-/** The marker attribute (the helpers' data-weft-scope). */
-export const MARKER_ATTR = "data-weft-scope"
-
-/** The host's one-attribute escape hatch: markers on or inside an
- * element carrying it are ignored (rendered user or model HTML). */
-export const UNTRUSTED_ATTR = "data-weft-untrusted"
-
-/** untrusted: el is, or is inside, an element the host marked untrusted. */
-const untrusted = (el: Element) => !!el.closest(`[${UNTRUSTED_ATTR}]`)
-
-/** One marker on the page: its parsed scope and the element. */
-export interface Marker {
-  scope: Scope
-  element: Element
-}
-
-export interface MarkerRungOptions {
-  /** The document scanned (default document). */
-  root?: Document
-  /** Called with every marker, document order, on install and after
-   * each settled run of DOM changes. */
-  onScopes: (markers: Marker[]) => void
-  /** Called with the marker element that holds a newly focused node. */
-  onFocus?: (element: Element) => void
-  /** The scan's debounce (default 100 ms, trailing). */
-  debounceMs?: number
-}
-
-export interface MarkerRung {
-  /** disconnect removes the observer, the focusin listener and a
-   * pending scan. Idempotent. */
-  disconnect: () => void
-}
-
-const PANEL = "weft-devtools"
-
 /** markerOf is the nearest element at or above n carrying the marker;
  * null when there is none, and null for n inside (or being) a
  * <weft-devtools> — focus in the panel's shadow tree reaches the
@@ -184,3 +148,39 @@ export function installMarkerRung(opts: MarkerRungOptions): MarkerRung | null {
     },
   }
 }
+
+/** The marker attribute (the helpers' data-weft-scope). */
+export const MARKER_ATTR = "data-weft-scope"
+
+/** The host's one-attribute escape hatch: markers on or inside an
+ * element carrying it are ignored (rendered user or model HTML). */
+export const UNTRUSTED_ATTR = "data-weft-untrusted"
+
+/** untrusted: el is, or is inside, an element the host marked untrusted. */
+const untrusted = (el: Element) => !!el.closest(`[${UNTRUSTED_ATTR}]`)
+
+/** One marker on the page: its parsed scope and the element. */
+export interface Marker {
+  scope: Scope
+  element: Element
+}
+
+export interface MarkerRungOptions {
+  /** The document scanned (default document). */
+  root?: Document
+  /** Called with every marker, document order, on install and after
+   * each settled run of DOM changes. */
+  onScopes: (markers: Marker[]) => void
+  /** Called with the marker element that holds a newly focused node. */
+  onFocus?: (element: Element) => void
+  /** The scan's debounce (default 100 ms, trailing). */
+  debounceMs?: number
+}
+
+export interface MarkerRung {
+  /** disconnect removes the observer, the focusin listener and a
+   * pending scan. Idempotent. */
+  disconnect: () => void
+}
+
+const PANEL = "weft-devtools"

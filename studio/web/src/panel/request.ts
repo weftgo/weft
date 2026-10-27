@@ -154,14 +154,6 @@ interface Facts {
 /** The diffs drawn, by row: a redraw diffs nothing again. */
 const diffMemo = new WeakMap<RequestRow, { base: string; diff: BoundedDiff }>()
 
-function remember(key: string, v: boolean | null | "pending") {
-  composedCache.set(key, v)
-  if (composedCache.size > COMPOSED_MAX)
-    composedCache.delete(composedCache.keys().next().value!)
-}
-
-const DIFF_MARK = { add: "+ ", del: "− ", same: "  " }
-
 /** stepsOf: every step the turn ran or the record names, in order —
  * the tab's picker, and what J/K walk while it is open. */
 export function stepsOf(t: TurnView, req: PanelRequests | null): number[] {
@@ -169,6 +161,14 @@ export function stepsOf(t: TurnView, req: PanelRequests | null): number[] {
   for (const k of req?.steps.keys() ?? []) s.add(k)
   return [...s].sort((a, b) => a - b)
 }
+
+function remember(key: string, v: boolean | null | "pending") {
+  composedCache.set(key, v)
+  if (composedCache.size > COMPOSED_MAX)
+    composedCache.delete(composedCache.keys().next().value!)
+}
+
+const DIFF_MARK = { add: "+ ", del: "− ", same: "  " }
 
 function diffView(
   r: RequestRow,
@@ -421,6 +421,39 @@ function promptView(
   return out
 }
 
+function composed(
+  r: RequestRow,
+  insHash: string,
+  snippets: string[] | undefined,
+  redraw: () => void
+): boolean | undefined {
+  const key = [
+    r.system_hash,
+    insHash,
+    r.body.tools.names.join(","),
+    snippets?.join("\u0000") ?? "\u0001",
+  ].join("|")
+  const got = composedCache.get(key)
+  if (got === "pending") return undefined
+  if (got !== undefined) return got ?? undefined
+  remember(key, "pending")
+  composedFromInstructions(r, insHash, snippets).then(
+    (v) => {
+      remember(key, v ?? null)
+      redraw()
+    },
+    () => remember(key, null)
+  )
+  return undefined
+}
+
+/** messagesSent per row and the records it read: a redraw resolves
+ * nothing again, and the earlier messages' tree keeps its root. */
+const sentMemo = new WeakMap<
+  RequestRow,
+  { tr: unknown; comps: unknown; running: boolean; m: MessagesSent }
+>()
+
 function catalogView(
   d: RequestTabDeps,
   r: RequestRow,
@@ -476,39 +509,6 @@ function catalogView(
   return out
 }
 
-function composed(
-  r: RequestRow,
-  insHash: string,
-  snippets: string[] | undefined,
-  redraw: () => void
-): boolean | undefined {
-  const key = [
-    r.system_hash,
-    insHash,
-    r.body.tools.names.join(","),
-    snippets?.join("\u0000") ?? "\u0001",
-  ].join("|")
-  const got = composedCache.get(key)
-  if (got === "pending") return undefined
-  if (got !== undefined) return got ?? undefined
-  remember(key, "pending")
-  composedFromInstructions(r, insHash, snippets).then(
-    (v) => {
-      remember(key, v ?? null)
-      redraw()
-    },
-    () => remember(key, null)
-  )
-  return undefined
-}
-
-/** messagesSent per row and the records it read: a redraw resolves
- * nothing again, and the earlier messages' tree keeps its root. */
-const sentMemo = new WeakMap<
-  RequestRow,
-  { tr: unknown; comps: unknown; running: boolean; m: MessagesSent }
->()
-
 /** picker is a row of pressed/unpressed buttons (the steps, a step's
  * attempts). */
 function picker(
@@ -538,6 +538,25 @@ function picker(
     box.append(b)
   }
   return box
+}
+
+/** A toggle the user opened, kept in the element's open keys. */
+function toggle(
+  d: RequestTabDeps,
+  key: string,
+  label: (open: boolean) => string
+): [HTMLElement, boolean] {
+  const open = d.keys.has(key)
+  const b = el("button", "weft-btn weft-rq-more", label(open), {
+    type: "button",
+    "aria-expanded": String(open),
+  })
+  on(b, "click", () => {
+    if (d.keys.has(key)) d.keys.delete(key)
+    else d.keys.add(key)
+    d.redraw()
+  })
+  return [b, open]
 }
 
 /** renderRequestTab is the Request tab's panel content. */
@@ -758,23 +777,4 @@ function toolChips(t: ToolEntry): HTMLElement {
   ])
     if (c) box.append(el("span", "weft-chip", c))
   return box
-}
-
-/** A toggle the user opened, kept in the element's open keys. */
-function toggle(
-  d: RequestTabDeps,
-  key: string,
-  label: (open: boolean) => string
-): [HTMLElement, boolean] {
-  const open = d.keys.has(key)
-  const b = el("button", "weft-btn weft-rq-more", label(open), {
-    type: "button",
-    "aria-expanded": String(open),
-  })
-  on(b, "click", () => {
-    if (d.keys.has(key)) d.keys.delete(key)
-    else d.keys.add(key)
-    d.redraw()
-  })
-  return [b, open]
 }

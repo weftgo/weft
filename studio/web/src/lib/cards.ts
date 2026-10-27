@@ -71,39 +71,32 @@ export function callFactsOf(
   return out
 }
 
-/** parkWord reads why a call parked: a ParkSource's park is a
- * breakpoint on a playground run (weft.playground, the row's
- * playground) or when the page knows the run's runtime registered
- * breakpoints_own (own), else "paused by ParkSource"; a ParkOn the run
- * names in weft.playground.breakpoints is a breakpoint; an approval
- * gate, or a record from before U25 that names no source, awaits a
- * decision; a park rule says which. run is the run's row or doc. A
- * call its doc's decided block holds (the resume the record links)
- * reads its outcome and the turn it resumed in — "✋ denied → t2" —,
- * never awaiting (id: the call's id). */
-export function parkWord(
-  f: CallFacts | undefined,
-  tool: string,
-  run?: {
-    meta?: Record<string, string>
-    playground?: boolean
-    decided?: DecisionDoc
-  } | null,
-  id?: string,
-  own = false
-): string {
-  const c = decidedCall(run?.decided, id)
-  if (c) {
-    const o = outcomeOf(c.outcome)
-    return `${o.icon} ${o.word} → ${turnTag(run!.decided!.run)}`
+/** The span's attempt facts as attemptCause reads them. */
+export function spanCause(sp: SpanLike | undefined) {
+  if (!sp) return {}
+  const a = sp.attrs ?? {}
+  return {
+    http_status: num(a["http.response.status_code"]),
+    wait_ms: num(a["weft.attempt.wait_ms"]),
+    error: a["error.type"] ? sp.status_message : undefined,
   }
-  const p = f?.park ?? ""
-  const bp = run?.meta?.["weft.playground.breakpoints"]
-  if (p === "park_source")
-    return own || run?.playground ? BREAKPOINT : BY_SOURCE
-  if (p === "park_on" && bp && `,${bp},`.includes(`,${tool},`))
-    return BREAKPOINT
-  return PARKED[p] ? `${AWAITING} · ${PARKED[p]}` : AWAITING
+}
+
+/** attemptTag is an attempt's name in the attempts pickers (U4-fix,
+ * UX-S2-02): "attempt 2 · fallback · 503 · overloaded" — its layer and
+ * cause off its attempt span. */
+export function attemptTag(
+  spans: SpanLike[] | null | undefined,
+  runId: string,
+  step: number,
+  n: number
+): string {
+  const sp = attemptSpan(spans, runId, step, n)
+  return attemptLabel(
+    n,
+    str(sp?.attrs?.["weft.attempt.layer"]),
+    attemptCause(spanCause(sp))
+  )
 }
 
 /** A parked call's words (UX-S3-12, UX-H-18): never "never completed"
@@ -233,40 +226,6 @@ export function execLine(f?: CallFacts): string | null {
   else if (lim) out.push(lim)
   if (f?.queueMs) out.push(`queued ${msText(f.queueMs)}`)
   return out.length ? out.join(" · ") : null
-}
-
-/** The span's attempt facts as attemptCause reads them. */
-export function spanCause(sp: SpanLike | undefined) {
-  if (!sp) return {}
-  const a = sp.attrs ?? {}
-  return {
-    http_status: num(a["http.response.status_code"]),
-    wait_ms: num(a["weft.attempt.wait_ms"]),
-    error: a["error.type"] ? sp.status_message : undefined,
-  }
-}
-
-/** attemptTag is an attempt's name in the attempts pickers (U4-fix,
- * UX-S2-02): "attempt 2 · fallback · 503 · overloaded" — its layer and
- * cause off its attempt span. */
-export function attemptTag(
-  spans: SpanLike[] | null | undefined,
-  runId: string,
-  step: number,
-  n: number
-): string {
-  const sp = attemptSpan(spans, runId, step, n)
-  return attemptLabel(
-    n,
-    str(sp?.attrs?.["weft.attempt.layer"]),
-    attemptCause(spanCause(sp))
-  )
-}
-
-/** preparedChip is the step's PrepareStep chip (O9, UX-E-14): the parts
- * its PrepareStep chain changed, from the request record's prepared. */
-export function preparedChip(p: string[] | undefined): string | null {
-  return p?.length ? `PrepareStep: ${p.join(", ")}` : null
 }
 
 /** thinkingWords is the request's thinking with the adapter's wire
@@ -407,6 +366,102 @@ const toolChoiceText = (t: unknown) =>
       ? `${(t as { mode: string }).mode}${(t as { name?: string }).name ? ` ${(t as { name?: string }).name}` : ""}`
       : JSON.stringify(t)
 
+/** preparedChip is the step's PrepareStep chip (O9, UX-E-14): the parts
+ * its PrepareStep chain changed, from the request record's prepared. */
+export function preparedChip(p: string[] | undefined): string | null {
+  return p?.length ? `PrepareStep: ${p.join(", ")}` : null
+}
+
+/** attachmentsOf lists the file parts of the turn's prompt — the last
+ * user message the run was fed (its input batch) — as fileWords. */
+export function attachmentsOf(
+  batches: TranscriptBatch[] | undefined
+): string[] {
+  const input = batches?.find((b) => b.input)
+  const user = input?.messages.filter((m) => m.role === "user").at(-1)
+  return ((user?.content ?? []) as (Part | null)[])
+    .filter((p): p is Extract<Part, { type: "file" }> => p?.type === "file")
+    .map(fileWords)
+}
+
+/** parkWord reads why a call parked: a ParkSource's park is a
+ * breakpoint on a playground run (weft.playground, the row's
+ * playground) or when the page knows the run's runtime registered
+ * breakpoints_own (own), else "paused by ParkSource"; a ParkOn the run
+ * names in weft.playground.breakpoints is a breakpoint; an approval
+ * gate, or a record from before U25 that names no source, awaits a
+ * decision; a park rule says which. run is the run's row or doc. A
+ * call its doc's decided block holds (the resume the record links)
+ * reads its outcome and the turn it resumed in — "✋ denied → t2" —,
+ * never awaiting (id: the call's id). */
+export function parkWord(
+  f: CallFacts | undefined,
+  tool: string,
+  run?: {
+    meta?: Record<string, string>
+    playground?: boolean
+    decided?: DecisionDoc
+  } | null,
+  id?: string,
+  own = false
+): string {
+  const c = decidedCall(run?.decided, id)
+  if (c) {
+    const o = outcomeOf(c.outcome)
+    return `${o.icon} ${o.word} → ${turnTag(run!.decided!.run)}`
+  }
+  const p = f?.park ?? ""
+  const bp = run?.meta?.["weft.playground.breakpoints"]
+  if (p === "park_source")
+    return own || run?.playground ? BREAKPOINT : BY_SOURCE
+  if (p === "park_on" && bp && `,${bp},`.includes(`,${tool},`))
+    return BREAKPOINT
+  return PARKED[p] ? `${AWAITING} · ${PARKED[p]}` : AWAITING
+}
+
+/** outputOf reads a run's structured output from its fold: the last
+ * valid submit_output call's arguments and the invalid ones before it;
+ * submitted is its own root span's weft.output.submitted (an Output
+ * agent's). none only when nothing was submitted — the root says
+ * false, or (a record from before it) no valid call is held; a
+ * submission whose arguments the record does not carry (content off,
+ * a read token) is stripped, never none. Null for a run with neither
+ * (no Output agent). */
+export function outputOf(
+  view: FoldedRun,
+  spans: SpanLike[] | null | undefined,
+  runId: string
+): {
+  args?: unknown
+  repairs: number
+  none: boolean
+  stripped: boolean
+} | null {
+  const v = spans?.find(
+    (s) =>
+      s.attrs?.["gen_ai.operation.name"] === "invoke_agent" &&
+      s.attrs["weft.run.id"] === runId
+  )?.attrs?.["weft.output.submitted"]
+  const submitted = v === undefined ? undefined : v === true || v === "true"
+  let args: unknown
+  let repairs = 0
+  let seen = false
+  let valid = false
+  for (const st of view.steps)
+    for (const c of st.toolCalls)
+      if (c.name === "submit_output" && c.result) {
+        seen = true
+        if (c.result.isError) repairs++
+        else {
+          valid = true
+          args = c.args ?? undefined
+        }
+      }
+  if (!seen && submitted === undefined) return null
+  const none = submitted === false || (submitted === undefined && !valid)
+  return { args, repairs, none, stripped: !none && args === undefined }
+}
+
 /** fileWords is a file part as a chip (UX-S1-13): "file image/png ·
  * url", "file text/plain · 14 B" — the media type and size, never the
  * bytes. */
@@ -422,18 +477,6 @@ export function fileWords(p: {
       ? "url"
       : "no data"
   return `file ${p.media_type || "?"} · ${size}`
-}
-
-/** attachmentsOf lists the file parts of the turn's prompt — the last
- * user message the run was fed (its input batch) — as fileWords. */
-export function attachmentsOf(
-  batches: TranscriptBatch[] | undefined
-): string[] {
-  const input = batches?.find((b) => b.input)
-  const user = input?.messages.filter((m) => m.role === "user").at(-1)
-  return ((user?.content ?? []) as (Part | null)[])
-    .filter((p): p is Extract<Part, { type: "file" }> => p?.type === "file")
-    .map(fileWords)
 }
 
 /** tokenSplit is the roll-up's own vs delegated (UX-S3-13): "60 in =
@@ -500,47 +543,4 @@ export function outputType(
       s.attrs["weft.run.id"] === runId
   )?.attrs?.["weft.output.type"]
   return typeof t === "string" && t ? t : undefined
-}
-
-/** outputOf reads a run's structured output from its fold: the last
- * valid submit_output call's arguments and the invalid ones before it;
- * submitted is its own root span's weft.output.submitted (an Output
- * agent's). none only when nothing was submitted — the root says
- * false, or (a record from before it) no valid call is held; a
- * submission whose arguments the record does not carry (content off,
- * a read token) is stripped, never none. Null for a run with neither
- * (no Output agent). */
-export function outputOf(
-  view: FoldedRun,
-  spans: SpanLike[] | null | undefined,
-  runId: string
-): {
-  args?: unknown
-  repairs: number
-  none: boolean
-  stripped: boolean
-} | null {
-  const v = spans?.find(
-    (s) =>
-      s.attrs?.["gen_ai.operation.name"] === "invoke_agent" &&
-      s.attrs["weft.run.id"] === runId
-  )?.attrs?.["weft.output.submitted"]
-  const submitted = v === undefined ? undefined : v === true || v === "true"
-  let args: unknown
-  let repairs = 0
-  let seen = false
-  let valid = false
-  for (const st of view.steps)
-    for (const c of st.toolCalls)
-      if (c.name === "submit_output" && c.result) {
-        seen = true
-        if (c.result.isError) repairs++
-        else {
-          valid = true
-          args = c.args ?? undefined
-        }
-      }
-  if (!seen && submitted === undefined) return null
-  const none = submitted === false || (submitted === undefined && !valid)
-  return { args, repairs, none, stripped: !none && args === undefined }
 }

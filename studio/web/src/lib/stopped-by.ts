@@ -26,35 +26,6 @@ const LOOP: Record<string, [string, string]> = {
   model_retries_exceeded: ["tool retry budget spent", "MaxModelRetries" + E],
 }
 
-/** stopStep is the step the stop fired at: the run's last (steps − 1),
- * undefined when it ran none. */
-export function stopStep(steps?: number): number | undefined {
-  return steps && steps > 0 ? steps - 1 : undefined
-}
-
-/** endStep is the step the header chip, its link and the story's end
- * card name (P8-fix-b #5): where the run failed among the steps the
- * surface draws (landStep) — a cancel or a model error during step N
- * names step N, the open one, never N − 1 — else the run's last step
- * (stopStep). Without the drawn steps, the step core's error names. */
-export function endStep(
-  r: StopRow,
-  drawn?: readonly number[]
-): number | undefined {
-  const at = failedAtStep(r)
-  return (drawn ? landStep(at, drawn) : at) ?? stopStep(r.steps)
-}
-
-/** The fields the chip reads off a run row or document. */
-export interface StopRow {
-  stopped_by?: string
-  cancel_cause?: string
-  err?: string
-  steps?: number
-  status?: string
-  error_type?: string
-}
-
 /** stopDetail is the detail core's error text carries for a stop, ""
  * when it has none: the detail is the record's, never invented.
  *
@@ -112,21 +83,6 @@ export function stoppedByWords(by?: string, cause?: string): StopWords | null {
   return w
     ? { word: w[0], hint: w[1] }
     : { word: by, hint: "a custom stop condition" }
-}
-
-/** landStep is where a selection lands for the step a run failed at
- * among the steps a surface draws: that step, else the last drawn
- * before it (a cancel before step N began: N − 1); undefined with no
- * failure or none drawn before it (the caller's step 0). */
-export function landStep(
-  failedAt: number | undefined,
-  drawn: readonly number[]
-): number | undefined {
-  let best: number | undefined
-  if (failedAt !== undefined)
-    for (const n of drawn)
-      if (n <= failedAt && (best === undefined || n > best)) best = n
-  return best
 }
 
 /** stopChip is the chip's text (the word, the error's detail in
@@ -269,4 +225,48 @@ export function repeatWords(l: LoopRepeats): { text: string; title: string } {
     text: `repeats step ${l.first}`,
     title: `DetectLoops: the same tool calls (names and arguments) as step ${l.first} — ${l.n} identical steps in a row ended the run`,
   }
+}
+
+/** stopStep is the step the stop fired at: the run's last (steps − 1),
+ * undefined when it ran none. */
+export function stopStep(steps?: number): number | undefined {
+  return steps && steps > 0 ? steps - 1 : undefined
+}
+
+/** endStep is the step the header chip, its link and the story's end
+ * card name (P8-fix-b #5): where the run failed among the steps the
+ * surface draws (landStep) — a cancel or a model error during step N
+ * names step N, the open one, never N − 1 — else the run's last step
+ * (stopStep). Without the drawn steps, the step core's error names. */
+export function endStep(
+  r: StopRow,
+  drawn?: readonly number[]
+): number | undefined {
+  const at = failedAtStep(r)
+  return (drawn ? landStep(at, drawn) : at) ?? stopStep(r.steps)
+}
+
+/** The fields the chip reads off a run row or document. */
+export interface StopRow {
+  stopped_by?: string
+  cancel_cause?: string
+  err?: string
+  steps?: number
+  status?: string
+  error_type?: string
+}
+
+/** landStep is where a selection lands for the step a run failed at
+ * among the steps a surface draws: that step, else the last drawn
+ * before it (a cancel before step N began: N − 1); undefined with no
+ * failure or none drawn before it (the caller's step 0). */
+export function landStep(
+  failedAt: number | undefined,
+  drawn: readonly number[]
+): number | undefined {
+  let best: number | undefined
+  if (failedAt !== undefined)
+    for (const n of drawn)
+      if (n <= failedAt && (best === undefined || n > best)) best = n
+  return best
 }

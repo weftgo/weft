@@ -453,6 +453,21 @@ type costFields struct {
 	// UnpricedModels are the provider/model pairs without a price
 	// behind the figure, deduped in order (absent when none).
 	UnpricedModels []string `json:"unpriced_models,omitempty"`
+	// CostPartial is an unknown set figure's known part (a session's,
+	// an experiment's; UX-H-07): the parts priced, of how many, and
+	// their sum — what the devtools panel's header draws as "≥ $x · k
+	// of n turns priced" from its turns, so Studio's set rows say the
+	// same figure. Absent on a known figure, on a single run's, and
+	// when no part is priced.
+	CostPartial *costPartial `json:"cost_partial,omitempty"`
+}
+
+// costPartial is cost_partial: usd is the priced parts' sum (rounded
+// as cost_usd), priced of of the set's parts are known.
+type costPartial struct {
+	USD    float64 `json:"usd"`
+	Priced int     `json:"priced"`
+	Of     int     `json:"of"`
 }
 
 // delegatedFields is a run's subagent bill beside its own.
@@ -477,6 +492,14 @@ type cost struct {
 	models                  []string
 	runs, unknown, unpriced int
 	why, cause              string
+	// A tally's known part (UX-H-07): floor sums the parts whose
+	// figure is known (a part's own when only its delegated is not),
+	// priced counts the parts whose whole bill is known; never counts
+	// the unknown parts that will never be known (a derived run whose
+	// stock spans report no usage), so "not known yet" is not said of
+	// them.
+	floor         float64
+	priced, never int
 }
 
 // addModels appends ms to the deduped list.
@@ -505,6 +528,9 @@ func capModels(list []string) []string {
 // fields is c on the wire: rounded, null when unknown.
 func (c cost) fields() costFields {
 	out := costFields{CostKnown: c.known, CostBadge: c.badge, CostReason: c.reason, Cache: c.cache, UnpricedModels: capModels(c.models)}
+	if !c.known && c.priced > 0 {
+		out.CostPartial = &costPartial{USD: round6(c.floor), Priced: c.priced, Of: c.runs}
+	}
 	if c.known && c.cache == cacheNotReported && out.CostReason == "" {
 		out.CostReason = cacheNote
 	}
@@ -869,6 +895,16 @@ func tally(parts []runCost, noun string, nested bool) cost {
 	out := cost{known: true}
 	for _, p := range parts {
 		out.usd += p.own.usd + p.delegated.usd
+		if p.own.known {
+			out.floor += p.own.usd
+			if p.delegated.known {
+				out.floor += p.delegated.usd
+				out.priced++
+			}
+		}
+		if p.own.reason == derivedUsageUnknown {
+			out.never++
+		}
 		out.models = addModels(out.models, p.own.models...)
 		out.models = addModels(out.models, p.delegated.models...)
 		out.runs++
@@ -906,7 +942,14 @@ func tally(parts []runCost, noun string, nested bool) cost {
 		if nested {
 			why = out.why
 		}
-		out.reason = fmt.Sprintf("%d of %d %ss' cost not known yet (%s)", out.unknown, out.runs, noun, why)
+		// A derived run whose spans report no usage is never known
+		// (the run row's own words, README's rule): "not known", not
+		// "not known yet", when every unknown part is one.
+		yet := " yet"
+		if out.never >= out.unknown {
+			yet = ""
+		}
+		out.reason = fmt.Sprintf("%d of %d %ss' cost not known%s (%s)", out.unknown, out.runs, noun, yet, why)
 		if out.unpriced > 0 {
 			out.reason += fmt.Sprintf("; %d unpriced", out.unpriced)
 		}

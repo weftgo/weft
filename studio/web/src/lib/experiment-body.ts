@@ -277,24 +277,6 @@ export function callLabel(name: string, args: unknown, max = 48): string {
   return `${name}(${inner})`
 }
 
-/** labLacksDefaults: the registration carries no option-lab defaults
- * — the server's own test (tool_choice mode unset). /api/runtimes
- * omits them only when Studio itself predates the field; a current
- * Studio fills an old runtime's in (its caps, tool_choice auto), and
- * then the server's 400 is the one that says so, shown verbatim. */
-export function labLacksDefaults(agent: Pick<AgentView, "defaults">): boolean {
-  return !agent.defaults?.tool_choice.mode
-}
-
-/** A compaction view's place (the transcript?step answer's, or the
- * preview's, compacted_at): messages [from_seq, to_seq) of the whole
- * transcript replaced by entries. */
-export interface CompactedNote {
-  from_seq: number
-  to_seq: number
-  entries: number
-}
-
 /**
  * compactedRefusal is studio/edits.go's refusal of an edit inside the
  * view from_step's request carried (ADR 0029 decision 4, F1.1's words),
@@ -575,6 +557,52 @@ export interface LabFields {
   only_tools: string[]
 }
 
+/** The hand-off's lab= and edits= (the panel's "compare in Studio",
+ * lib/links.ts): the lab's set knobs and the edit list as JSON, so the
+ * same experiment opens in Studio as the same command. */
+export function labHandoff(lab: LabFields | undefined): string | undefined {
+  const set = Object.entries(lab ?? {}).filter(
+    ([, v]) => (v as string | string[]).length
+  )
+  return set.length ? JSON.stringify(Object.fromEntries(set)) : undefined
+}
+
+/** ownMessages is the run's own messages (the input record left out),
+ * each tagged with the step it counts toward: the batch's stored step
+ * when every batch carries one and the input flag, else numbered by
+ * order — each assistant message opens the next step, what precedes
+ * the first is step 0's (editFieldsOf's rule, below). */
+export function ownMessages(
+  batches: TranscriptBatch[]
+): { step: number; m: Message }[] {
+  const placed = placeBatches(batches)
+  const list = Array.isArray(batches) ? batches : []
+  const stored =
+    list.length > 0 &&
+    list.every(
+      (b) =>
+        typeof b.step === "number" &&
+        b.step >= 0 &&
+        typeof b.input === "boolean"
+    )
+  const tagged: { step: number; m: Message }[] = []
+  for (const [i, b] of placed.entries()) {
+    const flag = list[i]?.input
+    const input = typeof flag === "boolean" ? flag : b.input
+    if (input) continue
+    for (const m of b.messages)
+      tagged.push({ step: stored ? (list[i].step as number) : -1, m })
+  }
+  if (!stored) {
+    let at = -1
+    for (const t of tagged) {
+      if (t.m.role === "assistant") at++
+      t.step = Math.max(at, 0)
+    }
+  }
+  return tagged
+}
+
 export const emptyLab = (): LabFields => ({
   max_steps: "",
   parallelism: "",
@@ -635,14 +663,22 @@ export interface LabProblem {
   message: string
 }
 
-/** The hand-off's lab= and edits= (the panel's "compare in Studio",
- * lib/links.ts): the lab's set knobs and the edit list as JSON, so the
- * same experiment opens in Studio as the same command. */
-export function labHandoff(lab: LabFields | undefined): string | undefined {
-  const set = Object.entries(lab ?? {}).filter(
-    ([, v]) => (v as string | string[]).length
-  )
-  return set.length ? JSON.stringify(Object.fromEntries(set)) : undefined
+/** labLacksDefaults: the registration carries no option-lab defaults
+ * — the server's own test (tool_choice mode unset). /api/runtimes
+ * omits them only when Studio itself predates the field; a current
+ * Studio fills an old runtime's in (its caps, tool_choice auto), and
+ * then the server's 400 is the one that says so, shown verbatim. */
+export function labLacksDefaults(agent: Pick<AgentView, "defaults">): boolean {
+  return !agent.defaults?.tool_choice.mode
+}
+
+/** A compaction view's place (the transcript?step answer's, or the
+ * preview's, compacted_at): messages [from_seq, to_seq) of the whole
+ * transcript replaced by entries. */
+export interface CompactedNote {
+  from_seq: number
+  to_seq: number
+  entries: number
 }
 
 /** labDefault is the agent's default for a knob as the form shows it,
@@ -937,40 +973,4 @@ export function labProblems(
     agent,
     enabled.length < names.length ? enabled : []
   ).problems
-}
-
-/** ownMessages is the run's own messages (the input record left out),
- * each tagged with the step it counts toward: the batch's stored step
- * when every batch carries one and the input flag, else numbered by
- * order — each assistant message opens the next step, what precedes
- * the first is step 0's (editFieldsOf's rule, below). */
-export function ownMessages(
-  batches: TranscriptBatch[]
-): { step: number; m: Message }[] {
-  const placed = placeBatches(batches)
-  const list = Array.isArray(batches) ? batches : []
-  const stored =
-    list.length > 0 &&
-    list.every(
-      (b) =>
-        typeof b.step === "number" &&
-        b.step >= 0 &&
-        typeof b.input === "boolean"
-    )
-  const tagged: { step: number; m: Message }[] = []
-  for (const [i, b] of placed.entries()) {
-    const flag = list[i]?.input
-    const input = typeof flag === "boolean" ? flag : b.input
-    if (input) continue
-    for (const m of b.messages)
-      tagged.push({ step: stored ? (list[i].step as number) : -1, m })
-  }
-  if (!stored) {
-    let at = -1
-    for (const t of tagged) {
-      if (t.m.role === "assistant") at++
-      t.step = Math.max(at, 0)
-    }
-  }
-  return tagged
 }

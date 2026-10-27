@@ -44,76 +44,6 @@ const KINDS: Record<string, string | undefined> = {
 
 export const CANCELLED = "cancelled"
 
-/** errorKind words a run row's error_type; null when the run did not
- * fail (or recorded no kind). An unknown kind is worded as itself. */
-export function errorKind(errorType?: string): KindWords | null {
-  if (!errorType) return null
-  if (errorType === CANCELLED)
-    return {
-      word: CANCELLED,
-      hint: "the run's context ended",
-      tone: "cancelled",
-    }
-  return {
-    word: WORDS[errorType] ?? errorType,
-    hint: KINDS[errorType] ?? "error.type",
-    tone: "bad",
-  }
-}
-
-// A kind whose word is not its error_type (UX-S4-09): the kill switch
-// is no provider failure — the run never asked.
-const WORDS: Record<string, string | undefined> = {
-  model_requests_denied: "denied by the kill switch (WEFT_MODEL_REQUESTS)",
-  // Beside the stop chip "tool retry budget spent" (stopped-by.ts):
-  // the same budget, in words (W7-prep).
-  model_retries_exceeded: "retry budget spent",
-}
-
-/** kindChip is the chip's bracketed text and title; null with no kind,
- * and for cancelled (U1-fix): the status word beside it already says
- * cancelled, error_type in its hint (lib/status.ts). */
-export function kindChip(
-  errorType?: string
-): { text: string; title: string; tone: KindWords["tone"] } | null {
-  const k = errorKind(errorType)
-  return k && errorType !== CANCELLED
-    ? {
-        text: `[${k.word}]`,
-        title: `${k.hint} — error_type ${errorType}`,
-        tone: k.tone,
-      }
-    : null
-}
-
-/** The counters a row or document carries (each absent when 0). */
-export interface ProblemRow {
-  attempts_retried?: number
-  fallbacks?: number
-  tool_errors?: number
-  denied?: number
-  truncated?: number
-  repaired?: number
-  /** Observer panics the run contained (weft.tap.panics). */
-  tap_panics?: number
-  log_warn?: number
-  log_error?: number
-  /** The log counts stopped at the reader's cap: each is a floor,
-   * drawn "≥". */
-  logs_capped?: boolean
-  pending?: number
-}
-
-/** One problem badge: a glyph and count for the list, words for the
- * strip and the accessible label. */
-export interface ProblemBadge {
-  key: string
-  glyph: string
-  label: string
-}
-
-const n = (v?: number) => v ?? 0
-
 /** problemBadges lists a run's problems, in one fixed order — none for
  * a clean run (badges only on problems). Parked calls ride ✋ with the
  * denials: both are calls a policy held. status is the row's statusOf
@@ -309,6 +239,34 @@ export function toolFailure(
   return { word: errorType, hint: "the ToolError code " + errorType }
 }
 
+/** errorKind words a run row's error_type; null when the run did not
+ * fail (or recorded no kind). An unknown kind is worded as itself. */
+export function errorKind(errorType?: string): KindWords | null {
+  if (!errorType) return null
+  if (errorType === CANCELLED)
+    return {
+      word: CANCELLED,
+      hint: "the run's context ended",
+      tone: "cancelled",
+    }
+  return {
+    word: WORDS[errorType] ?? errorType,
+    hint: KINDS[errorType] ?? "error.type",
+    tone: "bad",
+  }
+}
+
+// A kind whose word is not its error_type (UX-S4-09): the kill switch
+// is no provider failure — the run never asked.
+const WORDS: Record<string, string | undefined> = {
+  model_requests_denied: "denied by the kill switch (WEFT_MODEL_REQUESTS)",
+  // Beside the stop chip "tool retry budget spent" (stopped-by.ts):
+  // the same budget, in words (W7-prep).
+  model_retries_exceeded: "retry budget spent",
+}
+
+const n = (v?: number) => v ?? 0
+
 // A model attempt's error.type (the attempt span's; UX-S2-15) in
 // words: core's run-level tokens (core/observe.go's errorTypes) as an
 // attempt reads them, the context errors by their names. stream_idle's
@@ -450,4 +408,46 @@ export function toolFactsOf(
     })
   }
   return out
+}
+
+/** kindChip is the chip's bracketed text and title; null with no kind,
+ * and for cancelled (U1-fix): the status word beside it already says
+ * cancelled, error_type in its hint (lib/status.ts). */
+export function kindChip(
+  errorType?: string
+): { text: string; title: string; tone: KindWords["tone"] } | null {
+  const k = errorKind(errorType)
+  return k && errorType !== CANCELLED
+    ? {
+        text: `[${k.word}]`,
+        title: `${k.hint} — error_type ${errorType}`,
+        tone: k.tone,
+      }
+    : null
+}
+
+/** The counters a row or document carries (each absent when 0). */
+export interface ProblemRow {
+  attempts_retried?: number
+  fallbacks?: number
+  tool_errors?: number
+  denied?: number
+  truncated?: number
+  repaired?: number
+  /** Observer panics the run contained (weft.tap.panics). */
+  tap_panics?: number
+  log_warn?: number
+  log_error?: number
+  /** The log counts stopped at the reader's cap: each is a floor,
+   * drawn "≥". */
+  logs_capped?: boolean
+  pending?: number
+}
+
+/** One problem badge: a glyph and count for the list, words for the
+ * strip and the accessible label. */
+export interface ProblemBadge {
+  key: string
+  glyph: string
+  label: string
 }

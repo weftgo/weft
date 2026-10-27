@@ -951,6 +951,12 @@ type sessionRow struct {
 	ParentTurn    int    `json:"parent_turn,omitempty"`
 	ParentCall    string `json:"parent_call,omitempty"`
 	ParentRun     string `json:"parent_run,omitempty"`
+	// Derived marks a session every turn of which the reader built from
+	// stock OTel GenAI spans (a gen_ai.conversation.id's derived runs,
+	// docs/record-contract.md §9; UX-H-35): the list and the session
+	// page say "derived (stock OTel)". Read off the runs the cost walk
+	// read (sessionCost), absent when false or when that walk failed.
+	Derived bool `json:"derived,omitempty"`
 	// The session's cost (plan A5): its turns' own + delegated — the
 	// session's usage already includes their subagents. A thread/pool
 	// child is another session, with its own row: its cost is on the
@@ -2328,9 +2334,10 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	out := sessionsPage{Total: page.Total, Sessions: make([]sessionRow, 0, len(page.Sessions))}
 	scope := readScope{PublicID: query.PublicID, Tags: query.Meta}
 	for _, sr := range page.Sessions {
-		sc, _, _ := s.sessionCost(r.Context(), sr.ID, scope)
+		sc, _, runs := s.sessionCost(r.Context(), sr.ID, scope)
 		srow := sessRow(sr)
 		srow.costFields = sc.fields()
+		srow.Derived = allDerived(runs)
 		out.Sessions = append(out.Sessions, srow)
 	}
 	if page.NextBefore != nil { // the database's own cursor, as in serveRuns
@@ -2342,6 +2349,41 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, r, http.StatusOK, out)
+}
+
+// allDerived says every run of a session's cost walk is a derived run
+// (sessionRow.Derived); false for none read or a failed walk (nil).
+func allDerived(runs []obsdb.RunRow) bool {
+	for _, r := range runs {
+		if !r.Derived {
+			return false
+		}
+	}
+	return len(runs) > 0
+}
+
+// numberDerivedTurns numbers a session document's derived top-level
+// turns 1..n by start order (a tie by id; UX-H-35): a derived run has
+// no thread turn (its row reads 0, docs/record-contract.md §9), so the
+// session page would list every one as turn 0. Presentation only:
+// the run's own row (/api/runs/{id}) keeps 0, nothing is stored, and a
+// turn a thread numbered keeps its number.
+func numberDerivedTurns(rows []runRow) {
+	var idx []int
+	for i, r := range rows {
+		if r.Derived && r.Turn == 0 && r.ParentRunID == "" {
+			idx = append(idx, i)
+		}
+	}
+	slices.SortStableFunc(idx, func(a, b int) int {
+		if c := rows[a].Started.Compare(rows[b].Started); c != 0 {
+			return c
+		}
+		return strings.Compare(rows[a].ID, rows[b].ID)
+	})
+	for n, i := range idx {
+		rows[i].Turn = n + 1
+	}
 }
 
 // sessionSubRoute is one GET /api/sessions/{id}/<ext> sub-route.
@@ -2410,14 +2452,16 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	doc := sessionDoc{sessionRow: sessRow(det.SessionRow), Runs: make([]runRow, 0, len(det.Runs))}
-	sc, c, _ := s.sessionCost(r.Context(), id, pub)
+	sc, c, runs := s.sessionCost(r.Context(), id, pub)
 	doc.costFields = sc.fields()
+	doc.Derived = allDerived(runs)
 	// The turn rows' children counts: every parent-linked run, as on
 	// the runs list — the session walk primed its own runs only.
 	c.primeChildren(det.Runs)
 	for _, rr := range det.Runs {
 		doc.Runs = append(doc.Runs, c.row(rr))
 	}
+	numberDerivedTurns(doc.Runs)
 	s.delegatedSessions(r.Context(), id, pub, &doc)
 	writeJSON(w, r, http.StatusOK, doc)
 }

@@ -29,6 +29,7 @@ const PAGE_KEYS: Record<keyof StatsPage, true> = {
   groups_cut: true,
 }
 const COST_KEYS: Record<keyof CostFields, true> = {
+  cost_partial: true,
   cost_usd: true,
   cost_known: true,
   cost_badge: true,

@@ -55,11 +55,6 @@ export class LiveGrantError extends Error {
   }
 }
 
-/** liveKinds is the stream's kinds set as the query carries it. */
-function liveKinds(kinds?: string[]): string {
-  return (kinds ?? ["event", "run"]).join(",")
-}
-
 /**
  * grantDeadline turns the server's exp into a deadline on this page's
  * clock: the lifetime the server meant (exp minus the answer's own Date
@@ -80,52 +75,6 @@ export function grantDeadline(
   return (
     now + Math.min(LIVE_GRANT_TTL_MS, Math.max(0, serverExp - serverNow - 1000))
   )
-}
-
-/**
- * requestLiveGrant asks grantURL (POST {base}api/live-grant) for a sig
- * that opens this one stream: the selector and kinds in the JSON body,
- * the bearer in the Authorization header (none in setup A). The token
- * is never part of a URL.
- */
-export async function requestLiveGrant(
-  grantURL: string,
-  token: string,
-  selector: LiveSelector,
-  kinds?: string[],
-  signal?: AbortSignal
-): Promise<LiveGrant> {
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  }
-  if (token) headers.Authorization = `Bearer ${token}`
-  const res = await fetch(grantURL, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ ...selector, kinds: liveKinds(kinds) }),
-    signal,
-  })
-  if (!res.ok) throw new LiveGrantError(res.status)
-  const doc = (await res.json()) as { sig?: unknown; exp?: unknown } | null
-  if (typeof doc?.sig !== "string" || !doc.sig)
-    throw new LiveGrantError(res.status)
-  return { sig: doc.sig, exp: grantDeadline(doc.exp, res.headers.get("Date")) }
-}
-
-/** liveStreamURL is the stream a grant opens: GET {base}api/live with
- * the same selector and kinds, and the sig. */
-export function liveStreamURL(
-  liveURL: string,
-  selector: LiveSelector,
-  kinds: string[] | undefined,
-  grant: LiveGrant
-): string {
-  const url = new URL(liveURL)
-  url.search = selectorSearch(selector)
-  url.searchParams.set("kinds", liveKinds(kinds))
-  url.searchParams.set("sig", grant.sig)
-  return url.toString()
 }
 
 /** grantSpent reports whether a grant can no longer open a stream — the
@@ -608,4 +557,55 @@ export function throttle(
     timer = null
   }
   return run
+}
+
+/**
+ * requestLiveGrant asks grantURL (POST {base}api/live-grant) for a sig
+ * that opens this one stream: the selector and kinds in the JSON body,
+ * the bearer in the Authorization header (none in setup A). The token
+ * is never part of a URL.
+ */
+export async function requestLiveGrant(
+  grantURL: string,
+  token: string,
+  selector: LiveSelector,
+  kinds?: string[],
+  signal?: AbortSignal
+): Promise<LiveGrant> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(grantURL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ ...selector, kinds: liveKinds(kinds) }),
+    signal,
+  })
+  if (!res.ok) throw new LiveGrantError(res.status)
+  const doc = (await res.json()) as { sig?: unknown; exp?: unknown } | null
+  if (typeof doc?.sig !== "string" || !doc.sig)
+    throw new LiveGrantError(res.status)
+  return { sig: doc.sig, exp: grantDeadline(doc.exp, res.headers.get("Date")) }
+}
+
+/** liveStreamURL is the stream a grant opens: GET {base}api/live with
+ * the same selector and kinds, and the sig. */
+export function liveStreamURL(
+  liveURL: string,
+  selector: LiveSelector,
+  kinds: string[] | undefined,
+  grant: LiveGrant
+): string {
+  const url = new URL(liveURL)
+  url.search = selectorSearch(selector)
+  url.searchParams.set("kinds", liveKinds(kinds))
+  url.searchParams.set("sig", grant.sig)
+  return url.toString()
+}
+
+/** liveKinds is the stream's kinds set as the query carries it. */
+function liveKinds(kinds?: string[]): string {
+  return (kinds ?? ["event", "run"]).join(",")
 }

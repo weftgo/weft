@@ -10,7 +10,9 @@
 //      ?weft=debug / localStorage.weft_debug=1 override allows it
 //      (§5.3) — the host page including the tag only in dev builds is
 //      the main switch; where Studio does not answer, the panel
-//      removes itself silently (no console, one request, no retries).
+//      removes itself silently (one request, no retries) — one
+//      console line only when its tag names no endpoint and carries no
+//      data-weft (element.ts NO_ENDPOINT, UX-S5b-10).
 import { debugForced, readConfig } from "./config"
 import { panelsOnPage, WeftDevtools } from "./element"
 

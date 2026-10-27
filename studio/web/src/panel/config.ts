@@ -119,21 +119,6 @@ export interface MountOptions {
 export type DetectSetting =
   "" | "headers" | "markers" | "headers,markers" | "off"
 
-/** normalize turns a raw endpoint into a base URL with a trailing
- * slash, or "" when it is not http(s). Never throws: the element reads
- * its configuration inside custom-element callbacks, where a throw
- * lands in the host page's error handler. */
-function normalize(raw: string, base: string): string {
-  try {
-    const url = new URL(raw, base)
-    if (url.protocol !== "http:" && url.protocol !== "https:") return ""
-    if (!url.pathname.endsWith("/")) url.pathname += "/"
-    return url.toString()
-  } catch {
-    return ""
-  }
-}
-
 const POSITIONS: PanelPlacement[] = [
   "bottom-right",
   "bottom-left",
@@ -212,6 +197,21 @@ const entry = {
   })(),
 }
 
+/** normalize turns a raw endpoint into a base URL with a trailing
+ * slash, or "" when it is not http(s). Never throws: the element reads
+ * its configuration inside custom-element callbacks, where a throw
+ * lands in the host page's error handler. */
+function normalize(raw: string, base: string): string {
+  try {
+    const url = new URL(raw, base)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return ""
+    if (!url.pathname.endsWith("/")) url.pathname += "/"
+    return url.toString()
+  } catch {
+    return ""
+  }
+}
+
 /** scriptDir is the script's own origin + directory (rung 6) — what
  * /studio/panel.js, or /assets/devtools.abc123.js, serves from. "" for
  * a script without a src. */
@@ -225,56 +225,50 @@ function scriptDir(script: HTMLScriptElement | null): string {
   }
 }
 
-/** detectSetting reads a data-detect value: "off" wherever it is
- * named (the author asked for less), else the rungs it names (headers,
- * markers, comma-separated, either order, empty words skipped); a
- * value naming anything else is unset — the defaults apply. */
-export function detectSetting(v: string | null | undefined): DetectSetting {
-  const words = new Set(
-    String(v ?? "")
-      .toLowerCase()
-      .split(",")
-      .map((w) => w.trim())
-      .filter(Boolean)
-  )
-  if (words.has("off")) return "off"
-  const h = words.delete("headers")
-  const m = words.delete("markers")
-  if (words.size) return ""
-  return h && m ? "headers,markers" : h ? "headers" : m ? "markers" : ""
-}
-
-/** scopeOption is mount's scope option in its string form (a Scope
- * object serialised; anything else is unset). */
-function scopeOption(v: unknown): string | undefined {
-  if (typeof v === "string") return v
-  if (v && typeof v === "object" && typeof (v as Scope).publicId === "string") {
-    try {
-      return serializeScope(v as Scope)
-    } catch {
-      return undefined
-    }
-  }
-  return undefined
-}
-
-/** weftScope reads window.__WEFT__: its scope (the serialised form, or
- * a Scope object), else its publicId — the page's object, as the page
- * wrote it. The empty scope when there is none or it cannot be read
- * (a getter of the page's that throws is not the panel's to surface). */
-export function weftScope(): Scope {
+/** ?weft=debug or localStorage.weft_debug=1 forces the panel on
+ * where the endpoint exists (staging) — §5.3's override switch. The
+ * namespaced parameter never collides with an app's own ?debug=. The
+ * old key is migrated into localStorage["weft.devtools"] (debug: true)
+ * and dropped (D1); removing that key turns the switch off. */
+export function debugForced(): boolean {
   try {
-    const w = (
-      window as { __WEFT__?: { scope?: unknown; publicId?: unknown } | null }
-    ).__WEFT__
-    const sc = w?.scope
-    if (typeof sc === "string") return parseScope(sc)
-    const form = scopeOption(sc)
-    if (form !== undefined) return parseScope(form)
+    if (new URLSearchParams(location.search).get("weft") === "debug")
+      return true
+    if (migrateDebug()) return true
   } catch {
-    // fall through to the public id
+    // about:blank and friends: not forced
   }
-  return { publicId: weftPublicId() }
+  return false
+}
+
+/** discoverEndpoint is rung 5: GET <script directory>/panel-config.json
+ * (B3's document: {endpoint, version, capabilities}, never a token) and
+ * its endpoint when it is an http(s) URL on the same origin as the
+ * document was fetched from — the file may move the endpoint's path,
+ * never its origin, so a token from a higher rung cannot be sent
+ * somewhere the page did not name. "" on anything else (a 404, not
+ * JSON, no answer): the caller falls through to rung 6. No token and
+ * no credentials go with the request. */
+export async function discoverEndpoint(
+  configURL: string,
+  signal?: AbortSignal
+): Promise<string> {
+  if (signal?.aborted) return ""
+  try {
+    const res = await fetch(configURL, {
+      headers: { Accept: "application/json" },
+      credentials: "omit",
+      signal,
+    })
+    if (!res.ok) return ""
+    const doc = (await res.json()) as { endpoint?: unknown } | null
+    if (!doc || typeof doc.endpoint !== "string" || !doc.endpoint) return ""
+    const ep = normalize(doc.endpoint, configURL)
+    if (!ep || new URL(ep).origin !== new URL(configURL).origin) return ""
+    return ep
+  } catch {
+    return ""
+  }
 }
 
 /** viaPackage reports whether the bundle runs as the npm entry's import. */
@@ -343,65 +337,93 @@ function metaRung(): Rung {
   }
 }
 
-/** setViaPackage sets it (the element class's npmEntry setter). */
-export function setViaPackage(v: boolean): void {
-  entry.npm = v
-}
-
 const attrRung =
   (n: Element | null | undefined): Rung =>
   (f) =>
     n?.getAttribute(`data-${f}`) ?? null
 
-/** urlParam is the first weft_scope=… of a query or fragment string
- * (its leading ? or # dropped; split on both ? and &, so a hash
- * router's own query — #/chat?weft_scope=… — is read and a value ends
- * at the next ?), URL-decoded once — "+" stays "+" (the scope's own
- * form percent-encodes it), a malformed escape is kept as written;
- * null when the string carries none. */
-function urlParam(part: string, name = URL_SCOPE_PARAM): string | null {
-  for (const pair of part.replace(/^[?#]/, "").split(/[?&]/)) {
-    const at = pair.indexOf("=")
-    if ((at < 0 ? pair : pair.slice(0, at)) !== name) continue
-    const v = at < 0 ? "" : pair.slice(at + 1)
-    try {
-      return decodeURIComponent(v)
-    } catch {
-      return v
-    }
-  }
-  return null
+/** setViaPackage sets it (the element class's npmEntry setter). */
+export function setViaPackage(v: boolean): void {
+  entry.npm = v
 }
 
-/** discoverEndpoint is rung 5: GET <script directory>/panel-config.json
- * (B3's document: {endpoint, version, capabilities}, never a token) and
- * its endpoint when it is an http(s) URL on the same origin as the
- * document was fetched from — the file may move the endpoint's path,
- * never its origin, so a token from a higher rung cannot be sent
- * somewhere the page did not name. "" on anything else (a 404, not
- * JSON, no answer): the caller falls through to rung 6. No token and
- * no credentials go with the request. */
-export async function discoverEndpoint(
-  configURL: string,
-  signal?: AbortSignal
-): Promise<string> {
-  if (signal?.aborted) return ""
+/** weftScope reads window.__WEFT__: its scope (the serialised form, or
+ * a Scope object), else its publicId — the page's object, as the page
+ * wrote it. The empty scope when there is none or it cannot be read
+ * (a getter of the page's that throws is not the panel's to surface). */
+export function weftScope(): Scope {
   try {
-    const res = await fetch(configURL, {
-      headers: { Accept: "application/json" },
-      credentials: "omit",
-      signal,
-    })
-    if (!res.ok) return ""
-    const doc = (await res.json()) as { endpoint?: unknown } | null
-    if (!doc || typeof doc.endpoint !== "string" || !doc.endpoint) return ""
-    const ep = normalize(doc.endpoint, configURL)
-    if (!ep || new URL(ep).origin !== new URL(configURL).origin) return ""
-    return ep
+    const w = (
+      window as { __WEFT__?: { scope?: unknown; publicId?: unknown } | null }
+    ).__WEFT__
+    const sc = w?.scope
+    if (typeof sc === "string") return parseScope(sc)
+    const form = scopeOption(sc)
+    if (form !== undefined) return parseScope(form)
+  } catch {
+    // fall through to the public id
+  }
+  return { publicId: weftPublicId() }
+}
+
+/** weftPublicId reads window.__WEFT__.publicId — the page's object, as
+ * the page wrote it; "" when there is none or it cannot be read (a
+ * getter of the page's that throws is not the panel's to surface). */
+export function weftPublicId(): string {
+  try {
+    const id = (window as { __WEFT__?: { publicId?: unknown } | null }).__WEFT__
+      ?.publicId
+    return id == null ? "" : String(id)
   } catch {
     return ""
   }
 }
+
+export { isLoopback }
+
+/** What a token may do, as far as the page can tell (§6). A panel
+ * token (setup C) is `weft_pt.<claims>.<signature>` with its scope in
+ * the claims: "read" (the default mint) or "playground". Anything else
+ * is "" — the server token, or none (setups A and B). A hint for what
+ * to draw, never a check: Studio enforces the scope on every route,
+ * and the token is read here, not sent or logged. */
+export type TokenScope = ReturnType<typeof tokenScopeOf>
+
+/** scopeOption is mount's scope option in its string form (a Scope
+ * object serialised; anything else is unset). */
+function scopeOption(v: unknown): string | undefined {
+  if (typeof v === "string") return v
+  if (v && typeof v === "object" && typeof (v as Scope).publicId === "string") {
+    try {
+      return serializeScope(v as Scope)
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
+/** markerRungOn is the DOM-marker rung's switch (plan C3.3): it reads
+ * attributes only, so it is the production rung — on by default
+ * everywhere except a page off loopback under a read-scoped panel
+ * token (C5); data-detect naming "markers" turns it on there too,
+ * "off" turns it off. */
+export function markerRungOn(
+  cfg: Pick<PanelConfig, "detect" | "token">,
+  page: string = pageURL.href()
+): boolean {
+  if (cfg.detect === "off") return false
+  if (cfg.detect.includes("markers")) return true
+  return isLoopback(page) || tokenScope(cfg.token) !== "read"
+}
+
+/** pageURL is where the rung switches read the page's URL (default
+ * location.href) — one object, so a test can stand the panel on a page
+ * off loopback, which jsdom's location cannot be moved to. */
+export const pageURL = { href: (): string => location.href }
+
+/** The page URL's scope parameter (detection rung 4, plan C3.4). */
+export const URL_SCOPE_PARAM = "weft_scope"
 
 /** readConfig resolves every field through the ladder; el is the
  * <weft-devtools> element (its attributes are rung 2, its mount
@@ -504,28 +526,6 @@ export function readConfig(
   }
 }
 
-/** markerRungOn is the DOM-marker rung's switch (plan C3.3): it reads
- * attributes only, so it is the production rung — on by default
- * everywhere except a page off loopback under a read-scoped panel
- * token (C5); data-detect naming "markers" turns it on there too,
- * "off" turns it off. */
-export function markerRungOn(
-  cfg: Pick<PanelConfig, "detect" | "token">,
-  page: string = pageURL.href()
-): boolean {
-  if (cfg.detect === "off") return false
-  if (cfg.detect.includes("markers")) return true
-  return isLoopback(page) || tokenScope(cfg.token) !== "read"
-}
-
-/** pageURL is where the rung switches read the page's URL (default
- * location.href) — one object, so a test can stand the panel on a page
- * off loopback, which jsdom's location cannot be moved to. */
-export const pageURL = { href: (): string => location.href }
-
-/** The page URL's scope parameter (detection rung 4, plan C3.4). */
-export const URL_SCOPE_PARAM = "weft_scope"
-
 /** headerRungOn is the header rung's switch (plan §13.3): data-detect
  * "headers" turns it on anywhere and "off" turns it off; by default it
  * is on only where the host has said so by its setup — the page AND
@@ -571,68 +571,29 @@ function optionsRung(opts: MountOptions | null | undefined): Rung {
   }
 }
 
-/** weftPublicId reads window.__WEFT__.publicId — the page's object, as
- * the page wrote it; "" when there is none or it cannot be read (a
- * getter of the page's that throws is not the panel's to surface). */
-export function weftPublicId(): string {
-  try {
-    const id = (window as { __WEFT__?: { publicId?: unknown } | null }).__WEFT__
-      ?.publicId
-    return id == null ? "" : String(id)
-  } catch {
-    return ""
+/** urlParam is the first weft_scope=… of a query or fragment string
+ * (its leading ? or # dropped; split on both ? and &, so a hash
+ * router's own query — #/chat?weft_scope=… — is read and a value ends
+ * at the next ?), URL-decoded once — "+" stays "+" (the scope's own
+ * form percent-encodes it), a malformed escape is kept as written;
+ * null when the string carries none. */
+function urlParam(part: string, name = URL_SCOPE_PARAM): string | null {
+  for (const pair of part.replace(/^[?#]/, "").split(/[?&]/)) {
+    const at = pair.indexOf("=")
+    if ((at < 0 ? pair : pair.slice(0, at)) !== name) continue
+    const v = at < 0 ? "" : pair.slice(at + 1)
+    try {
+      return decodeURIComponent(v)
+    } catch {
+      return v
+    }
   }
+  return null
 }
-
-export { isLoopback }
-
-/** What a token may do, as far as the page can tell (§6). A panel
- * token (setup C) is `weft_pt.<claims>.<signature>` with its scope in
- * the claims: "read" (the default mint) or "playground". Anything else
- * is "" — the server token, or none (setups A and B). A hint for what
- * to draw, never a check: Studio enforces the scope on every route,
- * and the token is read here, not sent or logged. */
-export type TokenScope = ReturnType<typeof tokenScopeOf>
 
 /** tokenScope is lib/replay.ts's tokenScopeOf: one reading of a
  * bearer for both surfaces (Studio's replay verbs gate on it too). */
 export const tokenScope = tokenScopeOf
-
-/** ?weft=debug or localStorage.weft_debug=1 forces the panel on
- * where the endpoint exists (staging) — §5.3's override switch. The
- * namespaced parameter never collides with an app's own ?debug=. The
- * old key is migrated into localStorage["weft.devtools"] (debug: true)
- * and dropped (D1); removing that key turns the switch off. */
-export function debugForced(): boolean {
-  try {
-    if (new URLSearchParams(location.search).get("weft") === "debug")
-      return true
-    if (migrateDebug()) return true
-  } catch {
-    // about:blank and friends: not forced
-  }
-  return false
-}
-
-/** urlStep is "open in app"'s step (U21.2, UX-F-28): weft_step=<n>,
- * <n>.<tab> or .<tab> beside the URL rung's scope (lib/links.ts
- * appLink) — the panel opens the scope's run at that step (when named),
- * on that tab. null when the page's URL names none. */
-export function urlStep(
-  page: string = pageURL.href()
-): { step?: number; tab: string } | null {
-  try {
-    const u = new URL(page)
-    const m = /^(\d*)(?:\.(\w+))?$/.exec(
-      urlParam(u.search, "weft_step") ?? urlParam(u.hash, "weft_step") ?? ""
-    )
-    return m && (m[1] || m.at(2))
-      ? { step: m[1] ? +m[1] : undefined, tab: m.at(2) ?? "" }
-      : null
-  } catch {
-    return null
-  }
-}
 
 /** urlScope is detection rung 4 (plan C3.4): the host page's
  * ?weft_scope= (read first), else its #weft_scope= — the serialised
@@ -660,4 +621,43 @@ export function urlScope(page: string = pageURL.href()): Scope | null {
     // not a URL: no scope
   }
   return null
+}
+
+/** detectSetting reads a data-detect value: "off" wherever it is
+ * named (the author asked for less), else the rungs it names (headers,
+ * markers, comma-separated, either order, empty words skipped); a
+ * value naming anything else is unset — the defaults apply. */
+export function detectSetting(v: string | null | undefined): DetectSetting {
+  const words = new Set(
+    String(v ?? "")
+      .toLowerCase()
+      .split(",")
+      .map((w) => w.trim())
+      .filter(Boolean)
+  )
+  if (words.has("off")) return "off"
+  const h = words.delete("headers")
+  const m = words.delete("markers")
+  if (words.size) return ""
+  return h && m ? "headers,markers" : h ? "headers" : m ? "markers" : ""
+}
+
+/** urlStep is "open in app"'s step (U21.2, UX-F-28): weft_step=<n>,
+ * <n>.<tab> or .<tab> beside the URL rung's scope (lib/links.ts
+ * appLink) — the panel opens the scope's run at that step (when named),
+ * on that tab. null when the page's URL names none. */
+export function urlStep(
+  page: string = pageURL.href()
+): { step?: number; tab: string } | null {
+  try {
+    const u = new URL(page)
+    const m = /^(\d*)(?:\.(\w+))?$/.exec(
+      urlParam(u.search, "weft_step") ?? urlParam(u.hash, "weft_step") ?? ""
+    )
+    return m && (m[1] || m.at(2))
+      ? { step: m[1] ? +m[1] : undefined, tab: m.at(2) ?? "" }
+      : null
+  } catch {
+    return null
+  }
 }

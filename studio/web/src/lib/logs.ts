@@ -43,6 +43,10 @@ export const LOGS = {
   jumpHint:
     "select the run tree row this line was logged under (its drawer's Logs tab)",
   noSpan: "no span",
+  /** A derived run's GenAI log events beside its story (UX-H-10). */
+  events: "messages the app logged",
+  eventsHint:
+    "the run's GenAI log events (gen_ai.<role>.message, gen_ai.choice): the messages an instrumentation emits as log records rather than span attributes — every line is in the Logs view",
   none: "no app log line in this run",
   /** A running run's row with no line yet (its spans export when they
    * end): never "no line". */

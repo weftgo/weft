@@ -16,7 +16,8 @@
       "cost_usd": 0.004451,
       "cost_known": true,
       "cost_reason": "no cache split reported; a cached prompt may be overstated",
-      "cache": "not_reported"
+      "cache": "not_reported",
+      "derived": true
     }
   ],
   "next_before": null,

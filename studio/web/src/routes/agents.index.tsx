@@ -6,11 +6,11 @@
 // never a remembered one shown as live.
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 import type { ManifestAgent, ManifestSource, StatsPage } from "@/lib/api"
 import { ApiError, deleteProposal, manifestQuery, studioToken } from "@/lib/api"
-import { absoluteTime, UNNAMED_AGENT } from "@/lib/format"
+import { absoluteTime, relativeTime, UNNAMED_AGENT } from "@/lib/format"
 import { STATS_WINDOWS, STATS_WORDS, statsWindowOf } from "@/lib/stats"
 import type { StatsWindow } from "@/lib/stats"
 import { copyText } from "@/lib/json"
@@ -33,6 +33,7 @@ import { useCapabilities } from "@/hooks/use-capabilities"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { useKeepInView } from "@/hooks/use-keep-in-view"
 import { ConnectApp } from "@/components/studio/empty-state"
 import { STATUS_TEXT } from "@/lib/status-class"
 
@@ -73,14 +74,15 @@ function AgentsPage() {
   const search = Route.useSearch()
   const window = statsWindowOf(search.window)
   const named = search.agent
-  const loaded = !!manifest.data
-  useEffect(() => {
-    if (!named || !loaded) return
-    document
-      .querySelector(`[data-agent-card="${CSS.escape(named)}"]`)
-      ?.scrollIntoView({ block: "start" })
-  }, [named, loaded])
   const stats = useStats("agent", window)
+  // The named card stays in view while the numbers above it load and
+  // lay out (P020.1: scrolled once, before the charts, it ended far
+  // down the page).
+  useKeepInView(
+    named ? `[data-agent-card="${CSS.escape(named)}"]` : undefined,
+    !!manifest.data,
+    [!!stats.data]
+  )
   // Registered agents always get their numbers: a group the page's cap
   // cut is read on its own (useRegisteredNumbers).
   const numbersOf = useRegisteredNumbers(
@@ -147,7 +149,8 @@ function AgentsPage() {
       {manifest.data.agents.map((a) => (
         <div
           key={`${a.name}:${a.manifest_hash ?? ""}`}
-          className={`scroll-mt-4 space-y-1 ${a.name === named ? "rounded-lg ring-2 ring-thread/60" : ""}`}
+          // The selected card's lines sit inside its ring, not on it.
+          className={`scroll-mt-4 space-y-1 ${a.name === named ? "rounded-lg p-3 ring-2 ring-thread/60" : ""}`}
           data-agent-card={a.name}
           data-agent-selected={a.name === named ? "" : undefined}
         >
@@ -329,7 +332,15 @@ function SourceList({ sources }: { sources: ManifestSource[] }) {
             </span>
           )}
           {s.registered_at && (
-            <span className="text-faint">registered {s.registered_at}</span>
+            // As the Runtimes page says a time: relative, the stamp on
+            // hover (never the server's raw RFC 3339 with nanoseconds).
+            <span
+              className="text-faint"
+              title={absoluteTime(s.registered_at)}
+              data-registered-at
+            >
+              registered {relativeTime(s.registered_at)}
+            </span>
           )}
         </li>
       ))}

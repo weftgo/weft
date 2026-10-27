@@ -71,6 +71,9 @@ describe("?agent= (U21.2, UX-F-28)", () => {
     // The other card stays folded.
     expect(screen.queryByText("Help the user.")).toBeNull()
     expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+    // Its first lines sit inside the highlight ring (P020.1).
+    expect(card.className).toContain("ring-2")
+    expect(card.className).toContain("p-3")
   })
 })
 
@@ -126,6 +129,14 @@ describe("the Agents page from registrations (B4)", () => {
     expect(within(rows[1]).getByText("bbbbbbbbbbbb")).toBeTruthy()
     expect(within(rows[1]).getByText("remembered · runtime gone")).toBeTruthy()
     expect(within(rows[1]).queryByText("live")).toBeNull()
+    // The registration time as Studio says times (P020.1): relative,
+    // the stamp on hover — never the raw RFC 3339 the API carries.
+    const at = rows[0].querySelector<HTMLElement>("[data-registered-at]")!
+    expect(at.textContent).toMatch(
+      /^registered (just now|\d+[mhd] ago|[A-Z][a-z]{2} \d+)/
+    )
+    expect(at.textContent).not.toContain("2026-10-08T")
+    expect(at.title).toMatch(/^2026-10-08 \d\d:00:00 UTC/)
     // Per agent: each hash that holds it, with its state.
     const support = screen.getByLabelText("support sources")
     expect(within(support).getByText("555555555555")).toBeTruthy()

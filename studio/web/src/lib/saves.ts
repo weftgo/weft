@@ -131,9 +131,9 @@ export function mayExportTestWith(
 
 /** What a panel token (or a Studio without proposals) is told. */
 export const PROPOSAL_NEEDS_DEV = "a proposal needs the dev token"
-/** The Agents page's pointer, said once. */
+/** The Agents page's pointer, said once: how a proposal is kept. */
 export const PROPOSAL_POINTER =
-  "the durable path is WEFT-PROMPT.md P3: a propose command over the runtime link"
+  "to keep it, copy it into the agent's weft.Instructions(…) in your code"
 
 /** A replay's save-as-test zip composed with its sources (UX-C-30):
  * the chain from the root whose fixtures answer steps 0 to steps − 1,

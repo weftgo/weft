@@ -401,6 +401,27 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 			scope += " AND EXISTS (SELECT 1 FROM json_each(c.meta) AS cj WHERE cj.key = ? AND cj.value = ?)"
 			sargs = append(sargs, k, q.Meta[k])
 		}
+		if q.PublicID != "" || len(q.Meta) > 0 {
+			// The tree's rule (obsdb's scopeTree, the run document's
+			// hidden children, I4-fix2): a descendant under an
+			// out-of-scope run between it and the group's run is hidden
+			// with that run's whole subtree, so it is no part of the
+			// delegated bill either. a is such an intermediate: in r's
+			// id range, s.run_id in a's.
+			in := "1 = 1"
+			var iargs []any
+			if q.PublicID != "" {
+				in += " AND a.public_id = ?"
+				iargs = append(iargs, q.PublicID)
+			}
+			for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
+				in += " AND EXISTS (SELECT 1 FROM json_each(a.meta) AS aj WHERE aj.key = ? AND aj.value = ?)"
+				iargs = append(iargs, k, q.Meta[k])
+			}
+			scope += ` AND NOT EXISTS (SELECT 1 FROM runs AS a WHERE a.run_id > r.run_id || '/' AND a.run_id < r.run_id || '0'
+				AND s.run_id > a.run_id || '/' AND s.run_id < a.run_id || '0' AND NOT (` + in + `))`
+			sargs = append(sargs, iargs...)
+		}
 		below := statsBelowSQL(scope)
 		if err := query(`SELECT k, provider, model, SUM(input_tokens), SUM(output_tokens),
 			SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens)

@@ -763,3 +763,118 @@ func TestTagTokenAgentLane(t *testing.T) {
 		t.Errorf("the tag token's public_id= lane: %q, want %q (the tagged runs and the tagged run's record, never the untagged run's)", got, want)
 	}
 }
+
+// TestTagTokenAgentLaneFrames (I4-fix2): a tag-only token's agent=
+// lane with every frame kind — run, event, attempt — never delivers a
+// record or attempt frame of a run outside its tags (no run frame
+// admitted it, its own attributes carry no tag or another value), on a
+// bearer stream and on a grant minted without naming the tags; and its
+// resume backfills the batch's runs of that agent alone.
+func TestTagTokenAgentLaneFrames(t *testing.T) {
+	fastPing(t)
+	ts, hub := tagTokenStudio(t)
+	tok := mintTag(t, ts, `{"tags":{"arena.batch":"b1"}}`)
+	open := func(query, bearer, lastEventID string) *http.Response {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/live"+query, nil)
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		if lastEventID != "" {
+			req.Header.Set("Last-Event-ID", lastEventID)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			t.Fatalf("live%s: %d %s", query, resp.StatusCode, b)
+		}
+		return resp
+	}
+	// The resume: the stored director runs of b1 (r_b1a, r_b1c), never
+	// r_b2 (b2) or r_none (untagged), both director's.
+	resumed := open("?tag.arena.batch=b1&agent=director&kinds=event", tok, "1")
+	got := liveRunIDs(t, framesOf(readSSEUntil(t, resumed, "ping", 10*time.Second), "record"))
+	slices.Sort(got)
+	if strings.Join(slices.Compact(got), " ") != "r_b1a r_b1c" {
+		t.Errorf("the tag token's agent= resume backfilled %v, want r_b1a r_b1c", got)
+	}
+
+	lane := open("?tag.arena.batch=b1&agent=director&kinds=run,event,attempt", tok, "")
+	code, body := tcall(t, ts, http.MethodPost, "/api/live-grant", tok, `{"agent":"director","kinds":"run,event,attempt"}`)
+	if code != http.StatusOK {
+		t.Fatalf("a grant minted without the tags: %d %s", code, body)
+	}
+	var g struct {
+		Sig string `json:"sig"`
+	}
+	_ = json.Unmarshal([]byte(body), &g)
+	granted := open("?agent=director&kinds=run,event,attempt&sig="+g.Sig, "", "")
+
+	ctx := context.Background()
+	record := func(run string, meta map[string]string) {
+		rec := pubRecord(run, "pub_z", "", 1)
+		rec.Attrs["gen_ai.agent.name"] = "director"
+		for k, v := range meta {
+			rec.Attrs[k] = v
+		}
+		hub.Publish(ctx, obsdb.RecordFrame(rec))
+	}
+	spans := 0
+	attempt := func(run string, meta map[string]string) {
+		spans++
+		a := map[string]any{"weft.run.id": run, "weft.public_id": "pub_z", "gen_ai.agent.name": "director",
+			"weft.attempt.index": int64(1), "gen_ai.provider.name": "wefttest"}
+		for k, v := range meta {
+			a[k] = v
+		}
+		at := time.Now().UTC()
+		f, ok := obsdb.AttemptFrame(obsdb.Span{TraceID: "000000000000000000000000000000c1", SpanID: fmt.Sprintf("%016x", 0xc00+spans),
+			Name: "attempt", Kind: 3, Start: at, End: at.Add(time.Millisecond), StatusCode: 1, Service: "svc", Attrs: a})
+		if !ok {
+			t.Fatalf("attempt frame of %s not built", run)
+		}
+		hub.Publish(ctx, f)
+	}
+	b1, b2 := map[string]string{"arena.batch": "b1"}, map[string]string{"arena.batch": "b2"}
+	// Never admitted: an untagged run's record and attempt (no run
+	// frame), another value's, and an untagged run whose run frame came.
+	record("r_x1", nil)
+	attempt("r_x1", nil)
+	record("r_x2", b2)
+	attempt("r_x2", b2)
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_x3", PublicID: "pub_z", Agent: "director"}))
+	record("r_x3", nil)
+	attempt("r_x3", nil)
+	// Admitted: the batch's run frame, then its record and attempt.
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_ok1", PublicID: "pub_z", Agent: "director", Meta: b1}))
+	record("r_ok1", nil)
+	attempt("r_ok1", nil)
+
+	read := func(resp *http.Response, n int) string {
+		var out []string
+		for _, f := range readSSE(t, resp, n, 5*time.Second) {
+			var d struct {
+				RunID string `json:"run_id"`
+				Run   struct {
+					ID string `json:"id"`
+				} `json:"run"`
+			}
+			_ = json.Unmarshal([]byte(f.data), &d)
+			out = append(out, f.event+":"+d.RunID+d.Run.ID)
+		}
+		return strings.Join(out, " ")
+	}
+	want := "run:r_ok1 record:r_ok1 attempt:r_ok1"
+	if got := read(lane, 3); got != want {
+		t.Errorf("the tag token's agent= lane (run, event, attempt): %q, want %q — no frame of a run outside its tags", got, want)
+	}
+	if got := read(granted, 3); got != want {
+		t.Errorf("the grant minted without the tags: %q, want %q — the token's tags still hold", got, want)
+	}
+}

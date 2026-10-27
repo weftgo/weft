@@ -133,7 +133,9 @@ tags into the token like the public id, and every read it makes is held
 to them the way a public id token's is held to its public id: the runs
 list, search, stats and traces carry the tags as a filter (traces:
 every span carries them; stats' `by=agent` delegated bill sums only
-descendants carrying them), a single run without them is 403 (the rule
+descendants carrying them with every run between them and the group's
+run carrying them too — the tree's rule, so it matches what the run
+document and the span tree show), a single run without them is 403 (the rule
 another public id's run gets; an unknown id stays 404) with its steps,
 spans, logs, export and tree, a session lists only its tagged turns
 (`SessionQuery.Meta` scopes turns before the grouping; its

@@ -483,8 +483,12 @@ func statsSpanBeforeRun(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
-		// Every run but dl-p/1/call_3 carries the tag stats.batch=b1 on
-		// its spans (run metadata on every span), so its row's meta.
+		// Each run's tag stats.batch on its spans (run metadata on every
+		// span), so its row's meta; "" none. dl-p/2/call_4 carries the
+		// key with another value (b2); dl-p/3/call_5 is untagged with a
+		// tagged child (I4-fix2: tagged → untagged → tagged).
+		tags := map[string]string{"dl-p": "b1", "dl-p/0/call_1": "b1", "dl-p/0/call_1/0/call_2": "b1",
+			"dl-p/2/call_4": "b2", "dl-p/3/call_5/0/call_6": "b1", "dl-q": "b1"}
 		run := func(id, agent, public string, at time.Duration, in, out int64) statRun {
 			r := statRun{id: id, agent: agent, public: public, start: at, dur: time.Second}
 			r.spans = func(r statRun) []obsdb.Span {
@@ -494,9 +498,9 @@ func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 					root.Attrs["weft.parent.run.id"], root.Attrs["weft.parent.call.id"] = p, r.id[i+1:]
 				}
 				spans := []obsdb.Span{r.chat("c0", 0, "m-"+agent, 10*time.Millisecond, 100*time.Millisecond, in, out, -1, 1), root}
-				if r.id != "dl-p/1/call_3" {
+				if tag := tags[r.id]; tag != "" {
 					for _, sp := range spans {
-						sp.Attrs["stats.batch"] = "b1"
+						sp.Attrs["stats.batch"] = tag
 					}
 				}
 				return spans
@@ -508,6 +512,9 @@ func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			run("dl-p/0/call_1", "helper", "pub_d", -40*time.Minute+time.Second, 20, 2),
 			run("dl-p/0/call_1/0/call_2", "boss", "pub_d", -40*time.Minute+2*time.Second, 3, 1),
 			run("dl-p/1/call_3", "helper", "pub_other", -40*time.Minute+3*time.Second, 40, 4),
+			run("dl-p/2/call_4", "helper", "pub_d", -40*time.Minute+4*time.Second, 4, 1),
+			run("dl-p/3/call_5", "helper", "pub_d", -40*time.Minute+5*time.Second, 5, 1),
+			run("dl-p/3/call_5/0/call_6", "scout", "pub_d", -40*time.Minute+6*time.Second, 6, 1),
 			run("dl-q", "boss", "pub_d", -20*time.Minute, 50, 5),
 		} {
 			if err := db.Write(ctx(), obsdb.Batch{Spans: r.spans(r)}); err != nil {
@@ -529,31 +536,50 @@ func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 				out = append(out, fmt.Sprintf("%s own=%d/%d delegated=%d/%d runs=%d [%s]", g.Key, g.Usage.InputTokens, g.Usage.OutputTokens,
 					g.Delegated.InputTokens, g.Delegated.OutputTokens, g.DelegatedRuns, strings.Join(ms, ", ")))
 			}
+			slices.Sort(out) // by key: the page's own order is by runs
 			return out
 		}
-		// boss: its own three runs' calls (100+3+50); below dl-p the two
-		// helper runs (20+40) — the boss grandchild is boss's own.
-		// helper: below dl-p/0/call_1, the boss grandchild (3).
-		want := []string{"boss own=153/16 delegated=60/6 runs=2 [m-helper 60/6]", "helper own=60/6 delegated=3/1 runs=1 [m-boss 3/1]"}
+		// boss: its own three runs' calls (100+3+50); below dl-p every
+		// other agent's descendant — the helpers (20, 40, 4, 5) and the
+		// scout (6); the boss grandchild is boss's own. helper: below
+		// dl-p/0/call_1 the boss grandchild (3), below dl-p/3/call_5
+		// the scout (6). scout: none.
+		want := []string{"boss own=153/16 delegated=75/9 runs=5 [m-helper 69/8, m-scout 6/1]",
+			"helper own=69/8 delegated=9/2 runs=2 [m-boss 3/1, m-scout 6/1]", "scout own=6/1 delegated=0/0 runs=0 []"}
 		if got := delegated(statsQ(obsdb.StatsByAgent)); !slices.Equal(got, want) {
 			t.Errorf("delegated =\n %v\nwant\n %v", got, want)
 		}
+		// pub_d: dl-p/1/call_3 (pub_other) is left out.
 		q := statsQ(obsdb.StatsByAgent)
 		q.PublicID = "pub_d"
-		want = []string{"boss own=153/16 delegated=20/2 runs=1 [m-helper 20/2]", "helper own=20/2 delegated=3/1 runs=1 [m-boss 3/1]"}
+		want = []string{"boss own=153/16 delegated=35/5 runs=4 [m-helper 29/4, m-scout 6/1]",
+			"helper own=29/4 delegated=9/2 runs=2 [m-boss 3/1, m-scout 6/1]", "scout own=6/1 delegated=0/0 runs=0 []"}
 		if got := delegated(q); !slices.Equal(got, want) {
 			t.Errorf("delegated under pub_d =\n %v\nwant\n %v", got, want)
 		}
 		// A tag scope (RunQuery.Meta, a tag-scoped panel token: I4-fix)
-		// holds the descendants to it as the public id does: the
-		// untagged helper below dl-p is not delegated, with or without
-		// a public id.
+		// holds the descendants to it as the public id does: below dl-p
+		// the untagged helpers (call_3, call_5) and the b2 one (call_4)
+		// are not delegated, and neither is the tagged scout under the
+		// untagged call_5 (I4-fix2: the tree's rule — a run under a
+		// hidden one is hidden with its subtree, as the run document
+		// and the span tree show it), with or without a public id. The
+		// scout's own run is still its own group's: it carries the tag.
+		want = []string{"boss own=153/16 delegated=20/2 runs=1 [m-helper 20/2]",
+			"helper own=20/2 delegated=3/1 runs=1 [m-boss 3/1]", "scout own=6/1 delegated=0/0 runs=0 []"}
 		for _, pub := range []string{"", "pub_d"} {
 			q := statsQ(obsdb.StatsByAgent)
 			q.PublicID, q.Meta = pub, map[string]string{"stats.batch": "b1"}
 			if got := delegated(q); !slices.Equal(got, want) {
 				t.Errorf("delegated under tag stats.batch=b1 (public id %q) =\n %v\nwant\n %v", pub, got, want)
 			}
+		}
+		// b2: dl-p carries b1, so no group has a run of b2 but call_4,
+		// whose ancestors are out of the scope: its own group alone.
+		q = statsQ(obsdb.StatsByAgent)
+		q.Meta = map[string]string{"stats.batch": "b2"}
+		if got, want := delegated(q), []string{"helper own=4/1 delegated=0/0 runs=0 []"}; !slices.Equal(got, want) {
+			t.Errorf("delegated under tag stats.batch=b2 =\n %v\nwant\n %v", got, want)
 		}
 		// Every other by reads none.
 		page, err := a.Stats(ctx(), statsQ(obsdb.StatsByModel))

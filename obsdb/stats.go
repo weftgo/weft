@@ -194,8 +194,12 @@ type StatsPage struct {
 //     depth) whose own agent is another — what the agent's subagents
 //     spent for it, apart from its own Usage — each call once however
 //     many of the group's runs it sits under, and how many such runs
-//     made a call. A descendant past a panel token's public id is not
-//     read. Zero for every other By. A call can sit in several groups'
+//     made a call. Under a scope (RunQuery.PublicID, Meta: a panel
+//     token's) a descendant is read when its own row is in the scope
+//     and so is every run between it and the group's run — the run
+//     tree's rule (TreeQuery's scope): a run under a hidden one is
+//     hidden with its subtree, so the figure matches what the run
+//     document and the span tree show. Zero for every other By. A call can sit in several groups'
 //     delegated figures (boss → helper → boss: the grandchild's call is
 //     helper's delegated, and the helper's call boss's), so delegated
 //     figures are never summed across groups — the groups' own Usage

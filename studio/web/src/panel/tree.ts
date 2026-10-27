@@ -8,6 +8,38 @@
 // marks it; copy-node, copy-all and download hand the JSON out.
 import { plural } from "../lib/format"
 import { el, fmtJSON, on } from "./render"
+/** each visits a container's children, keys as strings. */
+function each(
+  v: Box,
+  fn: (k: string, c: unknown, i: number) => void,
+  to = Infinity
+) {
+  if (Array.isArray(v))
+    for (let i = 0; i < Math.min(v.length, to); i++) fn(String(i), v[i], i)
+  else {
+    const ks = Object.keys(v)
+    for (let i = 0; i < Math.min(ks.length, to); i++) fn(ks[i], v[ks[i]], i)
+  }
+}
+
+/** utf8 counts a string's UTF-8 bytes from one index on — a loop over
+ * char codes, no allocation (a surrogate pair is 4 bytes). */
+export function utf8(s: string, from = 0): number {
+  let n = 0
+  for (let i = from; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 0x80) n += 1
+    else if (c < 0x800) n += 2
+    else if (
+      (c & 0xfc00) === 0xd800 &&
+      (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00
+    ) {
+      n += 4
+      i++
+    } else n += 3
+  }
+  return n
+}
 
 /** A string longer than this many characters (UTF-16 units, so 2,048
  * characters — not 2 KiB) shows its head and a "+N bytes" expander. */
@@ -70,19 +102,6 @@ export const newTree = (): TreeState => ({
 type Box = Record<string, unknown> | unknown[]
 const isBox = (v: unknown): v is Box => v !== null && typeof v === "object"
 const size = (v: Box) => (Array.isArray(v) ? v.length : Object.keys(v).length)
-/** each visits a container's children, keys as strings. */
-function each(
-  v: Box,
-  fn: (k: string, c: unknown, i: number) => void,
-  to = Infinity
-) {
-  if (Array.isArray(v))
-    for (let i = 0; i < Math.min(v.length, to); i++) fn(String(i), v[i], i)
-  else {
-    const ks = Object.keys(v)
-    for (let i = 0; i < Math.min(ks.length, to); i++) fn(ks[i], v[ks[i]], i)
-  }
-}
 /** A child's path: JSON-pointer escaped. */
 const at = (p: string, k: string) =>
   `${p}/${k.replace(/~/g, "~0").replace(/\//g, "~1")}`
@@ -346,25 +365,6 @@ export function treeView(
   })
   out.append(list)
   return out
-}
-
-/** utf8 counts a string's UTF-8 bytes from one index on — a loop over
- * char codes, no allocation (a surrogate pair is 4 bytes). */
-export function utf8(s: string, from = 0): number {
-  let n = 0
-  for (let i = from; i < s.length; i++) {
-    const c = s.charCodeAt(i)
-    if (c < 0x80) n += 1
-    else if (c < 0x800) n += 2
-    else if (
-      (c & 0xfc00) === 0xd800 &&
-      (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00
-    ) {
-      n += 4
-      i++
-    } else n += 3
-  }
-  return n
 }
 
 /** cut is where a capped string's head ends: STR_CAP, one unit back

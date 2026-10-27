@@ -256,11 +256,6 @@ export async function discoverEndpoint(
   }
 }
 
-/** viaPackage reports whether the bundle runs as the npm entry's import. */
-export function viaPackage(): boolean {
-  return entry.npm
-}
-
 /** The panel's own <script> tag (rung 4): document.currentScript when
  * the bundle ran as a classic script; else the script whose src
  * resolves to the module's own URL (import.meta.url) when it carries
@@ -340,6 +335,11 @@ function normalize(raw: string, base: string): string {
   } catch {
     return ""
   }
+}
+
+/** viaPackage reports whether the bundle runs as the npm entry's import. */
+export function viaPackage(): boolean {
+  return entry.npm
 }
 
 /** setViaPackage sets it (the element class's npmEntry setter). */
@@ -571,26 +571,6 @@ function optionsRung(opts: MountOptions | null | undefined): Rung {
   }
 }
 
-/** urlParam is the first weft_scope=… of a query or fragment string
- * (its leading ? or # dropped; split on both ? and &, so a hash
- * router's own query — #/chat?weft_scope=… — is read and a value ends
- * at the next ?), URL-decoded once — "+" stays "+" (the scope's own
- * form percent-encodes it), a malformed escape is kept as written;
- * null when the string carries none. */
-function urlParam(part: string, name = URL_SCOPE_PARAM): string | null {
-  for (const pair of part.replace(/^[?#]/, "").split(/[?&]/)) {
-    const at = pair.indexOf("=")
-    if ((at < 0 ? pair : pair.slice(0, at)) !== name) continue
-    const v = at < 0 ? "" : pair.slice(at + 1)
-    try {
-      return decodeURIComponent(v)
-    } catch {
-      return v
-    }
-  }
-  return null
-}
-
 /** tokenScope is lib/replay.ts's tokenScopeOf: one reading of a
  * bearer for both surfaces (Studio's replay verbs gate on it too). */
 export const tokenScope = tokenScopeOf
@@ -619,6 +599,26 @@ export function urlScope(page: string = pageURL.href()): Scope | null {
     }
   } catch {
     // not a URL: no scope
+  }
+  return null
+}
+
+/** urlParam is the first weft_scope=… of a query or fragment string
+ * (its leading ? or # dropped; split on both ? and &, so a hash
+ * router's own query — #/chat?weft_scope=… — is read and a value ends
+ * at the next ?), URL-decoded once — "+" stays "+" (the scope's own
+ * form percent-encodes it), a malformed escape is kept as written;
+ * null when the string carries none. */
+function urlParam(part: string, name = URL_SCOPE_PARAM): string | null {
+  for (const pair of part.replace(/^[?#]/, "").split(/[?&]/)) {
+    const at = pair.indexOf("=")
+    if ((at < 0 ? pair : pair.slice(0, at)) !== name) continue
+    const v = at < 0 ? "" : pair.slice(at + 1)
+    try {
+      return decodeURIComponent(v)
+    } catch {
+      return v
+    }
   }
   return null
 }

@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import type { FoldedStep } from "@/lib/events"
+import { spanMs } from "@/lib/format"
 
 /** nearestOrdinal is the step ordinal closest to n among the sorted
  * ordinals (ordinals may skip: a resumed run's), the lower on a tie. */
@@ -38,10 +39,6 @@ function statusOf(step: FoldedStep, runStatus: string): string {
     : "no step_finish recorded"
 }
 
-function seconds(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
-}
-
 /**
  * describeStep is the scrubber's read-out of one step: its ordinal, its
  * status and its time offset — the model time of the steps before it
@@ -59,7 +56,7 @@ export function describeStep(
   const at =
     off === null
       ? `events ${step.from}–${step.to}`
-      : `t+${seconds(off)} model time`
+      : `t+${spanMs(off)} model time`
   return `step ${step.index} of ${steps.length.toLocaleString()} · ${statusOf(step, runStatus)} · ${at}`
 }
 

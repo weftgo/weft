@@ -12,7 +12,8 @@ export const BARRIER = "▮ sequential"
 export const BARRIER_HINT =
   "a Sequential tool: it waited for the calls before it and ran alone"
 
-/** parallelismWord is the step row's words for the dial. */
+/** parallelismWord is the dial in words, one form wherever it is said:
+ * the step row, the Request pane's chip, the Agents card's policy. */
 export const parallelismWord = (n: number) => `parallelism ${n}`
 
 /** concurrencyMarks adds the step rows' "parallelism N" (a step with a

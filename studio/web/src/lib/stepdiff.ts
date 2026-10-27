@@ -365,12 +365,6 @@ export function docHoles(doc: Pick<DiffDoc, "holes">): HoleMark[] {
   )
 }
 
-function cellsOf(row: DiffRowDoc): Record<DiffColumn, CellState> {
-  const out = {} as Record<DiffColumn, CellState>
-  for (const c of DIFF_COLUMNS) out[c] = cellOf(row, c)
-  return out
-}
-
 /** markChip is one mark's chip. */
 export function markChip(mark: string): MarkChip {
   if (isHole(mark)) {
@@ -441,6 +435,23 @@ export function sideView(side: DiffSide | null): SideView {
   return { side, marks, holes }
 }
 
+/** rowState reads a row from its cells: kept or missing when every
+ * cell is, else changed (the server's flag) or same. */
+export function rowState(
+  cells: Record<DiffColumn, CellState>,
+  changed: boolean
+): RowState {
+  for (const s of ["kept", "missing"] as const)
+    if (DIFF_COLUMNS.every((c) => cells[c] === s)) return s
+  return changed ? "changed" : "same"
+}
+
+function cellsOf(row: DiffRowDoc): Record<DiffColumn, CellState> {
+  const out = {} as Record<DiffColumn, CellState>
+  for (const c of DIFF_COLUMNS) out[c] = cellOf(row, c)
+  return out
+}
+
 /** stepDiffView reads one response into the rows a renderer draws. */
 export function stepDiffView(doc: DiffDoc): StepDiffView {
   const rows = [...list(doc.steps)]
@@ -480,17 +491,6 @@ export function stepDiffView(doc: DiffDoc): StepDiffView {
       DIFF_COLUMNS.some((c) => r.cells[c] === "differs")
     ).length,
   }
-}
-
-/** rowState reads a row from its cells: kept or missing when every
- * cell is, else changed (the server's flag) or same. */
-export function rowState(
-  cells: Record<DiffColumn, CellState>,
-  changed: boolean
-): RowState {
-  for (const s of ["kept", "missing"] as const)
-    if (DIFF_COLUMNS.every((c) => cells[c] === s)) return s
-  return changed ? "changed" : "same"
 }
 
 /** cellOf reads one column of one row as the server compared it. */

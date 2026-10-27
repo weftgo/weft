@@ -4,6 +4,8 @@
 // real pipeline (studio/cards_test.go) and the spec's sample chain.
 import { describe, expect, it } from "vitest"
 
+import { attemptError } from "./error-kind"
+
 import type { Span } from "./api"
 import {
   MCP_FAILURE,
@@ -95,6 +97,34 @@ describe("the model call's onion", () => {
       "→ attempt 2 after 1 ms, HTTP 503; attempt 3 after 1 ms, HTTP 503"
     )
     expect(stepChips(f)).toEqual(["↻ retry ×2"])
+  })
+
+  it("Retry's decision words the error class as the attempt lines do, and says why it gave up (P10b-pre-web-fix)", () => {
+    const f = {
+      attempts: [
+        { index: 1, ok: false, errorType: "rate_limit" },
+        {
+          index: 2,
+          layer: "retry",
+          ok: false,
+          errorType: "rate_limit",
+          waitMs: 400,
+        },
+        {
+          index: 3,
+          layer: "retry",
+          ok: false,
+          errorType: "rate_limit",
+          waitMs: 800,
+          giveUp: "budget",
+        },
+      ],
+      repairs: [],
+    }
+    const [retry] = modelOnion([{ name: "mw.Retry" }], f)
+    expect(retry.decision).toBe(
+      `→ attempt 2 after 400 ms, ${attemptError("rate_limit").word}; attempt 3 after 800 ms, ${attemptError("rate_limit").word}; gave up: retries spent (3 attempts)`
+    )
   })
 
   it("the spec's chain: Log greyed, Retry acting, Fallback serving the backup, RepairJSON idle", () => {

@@ -117,7 +117,7 @@ describe("concurrencyWords (UX-E-50, P7-fix)", () => {
       concurrencyWords({ override: 1, sequentialTools: true, manifest: 4 })
     ).toMatchObject({ text: "sequential" })
     expect(concurrencyWords({ override: 2, manifest: 4 })?.text).toBe(
-      "parallelism: 2"
+      "parallelism 2"
     )
   })
   it("then sequential_tools, as the run ran, over the manifest", () => {
@@ -131,7 +131,7 @@ describe("concurrencyWords (UX-E-50, P7-fix)", () => {
       manifest: 4,
       overrideRead: true,
     })
-    expect(w?.text).toBe("parallelism: 4")
+    expect(w?.text).toBe("parallelism 4")
     expect(w?.title).toContain("the run's manifest")
     expect(w?.title).not.toMatch(/read when its spans are available/)
     expect(concurrencyWords({ manifest: 1 })?.text).toBe(
@@ -144,7 +144,7 @@ describe("concurrencyWords (UX-E-50, P7-fix)", () => {
     // without the requests capability, the override is unread.
     const w = concurrencyWords({ sequentialTools: false, manifest: 4 })
     // Visible, not hover-only (W7-prep).
-    expect(w?.text).toBe("parallelism: 4 (manifest)")
+    expect(w?.text).toBe("parallelism 4 (manifest)")
     expect(w?.title).toContain(
       "the manifest's value; the run's own setting is read when its spans are available"
     )

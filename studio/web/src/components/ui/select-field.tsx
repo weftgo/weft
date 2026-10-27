@@ -53,12 +53,15 @@ export function SelectField({
   const uid = useId()
   const triggerID = `${uid}-trigger`
   const captionID = `${uid}-caption`
-  const shown = (v: unknown) => options.find((o) => o.value === v)?.label ?? String(v ?? "")
+  const shown = (v: unknown) =>
+    options.find((o) => o.value === v)?.label ?? String(v ?? "")
   const select = (
     <Select
       value={value}
       disabled={disabled}
-      onValueChange={(v) => onValueChange(typeof v === "string" ? v : String(v ?? ""))}
+      onValueChange={(v) =>
+        onValueChange(typeof v === "string" ? v : String(v ?? ""))
+      }
     >
       <SelectTrigger
         size="sm"

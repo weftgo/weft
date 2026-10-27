@@ -210,7 +210,15 @@ function DerivedStepCard({
  * attributes still has them read as messages, in log order. Nothing
  * when the run's logs hold none, or cannot be read (the Logs view
  * says why: a read token reads no logs, a run without a log bridge). */
-function LoggedMessages({ runId }: { runId: string }) {
+function LoggedMessages({
+  runId,
+  onSpans,
+}: {
+  runId: string
+  /** A step's chat span already carries its messages: the events are
+   * the same messages, said once, never drawn twice. */
+  onSpans: boolean
+}) {
   const q = useQuery({ ...allLogsQuery(runId), retry: false })
   const msgs = (q.data?.logs ?? []).flatMap((l) => {
     const m = eventMessage(l.event_name, l.body, l.attrs)
@@ -229,7 +237,24 @@ function LoggedMessages({ runId }: { runId: string }) {
       >
         {LOGS.events}
       </div>
-      <ChatMessages messages={msgs} />
+      {/* A cut read (LOG_PAGES pages) is said, never a silent end. */}
+      {q.data?.cut ? (
+        <HoleBadge
+          hole="truncated"
+          reason={LOGS.cutReason(q.data.logs.length)}
+          fix={LOGS.cutFix}
+        />
+      ) : null}
+      {onSpans ? (
+        <p
+          className="font-mono text-[11px] text-faint"
+          data-derived-logged-also
+        >
+          {LOGS.eventsAlso(msgs.length)}
+        </p>
+      ) : (
+        <ChatMessages messages={msgs} />
+      )}
     </section>
   )
 }
@@ -250,7 +275,15 @@ export function DerivedStory({ doc }: { doc: RunDoc }) {
           chat={chatSpanOf(spans.data?.spans, n)}
         />
       ))}
-      {has("logs") ? <LoggedMessages runId={doc.id} /> : null}
+      {has("logs") ? (
+        <LoggedMessages
+          runId={doc.id}
+          onSpans={steps.some(
+            (n) =>
+              !!genaiChat(chatSpanOf(spans.data?.spans, n)?.attrs ?? {}).family
+          )}
+        />
+      ) : null}
     </div>
   )
 }

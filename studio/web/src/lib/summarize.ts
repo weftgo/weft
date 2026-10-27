@@ -307,6 +307,39 @@ export interface Verdict {
   bad: boolean
 }
 
+/** thenLine is what came after the step: the next step, or how the
+ * run ended there (lib/stopped-by.ts's end card, at this step). */
+export function thenLine(
+  step: AnswerStep,
+  run: AnswerRun,
+  hasNext: boolean
+): string {
+  if (hasNext) return `→ step ${step.index + 1}`
+  if (run.status === "running") return "running…"
+  // The last step drawn is where the run ended: its end card names it.
+  return endCard(run, step.index) ?? `■ ${run.status || "ended"}`
+}
+
+export const SENT_NOT_RECORDED = "— no request record for this step"
+export const SENT_UNCHANGED = "unchanged since the step before"
+
+function short(v: unknown, n: number): string {
+  if (v === undefined) return ""
+  try {
+    return clip(JSON.stringify(v), n)
+  } catch {
+    return ""
+  }
+}
+
+/** clip is s on one line (whitespace runs one space), cut to n
+ * characters with "…"; "" for a non-string. */
+export function clip(s: unknown, n: number): string {
+  if (typeof s !== "string") return ""
+  const one = s.replace(/\s+/g, " ").trim()
+  return one.length > n ? `${one.slice(0, n - 1)}…` : one
+}
+
 /**
  * stepVerdict is the step's one line: where the run failed at this
  * step, what stopped it (the stop's words and the error's detail) and
@@ -365,39 +398,6 @@ export interface SentFacts {
   /** The step's marks (lib/requests.ts's byStep). */
   promptChanged?: boolean
   catalogChanged?: boolean
-}
-
-function short(v: unknown, n: number): string {
-  if (v === undefined) return ""
-  try {
-    return clip(JSON.stringify(v), n)
-  } catch {
-    return ""
-  }
-}
-
-/** thenLine is what came after the step: the next step, or how the
- * run ended there (lib/stopped-by.ts's end card, at this step). */
-export function thenLine(
-  step: AnswerStep,
-  run: AnswerRun,
-  hasNext: boolean
-): string {
-  if (hasNext) return `→ step ${step.index + 1}`
-  if (run.status === "running") return "running…"
-  // The last step drawn is where the run ended: its end card names it.
-  return endCard(run, step.index) ?? `■ ${run.status || "ended"}`
-}
-
-export const SENT_NOT_RECORDED = "— no request record for this step"
-export const SENT_UNCHANGED = "unchanged since the step before"
-
-/** clip is s on one line (whitespace runs one space), cut to n
- * characters with "…"; "" for a non-string. */
-export function clip(s: unknown, n: number): string {
-  if (typeof s !== "string") return ""
-  const one = s.replace(/\s+/g, " ").trim()
-  return one.length > n ? `${one.slice(0, n - 1)}…` : one
 }
 
 /** repliedLine is the model's reply in a line: its words, the calls it

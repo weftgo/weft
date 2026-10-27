@@ -249,6 +249,20 @@ describe("the Studio remainders, part 2 (U30.3)", () => {
         "read-only"
       )
       expect(studio.calls("PUT runtimes/rt_1/breakpoints")).toHaveLength(0)
+      // P10b-pre-web-fix: a Studio without capability breakpoints offers
+      // no clear to anyone — no read-only line either.
+      cleanup()
+      parkWith(
+        () => [runtime("rt_1", ["status"])],
+        ["requests", "steps", "ingest"]
+      )
+      await waitFor(() =>
+        expect(
+          document.querySelector("[data-parked] .eyebrow")?.textContent
+        ).toBe(BREAKPOINT)
+      )
+      await new Promise((r) => setTimeout(r, 300))
+      expect(clearLink()).toBeNull()
     }
   )
 

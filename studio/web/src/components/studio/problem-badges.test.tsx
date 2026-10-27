@@ -217,7 +217,7 @@ describe("the header's tool concurrency (UX-E-50)", () => {
       />
     )
     // The run's spans unread: the manifest's value, marked (W7-prep).
-    await findByText("parallelism: 2 (manifest)")
+    await findByText("parallelism 2 (manifest)")
     const c = container.querySelector<HTMLElement>("[data-concurrency]")!
     expect(c.title).toContain("weft.Parallelism")
     expect(
@@ -248,7 +248,7 @@ describe("the header's tool concurrency (UX-E-50)", () => {
         overrideParallelism={2}
       />
     )
-    await findByText("parallelism: 2")
+    await findByText("parallelism 2")
     cleanup()
     // Parallelism(1) as a run option: the request record says sequential.
     const { container } = await renderWithRouter(

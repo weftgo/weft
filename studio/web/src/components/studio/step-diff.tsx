@@ -346,6 +346,8 @@ export function StepDiffTable({
   const width = cols.length + 1 + (costs ? 1 : 0)
   // The step a link landed on (compareLink's step): scrolled to once.
   const target = useRef<HTMLTableRowElement>(null)
+  // "show all steps" unmounts itself: focus lands on the toggle.
+  const toggle = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     target.current?.scrollIntoView({ block: "center" })
   }, [focus])
@@ -391,6 +393,7 @@ export function StepDiffTable({
           disabled={!anyChanged}
           title={CHANGED_ONLY.title}
           onClick={() => setOnly(!on)}
+          ref={toggle}
           data-diff-changed-only
         >
           {CHANGED_ONLY.label}
@@ -405,7 +408,10 @@ export function StepDiffTable({
           <button
             type="button"
             className="text-thread-ink hover:underline"
-            onClick={() => setOnly(false)}
+            onClick={() => {
+              setOnly(false)
+              toggle.current?.focus()
+            }}
             data-diff-show-all
           >
             {CHANGED_ONLY.showAll}

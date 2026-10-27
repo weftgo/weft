@@ -45,6 +45,9 @@ export const LOGS = {
   noSpan: "no span",
   /** A derived run's GenAI log events beside its story (UX-H-10). */
   events: "messages the app logged",
+  /** The events repeat the messages the spans carry (drawn above). */
+  eventsAlso: (n: number) =>
+    `${plural(n, "message")} also logged as GenAI events — the step cards above draw them from the spans; every line is in the Logs view`,
   eventsHint:
     "the run's GenAI log events (gen_ai.<role>.message, gen_ai.choice): the messages an instrumentation emits as log records rather than span attributes — every line is in the Logs view",
   none: "no app log line in this run",

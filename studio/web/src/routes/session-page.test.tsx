@@ -147,7 +147,9 @@ afterEach(() => {
 
 describe("the words", () => {
   it("turnGap: a park's wait, a plain gap, an overlap", () => {
-    expect(turnGap(rows[0], rows[1])?.text).toBe("+500 ms waited for a decision")
+    expect(turnGap(rows[0], rows[1])?.text).toBe(
+      "+500 ms waited for a decision"
+    )
     expect(turnGap(rows[1], rows[2])?.text).toBe("+56.8 s after t2")
     expect(
       turnGap(rows[1], { started: "2026-10-01T09:00:03.000Z" })?.text

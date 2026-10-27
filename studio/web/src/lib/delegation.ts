@@ -237,6 +237,12 @@ export const LINEAGE = {
 /** The caller link's words on a run a call started (not delegated). */
 export const STARTED_BY = {
   by: "started by",
+  /** A run an MCP client in another process started (weft.caller.remote,
+   * U33.1-fix): the stated caller, never placed. */
+  remote: (id: string) =>
+    `started over MCP by run ${id} in another process (not linked)`,
+  remoteTitle:
+    "weft.caller.remote: the caller stated its run over MCP (_meta); Studio never places a run by a stated id, so this run stays top-level",
   call: (c: string) => `call ${c}`,
   title:
     "the run whose tool call started this one (weft.caller.run.id): a link, not a parent",
@@ -353,4 +359,22 @@ export function tokenSplit(
     delegated: `+${tokenPair(d.input_tokens, d.output_tokens)}`,
     title: `own ${exact(o)} · + ${exact(d)} by its child runs · ${exact(run.usage)} in all (the run's usage counts both)`,
   }
+}
+
+/** remoteCaller is the run id an MCP caller in another process stated
+ * for a run (its invoke_agent span's weft.caller.run.id beside
+ * weft.caller.remote), undefined for any other run. */
+export function remoteCaller(
+  spans: readonly { attrs?: Record<string, unknown> }[] | null | undefined,
+  runId: string
+): string | undefined {
+  const a = spans?.find(
+    (s) =>
+      s.attrs?.["gen_ai.operation.name"] === "invoke_agent" &&
+      s.attrs["weft.run.id"] === runId
+  )?.attrs
+  const id = a?.["weft.caller.run.id"]
+  return String(a?.["weft.caller.remote"]) === "true" && typeof id === "string"
+    ? id
+    : undefined
 }

@@ -68,6 +68,12 @@ export function catalogNotRecorded(): HoleMark {
       "the step carries no request record: the tools it offered are unknown",
   }
 }
+
+/** title is a badge's tooltip: the reason, and the fix where one
+ * exists — the run page's HoleBadge words it the same. */
+export function badgeTitle(reason: string, fix?: string): string {
+  return fix ? `${reason} — fix: ${fix}` : reason
+}
 export function promptNotRecorded(): HoleMark {
   return {
     hole: "not_recorded",
@@ -149,9 +155,6 @@ export function capLine(
 }
 
 export { SCRIPTED_MODEL }
-export function catalogCapped(n: number): HoleMark {
-  return { hole: "truncated", ...requestCappedWords(n) }
-}
 
 /** requestLabel is a request hole's badge text: the table's label,
  * prefixed where it does not name the request; not_recorded names the
@@ -199,6 +202,14 @@ export function promptReadError(error: string): HoleMark {
     hole: "derived",
     reason: `the step's prompt could not be read (${error}): the registered prompt is pre-filled`,
   }
+}
+
+/** The edit-the-prompt fallback's hole when the step's prompt cannot
+ * be read: the server serves no request record (not_served), the
+ * record has no row for the step (its prompt unknown), or the read
+ * failed (derived: the registered prompt stands in). */
+export function promptNotServed(): HoleMark {
+  return { hole: "not_recorded", cause: "not_served" }
 }
 
 /** holeBadges draws a list of holes (a step's, a call's, a turn's):
@@ -265,20 +276,6 @@ export function holeLine(m: HoleMark): HTMLElement {
   ])
 }
 
-/** title is a badge's tooltip: the reason, and the fix where one
- * exists — the run page's HoleBadge words it the same. */
-export function badgeTitle(reason: string, fix?: string): string {
-  return fix ? `${reason} — fix: ${fix}` : reason
-}
-
-/** The edit-the-prompt fallback's hole when the step's prompt cannot
- * be read: the server serves no request record (not_served), the
- * record has no row for the step (its prompt unknown), or the read
- * failed (derived: the registered prompt stands in). */
-export function promptNotServed(): HoleMark {
-  return { hole: "not_recorded", cause: "not_served" }
-}
-
 /** The not_recorded line a session lookup says (C4.1's cause): the
  * response's reason and fix first (api.go sends them), the cause's
  * words else. */
@@ -295,6 +292,9 @@ export function noPublicIdWords(reason?: string, fix?: string): string {
 /** badgeLabel is a badge's visible words (its first text). */
 export function badgeLabel(b: Element | null | undefined): string {
   return b?.firstChild?.nodeType === 3 ? (b.firstChild.textContent ?? "") : ""
+}
+export function catalogCapped(n: number): HoleMark {
+  return { hole: "truncated", ...requestCappedWords(n) }
 }
 
 /** requestHole draws a request pane's hole (a step's request line,

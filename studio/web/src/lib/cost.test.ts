@@ -351,11 +351,13 @@ describe("the cost order and totals", () => {
       text: "—",
       title: `0 of 1 runs priced · ${why}`,
     })
-    // U7: a partial $0 (only scripted runs priced) is "—", never "≥ $0.00";
-    // "<" never follows "≥".
+    // P10b-pre-web-fix (pricing.go's rule): priced runs at $0 are a $0
+    // floor, "≥ $0 · k of n", never "—" over a known part; "<" never
+    // follows "≥".
     expect(atLeastCost([rScripted(), rFail()])).toMatchObject({
-      text: "—",
+      text: "≥ $0 · 1 of 2 runs priced",
       title: `1 of 2 runs priced · ${why}`,
+      usd: 0,
     })
     // U5U7-fix 3: a known part under $0.0001 is "> $0", never a "≥
     // $0.0001" above the real figure; the exact figure leads the title.
@@ -370,7 +372,7 @@ describe("the cost order and totals", () => {
       title: "no run to total",
     })
   })
-  it("atLeastCost keeps a run's known own figure when only its delegated part is unknown", () => {
+  it("atLeastCost sums only the runs whose whole bill is known (pricing.go's floor): a known own figure beside an unknown delegated part adds nothing", () => {
     const running =
       "a subagent run's cost is not known yet: r/0/c1 (running: usage arrives at run end)"
     const v = atLeastCost([
@@ -379,16 +381,16 @@ describe("the cost order and totals", () => {
     ])
     expect(v).toMatchObject({
       known: false,
-      text: "≥ $0.0060 · 1 of 2 runs priced",
+      text: "≥ $0.0040 · 1 of 2 runs priced",
       badge: "unknown",
     })
     // The whole bill of one is known: the count says so, beside the delegated part's reason.
     expect(v.title).toBe(`1 of 2 runs priced · delegated: ${running}`)
-    // Own known, delegated unknown, nothing else: still ≥ its own, never —.
+    // Own known, delegated unknown, nothing else: no run priced — "—".
     expect(
       atLeastCost([{ ...priced(0.002, null), delegated_cost_reason: running }])
     ).toMatchObject({
-      text: "≥ $0.0020 · 0 of 1 runs priced",
+      text: "—",
       title: `0 of 1 runs priced · delegated: ${running}`,
     })
   })

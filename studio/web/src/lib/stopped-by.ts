@@ -26,6 +26,12 @@ const LOOP: Record<string, [string, string]> = {
   model_retries_exceeded: ["tool retry budget spent", "MaxModelRetries" + E],
 }
 
+/** stopStep is the step the stop fired at: the run's last (steps − 1),
+ * undefined when it ran none. */
+export function stopStep(steps?: number): number | undefined {
+  return steps && steps > 0 ? steps - 1 : undefined
+}
+
 /** stopDetail is the detail core's error text carries for a stop, ""
  * when it has none: the detail is the record's, never invented.
  *
@@ -225,12 +231,6 @@ export function repeatWords(l: LoopRepeats): { text: string; title: string } {
     text: `repeats step ${l.first}`,
     title: `DetectLoops: the same tool calls (names and arguments) as step ${l.first} — ${l.n} identical steps in a row ended the run`,
   }
-}
-
-/** stopStep is the step the stop fired at: the run's last (steps − 1),
- * undefined when it ran none. */
-export function stopStep(steps?: number): number | undefined {
-  return steps && steps > 0 ? steps - 1 : undefined
 }
 
 /** endStep is the step the header chip, its link and the story's end

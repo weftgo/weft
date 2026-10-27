@@ -105,6 +105,13 @@ describe("a bare script tag's dock (UX-S5b-10)", () => {
     const ep = String(warn.mock.calls[0][0]).replace(/^.* at (\S+);.*$/, "$1")
     expect(warn.mock.calls[0]).toEqual([noEndpoint(ep)])
     expect(ep).toMatch(/^http:\/\/(localhost|127\.0\.0\.1)/)
+    // Once per page (P10b-pre-web-fix): a dock mounted again is silent.
+    const again = create({})
+    again.autoMounted = true
+    document.body.appendChild(again)
+    await settle()
+    expect(again.isConnected).toBe(false)
+    expect(warn.mock.calls).toHaveLength(1)
     warn.mockRestore()
   })
 

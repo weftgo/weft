@@ -57,8 +57,7 @@ export function partialView(
   const badge = f?.cost_badge ?? "unknown"
   // The priced parts known at $0 (U33.2-fix): a floor of $0, said so,
   // never "—" over parts that are known.
-  if (!p.usd)
-    return { known: false, text: `≥ $0 · ${priced}`, title, badge, usd: 0 }
+  if (!p.usd) return zeroFloor(priced, title, badge)
   return knownPart(p.usd, priced, title, badge)
 }
 
@@ -419,14 +418,24 @@ export function cacheNotReported(
   return !!f?.cache && f.cache !== "exact"
 }
 
+/** zeroFloor is a partial sum whose priced parts are $0: "≥ $0 · k of
+ * n turns priced" (pricing.go's cost_partial with usd 0). */
+const zeroFloor = (priced: string, title: string, badge: string): CostView => ({
+  known: false,
+  text: `≥ $0 · ${priced}`,
+  title,
+  badge,
+  usd: 0,
+})
+
 /** atLeastCost totals runs' whole bills where an unknown run must not
  * hide the known ones (the panel's header over its turns, its replays
  * of a turn — A5.3): every run known → sumCost; some unknown → "≥ $x ·
- * k of n runs priced" (not known; usd the known part — a run's known
- * own figure counts when only its delegated part is unknown; never
- * "<" under "≥"), the reasons in its title only, deduped; a partial
- * figure of $0 (nothing priced, or only scripted $0s) is "—", never
- * "≥ $0.00" (U7); a known part under $0.0001 is "> $0 · …", never a
+ * k of n runs priced" (not known; usd the k whole-known runs' sum —
+ * pricing.go's tally's one rule: a run whose delegated part is unknown
+ * adds nothing; never "<" under "≥"), the reasons in its title only,
+ * deduped; no run priced is "—", priced runs at $0 "≥ $0 · k of n runs
+ * priced" (P10b-pre-web-fix); a known part under $0.0001 is "> $0 · …", never a
  * "≥ $0.0001" above the real figure (U5U7-fix 3). more says the rows are
  * not all there is (a paged list): the figure is then "≥" even when
  * every row is known, more its title's last words — and when every
@@ -447,8 +456,10 @@ export function atLeastCost(
     const t = runTotal(r)
     scripted &&= t.known && t.usd === 0 && r.cost_badge === "scripted"
     const own = costView(r)
-    if (own.known) usd += t.known ? t.usd : own.usd!
+    // One rule with pricing.go's tally (P10b-pre-web-fix): the floor
+    // sums the k parts whose whole bill is known, nothing of the rest.
     if (t.known) {
+      usd += t.usd
       k++
       continue
     }
@@ -482,7 +493,9 @@ export function atLeastCost(
       usd: 0,
     }
   }
-  if (!usd) return view(null, false, title, badge || "unknown")
+  // No part priced: "—"; priced parts at $0: a $0 floor, said so.
+  if (!k) return view(null, false, title, badge || "unknown")
+  if (!usd) return zeroFloor(priced, title, badge || "unknown")
   return knownPart(usd, priced, title, badge || "unknown")
 }
 

@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest"
 
 import { partialView } from "./cost"
+import { remoteCaller, STARTED_BY } from "./delegation"
 import { editsSummary, replayViewWords } from "./edits"
 import { eventMessage } from "./genai"
 
@@ -161,5 +162,34 @@ describe("partialView (UX-H-07)", () => {
     expect(
       partialView({ cost_known: false, cost_reason: reason })
     ).toBeUndefined()
+  })
+})
+
+describe("a run an MCP caller in another process started (P10b-pre-web-fix)", () => {
+  const root = (attrs: Record<string, unknown>) => ({
+    attrs: {
+      "gen_ai.operation.name": "invoke_agent",
+      "weft.run.id": "r_served",
+      ...attrs,
+    },
+  })
+  it("names the stated caller only beside weft.caller.remote", () => {
+    expect(
+      remoteCaller(
+        [
+          root({
+            "weft.caller.run.id": "r_client",
+            "weft.caller.remote": "true",
+          }),
+        ],
+        "r_served"
+      )
+    ).toBe("r_client")
+    expect(
+      remoteCaller([root({ "weft.caller.run.id": "r_client" })], "r_served")
+    ).toBeUndefined()
+    expect(STARTED_BY.remote("r_client")).toBe(
+      "started over MCP by run r_client in another process (not linked)"
+    )
   })
 })

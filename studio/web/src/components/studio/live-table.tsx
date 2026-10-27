@@ -24,6 +24,7 @@ import {
   FIRST_TOKEN,
   elapsed,
   relativeTime,
+  spanMs,
   tokens as fmtTokens,
 } from "@/lib/format"
 import {
@@ -346,7 +347,7 @@ export function LiveTable({
                       type="button"
                       className="shrink-0 rounded border px-1 font-mono text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
                       aria-expanded={fold.open}
-                      aria-label={`${fold.open ? LIVE_TREE.hide : LIVE_TREE.show}: ${LIVE_TREE.more(fold.n)}`}
+                      aria-label={`${fold.open ? LIVE_TREE.hide : LIVE_TREE.show}: ${LIVE_TREE.more(fold.n)}${!fold.open && fold.failed ? ` · ${LIVE_TREE.failed(fold.failed)}` : ""}`}
                       title={fold.open ? LIVE_TREE.hide : LIVE_TREE.show}
                       onClick={() =>
                         setToggled((t) => ({ ...t, [r.id]: !fold.open }))
@@ -441,7 +442,7 @@ export function LiveTable({
                     : "no finished step with a first token seen yet"
                 }
               >
-                {ttft !== null ? `${ttft.toLocaleString()} ms` : "—"}
+                {ttft !== null ? spanMs(ttft) : "—"}
               </TableCell>
               <TableCell
                 className="font-mono text-[11px] whitespace-nowrap text-muted-foreground"

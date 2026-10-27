@@ -225,6 +225,7 @@ describe("the run page at phone width (U30.2, UX-A-21)", () => {
     })
     const summary = menu.querySelector("summary")!
     expect(summary.textContent).toBe(`⋯ ${RUN_MENU.label}`)
+    expect(summary.getAttribute("aria-label")).toBe(RUN_MENU.label)
     expect(menu.open).toBe(false)
     // The verbs are inside it, reached once it opens.
     await waitFor(() =>
@@ -240,6 +241,20 @@ describe("the run page at phone width (U30.2, UX-A-21)", () => {
       fireEvent(menu, new Event("toggle"))
       await waitFor(() => expect(menu.open).toBe(true))
     }
+    // P10b-pre-web-fix: an Escape with focus outside the menu, or one
+    // a dialog a verb opened owns, and a pointer down inside a dialog,
+    // leave it open.
+    const dialog = document.createElement("div")
+    dialog.setAttribute("role", "dialog")
+    const inside = document.createElement("button")
+    dialog.append(inside)
+    document.body.append(dialog)
+    inside.focus()
+    fireEvent.keyDown(inside, { key: "Escape" })
+    fireEvent.pointerDown(inside)
+    expect(menu.open).toBe(true)
+    dialog.remove()
+    summary.focus()
     fireEvent.keyDown(document, { key: "Escape" })
     await waitFor(() => expect(menu.open).toBe(false))
     expect(document.activeElement).toBe(summary)

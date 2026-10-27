@@ -3,6 +3,7 @@
 // each a short chip with a title saying what it does and which option
 // set it — stop_when and usage_limit included, never left out.
 import type { ManifestAgent, ManifestTool } from "./api"
+import { parallelismWord } from "./concurrency"
 import { tokens } from "./format"
 
 /** The Output tool's mark on the Agents card (UX-S1-06). */
@@ -43,7 +44,7 @@ export function agentPolicyChips(
   const out: PolicyChip[] = [
     {
       key: "parallelism",
-      text: `parallelism ${policy.parallelism}`,
+      text: parallelismWord(policy.parallelism),
       title:
         policy.parallelism === 1
           ? "one tool call at a time (Parallelism(1) or Sequential())"

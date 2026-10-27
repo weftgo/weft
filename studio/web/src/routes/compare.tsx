@@ -88,8 +88,7 @@ function ComparePage() {
   })
   const extra = splitRuns(rawB).length - b.length
   useEffect(() => {
-    if (extra > 0)
-      void navigate({ ...compareLink(a, b, step), replace: true })
+    if (extra > 0) void navigate({ ...compareLink(a, b, step), replace: true })
   }, [extra, a, b, step, navigate])
   const submit = () => {
     const id = add.trim()

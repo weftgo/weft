@@ -113,7 +113,13 @@ import {
   LineageLine,
   StartedBy,
 } from "@/components/studio/lineage"
-import { LINEAGE_KEYS, lineageOfRun, linkedHoles } from "@/lib/delegation"
+import {
+  LINEAGE_KEYS,
+  lineageOfRun,
+  linkedHoles,
+  remoteCaller,
+  STARTED_BY,
+} from "@/lib/delegation"
 import { END_WORDS, forkOf, TURN_STEPPER } from "@/lib/timeline"
 import type { TurnEnd } from "@/lib/timeline"
 import { EndChip } from "@/components/studio/session-timeline"
@@ -649,6 +655,7 @@ export function RunHeader({
   // The structured output (UX-S1-06), the prompt's attachments
   // (UX-S1-13), the own / delegated token split (UX-S3-13).
   const output = outputOf(folded, spans, doc.id)
+  const remote = remoteCaller(spans, doc.id)
   const outType = outputType(spans, doc.id)
   const files = attachmentsOf(transcript?.batches)
   const split = tokenSplit(doc)
@@ -1037,6 +1044,11 @@ export function RunHeader({
           <LineageLine lineage={lineage} />
         ) : doc.caller_run_id ? (
           <StartedBy run={doc.caller_run_id} call={doc.caller_call_id} />
+        ) : remote ? (
+          // A caller in another process (U33.1-fix): said, not linked.
+          <span title={STARTED_BY.remoteTitle} data-started-remote={remote}>
+            {STARTED_BY.remote(remote)}
+          </span>
         ) : null}
         {/* A fork's turn names its origin (U15.2, UX-B-07): a link,
             never the raw weft.session.forked_from pair. */}
@@ -1155,11 +1167,22 @@ function HeaderActions({ children }: { children: ReactNode }) {
       setOpen(false)
       if (refocus) d.querySelector("summary")?.focus()
     }
+    // A dialog a verb opened owns its Escape and its clicks
+    // (P10b-pre-web-fix): the menu acts only on what is its own.
+    const inDialog = (t: EventTarget | null) =>
+      t instanceof Element &&
+      !!t.closest('[role="dialog"],[role="alertdialog"]')
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close(true)
+      if (
+        e.key === "Escape" &&
+        menu.current?.contains(document.activeElement) &&
+        !inDialog(e.target)
+      )
+        close(true)
     }
     const onDown = (e: PointerEvent) => {
-      if (!menu.current?.contains(e.target as Node)) close(false)
+      if (!menu.current?.contains(e.target as Node) && !inDialog(e.target))
+        close(false)
     }
     document.addEventListener("keydown", onKey)
     document.addEventListener("pointerdown", onDown)
@@ -1184,8 +1207,9 @@ function HeaderActions({ children }: { children: ReactNode }) {
       <summary
         className="cursor-pointer list-none rounded-md border px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:text-foreground"
         title={RUN_MENU.title}
+        aria-label={RUN_MENU.label}
       >
-        ⋯ {RUN_MENU.label}
+        <span aria-hidden>⋯</span> {RUN_MENU.label}
       </summary>
       <div className="absolute right-0 z-20 mt-1 flex w-max max-w-[calc(100vw-2rem)] flex-col items-start gap-2 rounded-md border bg-popover p-2 shadow-sm">
         {children}

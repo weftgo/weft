@@ -66,11 +66,11 @@ describe("a step's parallelism and a barrier (UX-S2-07)", () => {
   it("the run header's concurrency prefers the request record's dial", () => {
     expect(
       concurrencyWords({ recorded: 2, override: 3, manifest: 4 })?.text
-    ).toBe("parallelism: 2")
+    ).toBe("parallelism 2")
     expect(concurrencyWords({ recorded: 1 })?.text).toBe("sequential")
     // A record before the dial: the override, as before.
     expect(concurrencyWords({ override: 3, manifest: 4 })?.text).toBe(
-      "parallelism: 3"
+      "parallelism 3"
     )
   })
   const req = (step: number, parallelism?: number, seq: string[] = []) =>

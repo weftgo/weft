@@ -127,6 +127,34 @@ export function clip(s: string, n = TITLE_CUT): string {
     : line
 }
 
+/** turnLabel is a session turn's short name, "t3"; "" off a session. */
+export function turnLabel(r: { turn?: number }): string {
+  return r.turn ? `t${r.turn}` : ""
+}
+
+/** sessionTitle titles a session: its title (thread's
+ * weft.session.title, metadata that survives content-off), else its
+ * first turn's prompt, else NO_CONTENT when that turn was recorded
+ * without content (the row's content_off, or first — the turn, when
+ * the caller has it), else its id. */
+export function sessionTitle(
+  s: {
+    id: string
+    title?: string
+    first_prompt?: string
+    content_off?: boolean
+  },
+  first?: TitledRun
+): Title {
+  const t = clip(s.title ?? "", Infinity)
+  if (t) return { text: t, full: s.title ?? t, kind: "title" }
+  const p = clip(s.first_prompt ?? "", Infinity)
+  if (p) return { text: p, full: s.first_prompt ?? p, kind: "prompt" }
+  if (s.content_off || (first && contentOff(first)))
+    return { text: NO_CONTENT, full: NO_CONTENT, kind: "absent" }
+  return { text: s.id, full: s.id, kind: "id" }
+}
+
 /** NO_CONTENT stands in for a prompt the record did not keep: a
  * content-off destination stores no messages (the run page's stripped
  * badge says why). */
@@ -258,32 +286,4 @@ export function traceRunsWords(t: {
   if (!n) return "—"
   const runs = plural(n, "run")
   return t.failed_runs ? `${runs} · ${t.failed_runs} failed` : runs
-}
-
-/** turnLabel is a session turn's short name, "t3"; "" off a session. */
-export function turnLabel(r: { turn?: number }): string {
-  return r.turn ? `t${r.turn}` : ""
-}
-
-/** sessionTitle titles a session: its title (thread's
- * weft.session.title, metadata that survives content-off), else its
- * first turn's prompt, else NO_CONTENT when that turn was recorded
- * without content (the row's content_off, or first — the turn, when
- * the caller has it), else its id. */
-export function sessionTitle(
-  s: {
-    id: string
-    title?: string
-    first_prompt?: string
-    content_off?: boolean
-  },
-  first?: TitledRun
-): Title {
-  const t = clip(s.title ?? "", Infinity)
-  if (t) return { text: t, full: s.title ?? t, kind: "title" }
-  const p = clip(s.first_prompt ?? "", Infinity)
-  if (p) return { text: p, full: s.first_prompt ?? p, kind: "prompt" }
-  if (s.content_off || (first && contentOff(first)))
-    return { text: NO_CONTENT, full: NO_CONTENT, kind: "absent" }
-  return { text: s.id, full: s.id, kind: "id" }
 }

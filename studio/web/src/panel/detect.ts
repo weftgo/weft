@@ -96,6 +96,17 @@ function requestURL(input: unknown): string {
   }
 }
 
+/** readable reports whether a response at url may be read from a page
+ * at page: the same origin, or both on loopback. */
+export function readable(url: string, page: string): boolean {
+  try {
+    if (new URL(url).origin === new URL(page).origin) return true
+  } catch {
+    return false
+  }
+  return isLoopback(url) && isLoopback(page)
+}
+
 /** isLoopback reports whether a URL's host is this machine's:
  * localhost, *.localhost, 127.0.0.0/8 or [::1]. */
 export function isLoopback(url: string): boolean {
@@ -110,17 +121,6 @@ export function isLoopback(url: string): boolean {
   } catch {
     return false
   }
-}
-
-/** readable reports whether a response at url may be read from a page
- * at page: the same origin, or both on loopback. */
-export function readable(url: string, page: string): boolean {
-  try {
-    if (new URL(url).origin === new URL(page).origin) return true
-  } catch {
-    return false
-  }
-  return isLoopback(url) && isLoopback(page)
 }
 
 /** installHeaderRung wraps window.fetch so every same-origin response

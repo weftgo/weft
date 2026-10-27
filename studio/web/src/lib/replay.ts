@@ -92,6 +92,16 @@ export function tokenClaimsOf(
   }
 }
 
+/** The breakpoints a runtime parks on for this agent (its stored set,
+ * restricted to the agent's tools). */
+export function breakpointsFor(
+  runtime: Pick<RuntimeView, "breakpoints"> | undefined,
+  agent: Pick<AgentView, "tools"> | undefined
+): string[] {
+  const have = new Set((agent?.tools ?? []).map((t) => t.name))
+  return (runtime?.breakpoints ?? []).filter((t) => have.has(t))
+}
+
 const SUBSTITUTED =
   "substituted from the recorded result when the call repeats, else parked"
 
@@ -178,16 +188,6 @@ export function editPromptAndReplay(
     input: "",
     focus: "prompt",
   }
-}
-
-/** The breakpoints a runtime parks on for this agent (its stored set,
- * restricted to the agent's tools). */
-export function breakpointsFor(
-  runtime: Pick<RuntimeView, "breakpoints"> | undefined,
-  agent: Pick<AgentView, "tools"> | undefined
-): string[] {
-  const have = new Set((agent?.tools ?? []).map((t) => t.name))
-  return (runtime?.breakpoints ?? []).filter((t) => have.has(t))
 }
 
 /** The class words: "replay safe", "replay never", "replay never

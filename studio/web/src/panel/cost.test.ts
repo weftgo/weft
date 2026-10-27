@@ -249,7 +249,7 @@ describe("the header's summed cost", () => {
     })
   })
 
-  it("a turn whose delegated part alone is unknown keeps its own figure in the sum", async () => {
+  it("a turn whose delegated part alone is unknown adds nothing to the floor (pricing.go's rule)", async () => {
     const why =
       "a subagent run's cost is not known yet: s_01-t1/0/c1 (running: usage arrives at run end)"
     const el = await turns([
@@ -262,7 +262,7 @@ describe("the header's summed cost", () => {
       }),
     ])
     const c = $(el, "[data-weft-cost-total] [data-weft-cost]")!
-    expect(c.firstChild?.textContent).toBe("≥ $0.0060 · 1 of 2 turns priced")
+    expect(c.firstChild?.textContent).toBe("≥ $0.0040 · 1 of 2 turns priced")
     expect(c.getAttribute("title")).toBe(
       `1 of 2 turns priced · delegated: ${why}`
     )
@@ -326,13 +326,13 @@ describe("the header's summed cost", () => {
     })
   })
 
-  it("only scripted turns priced beside an unpriced one (U7): —, never ≥ $0.00", async () => {
+  it("only scripted turns priced beside an unpriced one: a $0 floor, ≥ $0 · k of n (P10b-pre-web-fix)", async () => {
     const el = await turns([
       runRow({ id: "s_01-t2", turn: 2, ...scripted }),
       runRow(unpriced),
     ])
     expect(cost($(el, "[data-weft-cost-total] [data-weft-cost]"))).toEqual({
-      text: "—",
+      text: "≥ $0 · 1 of 2 turns priced",
       title: `1 of 2 turns priced · ${UNPRICED_WHY}`,
     })
   })

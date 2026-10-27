@@ -421,6 +421,37 @@ function promptView(
   return out
 }
 
+/** picker is a row of pressed/unpressed buttons (the steps, a step's
+ * attempts). */
+function picker(
+  label: string,
+  items: number[],
+  cur: number,
+  pick: (n: number) => void,
+  words = (n: number) => `${label} ${n}`
+): HTMLElement {
+  const box = el("div", "weft-holes weft-rq-pick", "", {
+    role: "group",
+    "aria-label": label,
+    "data-key": label,
+  })
+  for (const n of items) {
+    const b = el(
+      "button",
+      `weft-btn${n === cur ? " weft-active" : ""}`,
+      words(n),
+      {
+        type: "button",
+        "aria-pressed": String(n === cur),
+        [`data-weft-rq-${label}`]: String(n),
+      }
+    )
+    on(b, "click", () => pick(n))
+    box.append(b)
+  }
+  return box
+}
+
 function composed(
   r: RequestRow,
   insHash: string,
@@ -507,37 +538,6 @@ function catalogView(
   if (c.truncated_bytes > 0)
     out.push(hole("truncated", { bytes: c.truncated_bytes }))
   return out
-}
-
-/** picker is a row of pressed/unpressed buttons (the steps, a step's
- * attempts). */
-function picker(
-  label: string,
-  items: number[],
-  cur: number,
-  pick: (n: number) => void,
-  words = (n: number) => `${label} ${n}`
-): HTMLElement {
-  const box = el("div", "weft-holes weft-rq-pick", "", {
-    role: "group",
-    "aria-label": label,
-    "data-key": label,
-  })
-  for (const n of items) {
-    const b = el(
-      "button",
-      `weft-btn${n === cur ? " weft-active" : ""}`,
-      words(n),
-      {
-        type: "button",
-        "aria-pressed": String(n === cur),
-        [`data-weft-rq-${label}`]: String(n),
-      }
-    )
-    on(b, "click", () => pick(n))
-    box.append(b)
-  }
-  return box
 }
 
 /** A toggle the user opened, kept in the element's open keys. */

@@ -15,6 +15,7 @@ import type {
   Transcript,
 } from "./api"
 import { isHoleRef } from "./api"
+import { parallelismWord } from "./concurrency"
 import { plural } from "./format"
 
 /** The chips on the pane's header, in that order. */
@@ -51,7 +52,7 @@ export function concurrencyWords(c: {
           title: `one tool call at a time (Parallelism 1) — ${from}`,
         }
       : {
-          text: `parallelism: ${n}`,
+          text: parallelismWord(n),
           title: `at most ${n} tool calls at once (weft.Parallelism) — ${from}`,
         }
   if (c.recorded !== undefined && c.recorded > 0)
@@ -136,48 +137,6 @@ export interface Registered {
   verified: boolean
 }
 
-/** registeredAgent picks the manifest's agent for a run: the one with
- * the run's own manifest hash, else the one with its name (unverified
- * unless the file source lists that name under the run's hash). */
-export function registeredAgent(
-  manifest: Manifest | undefined,
-  agent: string,
-  manifestHash?: string
-): Registered | undefined {
-  const agents = manifest?.agents ?? []
-  if (manifestHash) {
-    const exact = agents.find((a) => a.manifest_hash === manifestHash)
-    if (exact) return { agent: exact, verified: true }
-  }
-  const named = agents.find((a) => a.name === agent)
-  if (!named) return undefined
-  const listed =
-    !!manifestHash &&
-    (manifest?.sources ?? []).some(
-      (src) =>
-        src.source === "file" &&
-        src.agents.some(
-          (a) => a.name === agent && a.manifest_hash === manifestHash
-        )
-    )
-  return { agent: named, verified: listed }
-}
-
-/** The offered tools' PromptSnippets in offer order, from the
- * registered agent; undefined when the manifest does not know the
- * agent or any offered tool (a ToolSource tool is never in it). */
-export function snippetsOf(
-  names: string[],
-  agent: ManifestAgent | undefined
-): string[] | undefined {
-  if (!agent) return undefined
-  const byName = new Map(
-    agent.tools.map((t) => [t.name, t.prompt_snippet ?? ""])
-  )
-  if (names.some((n) => !byName.has(n))) return undefined
-  return names.map((n) => byName.get(n) ?? "")
-}
-
 /**
  * composedFromInstructions says whether the first recorded step's
  * system text is the run's configured instructions (instructions_hash)
@@ -220,6 +179,48 @@ export async function composedFromInstructions(
   if (!text.endsWith(`\n\n${tail}`)) return false
   const h = await sha256Hex(text.slice(0, text.length - tail.length - 2))
   return h === undefined ? undefined : h === instructionsHash
+}
+
+/** registeredAgent picks the manifest's agent for a run: the one with
+ * the run's own manifest hash, else the one with its name (unverified
+ * unless the file source lists that name under the run's hash). */
+export function registeredAgent(
+  manifest: Manifest | undefined,
+  agent: string,
+  manifestHash?: string
+): Registered | undefined {
+  const agents = manifest?.agents ?? []
+  if (manifestHash) {
+    const exact = agents.find((a) => a.manifest_hash === manifestHash)
+    if (exact) return { agent: exact, verified: true }
+  }
+  const named = agents.find((a) => a.name === agent)
+  if (!named) return undefined
+  const listed =
+    !!manifestHash &&
+    (manifest?.sources ?? []).some(
+      (src) =>
+        src.source === "file" &&
+        src.agents.some(
+          (a) => a.name === agent && a.manifest_hash === manifestHash
+        )
+    )
+  return { agent: named, verified: listed }
+}
+
+/** The offered tools' PromptSnippets in offer order, from the
+ * registered agent; undefined when the manifest does not know the
+ * agent or any offered tool (a ToolSource tool is never in it). */
+export function snippetsOf(
+  names: string[],
+  agent: ManifestAgent | undefined
+): string[] | undefined {
+  if (!agent) return undefined
+  const byName = new Map(
+    agent.tools.map((t) => [t.name, t.prompt_snippet ?? ""])
+  )
+  if (names.some((n) => !byName.has(n))) return undefined
+  return names.map((n) => byName.get(n) ?? "")
 }
 
 /**
@@ -328,6 +329,16 @@ export interface PromptBaseline {
   overridden?: boolean
 }
 
+/** The diff's caption. */
+export function baselineCaption(b: PromptBaseline): string {
+  if (b.kind === "previous") return `diff vs step ${b.step}`
+  if (!b.verified)
+    return "diff vs weft.json's instructions — not verified for this run"
+  return b.overridden
+    ? "diff vs the registered instructions (overridden for this run)"
+    : "diff vs the registered instructions"
+}
+
 /** overrideOf reads the run's own invoke_agent span (by weft.run.id; a
  * subagent child's span in the same trace is not this run's) for the
  * override fingerprint. Undefined when the run carries none. */
@@ -356,16 +367,6 @@ export function overrideOf(
     instructions: ins === true || ins === "true",
     fields: fields.sort(),
   }
-}
-
-/** The diff's caption. */
-export function baselineCaption(b: PromptBaseline): string {
-  if (b.kind === "previous") return `diff vs step ${b.step}`
-  if (!b.verified)
-    return "diff vs weft.json's instructions — not verified for this run"
-  return b.overridden
-    ? "diff vs the registered instructions (overridden for this run)"
-    : "diff vs the registered instructions"
 }
 
 /** sha256Hex is the lowercase hex sha256 of the UTF-8 bytes — the

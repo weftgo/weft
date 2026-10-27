@@ -20,6 +20,7 @@ export const SHORT = {
     "session — the history your app keeps (weft/thread): its turns, in order",
   scope: "scope — which conversation the panel follows on this page",
   flow: "flow — the run's weft.flow: the scope's flow=, stamped on each run; it filters lists",
+  tag: "tag — run metadata the scope's tag.<k>=<v> names; it filters lists",
   replay:
     "replay — run the agent again from this step in your app; earlier steps are kept",
   parked: said("parked"),

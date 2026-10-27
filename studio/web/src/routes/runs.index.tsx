@@ -367,6 +367,7 @@ function RunsPage() {
   const [moreOpen, setMoreOpen] = useState(false)
   const moreSet = moreFilterCount(search, costCapable)
   const searchInput = useRef<HTMLInputElement>(null)
+  const table = useRef<HTMLDivElement>(null)
   const agentInput = useRef<HTMLInputElement>(null)
   const listKey = JSON.stringify(search)
   useEffect(() => setSelected(-1), [listKey])
@@ -857,6 +858,14 @@ function RunsPage() {
           {costCapable ? (
             <UnpricedNote rows={runs} more={page.hasNextPage} />
           ) : null}
+          {/* The picks' count, read out from one region mounted for
+              the page's life (P10b-pre-web-fix): a live region mounted
+              with its first words says nothing. */}
+          {diffable ? (
+            <span className="sr-only" aria-live="polite" data-picks-live>
+              {picks.length ? PICKS.count(picks.length) : ""}
+            </span>
+          ) : null}
           {diffable && picks.length > 0 ? (
             <div
               className="flex flex-wrap items-center gap-2 font-mono text-[11px]"
@@ -864,7 +873,7 @@ function RunsPage() {
               aria-label={PICKS.title}
               data-picks
             >
-              <span className="text-muted-foreground" aria-live="polite">
+              <span className="text-muted-foreground" aria-hidden>
                 {PICKS.count(picks.length)}
               </span>
               {picks.length >= 2 ? (
@@ -884,7 +893,11 @@ function RunsPage() {
               <button
                 type="button"
                 className="text-thread-ink hover:underline"
-                onClick={() => setPicks([])}
+                onClick={() => {
+                  // The bar unmounts with its button: focus the table.
+                  setPicks([])
+                  table.current?.focus()
+                }}
                 data-picks-clear
               >
                 {PICKS.clear}
@@ -894,6 +907,7 @@ function RunsPage() {
           {/* UX-F-25: the skip link lands here, past the filter bar —
               the next Tab is the first row. */}
           <div
+            ref={table}
             className="relative overflow-x-auto rounded-lg border bg-background outline-none"
             tabIndex={-1}
             data-skip-target

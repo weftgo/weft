@@ -298,6 +298,34 @@ describe("a derived run's page (the Done line)", () => {
     expect(logged.textContent).not.toContain("an app line")
   })
 
+  it("events repeating the spans' messages are said once, never drawn twice (P10b-pre-web-fix)", async () => {
+    serve().on(`GET runs/${DERIVED}/logs`, {
+      logs: [
+        {
+          index: 0,
+          time: "2026-10-01T10:00:00.1Z",
+          severity: "INFO",
+          severity_number: 9,
+          event_name: "gen_ai.user.message",
+          body: `{"content":"where is my order?"}`,
+          attrs: {},
+        },
+      ],
+    })
+    renderApp(`/runs/${DERIVED}?view=story`)
+    const also = await waitFor(() => {
+      const n = document.querySelector<HTMLElement>(
+        "[data-derived-logged-also]"
+      )
+      expect(n).toBeTruthy()
+      return n!
+    })
+    expect(also.textContent).toBe(LOGS.eventsAlso(1))
+    expect(
+      document.querySelector("[data-derived-logged] [data-chat-role]")
+    ).toBeNull()
+  })
+
   it("no usage reported: the step and the row read unknown with the API's reason, never 0 as known", async () => {
     serve()
     studio

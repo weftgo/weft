@@ -171,6 +171,19 @@ export const FLOW: Term = {
   group: "work",
 }
 
+export const TAG: Term = {
+  term: "tag",
+  short: SHORT.tag,
+  long: [
+    "A tag is a run metadata pair (core.Metadata, weft.WithRunMetadata): a scope's tag.<k>=<v>",
+    "narrows Studio's lists and the panel to the runs carrying it — an arena batch, a CI job.",
+    "A panel token can carry tags too: it then reads only the runs that carry them.",
+  ].join("\n"),
+  docs: `${RC}#2-the-identity-chain`,
+  aliases: [],
+  group: "work",
+}
+
 // ── Delegation ─────────────────────────────────────────────────────
 
 export const SUBAGENT: Term = {
@@ -612,6 +625,7 @@ export const TERMS = {
   conversation: CONVERSATION,
   scope: SCOPE,
   flow: FLOW,
+  tag: TAG,
   subagent: SUBAGENT,
   childRun: CHILD_RUN,
   own: OWN,

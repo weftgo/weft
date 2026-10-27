@@ -29,7 +29,9 @@ describe("retired words (U21.2, U21.3)", () => {
         d
       ).toBe(true)
     expect(report(audit(files, loadAllowlist()))).toEqual([])
-  })
+    // A whole-tree audit: seconds alone, past vitest's 5 s default
+    // under the full suite's parallel load (as the injection test).
+  }, 20_000)
 
   it("the audit fails on an alias injected into each tree it reads", () => {
     const files = sources(src)
@@ -74,6 +76,20 @@ describe("retired words (U21.2, U21.3)", () => {
     // Seven audits of the whole tree: seconds alone, past vitest's 5 s
     // default under the full suite's parallel load.
   }, 20_000)
+
+  it("a setter's value is read, only its key is hidden (P10b-pre-web-fix)", () => {
+    const list = loadAllowlist()
+    const r = audit(
+      [
+        {
+          path: "panel/y.ts",
+          text: 'n.setAttribute("title", "3 threads"); m.set("thread", 1)',
+        },
+      ],
+      list
+    )
+    expect(r.hits.map((h) => h.text)).toEqual(["3 threads"])
+  })
 
   it("an allowlist entry no hit matches fails the audit", () => {
     const list = loadAllowlist()

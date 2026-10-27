@@ -191,6 +191,19 @@ export interface TurnWords {
   calls: string[]
 }
 
+/** callLine is the tool-call diff's line: name(args). */
+export function callLine(name: string, args: unknown): string {
+  let a = ""
+  if (args !== undefined) {
+    try {
+      a = stringify(args) ?? ""
+    } catch {
+      a = "?"
+    }
+  }
+  return `${name}(${a})`
+}
+
 /** turnWordsOf is the whole turn as the model spoke it: the assistant
  * messages after the input's last user message (the steps a continued
  * run kept, the legs a substitute chain already ran) and every one the
@@ -213,19 +226,6 @@ export function turnWordsOf(t: Transcript | null): TurnWords | null {
     for (const p of m.content as (Part | null)[])
       if (p?.type === "tool_call") calls.push(callLine(p.name, p.args))
   return { text: said.map(textOf).filter(Boolean).join("\n"), calls }
-}
-
-/** callLine is the tool-call diff's line: name(args). */
-export function callLine(name: string, args: unknown): string {
-  let a = ""
-  if (args !== undefined) {
-    try {
-      a = stringify(args) ?? ""
-    } catch {
-      a = "?"
-    }
-  }
-  return `${name}(${a})`
 }
 
 // ── A turn's words ────────────────────────────────────────────────
@@ -289,12 +289,6 @@ export function labOf(draft: ExperimentDraft) {
     },
     on.length < names.length ? on : []
   )
-}
-
-/** turnPromptOf is the turn's own prompt — the last user message the
- * run was fed, not the earlier turns' prompts it was fed along with. */
-export function turnPromptOf(t: Transcript | null): string {
-  return t ? (turnPrompt(t.batches) ?? "") : ""
 }
 
 /** experimentLabel names a replay of a turn (UX-D-14): `Replay 1 of
@@ -415,4 +409,10 @@ export function draftProblem(draft: ExperimentDraft): string | null {
     editsProblem(draft.thread, draft.step, draft.edits) ||
     (labOf(draft).problems[0]?.message ?? null)
   )
+}
+
+/** turnPromptOf is the turn's own prompt — the last user message the
+ * run was fed, not the earlier turns' prompts it was fed along with. */
+export function turnPromptOf(t: Transcript | null): string {
+  return t ? (turnPrompt(t.batches) ?? "") : ""
 }

@@ -199,23 +199,10 @@ interface Node extends WaterfallRow {
 
 type Base = Omit<WaterfallRow, "depth" | "critical">
 
-/** Marks the critical path (the chain that set the run's length):
- * from a row's end backwards, the child that ends last, then the one
- * that ended last before that child started, and so on — serial steps
- * all mark, of overlapping calls only the one that ended last; then
- * the same inside each marked child. */
-function markCritical(root: Node) {
-  for (const st = [root]; st.length;) {
-    const n = st.pop()!
-    n.critical = true
-    const kids = [...n.kids].sort((a, b) => endOf(b) - endOf(a))
-    let bound = Infinity
-    for (const k of kids)
-      if (endOf(k) <= bound) {
-        st.push(k)
-        bound = k.start
-      }
-  }
+export function int(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isInteger(v)) return v
+  if (typeof v === "string" && /^\d+$/.test(v)) return Number(v)
+  return undefined
 }
 
 /** The span's GenAI operation; the name's first word for spans that
@@ -255,6 +242,25 @@ export interface TreeNode {
 export const spanRef = (s: TimedSpan, id = s.span_id) => `${s.trace_id}/${id}`
 
 export const str = (v: unknown) => (typeof v === "string" ? v : undefined)
+
+/** Marks the critical path (the chain that set the run's length):
+ * from a row's end backwards, the child that ends last, then the one
+ * that ended last before that child started, and so on — serial steps
+ * all mark, of overlapping calls only the one that ended last; then
+ * the same inside each marked child. */
+function markCritical(root: Node) {
+  for (const st = [root]; st.length;) {
+    const n = st.pop()!
+    n.critical = true
+    const kids = [...n.kids].sort((a, b) => endOf(b) - endOf(a))
+    let bound = Infinity
+    for (const k of kids)
+      if (endOf(k) <= bound) {
+        st.push(k)
+        bound = k.start
+      }
+  }
+}
 
 function spanStatus(s: TimedSpan): RowStatus {
   if (s.status === "error") return "error"
@@ -1113,12 +1119,6 @@ export function spanTree(timed: readonly TimedSpan[]): TreeNode[] {
   return out
 }
 
-export function int(v: unknown): number | undefined {
-  if (typeof v === "number" && Number.isInteger(v)) return v
-  if (typeof v === "string" && /^\d+$/.test(v)) return Number(v)
-  return undefined
-}
-
 /** The kind each renderer draws a row as (the Waterfall's SpanKind: a
  * child run is a subagent row), its glyph, and its tone (U8.3): Studio's
  * run tree and the panel's Timeline read the same three tables, so a
@@ -1161,6 +1161,21 @@ export function rowTone(r: WaterfallRow): SpanTone {
 export const CRITICAL = "critical path"
 export const CRITICAL_HINT =
   "the chain of rows that set the run's length: of overlapping calls, the one that ended last"
+
+// ── Words ──────────────────────────────────────────────────────────
+// The renderers' words for a row (U8.2): the badge, the critical path,
+// the lanes, the child's link — one place, both surfaces.
+
+/** A row's badge: the error's kind; an open row's state (running,
+ * pending, never); a finished step or model call's finish reason; "ok"
+ * on a tool or child run; nothing on a finished root (the header says
+ * how the run ended). */
+export function rowBadge(r: WaterfallRow): string | undefined {
+  if (r.status === "error") return r.error ?? "error"
+  if (r.status !== "ok") return r.status
+  if (r.kind === "step" || r.kind === "model") return r.finish
+  return r.kind === "tool" || r.kind === "child" ? "ok" : undefined
+}
 
 /** A step's lanes when it ran calls side by side ("2 lanes"); one lane
  * says nothing. */
@@ -1276,27 +1291,16 @@ export function dimRows(rows: readonly WaterfallRow[], dim: Dim): Set<string> {
   return out
 }
 
-// ── Words ──────────────────────────────────────────────────────────
-// The renderers' words for a row (U8.2): the badge, the critical path,
-// the lanes, the child's link — one place, both surfaces.
-
-/** A row's badge: the error's kind; an open row's state (running,
- * pending, never); a finished step or model call's finish reason; "ok"
- * on a tool or child run; nothing on a finished root (the header says
- * how the run ended). */
-export function rowBadge(r: WaterfallRow): string | undefined {
-  if (r.status === "error") return r.error ?? "error"
-  if (r.status !== "ok") return r.status
-  if (r.kind === "step" || r.kind === "model") return r.finish
-  return r.kind === "tool" || r.kind === "child" ? "ok" : undefined
-}
-
-// ── Attributes ─────────────────────────────────────────────────────
-
-/** A span's attributes; {} for a span that arrived without any (a
- * hand-built or foreign one: the type promises them, the wire may not). */
-export function attrsOf(s: TimedSpan | undefined): Record<string, unknown> {
-  return (s as { attrs?: Record<string, unknown> } | undefined)?.attrs ?? {}
+/** The first finish reason: a list, or the list as a JSON string (the
+ * ClickHouse fallback map), or one reason. */
+function finishOf(v: unknown): string | undefined {
+  if (typeof v === "string" && v.startsWith("["))
+    try {
+      v = JSON.parse(v)
+    } catch {
+      /* the string itself */
+    }
+  return Array.isArray(v) ? str(v[0]) : str(v)
 }
 
 // ── Keys ───────────────────────────────────────────────────────────
@@ -1330,14 +1334,10 @@ export function rowKeys(run: string, qualify: boolean) {
   }
 }
 
-/** The first finish reason: a list, or the list as a JSON string (the
- * ClickHouse fallback map), or one reason. */
-function finishOf(v: unknown): string | undefined {
-  if (typeof v === "string" && v.startsWith("["))
-    try {
-      v = JSON.parse(v)
-    } catch {
-      /* the string itself */
-    }
-  return Array.isArray(v) ? str(v[0]) : str(v)
+// ── Attributes ─────────────────────────────────────────────────────
+
+/** A span's attributes; {} for a span that arrived without any (a
+ * hand-built or foreign one: the type promises them, the wire may not). */
+export function attrsOf(s: TimedSpan | undefined): Record<string, unknown> {
+  return (s as { attrs?: Record<string, unknown> } | undefined)?.attrs ?? {}
 }

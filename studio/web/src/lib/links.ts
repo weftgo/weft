@@ -770,13 +770,6 @@ export function sessionLink(id: string): SessionLink {
   return { to: "/sessions/$id", params: { id }, search: {} }
 }
 
-/** settingsLink is the Settings page (plan H4); with a provider/model,
- * its pricing table with a row prefilled for it (U7's "price this
- * model…"). */
-export function settingsLink(price?: string): SettingsLink {
-  return { to: "/settings", search: price ? { price } : {} }
-}
-
 /** conceptLink is the Settings page's Concepts section (U21.2): with a
  * glossary key (lib/glossary.ts TERMS), that term's entry — where a
  * <Term> tooltip's "more ›" goes. */
@@ -876,6 +869,16 @@ export function pickOf(v: unknown): string[] {
     .slice(-2)
 }
 
+/** liveLink is the live page filtered (?q=) and narrowed to one agent. */
+export function liveLink(
+  search: { q?: string; agent?: string } = {}
+): LiveLink {
+  const out: LiveLink["search"] = {}
+  if (search.q) out.q = search.q
+  if (search.agent) out.agent = search.agent
+  return { to: "/live", search: out }
+}
+
 /** connectLink is the Settings page's connect card (U21.2's connect
  * lines: an app, a page, a coding agent to this Studio) — where the
  * panel's empty list sends a first run (U21.3, UX-F-11). */
@@ -921,29 +924,16 @@ export function playgroundShareLink(state: string): PlaygroundLink {
   return { to: "/playground", search: {}, hash: `state=${state}` }
 }
 
-/** liveLink is the live page filtered (?q=) and narrowed to one agent. */
-export function liveLink(
-  search: { q?: string; agent?: string } = {}
-): LiveLink {
-  const out: LiveLink["search"] = {}
-  if (search.q) out.q = search.q
-  if (search.agent) out.agent = search.agent
-  return { to: "/live", search: out }
+/** settingsLink is the Settings page (plan H4); with a provider/model,
+ * its pricing table with a row prefilled for it (U7's "price this
+ * model…"). */
+export function settingsLink(price?: string): SettingsLink {
+  return { to: "/settings", search: price ? { price } : {} }
 }
 
 /** agentsLink is the agents page with one agent's card opened. */
 export function agentsLink(agent?: string): AgentsLink {
   return { to: "/agents", search: agent ? { agent } : {} }
-}
-
-// ── Save as test (plan F6) ──────────────────────────────────────────
-
-/** saveTestLink is the run page that, on landing, downloads the run's
- * wefttest zip with Studio's own bearer (never a token in the URL) and
- * drops ?save= — the devtools panel's "save as test" hands off here. */
-export function saveTestLink(id: string): RunLink {
-  const l = runPage(id)
-  return { ...l, search: { ...l.search, save: "test" } }
 }
 
 /** path renders a link's route path with its params encoded, relative
@@ -1000,4 +990,14 @@ export function appLink(
       ? `&${URL_STEP_PARAM}=${step ?? ""}${at.tab ? `.${at.tab}` : ""}`
       : ""
   return `${base}#weft_scope=${encodeURIComponent(serializeScope(scope))}${where}`
+}
+
+// ── Save as test (plan F6) ──────────────────────────────────────────
+
+/** saveTestLink is the run page that, on landing, downloads the run's
+ * wefttest zip with Studio's own bearer (never a token in the URL) and
+ * drops ?save= — the devtools panel's "save as test" hands off here. */
+export function saveTestLink(id: string): RunLink {
+  const l = runPage(id)
+  return { ...l, search: { ...l.search, save: "test" } }
 }

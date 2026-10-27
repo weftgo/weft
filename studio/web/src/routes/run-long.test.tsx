@@ -15,6 +15,7 @@ import {
   waitFor,
 } from "@testing-library/react"
 import axe from "axe-core"
+import { spanMs } from "@/lib/format"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -186,8 +187,9 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
     await waitFor(() => expect(list.scrollTop).toBeGreaterThan(height * 0.9))
     expect(steps().length).toBeLessThan(20)
     expect(slider.getAttribute("aria-valuenow")).toBe("4999")
-    expect(slider.getAttribute("aria-valuetext")).toMatch(
-      /^step 4999 of 5,000 · tool_calls · t\+499\.9 s model time$/
+    // The one duration format (lib/format spanMs, P10b-pre-web-fix).
+    expect(slider.getAttribute("aria-valuetext")).toBe(
+      `step 4999 of 5,000 · tool_calls · t+${spanMs(499_900)} model time`
     )
     // Scrolled away, the same step named again brings its card back
     // (the URL does not change).

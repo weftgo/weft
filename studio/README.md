@@ -320,10 +320,14 @@ turns unpriced: no price for openai/x, acme/y", "1 of 3 subagent runs'
 cost not known yet (…)"; "not known", without "yet", when every unknown
 part is a derived run whose spans report no usage — it never becomes
 known, UX-H-07), never a clause per run; such an unknown figure carries
-`cost_partial` `{usd, priced, of}` — the priced parts' sum and count of
-the set's, absent when none is priced — which Studio's sessions list and
-session page draw as the panel's header does, "≥ $x · k of n turns
-priced"; and `unpriced_models`
+`cost_partial` `{usd, priced, of}` — the sum and count of the parts
+whose whole bill (own + delegated) is known, absent when none is — which
+Studio's sessions list and session page draw as the panel's header sums
+the same turns (`atLeastCost`, one rule: a turn whose delegated part is
+unknown adds nothing): "≥ $x · k of n turns priced", "≥ $0 · k of n
+turns priced" when the priced turns are $0, "—" when none is
+(`parity.test.ts` feeds `testdata/api/cost-parity.golden.json` to both);
+and `unpriced_models`
 (a run row's `delegated_unpriced_models` for its subagents) lists the
 models without a price behind a figure, deduped, so a page can say it once
 — five at most, a sixth and more one last element `"(+n)"` (the reason's
@@ -601,10 +605,11 @@ unpriced model ("openai/x has no price"), a running turn
 no usage. The
 header's total beside "N turns · T tok" sums the turns' own + delegated
 (`atLeastCost`): "≥ $x · k of n turns priced" when a turn's is unknown,
-the reasons in its title only (a turn whose delegated part alone is
-unknown still adds its own figure: "delegated: …"; never "<" under "≥"),
-"—" when the known part is $0 (none priced, or only scripted turns —
-never "≥ $0.00"); a scripted turn reads "$0 · scripted"; beside it the
+the reasons in its title only (the sum is the k priced turns', Go's
+`cost_partial` rule: a turn whose delegated part alone is unknown adds
+nothing, its reason "delegated: …"; never "<" under "≥"), "≥ $0 · k of
+n turns priced" when the priced turns are $0, "—" when none is priced;
+a scripted turn reads "$0 · scripted"; beside it the
 header's one unpriced line (U7: "1 turn unpriced: no row for openai/x", a
 link to Studio's pricing table prefilled for the first model), counting
 the loaded turns the picker counts; and "≥" with "the N loaded turns only — load older turns for more"
@@ -1324,8 +1329,8 @@ retries one `/api/meta` read a minute, while the page is visible,
 brings it back by itself. The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 294,415 B raw / 98,790 B gzip
-(96.5 KiB, the bundle of the ledger's row "U33.2-fix"; 7,706 B — 7.5 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 294,694 B raw / 98,875 B gzip
+(96.6 KiB, the bundle of the ledger's row "P10b-pre-web-fix"; 7,621 B — 7.4 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

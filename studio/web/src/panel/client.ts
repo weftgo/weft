@@ -100,27 +100,6 @@ export function fetchTranscript(
   ).then(asTranscript)
 }
 
-/** post one JSON document and decode the answer (the panel's write
- * verbs are few; errors are PanelApiError like the reads). */
-export async function panelPost<T>(
-  ep: PanelEndpoint,
-  path: string,
-  body: unknown
-): Promise<T> {
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  }
-  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
-  const res = await fetch(apiUrl(ep, path), {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw await failure(res)
-  return (await res.json()) as T
-}
-
 export function fetchCommand(
   ep: PanelEndpoint,
   id: string
@@ -146,6 +125,42 @@ export function fetchHandoff(
   to: string
 ): Promise<{ location: string }> {
   return panelGet(ep, `panel-handoff?to=${encodeURIComponent(to)}`)
+}
+
+/** post one JSON document and decode the answer (the panel's write
+ * verbs are few; errors are PanelApiError like the reads). */
+export async function panelPost<T>(
+  ep: PanelEndpoint,
+  path: string,
+  body: unknown
+): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  }
+  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
+  const res = await fetch(apiUrl(ep, path), {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await failure(res)
+  return (await res.json()) as T
+}
+
+/** get one JSON document. Errors are PanelApiError; the caller
+ * decides what silence looks like (the panel never throws into the
+ * host page's console). */
+export async function panelGet<T>(
+  ep: PanelEndpoint,
+  path: string,
+  signal?: AbortSignal
+): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" }
+  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
+  const res = await fetch(apiUrl(ep, path), { headers, signal })
+  if (!res.ok) throw await failure(res)
+  return (await res.json()) as T
 }
 
 /** fetchRequests reads a run's request record (GET runs/{id}/requests,
@@ -215,6 +230,22 @@ export async function fetchStrippedNote(
     : undefined
 }
 
+export function fetchSpans(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<SpansDoc> {
+  return panelGet<SpansDoc>(ep, `runs/${encodeURIComponent(id)}/spans`, signal)
+}
+
+export function fetchSession(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<SessionDoc> {
+  return panelGet<SessionDoc>(ep, `sessions/${encodeURIComponent(id)}`, signal)
+}
+
 /** GET /api/sessions/{id}/public_id (plan C4.1): the public id a
  * thread session's turns carry — public_id "" with badge
  * "not_recorded" when it was created without one. The dev token's and
@@ -240,6 +271,34 @@ export function putProposal(
   })
 }
 
+/** POST /api/runs/{id}/steer — the rung-4 verb (§8.4): one user
+ * message delivered into a runtime-started run mid-flight; on an app
+ * turn (plan F4.3) a 202 with the command to poll. */
+export function postSteer(
+  ep: PanelEndpoint,
+  runID: string,
+  message: string
+): Promise<{ steered?: boolean; command_id?: string }> {
+  return panelPost(ep, `runs/${encodeURIComponent(runID)}/steer`, { message })
+}
+
+/** GET /api/playground/commands/{id} — §10.5's lifecycle row. */
+export interface CommandStatus {
+  command_id: string
+  state: "queued" | "accepted" | "rejected" | "finished" | "lost"
+  run_id: string
+  /** The finished run's own outcome (the runtime's finished ack);
+   * absent until the command is finished. A held approval decision
+   * finishes succeeded under the still-parked run's id. */
+  status?: "succeeded" | "failed"
+  error: string | null
+  /** U18.1: a scripted miss's source step, key components and the
+   * server's sentence (lib/target.ts's missOf). */
+  reason?: CommandReason
+  created: string
+  updated: string
+}
+
 export function fetchSessions(
   ep: PanelEndpoint,
   params: Record<string, string>,
@@ -247,22 +306,6 @@ export function fetchSessions(
 ): Promise<SessionsPage> {
   const qs = new URLSearchParams(params).toString()
   return panelGet<SessionsPage>(ep, `sessions${qs ? `?${qs}` : ""}`, signal)
-}
-
-export function fetchSpans(
-  ep: PanelEndpoint,
-  id: string,
-  signal?: AbortSignal
-): Promise<SpansDoc> {
-  return panelGet<SpansDoc>(ep, `runs/${encodeURIComponent(id)}/spans`, signal)
-}
-
-export function fetchSession(
-  ep: PanelEndpoint,
-  id: string,
-  signal?: AbortSignal
-): Promise<SessionDoc> {
-  return panelGet<SessionDoc>(ep, `sessions/${encodeURIComponent(id)}`, signal)
 }
 
 // ── Reads the panel uses (S4.2 shapes) ────────────────────────────
@@ -348,34 +391,6 @@ export function postPreview(
   body: Record<string, unknown>
 ): Promise<PreviewDoc> {
   return panelPost(ep, PREVIEW_PATH, body)
-}
-
-/** POST /api/runs/{id}/steer — the rung-4 verb (§8.4): one user
- * message delivered into a runtime-started run mid-flight; on an app
- * turn (plan F4.3) a 202 with the command to poll. */
-export function postSteer(
-  ep: PanelEndpoint,
-  runID: string,
-  message: string
-): Promise<{ steered?: boolean; command_id?: string }> {
-  return panelPost(ep, `runs/${encodeURIComponent(runID)}/steer`, { message })
-}
-
-/** GET /api/playground/commands/{id} — §10.5's lifecycle row. */
-export interface CommandStatus {
-  command_id: string
-  state: "queued" | "accepted" | "rejected" | "finished" | "lost"
-  run_id: string
-  /** The finished run's own outcome (the runtime's finished ack);
-   * absent until the command is finished. A held approval decision
-   * finishes succeeded under the still-parked run's id. */
-  status?: "succeeded" | "failed"
-  error: string | null
-  /** U18.1: a scripted miss's source step, key components and the
-   * server's sentence (lib/target.ts's missOf). */
-  reason?: CommandReason
-  created: string
-  updated: string
 }
 
 /** POST /api/runs/{id}/approvals — the parked experiment's continue /
@@ -502,21 +517,6 @@ export const LIVE_SILENCE_MS = 10_000
  * costs a repeated frame at worst, which the model's own fold by
  * position absorbs (S4.5). */
 export const LIVE_DEDUP_SIZE = 1 << 16
-
-/** get one JSON document. Errors are PanelApiError; the caller
- * decides what silence looks like (the panel never throws into the
- * host page's console). */
-export async function panelGet<T>(
-  ep: PanelEndpoint,
-  path: string,
-  signal?: AbortSignal
-): Promise<T> {
-  const headers: Record<string, string> = { Accept: "application/json" }
-  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
-  const res = await fetch(apiUrl(ep, path), { headers, signal })
-  if (!res.ok) throw await failure(res)
-  return (await res.json()) as T
-}
 
 /**
  * openPanelLive is live.ts's openLive over the panel's endpoint and

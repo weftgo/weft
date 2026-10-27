@@ -11,7 +11,8 @@
 // idle, never as a decision. Plain TypeScript, no React: the run
 // page's drawer, the Agents card and the panel's effect chips read
 // this one module (parity), the panel only the chip words at the top.
-import { msText } from "./attempts"
+import { giveUpLine, msText } from "./attempts"
+import { attemptError } from "./error-kind"
 import { plural } from "./format"
 
 type Attrs = Record<string, unknown>
@@ -342,6 +343,8 @@ export interface AttemptFact {
   waitMs?: number
   http?: number
   model?: string
+  /** weft.attempt.giveup_reason: why mw.Retry stopped (U30.3). */
+  giveUp?: string
 }
 
 /** What a model call's spans say its layers did. */
@@ -374,6 +377,7 @@ export function modelCallFacts(
         waitMs: num(a["weft.attempt.wait_ms"]),
         http: num(a["http.response.status_code"]),
         model: str(a["gen_ai.request.model"]),
+        giveUp: str(a["weft.attempt.giveup_reason"]),
       }
     })
     .sort((x, y) => x.index - y.index)
@@ -482,16 +486,29 @@ function modelDecision(
   switch (l.name) {
     case "mw.Retry": {
       const retried = f.attempts.filter((a) => a.layer === "retry")
-      if (!retried.length) return { attrs: [] }
+      // The step's give-up line when its last attempt failed (U30.3's
+      // words, lib/attempts.ts): why Retry stopped.
+      const gave = giveUpLine(
+        f.attempts.map((a) => ({
+          outcome: a.ok ? "ok" : "error",
+          giveup_reason: a.giveUp,
+          error_type: a.errorType,
+        }))
+      )
+      if (!retried.length && !gave) return { attrs: [] }
       const parts = retried.map((a) => {
         const before = f.attempts.find((b) => b.index === a.index - 1)
-        const cause = before?.http ? `HTTP ${before.http}` : before?.errorType
+        // The error class in the attempt line's words (error-kind.ts).
+        const cause = before?.http
+          ? `HTTP ${before.http}`
+          : before && attemptError(before.errorType).word
         return [
           `attempt ${a.index}`,
           a.waitMs !== undefined ? ` after ${msText(a.waitMs)}` : "",
           cause ? `, ${cause}` : "",
         ].join("")
       })
+      if (gave) parts.push(gave)
       return {
         decision: `→ ${parts.join("; ")}`,
         attrs: retried.map((a) => [

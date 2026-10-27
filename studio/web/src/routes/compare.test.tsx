@@ -215,6 +215,10 @@ describe("the compare page", () => {
     )
     expect(document.querySelector('[data-diff-step="1"]')).toBeTruthy()
     expect(document.querySelector("[data-diff-focus-hidden]")).toBeNull()
+    // P10b-pre-web-fix: the link unmounted itself; focus is on the toggle.
+    expect(document.activeElement).toBe(
+      document.querySelector("[data-diff-changed-only]")
+    )
     // The changed step a link names stays: no note.
     cleanup()
     renderApp("/compare?a=r_da&b=r_db&step=3")
@@ -451,9 +455,7 @@ describe("the compare page", () => {
   it("UX-S5b-07: a b that is only a leaves the URL with it", async () => {
     serve(["diff"], {})
     const { router } = renderApp("/compare?a=r_da&b=r_da,r_da")
-    await waitFor(() =>
-      expect(router.state.location.searchStr).toBe("?a=r_da")
-    )
+    await waitFor(() => expect(router.state.location.searchStr).toBe("?a=r_da"))
   })
 
   it("H9: opens with a run picker — a base, then the base agent's runs — and ?b= takes commas", async () => {

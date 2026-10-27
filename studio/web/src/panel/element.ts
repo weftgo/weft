@@ -378,6 +378,14 @@ import {
 } from "../lib/cards"
 import { MCP_WORDS, deniedWord, effectChips, stepEffectsOf } from "../lib/onion"
 
+/** eventStatus is a run's status as the host events say it (plan C4,
+ * §2): parked is succeeded with pending calls — a later resume does not
+ * unsay a transition already fired. The turn list, picker and filter
+ * read lib/status.ts's statusOf instead (U1). */
+export function eventStatus(r: RunRow): string {
+  return r.status === "succeeded" && r.pending > 0 ? "parked" : r.status
+}
+
 /** hasCapability reports whether meta lists the named capability (the
  * panel renders a control only when the server reports it, §8.5). */
 export function hasCapability(s: PanelState, name: string): boolean {
@@ -398,42 +406,12 @@ export const PATHS_LIMIT = 64
  * oldest dropped first. Cleared on every start. */
 export const RUN_MEMO_LIMIT = 500
 
-/** eventStatus is a run's status as the host events say it (plan C4,
- * §2): parked is succeeded with pending calls — a later resume does not
- * unsay a transition already fired. The turn list, picker and filter
- * read lib/status.ts's statusOf instead (U1). */
-export function eventStatus(r: RunRow): string {
-  return r.status === "succeeded" && r.pending > 0 ? "parked" : r.status
-}
-
 /** childRow is a child run's row: the turn's own children, else a
  * loaded child's (a grandchild at any depth). */
 function childRow(t: TurnView, id: string) {
   return [t.doc, ...[...t.children.values()].map((c) => c.doc)]
     .flatMap((d) => (d ? [...d.children, ...(d.caller_linked ?? [])] : []))
     .find((c) => c.id === id)
-}
-
-/** prevTurn is the turn before r in its session among the loaded
- * turns (turnTitle's prev: Studio's session page reads the turn above;
- * the panel's list is newest first and may span sessions): the highest
- * loaded non-fork turn below r's — turn numbers can have gaps (a queued
- * turn's number is taken at Send and dropped by ClearQueue). */
-export function prevTurn(
-  r: RunRow,
-  turns: readonly RunRow[]
-): RunRow | undefined {
-  if (r.forked_from || !r.session_id || !(r.turn > 1)) return undefined
-  let p: RunRow | undefined
-  for (const x of turns)
-    if (
-      x.session_id === r.session_id &&
-      !x.forked_from &&
-      x.turn < r.turn &&
-      x.turn > (p?.turn ?? 0)
-    )
-      p = x
-  return p
 }
 
 /** studioLink builds the ⤢ deep link (§2: "open in Studio" with the
@@ -537,6 +515,7 @@ export const HOW_TO_SCOPE: readonly string[] = [
  * endpoint and carries no data-weft, removed where the Studio guessed
  * on loopback (a dev page) did not answer — never off loopback (U22:
  * a production page's removal stays silent). */
+let warned = false
 export const noEndpoint = (ep: string) =>
   `weft devtools: Studio did not answer at ${ep}; add data-weft or data-endpoint on the panel's <script> tag`
 
@@ -696,6 +675,28 @@ function scopeValue(v: unknown): Scope | null {
   if (flow) out.flow = flow
   if (run) out.run = run
   return out
+}
+
+/** prevTurn is the turn before r in its session among the loaded
+ * turns (turnTitle's prev: Studio's session page reads the turn above;
+ * the panel's list is newest first and may span sessions): the highest
+ * loaded non-fork turn below r's — turn numbers can have gaps (a queued
+ * turn's number is taken at Send and dropped by ClearQueue). */
+export function prevTurn(
+  r: RunRow,
+  turns: readonly RunRow[]
+): RunRow | undefined {
+  if (r.forked_from || !r.session_id || !(r.turn > 1)) return undefined
+  let p: RunRow | undefined
+  for (const x of turns)
+    if (
+      x.session_id === r.session_id &&
+      !x.forked_from &&
+      x.turn < r.turn &&
+      x.turn > (p?.turn ?? 0)
+    )
+      p = x
+  return p
 }
 
 /** panelsOnPage is every <weft-devtools> in the document (another
@@ -2442,13 +2443,18 @@ export class WeftDevtools extends HTMLElement {
       // A tag that names no endpoint and no data-weft (UX-S5b-10: an
       // upgrader's bare include, read by its file name before 0.11):
       // one line says why the dock left — never on a tag that asked.
+      // Once per page (P10b-pre-web-fix): a dock mounted again says
+      // nothing new.
       if (
+        !warned &&
         !cfg.endpointExplicit &&
         isLoopback(endpoint) &&
         !viaPackage() &&
         !findPanelScript()?.hasAttribute("data-weft")
-      )
+      ) {
+        warned = true
         console.warn(noEndpoint(endpoint))
+      }
       this.remove()
     } else {
       // The host wrote the mount: it wants to see why nothing is there.
@@ -2982,18 +2988,21 @@ export class WeftDevtools extends HTMLElement {
     const running = s.turns.some((r) => r.status === "running")
     const agent = s.session?.agent ?? s.turns.at(0)?.agent ?? ""
     const dot = `weft-dot${s.live ? (running ? " weft-run" : " weft-on") : ""}`
-    // Running: the dot is Studio's live page on the agent (UX-F-03).
-    h.append(
-      running && agent
-        ? this.studioA(dot, "", href(this.base, liveLink({ agent })), {
-            "aria-label": HANDOFF.live,
-          })
-        : el("span", dot, "", { title: s.live ? "live" : "history" })
-    )
     const scope = this.model?.publicId || s.session?.public_id || ""
     // A page of runs (U22): its first tag by the key's last segment
     // ("batch cli-…"), else its agent, else its flow.
     const narrowing = this.model?.narrowing ?? {}
+    // Running: the dot is Studio's live page on the scope's agent
+    // (UX-F-03) — the narrowing's, or a conversation's; none for a page
+    // of runs of several agents (P10b-pre-web-fix).
+    const live = narrowing.agent || (scope && agent)
+    h.append(
+      running && live
+        ? this.studioA(dot, "", href(this.base, liveLink({ agent: live })), {
+            "aria-label": HANDOFF.live,
+          })
+        : el("span", dot, "", { title: s.live ? "live" : "history" })
+    )
     const [tk, tv] = Object.entries(narrowing.tags ?? {})[0] ?? []
     // A session alone (UX-H-06: a derived conversation has no public
     // id) names the session, never the fallback's words.
@@ -3068,7 +3077,11 @@ export class WeftDevtools extends HTMLElement {
     // narrow the list too.
     for (const [k, v] of Object.entries(narrowing.tags ?? {}))
       if (scope || k != tk)
-        h.append(el("span", "weft-chip weft-scope-chip", `tag ${k}=${v}`))
+        h.append(
+          el("span", "weft-chip weft-scope-chip", `tag ${k}=${v}`, {
+            title: SHORT.tag,
+          })
+        )
     h.append(el("span", "weft-grow"))
     // A derived turn whose spans reported no usage is left out of the
     // total (its zeros are "not reported"): the total then reads "≥",
@@ -3077,10 +3090,6 @@ export class WeftDevtools extends HTMLElement {
     const unknown = s.turns.find((r) => derivedUsageUnknown(r))
     const inTok = known.reduce((n, r) => n + r.usage.input_tokens, 0)
     const outTok = known.reduce((n, r) => n + r.usage.output_tokens, 0)
-    // No turn at all reads "—" too (UX-F-33): nothing known, not 0→0.
-    const tok = !known.length
-      ? "—"
-      : `${unknown ? "≥" : ""}${tokenPair(inTok, outTok)}`
     // "turn" is a session's word (UX-F-13): a list no session scopes
     // counts runs; "1 turn" singular. A page of runs (U22) counts its
     // whole match (the runs page's total), "batch b · 196 runs".
@@ -3088,6 +3097,13 @@ export class WeftDevtools extends HTMLElement {
     const count = all ?? s.turns.length
     const more = all == null && s.turnsCapped
     const noun = this.noun(s)
+    // The whole match counted, its loaded page's tokens summed: "≥"
+    // and the loaded-only words (P10b-pre-web-fix).
+    const cut = all != null && loadedOnly(s, s.turns.length, noun, noun)
+    // No turn at all reads "—" too (UX-F-33): nothing known, not 0→0.
+    const tok = !known.length
+      ? "—"
+      : `${unknown || cut ? "≥" : ""}${tokenPair(inTok, outTok)}`
     const stats = `${count}${more ? "+" : ""} ${noun}${count - 1 || more ? "s" : ""} · ${tok}`
     // A narrow dock hides the stat and cost line from sight (UX-D-32:
     // the header keeps to two lines; a screen reader still reads them);
@@ -3095,7 +3111,7 @@ export class WeftDevtools extends HTMLElement {
     te.title += ` · ${stats}`
     h.append(
       el("span", "", stats, {
-        title: unknown ? `${stats} — ${unknown.cost_reason ?? ""}` : stats,
+        title: [stats, unknown?.cost_reason, cut].filter(Boolean).join(" — "),
         "data-weft-stats": "",
       })
     )
@@ -7022,6 +7038,18 @@ export interface EdCtx {
   max: number | null
 }
 
+function argsText(call: FoldedToolCall): string {
+  if (typeof call.args === "string") return `(${call.args}`
+  if (call.args !== undefined) {
+    try {
+      return `(${JSON.stringify(call.args)})`
+    } catch {
+      return "(?)"
+    }
+  }
+  return call.streamedArgs ? `(${call.streamedArgs}…)` : "(…)"
+}
+
 /** A turn's run tree (lib/waterfall.ts): the Timeline's rows, and the
  * loop line's. */
 const turnRows = (t: TurnView) =>
@@ -7034,28 +7062,16 @@ const turnRows = (t: TurnView) =>
     agents: new Map((t.doc?.children ?? []).map((c) => [c.id, c.agent])),
   })
 
+function shortId(id: string): string {
+  const parts = id.split("/")
+  return parts[parts.length - 1] || id
+}
+
 /** lastStep is the highest step the request record holds a row of. */
 function lastStep(req: PanelRequests): number {
   let n = -1
   for (const k of req.steps.keys()) if (k > n) n = k
   return n
-}
-
-function attachStyles(root: ShadowRoot): void {
-  try {
-    if ("adoptedStyleSheets" in root && typeof CSSStyleSheet === "function") {
-      if (!sheet) {
-        const made = new CSSStyleSheet()
-        made.replaceSync(PANEL_CSS)
-        sheet = made
-      }
-      root.adoptedStyleSheets = [sheet]
-      return
-    }
-  } catch {
-    // no constructed sheets here (or another document's): fall back
-  }
-  root.append(el("style", "", PANEL_CSS))
 }
 
 /** prefersReducedMotion reports the page's prefers-reduced-motion:
@@ -7298,6 +7314,20 @@ function handOff(endpoint: string, runId: string): HTMLElement {
     title: `open the child run ${runId} in Studio`,
     "data-weft-handoff": runId,
   })
+}
+
+/** parkedHead is a parked call's line: its name, its arguments (the
+ * JSON, "(…)" when the record has none), then what follows them. */
+function parkedHead(call: ToolCallPart, after: HTMLElement[]): HTMLElement {
+  return el("div", "weft-call-h", [
+    el("span", "weft-name", call.name),
+    el(
+      "span",
+      "weft-args",
+      call.args === undefined ? "(…)" : fmtJSON(call.args)
+    ),
+    ...after,
+  ])
 }
 
 function renderCall(
@@ -7721,11 +7751,6 @@ export function mount(
   return node
 }
 
-function shortId(id: string): string {
-  const parts = id.split("/")
-  return parts[parts.length - 1] || id
-}
-
 /** engineWord is an experiment's engine as its chips say it: scripted
  * when the run answered as the scripted engine's model, else live. */
 export function engineWord(r: RunRow): "scripted" | "live" {
@@ -7945,36 +7970,27 @@ function usageLine(u: Usage): string {
   return parts.join(" · ")
 }
 
+function attachStyles(root: ShadowRoot): void {
+  try {
+    if ("adoptedStyleSheets" in root && typeof CSSStyleSheet === "function") {
+      if (!sheet) {
+        const made = new CSSStyleSheet()
+        made.replaceSync(PANEL_CSS)
+        sheet = made
+      }
+      root.adoptedStyleSheets = [sheet]
+      return
+    }
+  } catch {
+    // no constructed sheets here (or another document's): fall back
+  }
+  root.append(el("style", "", PANEL_CSS))
+}
+
 /** sourceLabel takes the turn back out of a `Replay 1 of t3` label (the
  * diff header reads "diff vs t3"). */
 function sourceLabel(label: string): string {
   return label.split(" of ")[1] || label
-}
-
-/** parkedHead is a parked call's line: its name, its arguments (the
- * JSON, "(…)" when the record has none), then what follows them. */
-function parkedHead(call: ToolCallPart, after: HTMLElement[]): HTMLElement {
-  return el("div", "weft-call-h", [
-    el("span", "weft-name", call.name),
-    el(
-      "span",
-      "weft-args",
-      call.args === undefined ? "(…)" : fmtJSON(call.args)
-    ),
-    ...after,
-  ])
-}
-
-function argsText(call: FoldedToolCall): string {
-  if (typeof call.args === "string") return `(${call.args}`
-  if (call.args !== undefined) {
-    try {
-      return `(${JSON.stringify(call.args)})`
-    } catch {
-      return "(?)"
-    }
-  }
-  return call.streamedArgs ? `(${call.streamedArgs}…)` : "(…)"
 }
 
 /** loadedOnly is a cost sum's note while older turns load on demand

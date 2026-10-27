@@ -23,7 +23,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "../lib/api"
 import { queryClient } from "../lib/query"
 import { INK, ROLE } from "../lib/palette"
-import { BILL_TITLE, costLine } from "../lib/cost"
+import {
+  atLeastCost,
+  BILL_TITLE,
+  costLine,
+  costView,
+  partialView,
+} from "../lib/cost"
 import { CORE_TERMS, TERMS } from "../lib/glossary"
 import { keyText, PANEL_KEYMAP, STUDIO_KEYMAP, VIEW_KEYS } from "../lib/keys"
 import { rowView } from "../lib/run-row"
@@ -35,7 +41,13 @@ import { AWAITING, STATUS, statusOf } from "../lib/status"
 import { statusClass } from "../lib/status-class"
 import { PANEL_CSS } from "./styles"
 import { clip, NO_CONTENT } from "../lib/title"
-import type { DecisionDoc, RunDoc, RunRow } from "../lib/api"
+import type {
+  CostFields,
+  DecisionDoc,
+  DelegatedCostFields,
+  RunDoc,
+  RunRow,
+} from "../lib/api"
 import type { AgentView } from "./client"
 import { TARGET_WORDS } from "../lib/target"
 import { UNRUN_CALL_REASON } from "../lib/events"
@@ -5654,4 +5666,39 @@ describe("the shared libs on both surfaces (U21.1)", () => {
     expect(panel).not.toContain("ttft")
     expect(studio).toBe(panel)
   })
+})
+
+// One cost rule for a set (P10b-pre-web-fix): the Go tally's session
+// figure (cost_partial: the whole-known turns' sum, "≥ $0" when they are
+// $0, "—" when none is) is what Studio draws (partialView) and what the
+// panel's header sums from the same turns (atLeastCost) —
+// studio/testdata/api/cost-parity.golden.json, written by Go's
+// TestCostParityGolden.
+describe("the set cost: Go's floor, Studio's figure and the panel's header agree", () => {
+  const parity = JSON.parse(
+    readFileSync(
+      resolve(process.cwd(), "../testdata/api/cost-parity.golden.json"),
+      "utf8"
+    )
+  ) as {
+    cases: {
+      name: string
+      session: CostFields
+      turns: (CostFields & DelegatedCostFields)[]
+    }[]
+  }
+  it("covers the three probe cases", () => {
+    expect(parity.cases).toHaveLength(3)
+  })
+  for (const c of parity.cases)
+    it(c.name, () => {
+      const studio = partialView(c.session, "turn") ?? costView(c.session)
+      const panel = atLeastCost(c.turns, undefined, "turn")
+      expect(panel.text).toBe(studio.text)
+      expect(panel.usd ?? null).toBe(
+        c.session.cost_partial
+          ? c.session.cost_partial.usd
+          : (studio.usd ?? null)
+      )
+    })
 })

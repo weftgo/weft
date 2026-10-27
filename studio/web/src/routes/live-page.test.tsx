@@ -27,6 +27,7 @@ import {
   LIVE_GRACE_MS,
   RUNNING_COST_REASON,
 } from "@/lib/live-rows"
+import { LIVE_TREE } from "@/lib/live-tree"
 import { resetNotices } from "@/lib/notify"
 import { APP_RUN_CANCEL, CANCEL_AGAIN } from "@/components/studio/live-table"
 import { POLLING_LINE } from "@/routes/live"
@@ -982,6 +983,45 @@ describe("accessibility", () => {
 })
 
 describe("H9: the tree, the minute and the attempt frames", () => {
+  it("a folded subagent counter names its failed children in its accessible name too (P10b-pre-web-fix)", async () => {
+    const { es } = await openPage()
+    const t0 = Date.now()
+    act(() => {
+      es.emit(
+        "run",
+        {
+          run: running("r_kid", {
+            parent_run_id: "r_dad",
+            agent: "worker",
+            status: "failed",
+            started: new Date(t0 - 1_000).toISOString(),
+            finished: new Date(t0).toISOString(),
+          }),
+        },
+        "1"
+      )
+      es.emit(
+        "run",
+        {
+          run: running("r_dad", {
+            agent: "director",
+            started: new Date(t0 - 3_000).toISOString(),
+          }),
+        },
+        "2"
+      )
+    })
+    const fold = await waitFor(() => {
+      const f = rowOf("r_dad")?.querySelector<HTMLElement>("[data-live-fold]")
+      expect(f?.dataset.liveFold).toBe("folded")
+      return f!
+    })
+    expect(fold.textContent).toContain(LIVE_TREE.failed(1))
+    expect(fold.getAttribute("aria-label")).toBe(
+      `${LIVE_TREE.show}: ${LIVE_TREE.more(1)} · ${LIVE_TREE.failed(1)}`
+    )
+  })
+
   it("draws a subagent under its parent and a retrying step from the attempt frame", async () => {
     const { es } = await openPage()
     const t0 = Date.now()

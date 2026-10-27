@@ -469,6 +469,54 @@ export function parkWord(
   return PARKED[p] ? `${AWAITING} · ${PARKED[p]}` : AWAITING
 }
 
+/** tokenSplit is the roll-up's own vs delegated (UX-S3-13): "60 in =
+ * 20 own + 40 via 1 child". Only the core's Subagent children —
+ * `<id>/…`, the ones its usage rolls up (pricing.go's rule) — count: a
+ * pool child session or a Generate inside a tool handler is linked to
+ * the run but not in its usage. Null with no such child usage, and —
+ * childTokenChips' rule — where the run does not say its
+ * delegated_usage (a token that cannot see every Subagent child: never
+ * a split from part of them). */
+export function tokenSplit(doc: {
+  id: string
+  usage: Usage
+  delegated_usage?: Usage
+  children: { id: string; usage?: Usage }[]
+}): string | null {
+  if (!doc.delegated_usage) return null
+  let sub = 0
+  let n = 0
+  for (const c of doc.children)
+    if (c.id.startsWith(`${doc.id}/`)) {
+      n++
+      sub += c.usage?.input_tokens ?? 0
+    }
+  if (!sub) return null
+  const u = doc.usage.input_tokens
+  return `${tokens(u)} in = ${tokens(u - sub)} own + ${tokens(sub)} via ${plural(n, "child", "children")}`
+}
+
+/** childTokenChips are the roll-up's per-child chips (UX-S3-13): each
+ * Subagent child's own "ops-manager 40 in · 20 out" — the rows
+ * tokenSplit adds up — its title the exact counts. None unless the run
+ * says its delegated usage (delegated_usage: U30.2-fix leaves it out
+ * where this token cannot see every Subagent child, so a split is
+ * never drawn from part of them). */
+export function childTokenChips(doc: {
+  id: string
+  delegated_usage?: Usage
+  children: { id: string; agent?: string; usage?: Usage }[]
+}): { id: string; text: string; title: string }[] {
+  if (!doc.delegated_usage) return []
+  return doc.children
+    .filter((c) => c.id.startsWith(`${doc.id}/`) && c.usage)
+    .map((c) => ({
+      id: c.id,
+      text: `${c.agent || UNNAMED_AGENT} ${tokenPair(c.usage!.input_tokens, c.usage!.output_tokens)}`,
+      title: `delegated to ${c.agent || UNNAMED_AGENT} (${c.id}): ${tokenPair(c.usage!.input_tokens, c.usage!.output_tokens, true)}, its own children included`,
+    }))
+}
+
 /** outputOf reads a run's structured output from its fold: the last
  * valid submit_output call's arguments and the invalid ones before it;
  * submitted is its own root span's weft.output.submitted (an Output
@@ -527,54 +575,6 @@ export function fileWords(p: {
       ? "url"
       : "no data"
   return `file ${p.media_type || "?"} · ${size}`
-}
-
-/** tokenSplit is the roll-up's own vs delegated (UX-S3-13): "60 in =
- * 20 own + 40 via 1 child". Only the core's Subagent children —
- * `<id>/…`, the ones its usage rolls up (pricing.go's rule) — count: a
- * pool child session or a Generate inside a tool handler is linked to
- * the run but not in its usage. Null with no such child usage, and —
- * childTokenChips' rule — where the run does not say its
- * delegated_usage (a token that cannot see every Subagent child: never
- * a split from part of them). */
-export function tokenSplit(doc: {
-  id: string
-  usage: Usage
-  delegated_usage?: Usage
-  children: { id: string; usage?: Usage }[]
-}): string | null {
-  if (!doc.delegated_usage) return null
-  let sub = 0
-  let n = 0
-  for (const c of doc.children)
-    if (c.id.startsWith(`${doc.id}/`)) {
-      n++
-      sub += c.usage?.input_tokens ?? 0
-    }
-  if (!sub) return null
-  const u = doc.usage.input_tokens
-  return `${tokens(u)} in = ${tokens(u - sub)} own + ${tokens(sub)} via ${plural(n, "child", "children")}`
-}
-
-/** childTokenChips are the roll-up's per-child chips (UX-S3-13): each
- * Subagent child's own "ops-manager 40 in · 20 out" — the rows
- * tokenSplit adds up — its title the exact counts. None unless the run
- * says its delegated usage (delegated_usage: U30.2-fix leaves it out
- * where this token cannot see every Subagent child, so a split is
- * never drawn from part of them). */
-export function childTokenChips(doc: {
-  id: string
-  delegated_usage?: Usage
-  children: { id: string; agent?: string; usage?: Usage }[]
-}): { id: string; text: string; title: string }[] {
-  if (!doc.delegated_usage) return []
-  return doc.children
-    .filter((c) => c.id.startsWith(`${doc.id}/`) && c.usage)
-    .map((c) => ({
-      id: c.id,
-      text: `${c.agent || UNNAMED_AGENT} ${tokenPair(c.usage!.input_tokens, c.usage!.output_tokens)}`,
-      title: `delegated to ${c.agent || UNNAMED_AGENT} (${c.id}): ${tokenPair(c.usage!.input_tokens, c.usage!.output_tokens, true)}, its own children included`,
-    }))
 }
 
 /** The structured output's words (UX-S1-06). */

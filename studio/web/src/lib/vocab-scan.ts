@@ -60,6 +60,9 @@ const HIDDEN_ATTR =
 const KEY_CALLS =
   /^(includes|has|get|set|delete|startsWith|endsWith|indexOf|test|getItem|setItem|removeItem|querySelector|querySelectorAll|getAttribute|setAttribute|hasAttribute|closest|matches|addEventListener|removeEventListener|useCapability)$/
 
+/** KEY_CALLS whose later arguments are values, not keys. */
+const SETTERS = /^(set|setItem|setAttribute)$/
+
 /** Object keys whose value is an identifier, never a word on screen. */
 const HIDDEN_KEY =
   /^(key|id|kind|value|to|href|className|type|name|cap|capability)$/
@@ -94,7 +97,13 @@ function visible(node: ts.Node): boolean {
     const callee = ts.isPropertyAccessExpression(p.expression)
       ? p.expression.name.text
       : p.expression.getText()
-    if (KEY_CALLS.test(callee)) return false
+    // A setter's key is argument 0; its value (set's, setItem's,
+    // setAttribute's second) may be words on screen (P10b-pre-web-fix).
+    if (
+      KEY_CALLS.test(callee) &&
+      (!SETTERS.test(callee) || p.arguments[0] === node)
+    )
+      return false
   }
   if (ts.isPropertyAssignment(p) && p.name === node) return false
   // A glossary entry's retired words (aliases: [...]) are the list the

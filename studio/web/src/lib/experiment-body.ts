@@ -663,24 +663,6 @@ export interface LabProblem {
   message: string
 }
 
-/** labLacksDefaults: the registration carries no option-lab defaults
- * — the server's own test (tool_choice mode unset). /api/runtimes
- * omits them only when Studio itself predates the field; a current
- * Studio fills an old runtime's in (its caps, tool_choice auto), and
- * then the server's 400 is the one that says so, shown verbatim. */
-export function labLacksDefaults(agent: Pick<AgentView, "defaults">): boolean {
-  return !agent.defaults?.tool_choice.mode
-}
-
-/** A compaction view's place (the transcript?step answer's, or the
- * preview's, compacted_at): messages [from_seq, to_seq) of the whole
- * transcript replaced by entries. */
-export interface CompactedNote {
-  from_seq: number
-  to_seq: number
-  entries: number
-}
-
 /** labDefault is the agent's default for a knob as the form shows it,
  * greyed: "" when the registration reports none. */
 export function labDefault(
@@ -812,6 +794,24 @@ const stopsOf = (s: string) => s.split("\n").filter((x) => x !== "")
  * array whatever the clicks' order). */
 const inOrder = (names: string[], tools: string[]) =>
   tools.filter((t) => names.includes(t))
+
+/** labLacksDefaults: the registration carries no option-lab defaults
+ * — the server's own test (tool_choice mode unset). /api/runtimes
+ * omits them only when Studio itself predates the field; a current
+ * Studio fills an old runtime's in (its caps, tool_choice auto), and
+ * then the server's 400 is the one that says so, shown verbatim. */
+export function labLacksDefaults(agent: Pick<AgentView, "defaults">): boolean {
+  return !agent.defaults?.tool_choice.mode
+}
+
+/** A compaction view's place (the transcript?step answer's, or the
+ * preview's, compacted_at): messages [from_seq, to_seq) of the whole
+ * transcript replaced by entries. */
+export interface CompactedNote {
+  from_seq: number
+  to_seq: number
+  entries: number
+}
 
 /**
  * labOverrides turns the lab into the command's typed fields and the

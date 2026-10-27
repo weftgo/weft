@@ -536,7 +536,9 @@ function ClearBreakpoint({
   const rts = useQuery({ ...runtimesQuery(), enabled: able && !!service })
   const [state, setState] = useState<"" | "saving" | "cleared" | "gone">("")
   const [err, setErr] = useState("")
-  if (panel)
+  // A Studio without the breakpoints route offers no clear to anyone:
+  // the read-only line only where one is offered (P10b-pre-web-fix).
+  if (panel && has("breakpoints"))
     return (
       <span
         className="ml-2 font-sans text-faint"

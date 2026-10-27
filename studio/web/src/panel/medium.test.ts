@@ -307,6 +307,45 @@ describe("Studio stops answering after boot (UX-F-09)", () => {
     expect(studio.gets(LIST).length).toBeGreaterThan(lists)
   })
 
+  it("meta answering while the list still fails restarts no lane backoff each minute (P10b-pre-web-fix)", async () => {
+    const { st, studio } = stoppable()
+    const el = await mount()
+    vi.useFakeTimers()
+    st.down = true
+    for (const es of FakeEventSource.live("public_id=")) es.fail()
+    await vi.advanceTimersByTimeAsync(9 * 60_000)
+    expect(line(el)).not.toBeNull()
+    const lane = () =>
+      studio.calls.filter((c) => /live/.test(c.path)).length +
+      FakeEventSource.instances.length
+    const lanes = lane()
+    // Meta answers again; the list still does not (a network failure).
+    const real = globalThis.fetch
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/api/meta")) {
+          st.down = false
+          try {
+            return await real(input, init)
+          } finally {
+            st.down = true
+          }
+        }
+        return real(input, init)
+      }
+    )
+    const streams = FakeEventSource.instances.length
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(60_000)
+      // Every lane that opens still fails: the spent backoff stays spent.
+      for (const es of FakeEventSource.live("public_id=")) es.fail()
+    }
+    expect(line(el)).not.toBeNull()
+    expect(FakeEventSource.instances.length).toBe(streams)
+    expect(lane()).toBe(lanes)
+  })
+
   it("removed while Studio is down: nothing reads again, nothing reopens (U30.1-fix)", async () => {
     const { st, studio } = stoppable()
     const el = await mount()

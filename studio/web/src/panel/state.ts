@@ -515,6 +515,25 @@ interface EventWalk {
   capped: boolean
 }
 
+/** overlay puts the run's finished words on a fold (applyTranscript
+ * maps only what the run produced onto its steps — its input record,
+ * the conversation it was fed, is not its reply). */
+function overlay(
+  folded: FoldedRun,
+  transcript: Transcript | null,
+  terminal = false
+): FoldedRun {
+  if (!transcript) return folded
+  try {
+    // A terminal run's stored words are the story: they replace what
+    // the tail streamed (deltas are never backfilled — text streamed
+    // across a dropped connection keeps its hole otherwise).
+    return applyTranscript(folded, transcript.batches, { replace: terminal })
+  } catch {
+    return folded
+  }
+}
+
 /** foldLive folds one live frame into a lane. Events fold once each,
  * by position, and in order: a position past the next one means the
  * stream never carried what lies between (published before the server
@@ -593,25 +612,6 @@ function newTurnView(id: string): TurnView {
     reading: false,
     recheck: false,
     stale: false,
-  }
-}
-
-/** overlay puts the run's finished words on a fold (applyTranscript
- * maps only what the run produced onto its steps — its input record,
- * the conversation it was fed, is not its reply). */
-function overlay(
-  folded: FoldedRun,
-  transcript: Transcript | null,
-  terminal = false
-): FoldedRun {
-  if (!transcript) return folded
-  try {
-    // A terminal run's stored words are the story: they replace what
-    // the tail streamed (deltas are never backfilled — text streamed
-    // across a dropped connection keeps its hole otherwise).
-    return applyTranscript(folded, transcript.batches, { replace: terminal })
-  } catch {
-    return folded
   }
 }
 
@@ -1222,8 +1222,18 @@ export class PanelModel {
       this.slowT = null
       if (!this.state.down) return
       // Read only while the page is visible and the dock open.
+      // Meta answering is not the list answering (P10b-pre-web-fix):
+      // the lanes' backoff starts over only once a list read lands —
+      // never a fresh one every minute while the list still fails.
       if (document.visibilityState == "visible" && this.watching)
-        fetchMeta(this.ep).then(() => this.reach(), quiet)
+        fetchMeta(this.ep).then(
+          () =>
+            this.disposed ||
+            this.refresh()
+              .catch(quiet)
+              .then(() => this.state.down || this.reach()),
+          quiet
+        )
       this.slow()
     })
   }

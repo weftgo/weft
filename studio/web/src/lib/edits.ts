@@ -56,29 +56,6 @@ export function editsProblem(
 export const FORK_EDITS =
   "transcript edits belong to an ephemeral replay; a fork starts at step 0 — set Write to: nowhere (ephemeral) or drop the edits"
 
-/** schemaOf is the input schema the run's records hold for tool: the
- * LAST catalog of the run that names it (steps in order, rows in
- * order) — what Studio's server checks against (studio/playground.go's
- * recordedSchemas keys by name over every catalog, the last one
- * winning, not by the edited step's own catalog: a Go-side debt this
- * mirrors so the editor and the server never disagree). undefined
- * where no catalog says. */
-export function schemaOf(
-  steps: Map<number, { rows: { tools?: unknown }[] }> | undefined,
-  tool: string
-): unknown {
-  let out: unknown
-  for (const n of [...(steps?.keys() ?? [])].sort((a, b) => a - b))
-    for (const row of steps?.get(n)?.rows ?? []) {
-      const t = (
-        row.tools as
-          { tools?: { name: string; schema?: unknown }[] } | undefined
-      )?.tools?.find((x) => x.name === tool)
-      if (t?.schema) out = t.schema
-    }
-  return out
-}
-
 const textOf = (m: Message) =>
   (m.content as (Part | null)[])
     .filter((p) => p?.type === "text")
@@ -230,6 +207,44 @@ const fits = (t: string, v: unknown): boolean =>
       kind(v) === (t === "boolean" ? "bool" : t)
 type Schema = Record<string, unknown>
 
+/** checkArgs reads an args edit: the object to send, or the refusal in
+ * the loop's words. A tool with no recorded schema needs an object.
+ * unchecked: this engine gave no number literals (JSON.parse source
+ * access), so integer literals and exactness were not checked here —
+ * the runtime checks them. */
+export function checkArgs(
+  tool: string,
+  schema: unknown,
+  text: string
+): { args?: Record<string, unknown>; error?: string; unchecked?: boolean } {
+  const fail = (m: string) => ({ error: `INVALID_INPUT: tool "${tool}": ${m}` })
+  let v: unknown
+  const seen = { unchecked: false }
+  try {
+    // Each number as a Number carrying its literal: integer means an
+    // integral literal in int64 (3.0 is refused, as the loop's decode does).
+    v = JSON.parse(text, (_k, x: unknown, ctx?: { source?: string }) => {
+      if (typeof x !== "number") return x
+      const n = new Number(x) as Num
+      n.lit = ctx?.source
+      if (n.lit === undefined) seen.unchecked = true
+      return n
+    })
+  } catch (e) {
+    return fail(`invalid JSON: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  if (kind(v) !== "object")
+    return fail(`expected object at the top level, got ${kind(v)}`)
+  const m =
+    lossy("", v) ||
+    (schema && typeof schema === "object" ? walk("", schema as Schema, v) : "")
+  if (m) return fail(m)
+  return {
+    args: JSON.parse(text) as Record<string, unknown>,
+    ...(seen.unchecked ? { unchecked: true } : {}),
+  }
+}
+
 /** editable: the target is one a replay can keep — the from_step it
  * implies (impliedFromStep) within the server's bound (max: the
  * highest from_step it accepts; null: unknown, nothing offered). */
@@ -315,42 +330,90 @@ function walk(path: string, s: Schema, v: unknown): string {
   return ""
 }
 
-/** checkArgs reads an args edit: the object to send, or the refusal in
- * the loop's words. A tool with no recorded schema needs an object.
- * unchecked: this engine gave no number literals (JSON.parse source
- * access), so integer literals and exactness were not checked here —
- * the runtime checks them. */
-export function checkArgs(
-  tool: string,
-  schema: unknown,
-  text: string
-): { args?: Record<string, unknown>; error?: string; unchecked?: boolean } {
-  const fail = (m: string) => ({ error: `INVALID_INPUT: tool "${tool}": ${m}` })
-  let v: unknown
-  const seen = { unchecked: false }
-  try {
-    // Each number as a Number carrying its literal: integer means an
-    // integral literal in int64 (3.0 is refused, as the loop's decode does).
-    v = JSON.parse(text, (_k, x: unknown, ctx?: { source?: string }) => {
-      if (typeof x !== "number") return x
-      const n = new Number(x) as Num
-      n.lit = ctx?.source
-      if (n.lit === undefined) seen.unchecked = true
-      return n
-    })
-  } catch (e) {
-    return fail(`invalid JSON: ${e instanceof Error ? e.message : String(e)}`)
+/** schemaOf is the input schema the run's records hold for tool: the
+ * LAST catalog of the run that names it (steps in order, rows in
+ * order) — what Studio's server checks against (studio/playground.go's
+ * recordedSchemas keys by name over every catalog, the last one
+ * winning, not by the edited step's own catalog: a Go-side debt this
+ * mirrors so the editor and the server never disagree). undefined
+ * where no catalog says. */
+export function schemaOf(
+  steps: Map<number, { rows: { tools?: unknown }[] }> | undefined,
+  tool: string
+): unknown {
+  let out: unknown
+  for (const n of [...(steps?.keys() ?? [])].sort((a, b) => a - b))
+    for (const row of steps?.get(n)?.rows ?? []) {
+      const t = (
+        row.tools as
+          { tools?: { name: string; schema?: unknown }[] } | undefined
+      )?.tools?.find((x) => x.name === tool)
+      if (t?.schema) out = t.schema
+    }
+  return out
+}
+
+export function userMessagesOf(batches: TranscriptBatch[]): UserMessage[] {
+  const out: UserMessage[] = []
+  const placed = placeBatches(batches)
+  const input = placed.filter((b) => b.input).flatMap((b) => b.messages)
+  const last = input.at(-1)
+  if (last?.role === "user") out.push({ step: 0, index: 0, text: textOf(last) })
+  for (const b of placed) {
+    if (b.input) continue
+    for (const m of b.messages)
+      if (m.role === "user")
+        out.push({
+          step: b.step,
+          index: out.filter((u) => u.step === b.step).length,
+          text: textOf(m),
+        })
   }
-  if (kind(v) !== "object")
-    return fail(`expected object at the top level, got ${kind(v)}`)
-  const m =
-    lossy("", v) ||
-    (schema && typeof schema === "object" ? walk("", schema as Schema, v) : "")
-  if (m) return fail(m)
-  return {
-    args: JSON.parse(text) as Record<string, unknown>,
-    ...(seen.unchecked ? { unchecked: true } : {}),
+  return out
+}
+
+// ── The mark (weft.edits) ─────────────────────────────────────────
+
+/** One token of a replayed run's weft.edits (source coordinates). */
+export interface EditMark {
+  step: number
+  what: "args" | "result" | "reply" | "user" | "insert"
+  callID?: string
+  index?: number
+}
+
+/** The playground's transcript-edit fields (UX-C-47): the recorded
+ * value is a muted "recorded: …" line above the field, never its
+ * placeholder (an empty field that looked filled); the field's own
+ * placeholder says it is empty; a field holding a draft carries the
+ * "edited" chip. */
+export const EDIT_FIELD = {
+  recorded: "recorded: ",
+  empty: "empty: type to replace the recorded value",
+  edited: "edited",
+  same: "same as the recording · not an edit",
+} as const
+
+/** lossy names the first number the browser cannot carry as written:
+ * past the doubles' exact integers (9007199254740993 would be sent as
+ * …992) or out of range (1e400 would be sent as null). */
+function lossy(path: string, v: unknown): string {
+  const at = (k: string) => (path ? `${path}.${k}` : k)
+  if (v instanceof Number) {
+    const lit = (v as unknown as Num).lit
+    const n = +v
+    if (!Number.isFinite(n))
+      return `field "${path}": the number ${lit ?? n} is out of range here: write it as a string`
+    if (lit && /^-?\d+$/.test(lit) && BigInt(lit) !== BigInt(n))
+      return `field "${path}": the number ${lit} would be sent as ${BigInt(n).toString()} (past the exact integers JSON keeps here): write it as a string or a smaller number`
+    return ""
   }
+  if (v && typeof v === "object")
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      const m = lossy(at(k), x)
+      if (m) return m
+    }
+  return ""
 }
 
 /** wireEdits is §5.1's transcript_edits: kind always sent, each kind
@@ -437,69 +500,6 @@ export const MARK_CHIPS: Record<EditMark["what"], string> = {
   reply: "edited",
   user: "edited",
   insert: "inserted",
-}
-
-export function userMessagesOf(batches: TranscriptBatch[]): UserMessage[] {
-  const out: UserMessage[] = []
-  const placed = placeBatches(batches)
-  const input = placed.filter((b) => b.input).flatMap((b) => b.messages)
-  const last = input.at(-1)
-  if (last?.role === "user") out.push({ step: 0, index: 0, text: textOf(last) })
-  for (const b of placed) {
-    if (b.input) continue
-    for (const m of b.messages)
-      if (m.role === "user")
-        out.push({
-          step: b.step,
-          index: out.filter((u) => u.step === b.step).length,
-          text: textOf(m),
-        })
-  }
-  return out
-}
-
-// ── The mark (weft.edits) ─────────────────────────────────────────
-
-/** One token of a replayed run's weft.edits (source coordinates). */
-export interface EditMark {
-  step: number
-  what: "args" | "result" | "reply" | "user" | "insert"
-  callID?: string
-  index?: number
-}
-
-/** The playground's transcript-edit fields (UX-C-47): the recorded
- * value is a muted "recorded: …" line above the field, never its
- * placeholder (an empty field that looked filled); the field's own
- * placeholder says it is empty; a field holding a draft carries the
- * "edited" chip. */
-export const EDIT_FIELD = {
-  recorded: "recorded: ",
-  empty: "empty: type to replace the recorded value",
-  edited: "edited",
-  same: "same as the recording · not an edit",
-} as const
-
-/** lossy names the first number the browser cannot carry as written:
- * past the doubles' exact integers (9007199254740993 would be sent as
- * …992) or out of range (1e400 would be sent as null). */
-function lossy(path: string, v: unknown): string {
-  const at = (k: string) => (path ? `${path}.${k}` : k)
-  if (v instanceof Number) {
-    const lit = (v as unknown as Num).lit
-    const n = +v
-    if (!Number.isFinite(n))
-      return `field "${path}": the number ${lit ?? n} is out of range here: write it as a string`
-    if (lit && /^-?\d+$/.test(lit) && BigInt(lit) !== BigInt(n))
-      return `field "${path}": the number ${lit} would be sent as ${BigInt(n).toString()} (past the exact integers JSON keeps here): write it as a string or a smaller number`
-    return ""
-  }
-  if (v && typeof v === "object")
-    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-      const m = lossy(at(k), x)
-      if (m) return m
-    }
-  return ""
 }
 
 /** markLine is a token's place in words. */

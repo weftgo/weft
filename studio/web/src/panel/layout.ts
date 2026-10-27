@@ -7,15 +7,6 @@ import type { PanelPlacement } from "./config"
 
 export type Side = "left" | "right" | "bottom" | "top"
 
-/** storage is localStorage, or null where reading it throws. */
-function storage(): Storage | null {
-  try {
-    return window.localStorage
-  } catch {
-    return null
-  }
-}
-
 /** pillPlace is where the pill sits: the float's corner (the half of
  * the viewport its box is in), a dock's side. */
 export function pillPlace(l: Layout): string {
@@ -78,6 +69,31 @@ const clamp = (v: number, lo: number, hi: number) =>
 const vw = () => window.innerWidth || 1024
 const vh = () => window.innerHeight || 768
 
+/** The fields that place the panel: stored only once the user placed
+ * it (toggled, moved, resized, re-docked), so until then the page's
+ * data-* attributes keep deciding. */
+export const PLACE = ["mode", "side", "open", "hidden", "x", "y", "w", "h", "d"]
+
+/** placedIn: a stored layout carries a placement. */
+export const placedIn = (st: Partial<Layout>) =>
+  PLACE.some((k) => Object.hasOwn(st, k))
+
+/** horizontal: docked on the left or right (sized by width). */
+export const horizontal = (side: Side) => side === "left" || side === "right"
+
+/** writeStore writes the layout under STORE_KEY (its placement only
+ * when placed); a private window (or a full quota) just forgets. */
+export function writeStore(l: Layout, placed: boolean): void {
+  try {
+    const out: Record<string, unknown> = { v: 1 }
+    for (const [k, v] of Object.entries(l))
+      if (placed || !PLACE.includes(k)) out[k] = v
+    storage()?.setItem(STORE_KEY, JSON.stringify(out))
+  } catch {
+    // forgotten: the panel still works
+  }
+}
+
 /** readStore reads the stored layout: version 1 only, each field of
  * the right type kept, anything else ignored. Never throws. */
 export function readStore(): Partial<Layout> {
@@ -115,31 +131,6 @@ export function readStore(): Partial<Layout> {
     return {}
   }
 }
-
-/** The fields that place the panel: stored only once the user placed
- * it (toggled, moved, resized, re-docked), so until then the page's
- * data-* attributes keep deciding. */
-export const PLACE = ["mode", "side", "open", "hidden", "x", "y", "w", "h", "d"]
-
-/** placedIn: a stored layout carries a placement. */
-export const placedIn = (st: Partial<Layout>) =>
-  PLACE.some((k) => Object.hasOwn(st, k))
-
-/** writeStore writes the layout under STORE_KEY (its placement only
- * when placed); a private window (or a full quota) just forgets. */
-export function writeStore(l: Layout, placed: boolean): void {
-  try {
-    const out: Record<string, unknown> = { v: 1 }
-    for (const [k, v] of Object.entries(l))
-      if (placed || !PLACE.includes(k)) out[k] = v
-    storage()?.setItem(STORE_KEY, JSON.stringify(out))
-  } catch {
-    // forgotten: the panel still works
-  }
-}
-
-/** horizontal: docked on the left or right (sized by width). */
-export const horizontal = (side: Side) => side === "left" || side === "right"
 
 /** migrateDebug moves localStorage.weft_debug=1 into the key (debug)
  * and drops the old one; reports whether the switch is on. */
@@ -285,5 +276,14 @@ export class Push {
       if (v) st.setProperty(name, v, prio)
       else st.removeProperty(name)
     })
+  }
+}
+
+/** storage is localStorage, or null where reading it throws. */
+function storage(): Storage | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
   }
 }

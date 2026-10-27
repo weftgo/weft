@@ -4,6 +4,7 @@
 // fallback that is a list (not a story), and a token-walled Studio
 // that says so instead of vanishing.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { SHORT } from "../lib/glossary-core"
 import type { WeftDevtools } from "./element"
 import { mount as mountPanel } from "./element"
 import {
@@ -100,6 +101,36 @@ describe("a tag scope: a page of unrelated runs (UX-D-05)", () => {
     expect(
       FakeEventSource.last("tag.arena.batch=cli-20261012-115753")
     ).toBeTruthy()
+  })
+
+  it("the whole match's count beside its loaded page's tokens: ≥ and the loaded-only words (P10b-pre-web-fix)", async () => {
+    fakeStudio(batchRoutes())
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "tag.arena.batch=cli-20261012-115753",
+      "data-open": "true",
+    })
+    const stats = $(el, "[data-weft-stats]")!
+    expect(stats.textContent).toBe("196 runs · ≥20 in · 8 out")
+    expect(stats.getAttribute("title")).toBe(
+      "196 runs · ≥20 in · 8 out — the 2 loaded runs only — load older runs for more"
+    )
+  })
+
+  it("a running run of a several-agent batch: the live dot links no one agent's live page (P10b-pre-web-fix)", async () => {
+    const routes = batchRoutes()
+    const page = routes[
+      "runs?tag.arena.batch=cli-20261012-115753&limit=50"
+    ] as { runs: Record<string, unknown>[] }
+    page.runs[0] = { ...page.runs[0], status: "running", finished: null }
+    fakeStudio(routes)
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "tag.arena.batch=cli-20261012-115753",
+      "data-open": "true",
+    })
+    expect($(el, ".weft-head a.weft-dot")).toBeNull()
+    expect($(el, ".weft-head .weft-dot")).not.toBeNull()
   })
 
   it("a tag scope with a flow keeps the flow's chip (the title names the batch)", async () => {
@@ -319,6 +350,9 @@ describe("U22-fix", () => {
     expect(all(el, ".weft-scope-chip").map((n) => n.textContent)).toEqual([
       "tag ci.job=7",
     ])
+    // Its hover is the glossary's (P10b-pre-web-fix), as the session's
+    // and the flow's chips are.
+    expect($(el, ".weft-scope-chip")!.getAttribute("title")).toBe(SHORT.tag)
   })
 
   it("the fallback groups its rows by agent and keeps the live words behind 'how to scope' (UX-D-06)", async () => {

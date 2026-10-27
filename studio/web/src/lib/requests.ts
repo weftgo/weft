@@ -37,19 +37,19 @@ export function paramFields(row: RequestRow): [string, string][] {
   ]
 }
 
+/** paramsLine is paramFields on one line (the panel's). */
+export function paramsLine(row: RequestRow): string {
+  return paramFields(row)
+    .map(([k, v]) => `${k} ${v}`)
+    .join(" · ")
+}
+
 /** hasWire: the row carries its attempt's provider exchange (plan A6)
  * — the Studio Wire tab draws it, the panel links to that tab. */
 export function hasWire(
   row: Pick<RequestRow, "raw">
 ): row is { raw: RawRecord } {
   return row.raw != null
-}
-
-/** paramsLine is paramFields on one line (the panel's). */
-export function paramsLine(row: RequestRow): string {
-  return paramFields(row)
-    .map(([k, v]) => `${k} ${v}`)
-    .join(" · ")
 }
 
 /** A step past the request pages the panel reads (MAX_REQUEST_PAGES ×

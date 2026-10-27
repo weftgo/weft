@@ -89,9 +89,17 @@ describe("the runs list's compare picks (U30.2, UX-A-16)", () => {
           .map((b) => b.dataset.pickRun)
       ).toEqual([runs.runs[0].id])
     )
+    expect(document.querySelector("[data-picks-live]")!.textContent).toBe(
+      PICKS.count(1)
+    )
     fireEvent.click(document.querySelector<HTMLElement>("[data-picks-clear]")!)
     expect(boxes().some((b) => b.checked)).toBe(false)
     expect(document.querySelector("[data-picks]")).toBeNull()
+    // P10b-pre-web-fix: focus lands on the table, the live region stays.
+    expect(document.activeElement).toBe(
+      document.querySelector("[data-skip-target]")
+    )
+    expect(document.querySelector("[data-picks-live]")!.textContent).toBe("")
   })
 
   it("without capability diff: no checkbox", async () => {

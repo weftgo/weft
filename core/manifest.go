@@ -300,9 +300,32 @@ func funcPackage(function string) string {
 	}
 	slash := strings.LastIndex(function, "/")
 	if dot := strings.Index(function[slash+1:], "."); dot >= 0 {
-		return function[:slash+1+dot]
+		return unescapeSymbol(function[:slash+1+dot])
 	}
 	return ""
+}
+
+// unescapeSymbol undoes the linker's escaping of a symbol's package
+// path: a "." (or another special byte) in its last element is written
+// %xx — gopkg.in/yaml.v3's functions read gopkg.in/yaml%2ev3.F at run
+// time — so the source reads the import path (U23.2-fix2). A "%" not
+// followed by two hex digits is kept.
+func unescapeSymbol(p string) string {
+	if !strings.Contains(p, "%") {
+		return p
+	}
+	var b strings.Builder
+	for i := 0; i < len(p); i++ {
+		if p[i] == '%' && i+2 < len(p) {
+			if v, err := strconv.ParseUint(p[i+1:i+3], 16, 8); err == nil {
+				b.WriteByte(byte(v))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(p[i])
+	}
+	return b.String()
 }
 
 // unescapeModPath undoes the module cache's case encoding: "!x" is "X".

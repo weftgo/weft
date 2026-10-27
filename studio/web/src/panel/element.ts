@@ -368,7 +368,7 @@ import {
   repairedWords,
   tokenSplit,
 } from "../lib/cards"
-import { deniedWord, effectChips, stepEffectsOf } from "../lib/onion"
+import { MCP_WORDS, deniedWord, effectChips, stepEffectsOf } from "../lib/onion"
 
 /** hasCapability reports whether meta lists the named capability (the
  * panel renders a control only when the server reports it, §8.5). */
@@ -7305,7 +7305,10 @@ function renderCall(
             f?.errorType ?? /^([A-Z_]+):/.exec(content)?.[1],
             f,
             !!call.childRunId
-          ) ?? (f?.fx?.deniedBy ? deniedWord(f.fx.deniedBy) : "error")
+          ) ??
+            (f?.fx?.deniedBy
+              ? deniedWord(f.fx.deniedBy)
+              : (MCP_WORDS[f?.errorType ?? ""] ?? "error"))
         )
       )
     }

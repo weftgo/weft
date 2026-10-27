@@ -115,11 +115,14 @@ func statsSpans(runs string) string {
 // under a scope a descendant with an out-of-scope run between it and
 // the group's run is left out with that run's subtree — the tree's
 // rule, the run document's hidden children (I4-fix2): the out-of-scope
-// descendant rows started in the window, whose ids none of dAnc's
-// intermediates (longer than the group's run) may be. Binds: the
+// descendant rows under the group runs' roots — whenever they started:
+// an intermediate started before the window still hides its subtree, as
+// SQLite's unbounded read does (U23.2-fix2), and another tenant's
+// children on a shared database are never gathered — whose ids none of
+// dAnc's intermediates (longer than the group's run) may be. Binds: the
 // window's start, the public id when pub is set, runs', the meta pairs
-// (key, key, value each, in key order), then under a scope the
-// window's start, the public id and the meta pairs again (statsBelowArgs).
+// (key, key, value each, in key order), then under a scope runs' again,
+// the public id and the meta pairs again (statsBelowArgs).
 func statsBelow(runs, pub string, meta map[string]string) string {
 	scope := ""
 	if pub != "" {
@@ -142,8 +145,9 @@ func statsBelow(runs, pub string, meta map[string]string) string {
 			in += " AND JSONHas(max(Meta), ?) AND JSONExtractString(max(Meta), ?) = ?"
 		}
 		between = ` AND NOT hasAny(arrayFilter(a -> length(a) > length(d.dParent), d.dAnc),
-		(SELECT groupArray(RunId) FROM (SELECT RunId FROM weft_runs WHERE position(RunId, '/') > 0 GROUP BY RunId
-			HAVING min(Started) >= fromUnixTimestamp64Nano(?) AND NOT (` + in + `))))`
+		(SELECT groupArray(RunId) FROM (SELECT RunId FROM weft_runs WHERE position(RunId, '/') > 0
+			AND splitByChar('/', RunId)[1] IN (SELECT splitByChar('/', rid)[1] FROM (` + runs + `))
+			GROUP BY RunId HAVING NOT (` + in + `))))`
 	}
 	return `SELECT DISTINCT ragent AS k, dTrace, dSpan, dRun, dProvider, dModel, dIn, dOut, dCached, dCacheWrite, dReasoning
 	FROM (SELECT dTrace, dSpan, dRun, dProvider, dModel, dIn, dOut, dCached, dCacheWrite, dReasoning, dParent, dAnc
@@ -167,9 +171,9 @@ func statsBelow(runs, pub string, meta map[string]string) string {
 }
 
 // statsBelowArgs is statsBelow's binds after runs': the meta pairs,
-// then under a scope its intermediates' window start, public id and
-// meta pairs.
-func statsBelowArgs(since int64, pub string, meta map[string]string) []any {
+// then under a scope its intermediates' runs binds (rargs), public id
+// and meta pairs.
+func statsBelowArgs(rargs []any, pub string, meta map[string]string) []any {
 	var out []any
 	pairs := func() {
 		for _, k := range slices.Sorted(maps.Keys(meta)) {
@@ -178,7 +182,7 @@ func statsBelowArgs(since int64, pub string, meta map[string]string) []any {
 	}
 	pairs()
 	if pub != "" || len(meta) > 0 {
-		out = append(out, since)
+		out = append(out, rargs...)
 		if pub != "" {
 			out = append(out, pub)
 		}
@@ -325,7 +329,7 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 			bargs = append(bargs, q.PublicID)
 		}
 		bargs = append(bargs, rargs...)
-		bargs = append(bargs, statsBelowArgs(q.Since.UnixNano(), q.PublicID, q.Meta)...)
+		bargs = append(bargs, statsBelowArgs(rargs, q.PublicID, q.Meta)...)
 		if err := query(`SELECT k, dProvider, dModel, toInt64(sum(dIn)), toInt64(sum(dOut)), toInt64(sum(dCached)),
 			toInt64(sum(dCacheWrite)), toInt64(sum(dReasoning)) FROM (`+below+`) GROUP BY k, dProvider, dModel`, bargs,
 			func(rows driver.Rows) error {

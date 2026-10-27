@@ -1434,7 +1434,9 @@ func TestToolsRecordSkippedBoundedAndOutsideTheHash(t *testing.T) {
 	}
 	lp := newRecLogProvider()
 	agt := core.New(wefttest.Script(wefttest.Say("ok")), core.LoggerProvider(lp), mk()[0],
-		core.SkippedImports("mcp:ledger", core.SkippedImport{Name: "odd", Reason: "schema root is not an object"}))
+		core.SkippedImports("mcp:ledger", core.SkippedImport{Name: "odd", Reason: "schema root is not an object"}),
+		// U23.2-fix2: an empty source reads "local", as a tool's own.
+		core.SkippedImports("", core.SkippedImport{Name: "anon", Reason: "r"}))
 	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
 		t.Fatal(err)
 	}
@@ -1442,7 +1444,7 @@ func TestToolsRecordSkippedBoundedAndOutsideTheHash(t *testing.T) {
 	defer lp.mu.Unlock()
 	for _, r := range lp.records {
 		if r.attr("weft.record") == "tools" &&
-			!strings.Contains(r.body, `"skipped":[{"name":"odd","reason":"schema root is not an object","source":"mcp:ledger"}]`) {
+			!strings.Contains(r.body, `"skipped":[{"name":"anon","reason":"r","source":"local"},{"name":"odd","reason":"schema root is not an object","source":"mcp:ledger"}]`) {
 			t.Errorf("SkippedImports not in the tools record: %s", r.body)
 		}
 	}

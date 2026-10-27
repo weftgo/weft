@@ -690,6 +690,10 @@ func TestSourceRelMachineIndependent(t *testing.T) {
 		{"/build/host/src/app/main.go", "main.main.func3", "main/main.go"},
 		{"/nowhere/svc/handlers.go", "github.com/x/svc.(*S).hook", "github.com/x/svc/handlers.go"},
 		{"/nowhere/svc/handlers.go", "", "handlers.go"},
+		// The linker escapes a dot in the package path's last element
+		// (U23.2-fix2): the source reads the import path.
+		{"/home/u/go/pkg/mod/gopkg.in/yaml.v3@v3.0.1/decode.go", "gopkg.in/yaml%2ev3.(*decoder).unmarshal", "gopkg.in/yaml.v3/decode.go"},
+		{"/x/y.go", "example.com/a%2eb%2ec.F", "example.com/a.b.c/y.go"},
 	} {
 		got := core.SourceRel(c.file, c.fn)
 		if got != c.want || strings.HasPrefix(got, "/") {
@@ -841,6 +845,12 @@ func TestRequestRecordWireFacts(t *testing.T) {
 			`{"extra_body_keys":["k"]}`},
 		{"userinfo with /", wiredFacts{wefttest.Script(wefttest.Say("ok")), "https://sk-abc/def@gw.example", []string{"k"}, nil},
 			`{"extra_body_keys":["k"]}`},
+		// U23.2-fix2: a "://" in a path or query is no scheme — the
+		// "@" past the cut makes it ambiguous: no host.
+		{"scheme in a query", wiredFacts{wefttest.Script(wefttest.Say("ok")), "gw/x?t=https://u:p@internal", []string{"k"}, nil},
+			`{"extra_body_keys":["k"]}`},
+		{"scheme in a path, no @", wiredFacts{wefttest.Script(wefttest.Say("ok")), "gw.example/redirect/https://other", []string{"k"}, nil},
+			`{"server_address":"gw.example","extra_body_keys":["k"]}`},
 		{"userinfo, no scheme", wiredFacts{wefttest.Script(wefttest.Say("ok")), "user:secret@gw.example:9000/v1", []string{"k"}, nil},
 			`{"server_address":"gw.example:9000","extra_body_keys":["k"]}`},
 	} {
@@ -863,7 +873,8 @@ func TestRequestRecordWireFacts(t *testing.T) {
 			t.Errorf("%s: wire = %s, want %s", c.name, body.Wire, c.want)
 		}
 		if strings.Contains(reqs[0].body, "secret") || strings.Contains(reqs[0].body, "token=") ||
-			strings.Contains(reqs[0].body, "sk-abc") || strings.Contains(reqs[0].body, `"user`) {
+			strings.Contains(reqs[0].body, "sk-abc") || strings.Contains(reqs[0].body, `"user`) ||
+			strings.Contains(reqs[0].body, "internal") {
 			t.Errorf("%s: a credential reached the record: %s", c.name, reqs[0].body)
 		}
 	}

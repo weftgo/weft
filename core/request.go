@@ -198,7 +198,9 @@ func wireFacts(m Model) (w *wireBody) {
 // rather than risk naming a secret as the host (U23.2-fix).
 func serverAddress(s string) string {
 	s = strings.TrimSpace(s)
-	if i := strings.Index(s, "://"); i >= 0 {
+	// A scheme only at the start: a "://" past the first "/", "?" or
+	// "#" is a path's or a query's, never the endpoint's (U23.2-fix2).
+	if i := strings.Index(s, "://"); i >= 0 && !strings.ContainsAny(s[:i], "/?#") {
 		s = s[i+3:]
 	}
 	auth := s

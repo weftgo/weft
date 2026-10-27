@@ -72,22 +72,30 @@ export function effectsOf(a: Attrs): CallEffects {
 
 /** An MCP call's two failures (error.type), told apart: the server was
  * not reached vs it answered isError. */
+/** An MCP call's failure words by error.type, both renderers' pill
+ * (the panel bundles these alone, never MCP_FAILURE's hints). */
+export const MCP_WORDS: Record<string, string | undefined> = {
+  mcp_transport: "MCP unreachable",
+  mcp_rpc_error: "MCP refused the call",
+  mcp_tool_error: "MCP tool error",
+}
+
 export const MCP_FAILURE: Record<
   string,
   { word: string; short: string; hint: string }
 > = {
   mcp_transport: {
-    word: "MCP unreachable",
+    word: MCP_WORDS.mcp_transport!,
     short: "unreachable",
     hint: "the tools/call got no answer: the connection or the stream ended, the session closed (error.type mcp_transport)",
   },
   mcp_rpc_error: {
-    word: "MCP refused the call",
+    word: MCP_WORDS.mcp_rpc_error!,
     short: "refused",
     hint: "the MCP server answered a JSON-RPC error: its handler failed, the tool is not listed or the arguments were refused (error.type mcp_rpc_error)",
   },
   mcp_tool_error: {
-    word: "MCP tool error",
+    word: MCP_WORDS.mcp_tool_error!,
     short: "tool error",
     hint: "the MCP server answered and said its tool failed: isError (error.type mcp_tool_error)",
   },

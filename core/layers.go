@@ -54,8 +54,10 @@ type MiddlewareInfo struct {
 	// Params is the layer's configuration, rendered as text, e.g.
 	// {"max_retries": "3", "base_delay": "200ms"}. Omitted when none.
 	Params map[string]string `json:"params,omitempty"`
-	// Source is the defining position, file:line relative to the
-	// module root, for a function or hook that is not weft's own.
+	// Source is the defining position for a function or hook that is
+	// not weft's own, in the import-path form: the package's import
+	// path, the file's base name and the line
+	// ("github.com/x/app/hooks.go:12"), the same on every machine.
 	Source string `json:"source,omitempty"`
 	// Opaque says the model chain's walk stopped at this layer: it
 	// declares no Unwrap, so the layers it wraps, if any, are not

@@ -1863,7 +1863,8 @@ type SkippedImport = core.SkippedImport
 // tools record's skipped[] beside the ones its tools carry (record
 // contract §4, U23.2-fix). weft/mcp's ImportError.Option builds it.
 // For the observability record only; nothing the model sees changes.
-// A run that offers no tool at all records no tools record, and so no
+// An empty source reads "local", as a tool's skips without an Origin
+// do. A run that offers no tool at all records no tools record, and so no
 // skipped[] either.
 func SkippedImports(source string, skipped ...SkippedImport) Option {
 	return core.SkippedImports(source, skipped...)

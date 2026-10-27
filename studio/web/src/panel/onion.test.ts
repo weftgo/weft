@@ -93,4 +93,13 @@ describe("the panel's effect chips (U23.2)", () => {
       )
     ).toBe(true)
   })
+
+  it("rw.mcp-mesh: each MCP failure's badge is its kind's word, as the run page's pill (U23.2-fix2)", async () => {
+    const el = await story("rw.mcp-mesh")
+    expect(badges(call(el, "m3"))).toContain("MCP tool error")
+    expect(badges(call(el, "m4"))).toContain("MCP refused the call")
+    expect(badges(call(el, "m5"))).toContain("MCP unreachable")
+    for (const id of ["m3", "m4", "m5"])
+      expect(badges(call(el, id)), id).not.toContain("error")
+  })
 })

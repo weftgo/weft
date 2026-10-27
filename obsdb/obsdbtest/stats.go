@@ -581,6 +581,31 @@ func statsDelegated(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if got, want := delegated(q), []string{"helper own=4/1 delegated=0/0 runs=0 []"}; !slices.Equal(got, want) {
 			t.Errorf("delegated under tag stats.batch=b2 =\n %v\nwant\n %v", got, want)
 		}
+		// U23.2-fix2: an out-of-scope intermediate that started before
+		// the window still hides its subtree, on both backends (the
+		// tree has no window): zw-p (pub_d) in the window, its helper
+		// (pub_other) 90 minutes ago, the scout under it (pub_d) in the
+		// window — under pub_d, zw-p's agent delegates nothing.
+		for _, r := range []statRun{
+			run("zw-p", "zprobe", "pub_d", -30*time.Minute, 7, 1),
+			run("zw-p/0/call_1", "zhelper", "pub_other", -90*time.Minute, 8, 1),
+			run("zw-p/0/call_1/0/call_1", "zscout", "pub_d", -29*time.Minute, 9, 1),
+		} {
+			if err := db.Write(ctx(), obsdb.Batch{Spans: r.spans(r)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		q = statsQ(obsdb.StatsByAgent)
+		q.PublicID = "pub_d"
+		var probe []string
+		for _, l := range delegated(q) {
+			if strings.HasPrefix(l, "zprobe ") {
+				probe = append(probe, l)
+			}
+		}
+		if want := []string{"zprobe own=7/1 delegated=0/0 runs=0 []"}; !slices.Equal(probe, want) {
+			t.Errorf("delegated under pub_d past an early out-of-scope helper =\n %v\nwant\n %v", probe, want)
+		}
 		// Every other by reads none.
 		page, err := a.Stats(ctx(), statsQ(obsdb.StatsByModel))
 		if err != nil {

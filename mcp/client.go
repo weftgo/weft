@@ -361,8 +361,15 @@ func callHandler(sess *sdk.ClientSession, remoteName string) func(context.Contex
 			// the live server refusing the call — its handler failed,
 			// the tool is unknown, the arguments invalid — never an
 			// unreachable server (U23.2-fix).
+			// The SDK also wraps its own transport failures as
+			// JSON-RPC errors (streamable HTTP's refused / dropped
+			// connections and non-2xx answers are ErrRejected, -32005):
+			// classified by code, so only a server's own error answer
+			// is a refusal (U23.2-fix2). A non-2xx answer carrying the
+			// server's JSON-RPC error wraps that error first, and
+			// errors.As finds it first.
 			var rpc *jsonrpc.Error
-			if errors.As(err, &rpc) {
+			if errors.As(err, &rpc) && !transportCode(rpc.Code) {
 				return "", &rpcError{err: err}
 			}
 			return "", &transportError{err: err}
@@ -404,6 +411,15 @@ type transportError struct{ err error }
 func (e *transportError) Error() string     { return "mcp: " + e.err.Error() }
 func (e *transportError) Unwrap() error     { return e.err }
 func (e *transportError) ErrorType() string { return "mcp_transport" }
+
+// transportCode says a JSON-RPC error code is the go-sdk's own word for
+// a transport failure, never a server's answer: ErrRejected (-32005,
+// "rejected by transport": streamable HTTP's connection errors, non-2xx
+// statuses, OAuth), ErrServerClosing (-32004) and ErrClientClosing
+// (-32003) — the SDK-internal codes of internal/jsonrpc2 (v1.8.0).
+func transportCode(code int64) bool {
+	return code == -32005 || code == -32004 || code == -32003
+}
 
 // rpcError is a tools/call the server answered with a JSON-RPC error —
 // its handler returned an error, the tool is not listed, the arguments

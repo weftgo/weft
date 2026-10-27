@@ -31,7 +31,12 @@ import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 
-import { isHoleRef, manifestQuery, requestsQuery } from "@/lib/api"
+import {
+  isHoleRef,
+  manifestQuery,
+  requestsQuery,
+  storedManifestQuery,
+} from "@/lib/api"
 import type {
   Holed,
   HoleRef,
@@ -47,6 +52,7 @@ import {
   attemptTag,
   OUTPUT,
   overrideTitle,
+  knobsBase,
   overrideTag,
   paramOverrideTags,
   preparedChip,
@@ -103,6 +109,12 @@ export interface RequestContext {
   instructionsHash?: string
   /** The run's weft.override.* fingerprint (its invoke_agent span). */
   override?: RunOverride
+  /** Studio's manifest store holds the run's manifest_hash (U27): its
+   * agent's configured params are what an override is read against. */
+  manifestAvailable?: boolean
+  /** The run a replay or experiment was forked from (forked_from's
+   * run id): its request's knobs, when the manifest has none. */
+  sourceRun?: string
   /** The run's spans: each attempt span's weft.attempt.layer
    * (attemptLayer), the attempts list's "· fallback". */
   spans?: Span[]
@@ -651,13 +663,29 @@ function AttemptView({
   // Each overridden knob's tag (UX-S5b-03): the run's
   // weft.override.params, the tool choice's weft.override.tool_choice.
   const ov = ctx?.override?.fields ?? []
-  const tags = ov.includes("params")
+  const tagged = ov.includes("params")
+  // What the overridden knobs are read against (UX-S5b-03): the run's
+  // stored manifest's agent params, else its source run's request.
+  const stored = useQuery({
+    ...storedManifestQuery(ctx?.manifestHash ?? ""),
+    enabled: tagged && !!ctx?.manifestAvailable && !!ctx.manifestHash,
+  })
+  const agent = stored.data?.manifest.agents.find((a) => a.name === ctx?.agent)
+  const src = useQuery({
+    ...requestsQuery(ctx?.sourceRun ?? ""),
+    enabled: tagged && !!ctx?.sourceRun && !agent?.params,
+  })
+  const tags = tagged
     ? paramOverrideTags(
         ctx?.spans?.find(
           (s) =>
             s.attrs["gen_ai.operation.name"] === "invoke_agent" &&
             s.attrs["weft.run.id"] === ctx.runId
-        )?.attrs["weft.override.params"]
+        )?.attrs["weft.override.params"],
+        knobsBase(
+          agent,
+          src.data?.requests.find((r) => r.attempt <= 1)?.body.params
+        )
       )
     : undefined
   return (

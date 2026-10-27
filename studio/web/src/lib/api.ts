@@ -966,6 +966,10 @@ export interface ManifestAgent {
     detect_loops?: number
   }
   tools: ManifestTool[]
+  /** The agent's configured sampling knobs (core.Params), by the
+   * request record's names (UX-S5b-03); absent when it sets none, or
+   * in a manifest written before the field. */
+  params?: Record<string, unknown>
   /** The onion (U23.1, ADR 0012): the WrapModel and WrapTools chains
    * outer to inner, and the hooks; each absent when empty. */
   model_middleware?: LayerInfo[]

@@ -26,8 +26,9 @@ export const CHIP_CATALOG = "catalog changed at this step"
 export const CHIP_PROMPT_CHANGED = "prompt changed at this step"
 
 /** concurrencyWords is the run header's tool-concurrency fact
- * (UX-E-50), as the run actually ran: the run's own
- * weft.override.parallelism (a run option or a playground override,
+ * (UX-E-50), as the run actually ran: the request record's parallelism
+ * when it carries one (U30.3, UX-S2-07: the dial itself); else the
+ * run's own weft.override.parallelism (a run option or a playground override,
  * read off its invoke_agent span) first; else the request record's
  * sequential_tools (true exactly when the effective Parallelism was 1);
  * else the cap from the run's stored manifest (policy.parallelism).
@@ -37,6 +38,7 @@ export const CHIP_PROMPT_CHANGED = "prompt changed at this step"
  * value is drawn as that — the manifest's, never the run's (P7-fix2),
  * marked "(manifest)" in the visible text (W7-prep). */
 export function concurrencyWords(c: {
+  recorded?: number
   override?: number
   overrideRead?: boolean
   sequentialTools?: boolean
@@ -52,6 +54,8 @@ export function concurrencyWords(c: {
           text: `parallelism: ${n}`,
           title: `at most ${n} tool calls at once (weft.Parallelism) — ${from}`,
         }
+  if (c.recorded !== undefined && c.recorded > 0)
+    return words(c.recorded, "the request record's parallelism")
   if (c.override !== undefined && c.override > 0)
     return words(c.override, "this run's override (weft.override.parallelism)")
   if (c.sequentialTools)

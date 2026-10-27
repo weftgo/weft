@@ -138,7 +138,7 @@ describe("the URL's filters", () => {
       "error ~ timeout",
       "since 2026-10-01",
       "until 2026-10-02T12:00:00Z",
-      "duration ≥ 5s",
+      "duration ≥ 5 s",
       "tokens ≥ 1,000",
       "cost ≥ $0.25",
       "tag tier=gold",

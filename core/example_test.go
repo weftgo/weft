@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"log"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -1312,9 +1313,31 @@ func (m onceModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[
 	}
 }
 
+// giveUps prints each reported attempt's give-up, from the run's
+// "model attempt" Debug lines.
+type giveUps struct{}
+
+func (giveUps) Enabled(context.Context, slog.Level) bool { return true }
+func (h giveUps) WithAttrs([]slog.Attr) slog.Handler     { return h }
+func (h giveUps) WithGroup(string) slog.Handler          { return h }
+func (giveUps) Handle(_ context.Context, r slog.Record) error {
+	if r.Message == "model attempt" {
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "giveup" {
+				fmt.Println("gave up:", a.Value)
+			}
+			return true
+		})
+	}
+	return nil
+}
+
 func ExampleAttemptInfo_giveUp() {
-	agt := core.New(wefttest.Script(wefttest.Fail(errors.New("401 unauthorized"))), core.WrapModel(once))
+	agt := core.New(wefttest.Script(wefttest.Fail(errors.New("401 unauthorized"))),
+		core.WrapModel(once), core.Logger(slog.New(giveUps{})))
 	_, err := agt.Generate(context.Background(), core.Prompt("hi"))
 	fmt.Println(err != nil)
-	// Output: true
+	// Output:
+	// gave up: not_retryable
+	// true
 }

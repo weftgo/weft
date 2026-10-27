@@ -168,13 +168,22 @@ export const GIVE_UP: Record<string, string | undefined> = {
  * got no answer (UX-S2-02): "gave up: retries spent (3 attempts)" from
  * the last attempt's giveup_reason; "gave up after 3 attempts" when
  * several failed and none says why (a record before it, a layer that
- * does not say). Null when the last attempt answered, or a single
- * failure says nothing more than its own row. */
+ * does not say). Null when the last attempt answered, when it ended
+ * on the run's cancellation or deadline (nothing gave up: the run's
+ * context ended, its status says so), or a single failure says
+ * nothing more than its own row. */
 export function giveUpLine(
-  attempts: { outcome?: string; giveup_reason?: string }[] | undefined
+  attempts:
+    | { outcome?: string; giveup_reason?: string; error_type?: string }[]
+    | undefined
 ): string | null {
   const last = attempts?.at(-1)
-  if (!last || last.outcome !== "error") return null
+  if (
+    !last ||
+    last.outcome !== "error" ||
+    last.error_type?.startsWith("context.")
+  )
+    return null
   const n = plural(attempts!.length, "attempt")
   const why = last.giveup_reason
   if (why) return `gave up: ${GIVE_UP[why] ?? why} (${n})`

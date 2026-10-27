@@ -14,7 +14,7 @@
 // the playground says so in meta.capabilities_off's words. Steer on the
 // running app turn sits beside (AppSteer). Cancel is never offered on
 // an app turn: the runtime refuses it.
-import { BREAKPOINT, BREAKPOINT_CLEAR } from "@/lib/cards"
+import { BREAKPOINT, BREAKPOINT_CLEAR, breakpointRuntimes } from "@/lib/cards"
 import { absoluteTime } from "@/lib/format"
 import {
   CALLS_HOLE,
@@ -527,12 +527,16 @@ function ClearBreakpoint({
   tool: string
   service?: string
 }) {
-  const read = tokenScopeOf(studioToken()) === "read"
+  // serveBreakpoints refuses every panel token (read or playground):
+  // only the server token (or none, on loopback) may clear one.
+  const panel = tokenScopeOf(studioToken()) !== ""
+  const { has } = useCapabilities()
+  const able = !panel && has("breakpoints")
   const qc = useQueryClient()
-  const rts = useQuery({ ...runtimesQuery(), enabled: !read && !!service })
-  const [state, setState] = useState<"" | "saving" | "cleared">("")
+  const rts = useQuery({ ...runtimesQuery(), enabled: able && !!service })
+  const [state, setState] = useState<"" | "saving" | "cleared" | "gone">("")
   const [err, setErr] = useState("")
-  if (read)
+  if (panel)
     return (
       <span
         className="ml-2 font-sans text-faint"
@@ -541,26 +545,43 @@ function ClearBreakpoint({
         {BREAKPOINT_CLEAR.readOnly}
       </span>
     )
-  const rt = rts.data?.runtimes.find(
-    (r) => r.service === service && r.breakpoints?.includes(tool)
-  )
-  if (state === "cleared")
+  if (state === "cleared" || state === "gone")
     return (
-      <span
-        className="ml-2 font-sans text-faint"
-        data-breakpoint-clear="cleared"
-      >
-        {BREAKPOINT_CLEAR.cleared}
+      <span className="ml-2 font-sans text-faint" data-breakpoint-clear={state}>
+        {state === "cleared" ? BREAKPOINT_CLEAR.cleared : BREAKPOINT_CLEAR.gone}
       </span>
     )
+  if (!able) return null
+  const held = breakpointRuntimes(rts.data?.runtimes, service, tool)
+  if (held.length > 1)
+    return (
+      <Link
+        {...runtimesLink()}
+        className="ml-2 font-sans text-faint hover:underline"
+        data-breakpoint-clear="several"
+      >
+        {BREAKPOINT_CLEAR.several(held.length, service!)}
+      </Link>
+    )
+  const rt = held.at(0)
   if (!rt) return null
   const clear = async () => {
     setState("saving")
     setErr("")
     try {
+      // The set as the runtime holds it now, never the page's last read:
+      // a breakpoint set since must survive this clear.
+      const fresh = await qc.fetchQuery({ ...runtimesQuery(), staleTime: 0 })
+      const now = breakpointRuntimes(fresh.runtimes, service, tool).find(
+        (r) => r.id === rt.id
+      )
+      if (!now) {
+        setState("gone")
+        return
+      }
       await putBreakpoints(
         rt.id,
-        (rt.breakpoints ?? []).filter((t) => t !== tool),
+        (now.breakpoints ?? []).filter((t) => t !== tool),
         "run"
       )
       setState("cleared")

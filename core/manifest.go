@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,6 +67,11 @@ type manifestAgent struct {
 	ModelMiddleware []MiddlewareInfo `json:"model_middleware,omitempty"`
 	ToolMiddleware  []MiddlewareInfo `json:"tool_middleware,omitempty"`
 	Hooks           *manifestHooks   `json:"hooks,omitempty"`
+	// Params is the agent's configured sampling knobs (core.Params), by
+	// the request record's names — what a run option overrides, so a
+	// reader can say "override (agent: 0.7)" (UX-S5b-03). Absent when
+	// the agent sets none.
+	Params *paramsBody `json:"params,omitempty"`
 }
 
 // manifestHooks are the agent's hook functions, each named as a tool
@@ -157,6 +163,10 @@ func (a *Agent) manifestEntry() manifestAgent {
 	}
 	if hooks.PrepareStep != nil || hooks.Tap != nil || hooks.OnRunEnd != nil || hooks.ToolSource != nil {
 		ma.Hooks = &hooks
+	}
+	if p := a.params; p.Temperature != nil || p.TopP != nil || p.MaxTokens != nil || len(p.Stop) > 0 || p.Seed != nil {
+		ma.Params = &paramsBody{Temperature: p.Temperature, TopP: p.TopP, MaxTokens: p.MaxTokens,
+			Stop: slices.Clone(p.Stop), Seed: p.Seed}
 	}
 	if a.usageLimit != (Usage{}) {
 		ma.Policy.UsageLimit = &manifestUsage{

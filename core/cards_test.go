@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -599,5 +600,37 @@ func TestOutputTypeRecorded(t *testing.T) {
 	_, _ = plain.Generate(context.Background(), core.Prompt("x"))
 	if _, ok := tp.find(t, "invoke_agent").attrsMap()["weft.output.type"]; ok {
 		t.Error("a run without Output carries weft.output.type")
+	}
+}
+
+// TestManifestParams (UX-S5b-03): the manifest carries the agent's
+// configured sampling knobs by the request record's names — what a run
+// option's override is read against — and none for an agent that sets
+// none.
+func TestManifestParams(t *testing.T) {
+	temp, seed := 0.7, int64(7)
+	agt := core.New(wefttest.Script(), core.Name("writer"),
+		core.Params(core.RequestParams{Temperature: &temp, Seed: &seed}))
+	raw, err := core.Manifest(agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Agents []struct {
+			Params map[string]any `json:"params"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil || len(m.Agents) != 1 {
+		t.Fatalf("manifest = %s (%v)", raw, err)
+	}
+	if got := m.Agents[0].Params; len(got) != 2 || got["temperature"] != 0.7 || got["seed"] != 7.0 {
+		t.Errorf("params = %v, want temperature 0.7 and seed 7", got)
+	}
+	plain, err := core.Manifest(core.New(wefttest.Script(), core.Name("plain")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), `"params"`) {
+		t.Errorf("an agent with no params: manifest %s carries params", plain)
 	}
 }

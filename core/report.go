@@ -53,13 +53,17 @@ type AttemptInfo struct {
 	// response), zero when none is known. The attempt span carries it as
 	// http.response.status_code.
 	HTTPStatus int
-	// GiveUp says why the reporting layer stopped after this failed
-	// attempt — the call's last: AttemptGiveUpBudget (its retries were
-	// spent), AttemptGiveUpNotRetryable (the failure is not one it
-	// retries), AttemptGiveUpRetryAfter (the provider asked to wait
-	// longer than it may). Empty on an attempt it followed with another,
-	// on a success, and when the layer does not know (a cancelled run
-	// names its own cause). The attempt span carries it as
+	// GiveUp says why the reporting layer stopped there, after this
+	// failed attempt: AttemptGiveUpBudget (its retries were spent),
+	// AttemptGiveUpNotRetryable (the failure is not one it retries),
+	// AttemptGiveUpRetryAfter (the provider asked to wait longer than it
+	// may). It is that layer's stop, not always the call's: an
+	// mw.Retry under an mw.Fallback marks where it stopped, and the call
+	// may go on to the backup. Empty on an attempt the layer followed
+	// with another, on a success, when the layer does not know (a
+	// cancelled run names its own cause), and when a self-reporting
+	// model under the layer reported the attempt (mw.Retry over one
+	// gives no reason). The attempt span carries it as
 	// weft.attempt.giveup_reason.
 	GiveUp string
 }

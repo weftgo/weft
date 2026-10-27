@@ -15,11 +15,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import { BREAKPOINT_CLEAR } from "@/lib/cards"
+import { BREAKPOINT, BREAKPOINT_CLEAR } from "@/lib/cards"
 import { BARRIER } from "@/lib/concurrency"
 import { renderApp, stubBrowser } from "@/test/app"
 import { shape, studioFor } from "@/test/cards-fixture"
 import { FakeEventSource } from "@/test/fake-event-source"
+import { golden, json } from "@/test/fake-studio"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -130,68 +131,164 @@ describe("the Studio remainders, part 2 (U30.3)", () => {
     )
   })
 
-  it("appr.breakpoint-own: the parked card clears the breakpoint through the runtime's breakpoints PUT (UX-H-18)", async () => {
-    const studio = open("appr.breakpoint-own", undefined, (fake) =>
+  it("runtimelab.option-lab: each tag names the agent's configured value from the run's stored manifest (UX-S5b-03)", async () => {
+    const run = shape("runtimelab.option-lab").run
+    open("runtimelab.option-lab", "view=story&step=0&pane=request", (fake) =>
       fake
-        .on("GET runtimes", {
-          runtimes: [
-            {
-              id: "rt_1",
-              service: shape("appr.breakpoint-own").run.service,
-              breakpoints_own: true,
-              breakpoints: ["status", "deploy"],
-              connected: true,
-              agents: [],
-            },
-          ],
+        .on(`GET runs/${run.id}`, {
+          ...run,
+          manifest_hash: "m1",
+          manifest_available: true,
         })
-        .on("PUT runtimes/rt_1/breakpoints", { tools: ["deploy"] })
+        .on("GET manifests/m1", {
+          manifest_hash: "m1",
+          agent: run.agent,
+          source: "runtime",
+          first_seen: run.started,
+          current_manifest_hash: "m1",
+          manifest: {
+            weft: 1,
+            agents: [
+              {
+                name: run.agent,
+                model: run.model,
+                policy: {
+                  parallelism: 4,
+                  max_steps: 10,
+                  max_result_bytes: 65536,
+                  max_model_retries: 3,
+                },
+                tools: [],
+                params: { temperature: 0.7 },
+              },
+            ],
+          },
+        })
     )
     await waitFor(() =>
       expect(
-        document.querySelector('[data-breakpoint-clear="rt_1"]')
-      ).not.toBeNull()
+        document.querySelector('[data-param-override="temperature"]')
+          ?.textContent
+      ).toBe("◂ override (agent: 0.7)")
     )
-    const link = document.querySelector<HTMLElement>(
-      '[data-breakpoint-clear="rt_1"]'
-    )!
-    const tool = "status"
-    fireEvent.click(
-      within(link).getByRole("button", { name: BREAKPOINT_CLEAR.clear(tool) })
-    )
-    await waitFor(() =>
-      expect(
-        document.querySelector('[data-breakpoint-clear="cleared"]')
-      ).not.toBeNull()
-    )
-    const put = studio.calls("PUT runtimes/rt_1/breakpoints")
-    expect(put).toHaveLength(1)
-    expect(put[0].body).toEqual({ tools: ["deploy"], surface: "run" })
+    expect(
+      document.querySelector('[data-param-override="top_p"]')?.textContent
+    ).toBe("◂ override (agent: default)")
   })
 
-  it("appr.breakpoint-own, a read token: the parked card says why it cannot clear the breakpoint (UX-H-18)", async () => {
-    setStudioToken(
-      `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope: "read", exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
+  // A runtime of the run's service, as GET /api/runtimes lists it.
+  const runtime = (id: string, breakpoints: string[], connected = true) => ({
+    id,
+    service: shape("appr.breakpoint-own").run.service,
+    breakpoints_own: true,
+    breakpoints,
+    connected,
+    agents: [],
+  })
+  // The run page's Studio for the breakpoint park, with capability
+  // breakpoints on and the runtimes the handler answers.
+  const parkWith = (
+    runtimes: () => object[],
+    caps = ["requests", "steps", "ingest", "breakpoints"]
+  ) =>
+    open("appr.breakpoint-own", undefined, (fake) =>
+      fake
+        .on("GET meta", {
+          ...golden<Record<string, unknown>>("meta"),
+          capabilities: caps,
+        })
+        .on("GET runtimes", () => json({ runtimes: runtimes() }))
+        .on("PUT runtimes/rt_1/breakpoints", { tools: ["deploy"] })
     )
-    open("appr.breakpoint-own", undefined, (st) =>
-      st.on("GET runtimes", {
-        runtimes: [
-          {
-            id: "rt_1",
-            service: shape("appr.breakpoint-own").run.service,
-            breakpoints_own: true,
-            breakpoints: ["status"],
-            connected: true,
-            agents: [],
-          },
-        ],
+  const clearLink = () =>
+    document.querySelector<HTMLElement>("[data-breakpoint-clear]")
+
+  it("appr.breakpoint-own: the parked card clears the breakpoint through the runtime's breakpoints PUT, on the set read just before (UX-H-18)", async () => {
+    let reads = 0
+    const studio = parkWith(() =>
+      // A breakpoint set on "deploy2" since the page's first read.
+      ++reads === 1
+        ? [runtime("rt_1", ["status", "deploy"])]
+        : [runtime("rt_1", ["status", "deploy", "deploy2"])]
+    )
+    await waitFor(() =>
+      expect(clearLink()?.getAttribute("data-breakpoint-clear")).toBe("rt_1")
+    )
+    const before = studio.calls("GET runtimes").length
+    fireEvent.click(
+      within(clearLink()!).getByRole("button", {
+        name: BREAKPOINT_CLEAR.clear("status"),
       })
     )
     await waitFor(() =>
-      expect(
-        document.querySelector('[data-breakpoint-clear="read-only"]')
-          ?.textContent
-      ).toBe(BREAKPOINT_CLEAR.readOnly)
+      expect(clearLink()?.getAttribute("data-breakpoint-clear")).toBe("cleared")
     )
+    expect(studio.calls("GET runtimes").length).toBeGreaterThan(before)
+    const put = studio.calls("PUT runtimes/rt_1/breakpoints")
+    expect(put).toHaveLength(1)
+    expect(put[0].body).toEqual({
+      tools: ["deploy", "deploy2"],
+      surface: "run",
+    })
+  })
+
+  it.each([
+    ["read", "read"],
+    ["playground", "playground"],
+  ])(
+    "appr.breakpoint-own, a %s panel token: the parked card says why it cannot clear the breakpoint (UX-H-18)",
+    async (_, scope) => {
+      setStudioToken(
+        `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
+      )
+      const studio = parkWith(() => [runtime("rt_1", ["status"])])
+      await waitFor(() =>
+        expect(clearLink()?.textContent).toBe(BREAKPOINT_CLEAR.readOnly)
+      )
+      expect(clearLink()!.getAttribute("data-breakpoint-clear")).toBe(
+        "read-only"
+      )
+      expect(studio.calls("PUT runtimes/rt_1/breakpoints")).toHaveLength(0)
+    }
+  )
+
+  it("appr.breakpoint-own: no link for a disconnected runtime, nor with capability breakpoints off (UX-H-18)", async () => {
+    parkWith(() => [runtime("rt_1", ["status"], false)])
+    // The park still reads as a breakpoint: only the link is withheld.
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-parked] .eyebrow")?.textContent
+      ).toBe(BREAKPOINT)
+    )
+    await new Promise((r) => setTimeout(r, 300))
+    expect(clearLink()).toBeNull()
+    cleanup()
+    parkWith(
+      () => [runtime("rt_1", ["status"])],
+      ["requests", "steps", "ingest"]
+    )
+    // The park still reads as a breakpoint: only the link is withheld.
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-parked] .eyebrow")?.textContent
+      ).toBe(BREAKPOINT)
+    )
+    await new Promise((r) => setTimeout(r, 300))
+    expect(clearLink()).toBeNull()
+  })
+
+  it("appr.breakpoint-own: two runtimes of the service holding it — no guess, a pointer to the runtimes page (UX-H-18)", async () => {
+    const studio = parkWith(() => [
+      runtime("rt_1", ["status"]),
+      runtime("rt_2", ["status"]),
+    ])
+    await waitFor(() =>
+      expect(clearLink()?.getAttribute("data-breakpoint-clear")).toBe("several")
+    )
+    expect(clearLink()!.textContent).toBe(
+      BREAKPOINT_CLEAR.several(2, shape("appr.breakpoint-own").run.service)
+    )
+    expect(clearLink()!.getAttribute("href")).toContain("/runtimes")
+    expect(studio.calls("PUT runtimes/rt_1/breakpoints")).toHaveLength(0)
   })
 })

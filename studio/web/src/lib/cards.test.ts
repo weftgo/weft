@@ -295,21 +295,31 @@ describe("the run cards' facts (U25)", () => {
       id: "r1/0/c1",
       usage: { input_tokens: 40, output_tokens: 20 },
     }
-    expect(tokenSplit({ id: "r1", usage, children: [sub] })).toBe(
+    const d = { delegated_usage: sub.usage }
+    expect(tokenSplit({ id: "r1", usage, ...d, children: [sub] })).toBe(
       "60 in = 20 own + 40 via 1 child"
     )
-    expect(tokenSplit({ id: "r1", usage, children: [] })).toBeNull()
+    expect(tokenSplit({ id: "r1", usage, ...d, children: [] })).toBeNull()
+    // A scoped token that cannot see every Subagent child: the run doc
+    // says no delegated_usage (U30.2-fix), and no split is drawn from
+    // the children it does see.
+    expect(tokenSplit({ id: "r1", usage, children: [sub] })).toBeNull()
     // A pool child session or a Generate inside a tool handler is
     // linked to the run, not in its usage (pricing.go's rule): never
     // "100 in = 20 own + 80 via 1 child", never a negative own.
     const pool = { id: "r9", usage: { input_tokens: 80, output_tokens: 1 } }
-    expect(tokenSplit({ id: "r1", usage, children: [pool] })).toBeNull()
-    expect(tokenSplit({ id: "r1", usage, children: [sub, pool] })).toBe(
+    expect(tokenSplit({ id: "r1", usage, ...d, children: [pool] })).toBeNull()
+    expect(tokenSplit({ id: "r1", usage, ...d, children: [sub, pool] })).toBe(
       "60 in = 20 own + 40 via 1 child"
     )
     // A sibling whose id merely starts with the run's is not its child.
     expect(
-      tokenSplit({ id: "r1", usage, children: [{ ...sub, id: "r10/0/c1" }] })
+      tokenSplit({
+        id: "r1",
+        usage,
+        ...d,
+        children: [{ ...sub, id: "r10/0/c1" }],
+      })
     ).toBeNull()
   })
 

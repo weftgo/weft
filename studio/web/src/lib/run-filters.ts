@@ -427,7 +427,7 @@ export function runChips(s: RunsSearch, caps: FilterCaps): RunChip[] {
       )
   }
   if (s.min_duration !== undefined)
-    push("min_duration", `duration ≥ ${s.min_duration}s`)
+    push("min_duration", `duration ≥ ${s.min_duration} s`)
   if (s.min_tokens !== undefined)
     push("min_tokens", `tokens ≥ ${s.min_tokens.toLocaleString("en-US")}`)
   if (s.min_cost !== undefined)

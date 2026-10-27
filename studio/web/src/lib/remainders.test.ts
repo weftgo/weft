@@ -6,6 +6,7 @@ import type { RequestRow } from "./api"
 import { giveUpLine, msText } from "./attempts"
 import {
   childTokenChips,
+  knobsBase,
   outputType,
   overrideTag,
   paramOverrideTags,
@@ -15,6 +16,7 @@ import { BARRIER, concurrencyMarks } from "./concurrency"
 import { attemptError } from "./error-kind"
 import { duration, spanMs } from "./format"
 import { OUTPUT_MARK, toolPolicyChips } from "./policy"
+import { concurrencyWords } from "./request-pane"
 import { offsetText, took } from "./waterfall"
 
 describe("one duration format (UX-F-16)", () => {
@@ -54,10 +56,23 @@ describe("an attempt's cause and the give-up (UX-S2-02)", () => {
     expect(giveUpLine([fail])).toBeNull()
     expect(giveUpLine([fail, { outcome: "ok" }])).toBeNull()
     expect(giveUpLine(undefined)).toBeNull()
+    // The run's context ended: nothing gave up.
+    for (const error_type of ["context.Canceled", "context.DeadlineExceeded"])
+      expect(giveUpLine([fail, fail, { ...fail, error_type }])).toBeNull()
   })
 })
 
 describe("a step's parallelism and a barrier (UX-S2-07)", () => {
+  it("the run header's concurrency prefers the request record's dial", () => {
+    expect(
+      concurrencyWords({ recorded: 2, override: 3, manifest: 4 })?.text
+    ).toBe("parallelism: 2")
+    expect(concurrencyWords({ recorded: 1 })?.text).toBe("sequential")
+    // A record before the dial: the override, as before.
+    expect(concurrencyWords({ override: 3, manifest: 4 })?.text).toBe(
+      "parallelism: 3"
+    )
+  })
   const req = (step: number, parallelism?: number, seq: string[] = []) =>
     ({
       step,
@@ -148,22 +163,35 @@ describe("per-child token chips (UX-S3-13)", () => {
 })
 
 describe("the per-param override tag (UX-S5b-03)", () => {
-  it("tags each knob the override set or cleared, with the agent's value when known", () => {
+  const agent = { knobs: { temperature: 0.7 }, from: "agent" as const }
+  it("tags each knob the override set or cleared, with the agent's configured value when known", () => {
     const v = '{"temperature":0.4,"top_p":null}'
     expect([...paramOverrideTags(v)]).toEqual([
       ["temperature", "override"],
       ["top_p", "cleared by override"],
     ])
-    expect(paramOverrideTags(v, { temperature: 0.7 }).get("temperature")).toBe(
+    expect(paramOverrideTags(v, agent).get("temperature")).toBe(
       "override (agent: 0.7)"
     )
-    expect(overrideTag("seed", {})).toBe("override (agent: default)")
+    expect(overrideTag("seed", agent)).toBe("override (agent: default)")
     // The pre-U25 Go struct: its nulls say nothing of the agent's.
     expect([...paramOverrideTags({ Temperature: 0.4, TopP: null })]).toEqual([
       ["temperature", "override"],
     ])
   })
-  it("lists an experiment variant's knobs against the source run's", () => {
+  it("reads the manifest's agent params first, else the source run's request, said as such", () => {
+    expect(
+      knobsBase({ params: { temperature: 0.7 } }, { temperature: 1 })
+    ).toEqual(agent)
+    // No params in the manifest (none set, or a manifest before the
+    // field): the source run's knobs, named as the source run's.
+    const src = knobsBase({}, { temperature: 1 })
+    expect(src).toEqual({ knobs: { temperature: 1 }, from: "source run" })
+    expect(overrideTag("temperature", src)).toBe("override (source run: 1)")
+    expect(overrideTag("seed", src)).toBe("override (source run: default)")
+    expect(knobsBase(undefined, undefined)).toBeUndefined()
+  })
+  it("lists an experiment variant's knobs against the comparison", () => {
     expect(
       variantParamLines(
         {
@@ -171,13 +199,19 @@ describe("the per-param override tag (UX-S5b-03)", () => {
           params: { top_p: 0.9 },
           tool_choice: "none",
         },
-        { temperature: 0.7 }
+        agent
       )
     ).toEqual([
       "top_p 0.9 ◂ override (agent: default)",
       "temperature 0.4 ◂ override (agent: 0.7)",
       "tool choice none ◂ override",
     ])
+    expect(
+      variantParamLines(
+        { options: { temperature: 0.4 } },
+        knobsBase(undefined, { temperature: 0.9 })
+      )
+    ).toEqual(["temperature 0.4 ◂ override (source run: 0.9)"])
     expect(variantParamLines({ instructions: "x" })).toEqual([])
   })
 })

@@ -280,7 +280,7 @@ child). It ends when the run does, however the run ends.
 | `weft.run.messages` | int | at end, always: the growth `messages` records emitted (views excluded) — 0 when content capture was off or no logger was wired. Informational: a content-off destination legitimately stores none (§5) |
 | `weft.run.pending` | int | at end, when calls are parked for approval |
 | `weft.output.submitted` | bool | at end, an agent built with `Output` only: `true` when the run ended with a valid `submit_output` call (what `GenerateAs` / `OutputOf` decode), `false` when it did not — the case `GenerateAs` answers `ErrNoOutput`, which the caller sees and the record otherwise would not (UX-S1-06). A caller-side decode failure stays the caller's: no record carries it |
-| `weft.output.type` | string | at start, an agent built with `Output` only: the type its typed answer decodes into, package-qualified (`main.Invoice`; a pointer's element; `struct` for an anonymous struct), at most 128 bytes — a name, never a value (UX-S1-06). The manifest's `submit_output` tool carries the same name as `output_type` |
+| `weft.output.type` | string | at start, an agent built with `Output` only: the type its typed answer decodes into, package-qualified (`main.Invoice`; a pointer's element; `struct` for an anonymous struct), at most 128 bytes, cut at a rune boundary — a name, never a value (UX-S1-06). The manifest's `submit_output` tool carries the same name as `output_type` |
 | `weft.run.denied` | int | at end, on the resuming run (a run fed decisions), when it denied parked calls — an explicit `Deny` and every call left undecided ("no decision"): they have no event (ADR 0007) and, since U13.1, a zero-length `execute_tool` span each marked `weft.tool.denied` — which a reader does not count again: this count stays their carrier (§6 `problems.denied`). Not a `Resolve` (a result computed outside the process); not an `mw.Allow` refusal (a policy middleware's `DENIED` has its own `execute_tool` span, counted from there); not the calls `Repair` fills with an error result when a transcript with parked calls returns with a new prompt instead of decisions — those are uncounted |
 | `weft.tap.panics` | int | at end, when observers panicked during the run and were contained: taps, `OnMessages` observers, a record or report the logger or tracer failed to build — the run's share of `Agent.TapPanics` (`OnRunEnd` observers run after the span ended: theirs reach `TapPanics` alone). The run is unchanged; an observer the app relies on saw less (§6 `problems.tap_panics`) |
 | `weft.run.stop_reason` | string | at end: the last step's `stop`, `tool_calls`, `max_tokens` |
@@ -404,13 +404,16 @@ so), `auth` (401, 403), `server_error` (any other 5xx) — and
 `model_error` for the rest (a reader keeps `model_error` as the
 fallback: an attempt stored before U30.3 reads it for every provider
 failure). `weft.attempt.giveup_reason` (`AttemptInfo.GiveUp`) on a
-failed attempt the reporting layer stopped after — `mw.Retry`'s
+failed attempt the reporting layer stopped there, after it — that
+layer's stop, not always the call's: an `mw.Retry` under an
+`mw.Fallback` marks where it stopped, and the call may go on to the
+backup — `mw.Retry`'s
 `budget` (its retries spent), `not_retryable` (a failure its classifier
 does not retry), `retry_after_too_long` (the provider asked to wait
 past `MaxWait`); absent on an attempt another followed, on a run's
 cancellation (its cause is the run's), and when a self-reporting model
-beneath reported the attempt (the verdict is `Retry`'s, the report the
-model's).
+beneath reported the attempt (`mw.Retry` over one gives no reason: the
+verdict is `Retry`'s, the report the model's).
 
 Live, each attempt span is also an `attempt` frame the moment it lands
 (H9, O17: `obsdb.AttemptFrame`, published by OTLP ingest and by a

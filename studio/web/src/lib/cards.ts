@@ -112,8 +112,36 @@ export const BREAKPOINT_CLEAR = {
   cleared: "breakpoint cleared: runs from now on run this tool",
   at: (rt: string) => `runtime ${rt}`,
   readOnly:
-    "a read token cannot change breakpoints: open Studio with its own token to clear it",
+    "a panel token cannot change breakpoints (they park every run the runtime starts): open Studio with its server token to clear it",
+  several: (n: number, service: string) =>
+    `${n} runtimes of ${service} break on this tool: clear it on the one that ran this turn`,
+  gone: "that runtime no longer breaks on this tool",
 } as const
+
+/** breakpointRuntimes are the runtimes that may have parked a call on a
+ * breakpoint (UX-H-18): the run's own, by the app-turn gate's rule
+ * (lib/honesty.ts parkedKind: a connected runtime of the run's
+ * service), that hold the tool in their breakpoints. More than one is
+ * not guessed between: the card points at the runtimes page. */
+export function breakpointRuntimes<
+  TRuntime extends {
+    service: string
+    connected?: boolean
+    breakpoints?: string[]
+  },
+>(
+  rts: readonly TRuntime[] | null | undefined,
+  service: string | undefined,
+  tool: string
+): TRuntime[] {
+  if (!service) return []
+  return (rts ?? []).filter(
+    (r) =>
+      r.connected !== false &&
+      r.service === service &&
+      !!r.breakpoints?.includes(tool)
+  )
+}
 
 /** A ParkSource's park that no debugger is known to have set:
  * ParkSource is a general option (ADR 0030), runtime.Breakpoints() one
@@ -299,14 +327,36 @@ export function paramsOverride(v: unknown): string | null {
 /** A knob's sampling params as the request record names them. */
 type Knobs = Record<string, unknown>
 
+/** What an overridden knob is compared against (UX-S5b-03): the
+ * agent's configured params — its manifest's, the run's stored one —
+ * else the source run's request ("source run"). */
+export interface KnobsBase {
+  knobs: Knobs
+  from: "agent" | "source run"
+}
+
+/** knobsBase picks the comparison: the manifest's agent's params when
+ * the manifest carries them, else the source run's request knobs when
+ * read; undefined when neither is known (the tag says "override"). A
+ * manifest without params says nothing: an agent that sets none and a
+ * manifest older than the field read the same. */
+export function knobsBase(
+  agent: { params?: Knobs } | null | undefined,
+  source?: Knobs | null
+): KnobsBase | undefined {
+  if (agent?.params) return { knobs: agent.params, from: "agent" }
+  return source ? { knobs: source, from: "source run" } : undefined
+}
+
 /** overrideTag is a knob's tag in the request and experiment views
- * (UX-S5b-03): "override (agent: 0.7)" — the agent's own value beside
- * an overridden one when it is known (agent given), "(agent: default)"
- * when the agent sets none; "override" alone when it is not known. */
-export function overrideTag(knob: string, agent?: Knobs | null): string {
-  if (!agent) return "override"
-  const a = agent[knob]
-  return `override (agent: ${a === undefined || a === null ? "default" : JSON.stringify(a)})`
+ * (UX-S5b-03): "override (agent: 0.7)" — the agent's configured value
+ * beside an overridden one, "(agent: default)" when it sets none; or
+ * "(source run: …)" when only the source run's request is known;
+ * "override" alone when neither is. */
+export function overrideTag(knob: string, base?: KnobsBase): string {
+  if (!base) return "override"
+  const a = base.knobs[knob]
+  return `override (${base.from}: ${a === undefined || a === null ? "default" : JSON.stringify(a)})`
 }
 
 /** paramOverrideTags reads weft.override.params (paramsOverride's three
@@ -315,7 +365,7 @@ export function overrideTag(knob: string, agent?: Knobs | null): string {
  * "cleared by override". Empty when unreadable. */
 export function paramOverrideTags(
   v: unknown,
-  agent?: Knobs | null
+  base?: KnobsBase
 ): Map<string, string> {
   const out = new Map<string, string>()
   let o = v
@@ -331,7 +381,7 @@ export function paramOverrideTags(
   for (const [k, x] of entries) {
     const name = PARAM[k] ?? k
     if (x !== null && !(Array.isArray(x) && !x.length))
-      out.set(name, overrideTag(name, agent))
+      out.set(name, overrideTag(name, base))
     else if (!old) out.set(name, "cleared by override")
   }
   return out
@@ -340,8 +390,8 @@ export function paramOverrideTags(
 /** variantParamLines are an experiment variant's sampling knobs, each
  * with its tag (UX-S5b-03): "temperature 0.4 ◂ override (agent: 0.7)"
  * — the variant's overrides (options.temperature, params, tool_choice)
- * against the source run's request (agent), when it is read. */
-export function variantParamLines(o: unknown, agent?: Knobs | null): string[] {
+ * against knobsBase's comparison, when one is known. */
+export function variantParamLines(o: unknown, base?: KnobsBase): string[] {
   if (!o || typeof o !== "object") return []
   const v = o as {
     options?: Record<string, unknown>
@@ -352,7 +402,7 @@ export function variantParamLines(o: unknown, agent?: Knobs | null): string[] {
   if (v.options?.temperature !== undefined)
     knobs.temperature = v.options.temperature
   const out = Object.entries(knobs).map(
-    ([k, x]) => `${k} ${JSON.stringify(x)} ◂ ${overrideTag(k, agent)}`
+    ([k, x]) => `${k} ${JSON.stringify(x)} ◂ ${overrideTag(k, base)}`
   )
   if (v.tool_choice !== undefined)
     out.push(`tool choice ${toolChoiceText(v.tool_choice)} ◂ override`)
@@ -483,12 +533,17 @@ export function fileWords(p: {
  * 20 own + 40 via 1 child". Only the core's Subagent children —
  * `<id>/…`, the ones its usage rolls up (pricing.go's rule) — count: a
  * pool child session or a Generate inside a tool handler is linked to
- * the run but not in its usage. Null with no such child usage. */
+ * the run but not in its usage. Null with no such child usage, and —
+ * childTokenChips' rule — where the run does not say its
+ * delegated_usage (a token that cannot see every Subagent child: never
+ * a split from part of them). */
 export function tokenSplit(doc: {
   id: string
   usage: Usage
+  delegated_usage?: Usage
   children: { id: string; usage?: Usage }[]
 }): string | null {
+  if (!doc.delegated_usage) return null
   let sub = 0
   let n = 0
   for (const c of doc.children)

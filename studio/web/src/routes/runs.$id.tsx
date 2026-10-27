@@ -671,6 +671,8 @@ function RunPage() {
               runId: id,
               agent: run.data?.agent,
               manifestHash: run.data?.manifest_hash,
+              manifestAvailable: run.data?.manifest_available,
+              sourceRun: run.data?.forked_from.split("#")[0],
               instructionsHash: run.data?.instructions_hash,
               override,
               spans: ownSpans,
@@ -1747,6 +1749,7 @@ function RunPage() {
             transcript={transcript.data}
             gaps={stream.gaps}
             sequentialTools={requestsQ.data?.requests[0]?.body.sequential_tools}
+            parallelism={requestsQ.data?.requests[0]?.body.parallelism}
             overrideParallelism={overrideParallelism(ownSpans, id)}
             overrideRead={hasInvokeAgent(ownSpans, id)}
             toolFacts={spans.data ? toolFacts : undefined}

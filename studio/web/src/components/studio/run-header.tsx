@@ -553,6 +553,7 @@ export function RunHeader({
   transcript,
   gaps,
   sequentialTools,
+  parallelism,
   overrideParallelism,
   overrideRead,
   toolFacts,
@@ -573,6 +574,9 @@ export function RunHeader({
   /** The first request record's sequential_tools: the concurrency fact
    * as the run ran, ahead of its stored manifest (UX-E-50). */
   sequentialTools?: boolean
+  /** The first request record's parallelism (UX-S2-07): the dial the
+   * run ran with, ahead of everything else when the record carries it. */
+  parallelism?: number
   /** The run's weft.override.parallelism (overrideOf): the concurrency
    * a run option or a playground override set, ahead of both. */
   overrideParallelism?: number
@@ -621,6 +625,7 @@ export function RunHeader({
     enabled: Boolean(doc.manifest_available && doc.manifest_hash),
   })
   const conc = concurrencyWords({
+    recorded: parallelism,
     override: overrideParallelism,
     overrideRead,
     sequentialTools,

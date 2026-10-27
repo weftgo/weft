@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // outputToolName is the tool Output registers. The model calls it with
@@ -71,7 +72,7 @@ const maxOutputTypeName = 128
 // outputTypeName is Output's type as the record names it (UX-S1-06):
 // the package-qualified name ("main.Invoice"), a pointer's element's,
 // "struct" for an anonymous struct — a name, never a value, at most
-// maxOutputTypeName bytes.
+// maxOutputTypeName bytes, cut at a rune boundary.
 func outputTypeName(t reflect.Type) string {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -81,7 +82,13 @@ func outputTypeName(t reflect.Type) string {
 	}
 	s := t.String()
 	if len(s) > maxOutputTypeName {
-		s = s[:maxOutputTypeName]
+		// Cut at a rune boundary: a generic's type arguments may name
+		// non-ASCII identifiers, and the attribute stays valid UTF-8.
+		n := maxOutputTypeName
+		for n > 0 && !utf8.RuneStart(s[n]) {
+			n--
+		}
+		s = s[:n]
 	}
 	return s
 }

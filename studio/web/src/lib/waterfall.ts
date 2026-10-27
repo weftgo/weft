@@ -247,12 +247,6 @@ interface Node extends WaterfallRow {
 
 type Base = Omit<WaterfallRow, "depth" | "critical">
 
-export function int(v: unknown): number | undefined {
-  if (typeof v === "number" && Number.isInteger(v)) return v
-  if (typeof v === "string" && /^\d+$/.test(v)) return Number(v)
-  return undefined
-}
-
 /** The span's GenAI operation; the name's first word for spans that
  * carry none ("invoke_agent planner"). */
 export function opOf(s: TimedSpan): string {
@@ -781,15 +775,18 @@ function timeRows(input: WaterfallInput): WaterfallModel {
       str(ia["gen_ai.agent.name"]) ??
         inv?.span.name.replace(/^invoke_agent\s*/, "") ??
         (fold?.agent || input.agents?.get(run) || at?.label),
-      // The steps: weft's count, else the fold's — and a run no event
-      // folded (derived from stock OTel spans) counts its chat spans,
-      // one model call a step, as Studio's run row does (obsdb/stock.go
-      // row.Steps = len(chats)): the header and the root row say one
-      // number (P020.1).
+      // The steps: weft's count, else the fold's — and a run derived
+      // from stock OTel spans (its id otel-<trace>-<root span>, record
+      // contract §9: no events to fold) counts its chat spans, one model
+      // call a step, as Studio's run row does (obsdb/stock.go row.Steps
+      // = len(chats)): the header and the root row say one number
+      // (P020.1). A weft run never does — its retries are chat spans too.
       int(ia["weft.run.steps"]) ??
         (fold &&
           (fold.steps.length ||
-            own.filter((p) => opOf(p.span) == "chat").length)),
+            (run.startsWith("otel-")
+              ? own.filter((p) => opOf(p.span) == "chat").length
+              : 0))),
       inv?.start ?? (lo < Infinity ? lo : (at?.start ?? 0)),
       inv
         ? inv.took
@@ -1198,20 +1195,6 @@ export const KIND_ICON: Record<SpanKind, string> = {
   attempt: "◇",
   span: "○",
 }
-export function rowTone(r: WaterfallRow): SpanTone {
-  switch (r.status) {
-    case "error":
-      return r.kind === "tool" ? "error" : "bad"
-    case "running":
-      return "running"
-    case "never":
-      return "never"
-    case "pending":
-      return "result"
-    default:
-      return r.kind === "tool" ? "tool" : "step"
-  }
-}
 
 /** The critical path's legend and hint. */
 export const CRITICAL = "critical path"
@@ -1357,6 +1340,27 @@ function finishOf(v: unknown): string | undefined {
       /* the string itself */
     }
   return Array.isArray(v) ? str(v[0]) : str(v)
+}
+
+export function int(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isInteger(v)) return v
+  if (typeof v === "string" && /^\d+$/.test(v)) return Number(v)
+  return undefined
+}
+
+export function rowTone(r: WaterfallRow): SpanTone {
+  switch (r.status) {
+    case "error":
+      return r.kind === "tool" ? "error" : "bad"
+    case "running":
+      return "running"
+    case "never":
+      return "never"
+    case "pending":
+      return "result"
+    default:
+      return r.kind === "tool" ? "tool" : "step"
+  }
 }
 
 // ── Keys ───────────────────────────────────────────────────────────

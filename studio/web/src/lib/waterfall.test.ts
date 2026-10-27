@@ -297,6 +297,18 @@ describe("a derived run (stock GenAI spans, no weft.run.id)", () => {
     })
     expect(root(bare).gist).toBe("2 steps")
   })
+
+  it("a weft run (weft.run.id) never counts chat spans: its retries are chat spans too (P020.1-ui-fix)", () => {
+    // No invoke_agent span (not exported yet) and no folded events: one
+    // step whose model call was retried — two chat spans at index 0.
+    const spans = [
+      span("c1", "", "chat script", 1, 2, chat("r", 0, "error", 0)),
+      span("c2", "", "chat script", 3, 4, chat("r", 0, "stop", 0)),
+    ]
+    const empty = { steps: [] } as unknown as FoldedRun
+    const root = waterfallRows({ runId: "r", spans, fold: empty }).rows[0]
+    expect(root.gist).not.toBe("2 steps")
+  })
 })
 
 describe("hostile input", () => {

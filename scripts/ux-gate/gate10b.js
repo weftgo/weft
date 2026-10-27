@@ -174,6 +174,14 @@ const panelHead = (page) => page.evaluate(() => {
     theme: document.querySelector("weft-devtools")?.getAttribute("data-theme-resolved") || "",
   };
 });
+// since 0.20.1 a page of runs titles itself "<kind> <id> · N runs" (the count
+// left the stats line); headName / headN read either form.
+const headName = (h) => (h ? h.title.replace(/ · \d+\+? runs?$/, "") : "");
+const headN = (h) => {
+  if (!h) return NaN;
+  const m = h.title.match(/ · (\d+)\+? runs?$/) || h.stats.match(/^(\d+)\+? runs?/);
+  return m ? Number(m[1]) : NaN;
+};
 async function panelSelect(page, id) {
   await page.evaluate((id) => document.querySelector("weft-devtools").select(id), id);
   await page.waitForTimeout(2500);
@@ -296,8 +304,8 @@ async function phaseMain() {
     await hostPanel(b.page, { token: TOKEN, scope: `tag.arena.batch=${BATCH}` });
     let h = await panelHead(b.page);
     let shot = await pw.shot(b.page, "b1-panel-batch");
-    const n1 = h ? Number((h.stats.match(/^(\d+)\+? (run|turn)s?/) || [])[1]) : NaN;
-    const b1 = h && h.title === `batch ${BATCH}` && n1 === top && /^\d+\+? runs? ·/.test(h.stats) && h.rows.length > 0 && !/\bturns?\b/.test(h.stats);
+    const n1 = headN(h);
+    const b1 = h && headName(h) === `batch ${BATCH}` && n1 === top && / · \d+\+? runs?$/.test(h.title) && h.rows.length > 0 && !/\bturns?\b/.test(h.title + " " + h.stats);
     ev.push(`${ok(b1)} data-scope="tag.arena.batch=${BATCH}": title ${q(h && h.title)} · ${q(h && h.stats)}; ${h ? h.rows.length : 0} rows loaded (first ${q(h && h.rows[0] && h.rows[0].text)}); N = ${n1} vs /api/runs?tag.arena.batch=…&limit=1 total ${top} (top-level; &all=1 → ${allN} with child runs): ${n1 === top ? "equal" : "DIFFERENT"} [${shot}]`);
     facts.unpriced = ((await pw.panelText(b.page)).match(/\d+ runs? unpriced[^\n]*/) || [""])[0];
     await b.browser.close();
@@ -312,8 +320,8 @@ async function phaseMain() {
     h = await panelHead(b.page);
     shot = await pw.shot(b.page, "b2-panel-flow");
     const listed = h ? h.rows.map((r) => r.id) : [];
-    const n2 = h ? Number((h.stats.match(/^(\d+)/) || [])[1]) : NaN;
-    const b2 = h && h.title === "flow f_checkout" && n2 === flowAll && listed.length === flowAll && listed.every((id) => flowAPI.includes(id) || flowAll > flowAPI.length) && flowAPI.every((id) => listed.includes(id)) && !others.filter((r) => (r.meta || {})["weft.flow"] !== "f_checkout").some((r) => listed.includes(r.id));
+    const n2 = headN(h);
+    const b2 = h && headName(h) === "flow f_checkout" && n2 === flowAll && listed.length === flowAll && listed.every((id) => flowAPI.includes(id) || flowAll > flowAPI.length) && flowAPI.every((id) => listed.includes(id)) && !others.filter((r) => (r.meta || {})["weft.flow"] !== "f_checkout").some((r) => listed.includes(r.id));
     ev.push(`${ok(b2)} data-scope=";flow=f_checkout" (runs stamped by the in-gate Go program: scope.WithFlow over five wefttest runs tagged g10b.batch=${FB}, three f_checkout, two f_search — no fixture): title ${q(h && h.title)} · ${q(h && h.stats)}; lists ${listed.length} — ${h ? h.rows.map((r) => q(r.text.slice(0, 40))).join(", ") : ""}; /api/runs?flow=f_checkout total ${flowAll}; the two f_search runs listed: ${others.filter((r) => (r.meta || {})["weft.flow"] === "f_search").some((r) => listed.includes(r.id)) ? "YES" : "no"} [${shot}]`);
     await b.browser.close();
 
@@ -322,8 +330,8 @@ async function phaseMain() {
     await hostPanel(b.page, { token: process.env.TAGTOK });
     h = await panelHead(b.page);
     shot = await pw.shot(b.page, "b3-panel-tag-token");
-    const n3 = h ? Number((h.stats.match(/^(\d+)/) || [])[1]) : NaN;
-    const b3 = h && h.title === `batch ${BATCH}` && n3 === top && h.rows.length > 0;
+    const n3 = headN(h);
+    const b3 = h && headName(h) === `batch ${BATCH}` && n3 === top && h.rows.length > 0;
     ev.push(`${ok(b3)} a tag token minted for the batch (POST /api/panel-tokens {"tags":{"arena.batch":"${BATCH}"}} with the server token; read scope), no data-scope: title ${q(h && h.title)} · ${q(h && h.stats)} [${shot}]`);
     await b.browser.close();
 

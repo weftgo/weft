@@ -3028,16 +3028,21 @@ export class WeftDevtools extends HTMLElement {
     const title = scope
       ? `${agent ? agent + " · " : ""}${scope}`
       : q || NO_SCOPE_LABEL
+    // A page of runs (no public id, a narrowing): "batch <id> · N runs",
+    // the id cut before the count (P020.1).
+    const page = !scope && q
     const te = el(
       "span",
-      "weft-title",
+      page ? "weft-title weft-q" : "weft-title",
       // The agent's card in Studio (UX-F-03).
       scope && agent
         ? [
             this.studioA("", agent, href(this.base, agentsLink(agent))),
             ` · ${scope}`,
           ]
-        : title,
+        : page
+          ? [el("span", "weft-tv", q)]
+          : title,
       {
         title: scope
           ? title
@@ -3105,10 +3110,12 @@ export class WeftDevtools extends HTMLElement {
     // "turn" is a session's word (UX-F-13): a list no session scopes
     // counts runs; "1 turn" singular. A page of runs (U22) counts its
     // whole match (the runs page's total), "batch b · 196 runs".
-    const all = !scope && q ? s.total : undefined
+    const all = page ? s.total : undefined
     const count = all ?? s.turns.length
     const more = all == null && s.turnsCapped
     const noun = this.noun(s)
+    const n = `${count}${more ? "+" : ""} ${noun}${count - 1 || more ? "s" : ""}`
+    if (page) te.append(` · ${n}`)
     // The whole match counted, its loaded page's tokens summed: "≥"
     // and the loaded-only words (P10b-pre-web-fix).
     const cut = all != null && loadedOnly(s, s.turns.length, noun, noun)
@@ -3116,11 +3123,12 @@ export class WeftDevtools extends HTMLElement {
     const tok = !known.length
       ? "—"
       : `${unknown || cut ? "≥" : ""}${tokenPair(inTok, outTok)}`
-    const stats = `${count}${more ? "+" : ""} ${noun}${count - 1 || more ? "s" : ""} · ${tok}`
+    // A page of runs' count is in its title: the stats say the tokens.
+    const stats = page ? tok : `${n} · ${tok}`
     // A narrow dock hides the stat and cost line from sight (UX-D-32:
     // the header keeps to two lines; a screen reader still reads them);
     // the title's tooltip says them.
-    te.title += ` · ${stats}`
+    te.title += ` · ${n} · ${tok}`
     h.append(
       el("span", "", stats, {
         title: [stats, unknown?.cost_reason, cut].filter(Boolean).join(" — "),
@@ -3895,12 +3903,14 @@ export class WeftDevtools extends HTMLElement {
       engRow.append(
         el(
           "label",
-          "weft-tool",
+          // One option a block, its reason the line under it (P020.1:
+          // as flex items they wrapped into two overlapping columns).
+          "weft-edit",
           [
             r,
-            words,
+            ` ${words}`,
             ...(why
-              ? [el("span", "weft-reason", why, { "data-engine-why": "" })]
+              ? [el("div", "weft-reason", why, { "data-engine-why": "" })]
               : []),
           ],
           {
@@ -7543,13 +7553,15 @@ export function renderTimeline(
     )
     return box
   }
-  const ticks = el("div", "weft-axis")
-  for (const f of [0, 0.25, 0.5, 0.75, 1]) {
-    const v = Math.round(end * f)
-    const tick = el("span", "weft-tick", time ? `${v} ms` : `seq ${v}`)
-    tick.style.left = `${f * 100}%`
-    ticks.append(tick)
-  }
+  // The axis' two ends (P020.1: five ticks overprinted each other in
+  // a 640 px dock), at its edges.
+  const ticks = el(
+    "div",
+    "weft-axis",
+    [0, Math.round(end)].map((v) =>
+      el("span", "weft-tick", time ? `${v} ms` : `seq ${v}`)
+    )
+  )
   box.append(
     el("div", "weft-wf-row", [
       el("span", "weft-wf-name", time ? "time (ms)" : "seq"),

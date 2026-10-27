@@ -158,6 +158,7 @@ export const PANEL_CSS = `
 .weft-howto { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
 @media (prefers-reduced-motion: reduce) { .weft-dot.weft-run, .weft-fab-pulse { animation: none; } }
 .weft-head .weft-title, .weft-tv { overflow: hidden; text-overflow: ellipsis; }
+.weft-q { display: flex; min-width: 20ch; white-space: nowrap; }
 .weft-head .weft-grow { flex: 1; }
 .weft-switch { max-width: 40%; background: var(--weft-bg); color: var(--weft-dim); border: 1px solid var(--weft-line);
   border-radius: var(--weft-radius-sm); font: inherit; font-size: 11px; }
@@ -231,7 +232,8 @@ details[data-depth] { margin-left: -10px; }
 .weft-badge.weft-info { border-color: var(--weft-info); color: var(--weft-info); }
 .weft-holes { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .weft-tag { border: 1px solid var(--weft-line); color: var(--weft-dim); }
-.weft-unp { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--weft-dim); }
+.weft-unp, [data-weft-stats], [data-weft-cost-total] { flex: 0 99 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.weft-unp { color: var(--weft-dim); }
 .weft-tag[data-tone=bad] { color: var(--weft-err); }
 .weft-note { color: var(--weft-dim); border: 1px dashed var(--weft-line); border-radius: var(--weft-radius);
   padding: 6px 9px; margin-bottom: 8px; }
@@ -266,7 +268,7 @@ ${decisionRules()}
   padding: 3px 8px; cursor: pointer; font: inherit; }
 .weft-tab:hover { color: var(--weft-fg); }
 .weft-tab.weft-active { color: var(--weft-fg); border-bottom-color: var(--weft-accent); }
-.weft-tq { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
+.weft-tq { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
 .weft-tq .weft-turn-q { flex: 1 1 100%; }
 .weft-tq .weft-tq-status { width: auto; }
 .weft-tq-n { padding: 4px 9px; color: var(--weft-dim); }
@@ -292,10 +294,7 @@ ${decisionRules()}
 .weft-rq-params > div { display: flex; gap: 8px; }
 .weft-rq-pk { width: 84px; flex: none; color: var(--weft-dim); }
 .weft-rq-tool { display: block; margin: 2px 0; }
-.weft-axis { flex: 1; position: relative; height: 14px; }
-.weft-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--weft-dim); font-size: 10px; white-space: nowrap; }
-.weft-tick:first-child { transform: none; }
-.weft-tick:last-child { transform: translateX(-100%); }
+.weft-axis { flex: 1; display: flex; justify-content: space-between; color: var(--weft-dim); font-size: 10px; }
 .weft-keys {
   position: absolute; inset: 0; z-index: 3; background: var(--weft-scrim);
   display: flex; align-items: center; justify-content: center; flex-wrap: wrap; overflow: auto;
@@ -326,10 +325,10 @@ select.weft-input { width: auto; min-width: 120px; }
 .weft-lab .weft-input { width: 100%; min-width: 0; }
 .weft-ovr, .weft-ovr.weft-input { color: var(--weft-accent); border-color: var(--weft-accent); }
 .weft-lab-p { color: var(--weft-err); font-size: 11px; }
-.weft-tool { display: inline-flex; gap: 4px; align-items: baseline; margin-right: 10px;
+.weft-tool { display: inline-flex; gap: 4px; align-items: center; margin-right: 10px;
   color: var(--weft-fg); cursor: pointer; }
 .weft-edit { display: block; margin: 3px 0; color: var(--weft-dim); }
-.weft-tq-err, [data-weft-editable], [data-weft-handoff] { display: inline-block; min-width: 24px; min-height: 24px; }
+[data-weft-editable], [data-weft-handoff] { display: inline-block; min-width: 24px; min-height: 24px; }
 div[data-weft-editable] { display: block; }
 .weft-run-btn {
   background: var(--weft-accent); color: var(--weft-on-accent); border: none; border-radius: var(--weft-radius-sm);
@@ -351,7 +350,7 @@ div[data-weft-editable] { display: block; }
 .weft-diff-unknown { color: var(--weft-dim); font-style: italic; }
 .weft-diff-changed > th, td.weft-diff-changed { color: var(--weft-warn); }
 .weft-diff-a { color: var(--weft-err); }
-.weft-resolve { width: auto; min-width: 150px; margin: 0 4px; }
+.weft-resolve { width: 25ch; max-width: 100%; margin: 0 4px; }
 .weft-verbs { display: inline-flex; gap: 2px; margin-left: 4px; }
 .weft-verb { background: none; border: none; color: var(--weft-dim); cursor: pointer; padding: 0 3px; font: inherit; clip-path: inset(50%); }
 .weft-verb::before { content: attr(data-g); }

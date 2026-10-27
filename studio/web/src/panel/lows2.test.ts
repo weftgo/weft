@@ -168,7 +168,7 @@ describe("the header and the pill (UX-H-06, UX-H-31)", () => {
       "data-scope": ";session=s_01",
       "data-open": "true",
     })
-    expect(text(el, ".weft-title")).toBe("session s_01")
+    expect(text(el, ".weft-title")).toBe("session s_01 · 0 runs")
     expect(text(el, ".weft-title")).not.toBe(NO_SCOPE_LABEL)
     expect($(el, ".weft-title")!.getAttribute("title")).toContain(
       "(no public id)"

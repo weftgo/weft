@@ -15,6 +15,7 @@ module, ADR 0005).
 - Studio (P020.1): `/agents?agent=<name>` keeps the named card in view while the numbers above it load and lay out (with many agents it ended far down the page); the Agents page says a registration time as Studio says times (relative, the stamp on hover — not the server's raw RFC 3339 with nanoseconds), points at keeping a proposed prompt in user words (it named an internal design doc), and pads the selected card inside its ring.
 - Studio, devtools panel (P020.1): a plain Go error a tool layer hid (`mw.MapErrors` over an `errors.New` value) reads `INTERNAL ← plain error`, not `INTERNAL ← *errors.errorString`; the recorded `weft.tool.error_masked` is unchanged and stays on the hover.
 - Studio (P020.1): the call graph sizes its nodes and column gaps to their words — an edge label no longer prints over a node, and an MCP server node's failure line ("1 unreachable · 1 refused · 1 tool error") is no longer cut.
+- devtools panel (P020.1): a page of runs' header reads "batch <id> · N runs" at every dock width — the id is cut before the count, and the token, cost and unpriced lines give way before the title; the Timeline axis names its two ends instead of five overprinted ticks; "has error" is a normal checkbox on its label's line; the replay drawer's engine options no longer wrap into two overlapping columns in a 640 px dock; a parked call's "result to resolve with" field shows its whole placeholder.
 
 ## 0.20.0 — 2026-10-27
 

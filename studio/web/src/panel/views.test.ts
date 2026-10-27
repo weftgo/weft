@@ -235,9 +235,6 @@ describe("the timeline", () => {
     expect(tl.getAttribute("data-axis")).toBe("time")
     expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
       "0 ms",
-      "500 ms",
-      "1000 ms",
-      "1500 ms",
       "2000 ms",
     ])
     expect(all(el, ".weft-tl .weft-tl-l").map((n) => n.textContent)).toEqual([
@@ -286,9 +283,6 @@ describe("the timeline", () => {
     expect($(el, ".weft-timeline")!.getAttribute("data-axis")).toBe("seq")
     expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
       "seq 0",
-      "seq 1",
-      "seq 3",
-      "seq 4",
       "seq 5",
     ])
     // The run tree's order (lib/waterfall.ts, U8.1): a step, then its
@@ -345,9 +339,6 @@ describe("the timeline", () => {
     await settle()
     expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
       "0 ms",
-      "250 ms",
-      "500 ms",
-      "750 ms",
       "1000 ms",
     ])
     expect(all(el, ".weft-tl .weft-tl-l").map((n) => n.textContent)).toEqual([

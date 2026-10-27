@@ -110,7 +110,7 @@ describe("the Story's editor (F2's Done line, panel half)", () => {
     // inline-block rule whatever the order); the args, a span in the
     // call's head beside its name, inline-block there as before.
     expect(PANEL_CSS).toContain(
-      ".weft-tq-err, [data-weft-editable], [data-weft-handoff] { display: inline-block; min-width: 24px; min-height: 24px; }"
+      "[data-weft-editable], [data-weft-handoff] { display: inline-block; min-width: 24px; min-height: 24px; }"
     )
     expect(PANEL_CSS).toContain("div[data-weft-editable] { display: block; }")
     for (const f of fields)

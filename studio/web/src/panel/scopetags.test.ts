@@ -75,8 +75,10 @@ describe("a tag scope: a page of unrelated runs (UX-D-05)", () => {
       "data-scope": "tag.arena.batch=cli-20261012-115753",
       "data-open": "true",
     })
-    expect(text(el, ".weft-title")).toBe("batch cli-20261012-115753")
-    expect(text(el, "[data-weft-stats]")).toMatch(/^196 runs · /)
+    // The count rides the title, the id cut before it (P020.1).
+    expect(text(el, ".weft-title")).toBe("batch cli-20261012-115753 · 196 runs")
+    expect(text(el, ".weft-title .weft-tv")).toBe("batch cli-20261012-115753")
+    expect(text(el, "[data-weft-stats]")).not.toMatch(/runs/)
     expect(text(el, ".weft-head")).not.toContain("how to scope")
     // No conversation: no sessions read, the list by the tag alone.
     expect(studio.gets("sessions")).toEqual([])
@@ -111,10 +113,11 @@ describe("a tag scope: a page of unrelated runs (UX-D-05)", () => {
       "data-open": "true",
     })
     const stats = $(el, "[data-weft-stats]")!
-    expect(stats.textContent).toBe("196 runs · ≥20 in · 8 out")
+    expect(stats.textContent).toBe("≥20 in · 8 out")
     expect(stats.getAttribute("title")).toBe(
-      "196 runs · ≥20 in · 8 out — the 2 loaded runs only — load older runs for more"
+      "≥20 in · 8 out — the 2 loaded runs only — load older runs for more"
     )
+    expect(text(el, ".weft-title")).toContain("· 196 runs")
   })
 
   it("a running run of a several-agent batch: the live dot links no one agent's live page (P10b-pre-web-fix)", async () => {
@@ -146,7 +149,7 @@ describe("a tag scope: a page of unrelated runs (UX-D-05)", () => {
       "data-scope": "tag.arena.batch=b1;flow=f_checkout",
       "data-open": "true",
     })
-    expect(text(el, ".weft-title")).toBe("batch b1")
+    expect(text(el, ".weft-title")).toBe("batch b1 · 0 runs")
     expect(text(el, ".weft-scope-chip")).toBe("flow f_checkout")
     expect(text(el, ".weft-splash")).toBe("no runs yet — run your app")
   })
@@ -164,8 +167,7 @@ describe("a tag scope: a page of unrelated runs (UX-D-05)", () => {
       "data-scope": ";agent=director",
       "data-open": "true",
     })
-    expect(text(el, ".weft-title")).toBe("agent director")
-    expect(text(el, "[data-weft-stats]")).toMatch(/^1 run · /)
+    expect(text(el, ".weft-title")).toBe("agent director · 1 run")
   })
 })
 
@@ -182,7 +184,7 @@ describe("the flow filters (UX-D-08, user decision 2)", () => {
     expect(
       all(el, "[data-weft-run]").map((r) => r.getAttribute("data-weft-run"))
     ).toEqual(["r_flow"])
-    expect(text(el, ".weft-title")).toBe("flow f_checkout")
+    expect(text(el, ".weft-title")).toBe("flow f_checkout · 1 run")
     // The title names the flow: no second chip saying it again.
     expect($(el, ".weft-scope-chip")).toBeNull()
     expect(FakeEventSource.last("flow=f_checkout")).toBeTruthy()
@@ -346,7 +348,7 @@ describe("U22-fix", () => {
       "data-scope": "tag.arena.batch=b1;tag.ci.job=7",
       "data-open": "true",
     })
-    expect(text(el, ".weft-title")).toBe("batch b1")
+    expect(text(el, ".weft-title")).toBe("batch b1 · 0 runs")
     expect(all(el, ".weft-scope-chip").map((n) => n.textContent)).toEqual([
       "tag ci.job=7",
     ])
@@ -416,7 +418,7 @@ describe("a tag-scoped panel token (I4)", () => {
     el: WeftDevtools,
     studio: ReturnType<typeof fakeStudio>
   ) {
-    expect(text(el, ".weft-title")).toBe(`batch ${BATCH}`)
+    expect(text(el, ".weft-title .weft-tv")).toBe(`batch ${BATCH}`)
     // The panel's one read: the batch by its tag, under the token.
     expect(studio.gets(`runs?tag.arena.batch=${BATCH}&limit=50`)).toHaveLength(
       1

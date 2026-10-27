@@ -172,6 +172,11 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
     expect(text(el, '[data-engine-option="scripted"] [data-engine-why]')).toBe(
       "your edit changes step 3's request: the recording answered the original"
     )
+    // A block per option, the reason a line under it (P020.1: flex
+    // items, they wrapped into two overlapping columns in a 640 px dock).
+    const opt = $(el, '[data-engine-option="scripted"]')!
+    expect(opt.className).toBe("weft-edit")
+    expect(opt.querySelector("[data-engine-why]")!.tagName).toBe("DIV")
     expect(runBtn(el)!.textContent).toMatch(/^Run live on wefttest\/script · /)
     click(
       all(el, ".weft-drawer button").find((b) =>

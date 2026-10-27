@@ -5013,9 +5013,11 @@ describe("the engine per command on both drawers (U17)", () => {
     engine: root
       .querySelector("[data-drawer-section=engine]")!
       .getAttribute("data-engine"),
-    scripted: root.querySelector('[data-engine-option="scripted"]')!
-      .textContent,
-    live: root.querySelector('[data-engine-option="live"]')!.textContent,
+    // The panel spaces its radio from its words with a space (P020.1).
+    scripted: root
+      .querySelector('[data-engine-option="scripted"]')!
+      .textContent.trim(),
+    live: root.querySelector('[data-engine-option="live"]')!.textContent.trim(),
     target: root.querySelector("[data-drawer-section=target]")!.textContent,
     run: root.querySelector(run)!.textContent,
     order: [...root.querySelectorAll("[data-drawer-section]")]

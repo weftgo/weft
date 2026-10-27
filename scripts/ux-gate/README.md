@@ -72,6 +72,24 @@
   h1–h7. Every process it starts runs under `strace -e connect` (h4). One line per clause in
   `$RUN/gate10a.txt` (screenshots in `$RUN/shots`), ending `GATE 10a: PASSED` or
   `GATE 10a: FAILED (<clauses>)`; exit 1 when a clause FAILs.
+- `gate10b.sh` + `gate10b.js` + `g10bdemo.go` — the phase 10b gate (one system: shared words, scope,
+  the onion, the CLI). Run it with
+  `ARENA=<weft-arena checkout> RUN=<scratch dir> PLAYWRIGHT_DIR=<playwright install> scripts/ux-gate/gate10b.sh`
+  (`REPO` defaults to this script's own tree; `IN_FLIGHT` names ledger items whose open rows are in flight):
+  a fresh `weft studio` on `$RUN/studio.db` (127.0.0.1:7351, token `gate10btok`) with every weft process in
+  a private discovery world (XDG_RUNTIME_DIR / XDG_CACHE_HOME under `$RUN`, a cwd with no ./.weft); the arena
+  built against `$REPO` and seeded `--offline` (`KNOWN_STALE` failures RECORDED with their arena notes);
+  `g10bdemo.go` (an ignore-tagged program built under `$RUN/demo`, never in the repo) stamps flow runs, calls
+  an `mcp.Server("billing")` in-memory server (a tool error, a refusal, a transport failure), registers a
+  governance-shaped agent so its manifest is stored, and keeps a run in flight for /live; the stock_genai
+  fixtures through /v1/traces; then (a) the vocab audit and every sampled `<Term>` reached by Tab, the `?`
+  Concepts tab, a fresh Studio's empty state and first-run card, (b) the panel by batch tag, flow, tag token
+  and token wall, (c) the manifest's chain and the onion in the drawer and the panel's chips, (d) the
+  `mcp:billing` graph node, (e) bare `weft doctor`, a second `weft studio`, `weft open --with-token`, the
+  wall's `<db>.token`, (f) derived runs, (g) `make studio-check` + the ledger (headroom ≥ 7,500 B, every
+  panel.js commit since v0.19.0 with its row), (h) axe over the panel in both themes, (i) `make mcp-check`,
+  j1–j7 and (k) the Coverage ledger. One line per clause in `$RUN/gate10b.txt`, ending `GATE 10b: PASSED` or
+  `GATE 10b: FAILED (<clauses>)`; exit 1 when a clause FAILs.
 - `h9.js` — item H9's done line in a real browser: the runs list (toolbar folded, "with
   subagents" nested), `/compare` (its picker, two picks) and a subagent parent's run page fit
   1440 and 360 px with no sideways page scroll, and `/live` during an offline run draws the

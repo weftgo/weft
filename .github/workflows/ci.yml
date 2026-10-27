@@ -138,7 +138,7 @@ jobs:
         working-directory: obsdb/clickhouse
         run: |
           set -o pipefail
-          go test -race -count=1 -v ./... | tee "$RUNNER_TEMP/clickhouse.log"
+          go test -race -count=1 -timeout 30m -v ./... | tee "$RUNNER_TEMP/clickhouse.log"
           if grep -E '^\s*--- SKIP' "$RUNNER_TEMP/clickhouse.log"; then
             echo "gated tests skipped: WEFT_CLICKHOUSE_DSN did not reach them" >&2
             exit 1

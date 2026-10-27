@@ -1393,9 +1393,7 @@ func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage,
 	}
 	if q.NotRun {
 		conds = append(conds, "GenAIHits > 0", "WeftHits = 0",
-			// The derived runs' traces from their ids (otel-<trace>-<span>):
-			// the 'otel-' key range alone, never a scan for TraceID.
-			"TraceId NOT IN (SELECT substring(RunId, 6, 32) FROM weft_runs WHERE startsWith(RunId, 'otel-') AND Derived = 1)")
+			"TraceId NOT IN ("+notRunDerivedTraces+")")
 	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "StartNs >= ?")
@@ -1487,8 +1485,7 @@ func (d *DB) fillDerivedTraceRuns(ctx context.Context, rows []obsdb.TraceRow) er
 		conds[i] = "startsWith(RunId, ?)"
 		args[i] = obsdb.StockRunPrefix(t)
 	}
-	rs, err := d.conn.Query(ctx, `SELECT DISTINCT TraceID, RunId FROM weft_runs
-		WHERE (`+strings.Join(conds, " OR ")+`) AND Derived = 1 ORDER BY TraceID, RunId`, args...)
+	rs, err := d.conn.Query(ctx, derivedTraceRunsSQL(conds), args...)
 	if err != nil {
 		return err
 	}
@@ -1508,6 +1505,36 @@ func (d *DB) fillDerivedTraceRuns(ctx context.Context, rows []obsdb.TraceRow) er
 		slices.Sort(r.RunIDs)
 	}
 	return rs.Err()
+}
+
+// traceNarrowing is one of traceInner's narrowing subqueries: the traces
+// holding a span that satisfies cond (over the alias t), bounded by
+// since when set — a trace that starts at or after since has every span
+// there, so the superset holds and the read stays inside the window.
+func traceNarrowing(cond string, since time.Time, args ...any) (string, []any) {
+	sub := "SELECT t.TraceId FROM otel_traces AS t WHERE " + cond
+	if !since.IsZero() {
+		sub += " AND t.Timestamp >= fromUnixTimestamp64Nano(toInt64(?))"
+		args = append(args, since.UnixNano())
+	}
+	return sub, args
+}
+
+// notRunNarrowing is TraceQuery.NotRun's narrowing condition: a stock
+// GenAI span (chStockOp over the alias t).
+var notRunNarrowing = strings.ReplaceAll(chStockOp, "SpanAttributes", "t.SpanAttributes")
+
+// notRunDerivedTraces is the traces derived runs exist for, from their
+// ids (otel-<trace>-<span>): the 'otel-' key range of weft_runs alone,
+// never a scan for TraceID (TraceQuery.NotRun's outer condition).
+const notRunDerivedTraces = `SELECT substring(RunId, 6, 32) FROM weft_runs WHERE startsWith(RunId, 'otel-') AND Derived = 1`
+
+// derivedTraceRunsSQL is the trace list's read of its traces' derived
+// runs: one id-prefix condition per trace (conds), ORed — a key range
+// each.
+func derivedTraceRunsSQL(conds []string) string {
+	return `SELECT DISTINCT TraceID, RunId FROM weft_runs
+		WHERE (` + strings.Join(conds, " OR ") + `) AND Derived = 1 ORDER BY TraceID, RunId`
 }
 
 // chStockOp is obsdb.StockCandidate's operation rule over an
@@ -1542,23 +1569,30 @@ func traceInner(q obsdb.TraceQuery) (string, []any) {
 	}
 	var args, narrowArgs []any
 	var narrow []string
+	// A narrowing subquery reads the spans that could satisfy its filter;
+	// with Since, only those at or after it — a trace that starts at or
+	// after Since has every span there, so the superset holds and no
+	// subquery scans older spans.
+	narrowBy := func(cond string, condArgs ...any) {
+		sub, subArgs := traceNarrowing(cond, q.Since, condArgs...)
+		narrow = append(narrow, "TraceId IN ("+sub+")")
+		narrowArgs = append(narrowArgs, subArgs...)
+	}
 	if q.Service != "" {
 		cols = append(cols, "countIf(ServiceName = ?) AS SvcHits")
 		args = append(args, q.Service)
-		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE t.ServiceName = ?)")
-		narrowArgs = append(narrowArgs, q.Service)
+		narrowBy("t.ServiceName = ?", q.Service)
 	}
 	if q.NotRun {
 		// GenAI spans, no weft run (TraceQuery.NotRun); the derived rows
-		// are the outer condition's.
+		// are the outer condition's (notRunDerivedTraces).
 		cols = append(cols, "countIf("+chStockOp+") AS GenAIHits", "countIf(RunId != '') AS WeftHits")
-		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE "+strings.ReplaceAll(chStockOp, "SpanAttributes", "t.SpanAttributes")+")")
+		narrowBy(notRunNarrowing)
 	}
 	if q.PublicID != "" {
 		cols = append(cols, "countIf(PublicId != ?) AS Foreign")
 		args = append(args, q.PublicID)
-		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE t.PublicId = ?)")
-		narrowArgs = append(narrowArgs, q.PublicID)
+		narrowBy("t.PublicId = ?", q.PublicID)
 	}
 	if len(q.ScopeMeta) > 0 {
 		// Every span carries each pair: the group's count of spans
@@ -1582,8 +1616,7 @@ func traceInner(q obsdb.TraceQuery) (string, []any) {
 	for _, k := range slices.Sorted(maps.Keys(q.Meta)) {
 		// A span carrying the pair (exact, not a superset: the filter is
 		// this narrowing).
-		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE mapContains(t.SpanAttributes, ?) AND t.SpanAttributes[?] = ?)")
-		narrowArgs = append(narrowArgs, k, k, q.Meta[k])
+		narrowBy("mapContains(t.SpanAttributes, ?) AND t.SpanAttributes[?] = ?", k, k, q.Meta[k])
 	}
 	sql := "SELECT " + strings.Join(cols, ", ") + " FROM otel_traces"
 	if len(narrow) > 0 {

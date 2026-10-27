@@ -790,6 +790,10 @@ func TestDerivedSpansHideSystemPromptFromReadTokens(t *testing.T) {
 			Events: []obsdb.SpanEvent{
 				{Time: at, Name: "gen_ai.system.message", Attrs: map[string]any{"content": "SECRET EVENT"}},
 				{Time: at, Name: "gen_ai.user.message", Attrs: map[string]any{"content": "user event"}},
+				{Time: at, Name: "gen_ai.content.prompt", Attrs: map[string]any{"gen_ai.prompt": "SECRET PROMPT EVENT"}},
+				{Time: at, Name: "gen_ai.client.inference.operation.details", Attrs: map[string]any{
+					"gen_ai.system_instructions": `[{"type":"text","content":"SECRET DETAILS"}]`,
+					"gen_ai.input.messages":      `[{"role":"system","parts":[{"type":"text","content":"SECRET DETAILS INLINE"}]},{"role":"user","parts":[{"type":"text","content":"details user"}]}]`}},
 			}},
 		{TraceID: tr, SpanID: "7f00000000000003", ParentSpanID: "7f00000000000001", Name: "chat m", Start: at, End: at.Add(time.Second),
 			Attrs: tag(map[string]any{"gen_ai.operation.name": "chat", "gen_ai.prompt": "SECRET PLAIN"})},
@@ -807,19 +811,20 @@ func TestDerivedSpansHideSystemPromptFromReadTokens(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("tag token's trace read: %d %s", code, body)
 	}
-	for _, secret := range []string{"SECRET SYSTEM", "SECRET INLINE", "SECRET LEGACY", "SECRET PLAIN", "SECRET EVENT", "gen_ai.system_instructions"} {
+	for _, secret := range []string{"SECRET SYSTEM", "SECRET INLINE", "SECRET LEGACY", "SECRET PLAIN", "SECRET EVENT", "SECRET PROMPT EVENT", "SECRET DETAILS", "gen_ai.system_instructions"} {
 		if strings.Contains(body, secret) {
 			t.Errorf("a read token's trace carries %q: %s", secret, body)
 		}
 	}
-	for _, kept := range []string{"hello there", "legacy user", "user event"} {
+	for _, kept := range []string{"hello there", "legacy user", "user event", "details user", "gen_ai.client.inference.operation.details"} {
 		if !strings.Contains(body, kept) {
 			t.Errorf("a read token's trace lost %q: %s", kept, body)
 		}
 	}
 	if _, full := tcall(t, ts, http.MethodGet, "/api/traces/"+tr, "srv", ""); !strings.Contains(full, "SECRET SYSTEM") ||
 		!strings.Contains(full, "SECRET INLINE") || !strings.Contains(full, "SECRET LEGACY") ||
-		!strings.Contains(full, "SECRET PLAIN") || !strings.Contains(full, "SECRET EVENT") {
+		!strings.Contains(full, "SECRET PLAIN") || !strings.Contains(full, "SECRET EVENT") ||
+		!strings.Contains(full, "SECRET PROMPT EVENT") || !strings.Contains(full, "SECRET DETAILS") {
 		t.Errorf("the server token's trace lost the system prompt: %s", full)
 	}
 }

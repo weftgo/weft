@@ -878,3 +878,49 @@ func TestTagTokenAgentLaneFrames(t *testing.T) {
 		t.Errorf("the grant minted without the tags: %q, want %q — the token's tags still hold", got, want)
 	}
 }
+
+// A derived row's removal (I6-fix3, obsdb.RunRow.Removed) never reaches
+// a scoped token: a derived row has no public id and no tags, so a
+// public-id token's stream and a tag token's stream skip its frame —
+// the next in-scope run frame arrives first. The server token's agent
+// stream sees it.
+func TestRemovedFrameRefusedToScopedTokens(t *testing.T) {
+	ts, hub := tagTokenStudio(t)
+	tagTok := mintTag(t, ts, `{"tags":{"arena.batch":"b1"}}`)
+	pubTok := mintTag(t, ts, `{"public_id":"arena:b1:x"}`)
+	open := func(query, bearer string) *http.Response {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/live"+query, nil)
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			t.Fatalf("live%s: %d %s", query, resp.StatusCode, b)
+		}
+		return resp
+	}
+	tagged := open("?tag.arena.batch=b1&kinds=run", tagTok)
+	pub := open("?public_id=arena:b1:x&kinds=run", pubTok)
+	srv := open("?agent=director&kinds=run", "srv")
+	ctx := context.Background()
+	const gone = "otel-6c0c0ffee0000000000000000000c001-6c00000000000004"
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: gone, TraceID: "6c0c0ffee0000000000000000000c001",
+		Agent: "director", Derived: true, Removed: true}))
+	hub.Publish(ctx, obsdb.RunFrame(obsdb.RunRow{ID: "r_b1a", Agent: "director", PublicID: "arena:b1:x",
+		Meta: map[string]string{"arena.batch": "b1"}, Status: obsdb.StatusSucceeded}))
+	for name, resp := range map[string]*http.Response{"tag token": tagged, "public id token": pub} {
+		frames := readSSE(t, resp, 1, 5*time.Second)
+		if len(frames) != 1 || strings.Contains(frames[0].data, gone) || !strings.Contains(frames[0].data, "r_b1a") {
+			t.Errorf("%s: frames %+v, want r_b1a's alone (the removal refused)", name, frames)
+		}
+	}
+	if frames := readSSE(t, srv, 1, 5*time.Second); len(frames) != 1 || !strings.Contains(frames[0].data, `"removed":true`) {
+		t.Errorf("server token: frames %+v, want the removal", frames)
+	}
+}

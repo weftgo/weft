@@ -836,24 +836,31 @@ func withoutSystemPrompt(attrs map[string]any) (map[string]any, bool) {
 	return out, true
 }
 
-// withoutSystemEvents is a span's events without the event-era
-// gen_ai.system.message events (the system prompt, as older GenAI
-// instrumentations record it), the slice itself when there are none.
+// withoutSystemEvents is a span's events without the system prompt they
+// may carry (docs/record-contract.md §9): the event-era
+// gen_ai.system.message and gen_ai.content.prompt events dropped whole
+// (one string, the system prompt in it or beside it), and every other
+// event's attributes through withoutSystemPrompt — a
+// gen_ai.client.inference.operation.details event carries the
+// conventions' gen_ai.system_instructions and gen_ai.input.messages as a
+// span does. The slice itself when nothing was removed.
 func withoutSystemEvents(evs []obsdb.SpanEvent) []obsdb.SpanEvent {
-	n := 0
+	var out []obsdb.SpanEvent
+	changed := false
 	for _, ev := range evs {
-		if ev.Name == "gen_ai.system.message" {
-			n++
+		switch ev.Name {
+		case "gen_ai.system.message", "gen_ai.content.prompt":
+			changed = true
+			continue
 		}
+		if a, ok := withoutSystemPrompt(ev.Attrs); ok {
+			ev.Attrs = a
+			changed = true
+		}
+		out = append(out, ev)
 	}
-	if n == 0 {
+	if !changed {
 		return evs
-	}
-	out := make([]obsdb.SpanEvent, 0, len(evs)-n)
-	for _, ev := range evs {
-		if ev.Name != "gen_ai.system.message" {
-			out = append(out, ev)
-		}
 	}
 	return out
 }

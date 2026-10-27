@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	ch "github.com/ClickHouse/clickhouse-go/v2"
+
 	"github.com/weftgo/weft/obsdb"
 )
 
@@ -136,6 +138,69 @@ func TestDeriveRaceAfterFreshRead(t *testing.T) {
 	}
 }
 
+// delayConn holds a writer's derived-row DELETE until onDelete returns
+// (once): the window between its SELECT and its DELETE, where another
+// writer may land a larger row.
+type delayConn struct {
+	ch.Conn
+	onDelete func()
+}
+
+func (c *delayConn) Exec(ctx context.Context, query string, args ...any) error {
+	if strings.HasPrefix(query, "DELETE FROM weft_runs") && c.onDelete != nil {
+		f := c.onDelete
+		c.onDelete = nil
+		f()
+	}
+	return c.Conn.Exec(ctx, query, args...)
+}
+
+// The probe's shape (the I6-fix3 review): N, a conversation under M's
+// tool, and M (no conversation id) are stored first — M a run, N its
+// child. Writer A brings O above M: M folds, N must be rewritten under
+// O. Between A's SELECT and its DELETE, writer B lands N's second chat
+// span and N's larger row (2 steps, 12 in). A's DELETE removes that row
+// too; A re-derives after the DELETE, so N ends with B's figures — never
+// A's earlier one-step row.
+func TestRewriteAfterDeleteKeepsLargerRow(t *testing.T) {
+	base := freshDeriveDB(t)
+	ctx := context.Background()
+	const tr = "6e0c0ffee0000000000000000000e009"
+	at := time.Now().UTC().Add(-time.Minute)
+	sp := func(id, parent, name string, attrs map[string]any) obsdb.Span {
+		return obsdb.Span{TraceID: tr, SpanID: id, ParentSpanID: parent, Name: name, Kind: 1, Start: at, End: at.Add(time.Second),
+			StatusCode: 1, Service: "svc", Attrs: attrs, Resource: map[string]any{"service.name": "svc"}}
+	}
+	o := sp("6e00000000000a01", "", "invoke_agent outer", map[string]any{"gen_ai.operation.name": "invoke_agent"})
+	oTool := sp("6e00000000000a02", o.SpanID, "execute_tool d", map[string]any{"gen_ai.operation.name": "execute_tool", "gen_ai.tool.call.id": "call_o"})
+	m := sp("6e00000000000f02", oTool.SpanID, "invoke_agent middle", map[string]any{"gen_ai.operation.name": "invoke_agent"})
+	mTool := sp("6e00000000000f03", m.SpanID, "execute_tool ask", map[string]any{"gen_ai.operation.name": "execute_tool", "gen_ai.tool.call.id": "call_m"})
+	n := sp("6e00000000000f04", mTool.SpanID, "invoke_agent leaf", map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.conversation.id": "conv_n"})
+	chat := func(id string, in int64) obsdb.Span {
+		c := sp(id, n.SpanID, "chat m", map[string]any{"gen_ai.operation.name": "chat", "gen_ai.usage.input_tokens": in})
+		c.Start = at.Add(time.Duration(len(id)) * time.Millisecond)
+		return c
+	}
+	b := &DB{conn: base.conn}
+	if err := b.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{m, mTool, n, chat("6e00000000000f05", 5)}}); err != nil {
+		t.Fatal(err)
+	}
+	a := &DB{conn: &delayConn{Conn: base.conn, onDelete: func() {
+		c2 := chat("6e00000000000f06", 7)
+		c2.Start = at.Add(500 * time.Millisecond)
+		if err := b.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{c2}}); err != nil {
+			t.Error(err)
+		}
+	}}}
+	if err := a.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{oTool, o}}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := base.Run(ctx, obsdb.StockRunID(tr, n.SpanID))
+	if err != nil || r.ParentRunID != obsdb.StockRunID(tr, o.SpanID) || r.Steps != 2 || r.Usage.InputTokens != 12 {
+		t.Errorf("N = parent %q steps %d in %d (%v); want O, 2 steps, 12 in (B's figures kept)", r.ParentRunID, r.Steps, r.Usage.InputTokens, err)
+	}
+}
+
 // The derived-row reads go by id prefix — weft_runs' primary key — not a
 // TraceID scan (the I6-fix2 review): the writer's reconcile, the trace
 // list's derived lookup and NotRun's derived traces each read a key
@@ -158,13 +223,31 @@ func TestDerivedReadsUseThePrimaryKey(t *testing.T) {
 	if err := db.conn.Exec(ctx, `INSERT INTO weft_runs (RunId, TraceID, Started, LastSeen) VALUES ('r_a', 't', ?, ?), ('z_b', 't', ?, ?)`, at, at, at, at); err != nil {
 		t.Fatal(err)
 	}
+	// Spans to read, an old day's and today's (an empty table plans no
+	// read at all).
+	old := at.Add(-30 * 24 * time.Hour)
+	if err := db.insertSpans(ctx, []obsdb.Span{
+		{TraceID: "6e0c0ffee0000000000000000000e0a1", SpanID: "6e000000000000a1", Name: "chat m", Start: old, End: old.Add(time.Second),
+			Attrs: map[string]any{"gen_ai.operation.name": "chat"}, Resource: map[string]any{}},
+		{TraceID: "6e0c0ffee0000000000000000000e0a2", SpanID: "6e000000000000a2", Name: "chat m", Start: at, End: at.Add(time.Second),
+			Attrs: map[string]any{"gen_ai.operation.name": "chat"}, Resource: map[string]any{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	two := []string{"startsWith(RunId, ?)", "startsWith(RunId, ?)"}
+	notRunSQL, notRunArgs := traceInner(obsdb.TraceQuery{NotRun: true, Since: at.Add(-time.Hour)})
+	narrowSQL, narrowArgs := traceNarrowing(notRunNarrowing, at.Add(-time.Hour))
 	for name, q := range map[string]struct {
 		sql  string
 		args []any
 	}{
-		"reconcile":  {`SELECT RunId, max(ParentRunID) FROM weft_runs WHERE startsWith(RunId, ?) AND Derived = 1 GROUP BY RunId`, []any{prefix}},
-		"trace list": {`SELECT DISTINCT TraceID, RunId FROM weft_runs WHERE (startsWith(RunId, ?) OR startsWith(RunId, ?)) AND Derived = 1`, []any{prefix, obsdb.StockRunPrefix("6e0c0ffee0000000000000000000e003")}},
-		"not run":    {`SELECT substring(RunId, 6, 32) FROM weft_runs WHERE startsWith(RunId, 'otel-') AND Derived = 1`, nil},
+		// The production SQL itself (shared constants and builders).
+		"reconcile":  {reconcileSelect, []any{prefix}},
+		"trace list": {derivedTraceRunsSQL(two), []any{prefix, obsdb.StockRunPrefix("6e0c0ffee0000000000000000000e003")}},
+		"not run":    {notRunDerivedTraces, nil},
+		"not run list": {"SELECT TraceId FROM (" + notRunSQL + ") WHERE GenAIHits > 0 AND TraceId NOT IN (" + notRunDerivedTraces + ")",
+			notRunArgs},
+		"not run window": {narrowSQL, narrowArgs},
 	} {
 		rs, err := db.conn.Query(ctx, "EXPLAIN indexes = 1 "+q.sql, q.args...)
 		if err != nil {
@@ -180,6 +263,22 @@ func TestDerivedReadsUseThePrimaryKey(t *testing.T) {
 		}
 		_ = rs.Close()
 		all := strings.Join(plan, " | ")
+		switch name {
+		case "not run window":
+			// NotRun's narrowing reads inside the window: the span table's
+			// minmax index on Timestamp prunes the older part.
+			if !strings.Contains(all, "Timestamp") || !strings.Contains(all, "Parts: 1/2") {
+				t.Errorf("%s: the narrowing reads outside the window: %s", name, all)
+			}
+			continue
+		case "not run list":
+			// The window's traces narrow the trace list's own read (the
+			// TraceId bloom filter skips the old trace's granule).
+			if !strings.Contains(all, "idx_trace_id") || !strings.Contains(all, "Granules: 1/2") {
+				t.Errorf("%s: the list reads every trace: %s", name, all)
+			}
+			continue
+		}
 		i := strings.Index(all, "PrimaryKey")
 		if i < 0 || !strings.Contains(all[i:], "(RunId in ['otel-") {
 			t.Errorf("%s: the plan reads no RunId key range: %s", name, all)

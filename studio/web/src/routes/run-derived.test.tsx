@@ -537,16 +537,16 @@ describe("a derived run from its trace (I6: UX-H-02, UX-H-03)", () => {
     })
     expect(a.textContent).toBe(notRunTraces(1))
     expect(new URL(a.href).searchParams.get("not_run")).toBe("true")
-    // Over the last NOT_RUN_DAYS days: the count asks with since, the
-    // link carries the day (an index read, never every span).
+    // Over exactly the last NOT_RUN_DAYS days: the count asks with since
+    // (now − 7×24 h, to the minute), the link carries the same instant.
     const counted = studio
       .calls("GET traces")
       .find((c) => c.query.get("not_run") === "1")!
     const since = Date.parse(counted.query.get("since")!)
-    expect(Date.now() - since).toBeGreaterThan(NOT_RUN_DAYS * 86_400_000)
-    expect(Date.now() - since).toBeLessThan((NOT_RUN_DAYS + 1) * 86_400_000)
+    expect(Date.now() - since).toBeGreaterThanOrEqual(NOT_RUN_DAYS * 86_400_000)
+    expect(Date.now() - since).toBeLessThan(NOT_RUN_DAYS * 86_400_000 + 120_000)
     expect(new URL(a.href).searchParams.get("since")).toBe(
-      counted.query.get("since")!.slice(0, 10)
+      counted.query.get("since")
     )
     // The list it lands on asks for them.
     cleanup()

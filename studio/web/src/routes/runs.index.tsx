@@ -251,18 +251,21 @@ function RunsPage() {
   // The GenAI traces stored that make no run (UX-H-02): a Python or TS
   // app's spans that are traces only — counted, linked to the list of
   // them, where each trace says why.
-  // Over the last NOT_RUN_DAYS days (from that day's start, UTC): the
-  // trace list's since — an index read, not every span stored.
-  const notRunSince = new Date(Date.now() - NOT_RUN_DAYS * 86_400_000)
+  // Over exactly the last NOT_RUN_DAYS days (now − 7×24 h, to the
+  // minute so the query key holds still): the trace list's since — an
+  // index read, never every span stored.
+  const notRunSince = new Date(
+    Math.floor((Date.now() - NOT_RUN_DAYS * 86_400_000) / 60_000) * 60_000
+  )
     .toISOString()
-    .slice(0, 10)
+    .replace(/\.\d{3}Z$/, "Z")
   const notRun = useQuery({
     queryKey: ["traces", "not_run", "count", notRunSince],
     staleTime: 30_000,
     queryFn: () =>
       fetchTraces({
         not_run: true,
-        since: `${notRunSince}T00:00:00Z`,
+        since: notRunSince,
         limit: 1,
       }),
     enabled: has("traces"),

@@ -187,6 +187,11 @@ func (d *DB) insertDerived(ctx context.Context, rows []obsdb.RunRow) error {
 	return batch.Send()
 }
 
+// reconcileSelect is reconcileDerived's read of a trace's derived rows,
+// by id prefix (a primary-key range).
+const reconcileSelect = `SELECT RunId, max(ParentRunID), max(Agent), max(SessionID) FROM weft_runs
+	WHERE startsWith(RunId, ?) AND Derived = 1 GROUP BY RunId`
+
 // reconcileDerived brings the trace's stored derived rows to runs, the
 // latest derivation (§9). The rows are read by their id prefix
 // (obsdb.StockRunPrefix: weft_runs' primary key, a key range — never a
@@ -202,7 +207,9 @@ func (d *DB) insertDerived(ctx context.Context, rows []obsdb.RunRow) error {
 // folded, whose max keeps the dropped id when it sorts higher — must be
 // rewritten, which an insert cannot do under max: both are deleted (one
 // lightweight DELETE, guarded by Derived = 1, only when one is due —
-// never in the steady state), then the rewritten rows inserted whole.
+// never in the steady state), then the rewritten rows inserted whole from
+// a read of the trace after the DELETE (so a larger row another writer
+// inserted before it is derived again, not lost).
 // The DELETE waits for its mutation (the server's default
 // lightweight_deletes_sync): it applies to the parts that exist when it
 // is issued, so the re-insert after it is never deleted either way, but
@@ -224,8 +231,7 @@ func (d *DB) reconcileDerived(ctx context.Context, trace string, spans []obsdb.S
 		_, made := want[id]
 		return ok && seen[root] && !made
 	}
-	rs, err := d.conn.Query(ctx, `SELECT RunId, max(ParentRunID), max(Agent), max(SessionID) FROM weft_runs
-		WHERE startsWith(RunId, ?) AND Derived = 1 GROUP BY RunId`, obsdb.StockRunPrefix(trace))
+	rs, err := d.conn.Query(ctx, reconcileSelect, obsdb.StockRunPrefix(trace))
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +270,29 @@ func (d *DB) reconcileDerived(ctx context.Context, trace string, spans []obsdb.S
 	if err := d.conn.Exec(ctx, `DELETE FROM weft_runs WHERE RunId IN ? AND Derived = 1`, drop); err != nil {
 		return nil, err
 	}
-	return gone, d.insertDerived(ctx, rewrite)
+	if len(rewrite) == 0 {
+		return gone, nil
+	}
+	// The rewritten rows come from a read after the DELETE, never from
+	// want: another writer may have inserted a larger row for one of them
+	// between this writer's SELECT and its DELETE, which the DELETE
+	// removed. That row's spans were stored before it — this read holds
+	// them — and any row inserted after the DELETE survives it.
+	after, err := d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE TraceId = ?"+spanDedup, trace)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]bool, len(rewrite))
+	for _, r := range rewrite {
+		ids[r.ID] = true
+	}
+	var rows []obsdb.RunRow
+	for _, r := range obsdb.DeriveStockRuns(after) {
+		if ids[r.Row.ID] {
+			rows = append(rows, r.Row)
+		}
+	}
+	return gone, d.insertDerived(ctx, rows)
 }
 
 func boolUInt8(b bool) uint8 {

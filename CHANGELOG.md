@@ -6,7 +6,7 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
-## Unreleased
+## 0.20.2 — 2026-10-27
 
 ### Fixed
 

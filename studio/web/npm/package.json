@@ -1,6 +1,6 @@
 {
   "name": "@weftgo/devtools",
-  "version": "0.20.1",
+  "version": "0.20.2",
   "description": "The weft devtools panel: the same bytes as /studio/panel.js, as an ES module, with typed mount/scope/open/close/on and thin React, Vue and Svelte helpers.",
   "keywords": [
     "weft",

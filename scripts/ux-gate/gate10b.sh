@@ -217,7 +217,7 @@ gcode=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN"
 gavail=$(api "/api/runs?limit=1&tag.arena.batch=$BATCH&tag.arena.scenario=mw.governance-patterns" | jq -r '.runs[0].id' | xargs -I{} curl -sf -H "Authorization: Bearer $TOKEN" "$STUDIO/api/runs/{}" | jq -r '.manifest_available')
 oh=$(api "/api/runs/$ONION_RUN" | jq -r '.manifest_hash // empty')
 chain=$(api "/api/manifests/$oh" | jq -c '.manifest.agents[] | select(.name=="gov-desk") | {model_middleware: [.model_middleware[]?.name], tool_middleware: [.tool_middleware[]? | (.name + (if .source then " (" + .source + ")" else "" end))]}')
-cok=$(echo "$chain" | jq -e '.model_middleware == ["mw.Retry","mw.RepairJSON"] and (.tool_middleware | length) == 2 and (.tool_middleware[0] | test("onionRun.func1")) and .tool_middleware[1] == "mw.Allow"' >/dev/null && echo yes || echo no)
+cok=$(echo "$chain" | jq -e '.model_middleware == ["mw.Retry","mw.RepairJSON"] and (.tool_middleware | length) == 2 and (.tool_middleware[0] | test("^func@demo/main\\.go:[0-9]+ \\(demo/main\\.go:[0-9]+\\)$")) and .tool_middleware[1] == "mw.Allow"' >/dev/null && echo yes || echo no)
 gt=$(cd "$REPO/core" && go test -count=1 -run '^TestOnionGovernancePatterns$' -v . 2>&1 | grep -E '^(--- |ok|FAIL)' | tr '\n' ' ')
 clause c1 "$([ "$cok" = yes ] && echo "$gt" | grep -q -- '--- PASS' && echo PASS || echo FAIL)" "the onion recorded: a governance-patterns manifest lists its middleware chain outer-to-inner" \
   "the in-gate gov-desk (the arena's governance closures + mw.Allow, mw.Retry + mw.RepairJSON; registered through runtime.Install): run $ONION_RUN → GET /api/manifests/${oh:0:12}… → $chain ($cok: model Retry › RepairJSON, tools the scrub closure by name and file:line › mw.Allow)" \

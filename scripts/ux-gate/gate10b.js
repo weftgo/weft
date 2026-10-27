@@ -374,7 +374,7 @@ async function phaseMain() {
       let shot = await pw.shot(page, "c3-drawer-gov-tool");
       const tl = o.onion.flatMap((x) => x.layers);
       const allowL = tl.find((x) => x.full === "mw.Allow");
-      const c1 = o.onion.length > 0 && !o.onion[0].unknown && tl.length >= 3 && tl[0].idle && /onionRun\.func1/.test(tl[0].full) && allowL && /denied by policy/.test(allowL.text);
+      const c1 = o.onion.length > 0 && !o.onion[0].unknown && tl.length >= 3 && tl[0].idle && /^func@demo\/main\.go:\d+$/.test(tl[0].full) && /^main\.go:\d+/.test(tl[0].text) && allowL && /denied by policy/.test(allowL.text);
       ev.push(`${ok(c1)} the in-gate gov-desk run ${ON.slice(0, 8)} (registered: its manifest stored), delete_record: ${layerWords(o.onion)} [${shot}]`);
       o = await onionAt(page, ON, (r) => r.kind === "model" && /tool_calls/.test(r.text));
       shot = await pw.shot(page, "c4-drawer-gov-model");

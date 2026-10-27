@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -108,10 +109,23 @@ func startStudio(t *testing.T, db string, base, span int, wantAt string, out *sy
 	}
 }
 
-// TestSecondStartReuses: two starts in a row on one database — the
-// second prints the reuse line, returns nil (exit 0) and serves
-// nothing (no banner, no listener).
-func TestSecondStartReuses(t *testing.T) {
+// wantRefused checks a second start on a database a running Studio
+// serves: refused (UX-S5a-13), the error naming that Studio's URL and
+// pid, nothing printed.
+func wantRefused(t *testing.T, err error, out fmt.Stringer, addr string) {
+	t.Helper()
+	if want := "studio already running at http://" + addr + " (pid " + strconv.Itoa(os.Getpid()) + ") on "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("second start = %v, want refused: %q…", err, want)
+	}
+	if out.String() != "" {
+		t.Errorf("a refused start printed %q", out.String())
+	}
+}
+
+// TestSecondStartRefused: two starts in a row on one database — the
+// second is refused naming the first (exit 1) and serves nothing (no
+// banner, no listener).
+func TestSecondStartRefused(t *testing.T) {
 	base := freeBase(t, 3)
 	db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
 	var first syncBuffer
@@ -122,15 +136,10 @@ func TestSecondStartReuses(t *testing.T) {
 	}
 
 	var second strings.Builder
-	if err := serve(db, want{addr: loop(base), span: 3}, "tok", &second); err != nil {
-		t.Fatalf("second start: %v", err)
-	}
-	if want := "studio already running at http://" + loop(base) + " (pid " + strconv.Itoa(os.Getpid()) + "), reusing\n"; second.String() != want {
-		t.Errorf("second start printed %q, want exactly %q", second.String(), want)
-	}
+	wantRefused(t, serve(db, want{addr: loop(base), span: 3}, "tok", &second), &second, loop(base))
 	if conn, err := net.DialTimeout("tcp", loop(base+1), 100*time.Millisecond); err == nil {
 		_ = conn.Close()
-		t.Errorf("the reusing start listens on %s", loop(base+1))
+		t.Errorf("the refused start listens on %s", loop(base+1))
 	}
 }
 
@@ -304,7 +313,7 @@ func TestDBFile(t *testing.T) {
 }
 
 // TestRelativeDBFormsReuse: a Studio started with a relative
-// --db sqlite://x.db is reused by a start in the same directory that
+// --db sqlite://x.db is found (and the start refused) by a start in the same directory that
 // names the same file through $WEFT_DB — the two forms resolve to one
 // absolute path.
 func TestRelativeDBFormsReuse(t *testing.T) {
@@ -316,10 +325,5 @@ func TestRelativeDBFormsReuse(t *testing.T) {
 
 	t.Setenv("WEFT_DB", "x.db")
 	var second strings.Builder
-	if err := serve("", want{addr: loop(base), span: 2}, "tok", &second); err != nil {
-		t.Fatalf("second start: %v", err)
-	}
-	if want := "studio already running at http://" + loop(base) + " (pid " + strconv.Itoa(os.Getpid()) + "), reusing\n"; second.String() != want {
-		t.Errorf("second start printed %q, want %q", second.String(), want)
-	}
+	wantRefused(t, serve("", want{addr: loop(base), span: 2}, "tok", &second), &second, loop(base))
 }

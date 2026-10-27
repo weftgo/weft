@@ -3,7 +3,8 @@
 What weft's observability pipeline emits, and what `obsdb` reads back
 into a run, stated so that someone without the Go source can build a run
 page from stock OTLP — or make a non-Go agent emit records weft's Studio
-reads as its own.
+reads as its own (by hand: weft ships its emitter in Go only today; no
+TS or Python helper exists — backlog I2).
 
 **This page is the authority.** It restates, in one place, the contract
 that ADR 0016 (the spans), ADR 0024 (the records and the identity chain)

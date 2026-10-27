@@ -54,7 +54,11 @@ that send neither header (curl, the runtime link) and `AllowOrigins`
 origins are let through; reads need no rule, since setup A sends no
 CORS headers and the browser hides a foreign page's answer.
 
-**B · local binary** — any language's app, several services:
+**B · local binary** — any language's app, several services. What a
+non-Go app gets today: its OTel traces, the runs derived from them
+(docs/record-contract.md §9) and the devtools panel through `panel.js`
+— not the playground, breakpoints or approvals, which need a runtime
+link (`weft/runtime`: Go only today; non-Go clients are backlog I2):
 
 ```sh
 go install github.com/weftgo/weft/cmd/weft@latest
@@ -75,10 +79,11 @@ the file"); ingest is open on loopback;
 `127.0.0.1:7331` is the one default port: started again on the same
 database, the binary finds the running Studio through `/api/meta`
 (`db.path`, `pid`, read with the stable token — sent only to an
-address a trusted discovery file names, so from another directory with
-`--db` on the same file the probe goes out bare and a second Studio
-starts) and reuses it (`studio
-already running at … (pid n), reusing`, exit 0); anything else on the port
+address a trusted discovery file names) — on the wanted port, or
+wherever the discovery file says (a Studio started with `--addr`, or
+moved to 7332–7340) — and refuses the start: one Studio per database
+file (`studio already running at http://127.0.0.1:7347 (pid n) on
+…/weft.db`, exit 1; `weft dev` reuses it instead); anything else on the port
 moves it to the next free one in 7331–7340 with one line saying so.
 `--addr` (or `WEFT_STUDIO_ADDR`) pins: a busy pinned address is an
 error, never a fallback; `--db sqlite://path` picks the
@@ -89,15 +94,23 @@ playground is on (`studio.Playground(true)`), inert until an app's
 is `--manifest` (`WEFT_MANIFEST`), else the nearest `weft.json` from
 the working directory upward — one line says which file, or that none
 was found. `--open` (default on when stdout is a terminal) opens the
-UI with the token in the URL fragment.
+UI with the token in the URL fragment; without it the banner ends
+`studio: sign in with weft open --with-token`.
 
 The same binary is the API over a terminal, each subcommand one
-route, `--url` (`WEFT_STUDIO_URL`) and `--token` (`WEFT_STUDIO_TOKEN`)
-picking the Studio: `weft runs [--agent] [--since] [--failed] [--status] [--limit]
-[--json]` (`GET /api/runs`; a limit that hid runs says so on stderr),
-`weft open <run id> [--open] [--with-token]` (checks `GET
-/api/runs/{id}`, prints the bare `<url>/runs/<id>`; the token goes only
-to the browser, or to stdout on `--with-token`), `weft export <run id>
+route, one resolver picking the Studio for all of them: `--url`, else
+`WEFT_STUDIO_URL`, else the discovery file (the trust rules apps use;
+`WEFT_DISCOVERY=off` skips it), else `127.0.0.1:7331` — one stderr line
+`weft: Studio <url> (discovery file …)` when you named none — and the
+token `--token`, else `WEFT_STUDIO_TOKEN`, else the file's when it
+names that Studio: `weft runs [--agent] [--since] [--failed] [--status] [--limit]
+[--json]` (`GET /api/runs`; the error's kind and why, duration, cost
+and public id in the table; a limit that hid runs says so on stderr),
+`weft open [id] [--open] [--with-token]` (a run, public, session or
+trace id — `GET /api/runs/{id}`, `/api/public/{id}`,
+`/api/sessions/{id}`, `/api/traces/{id}` in turn — its bare page;
+no id, the Studio root; the token goes only to the browser, or to
+stdout on `--with-token`), `weft export <run id>
 [--format json|jsonl|otlp]` and `weft export <run id> --wefttest
 ./pkg [--fixtures-only [--test TestName]] [--force]` (`GET
 /api/runs/{id}/export`: the save-as-test zip's tree written into the
@@ -105,7 +118,8 @@ package directory byte for byte — `<agent>_replay_test.go` beside
 `testdata/TestReplay_<run>/`; `--fixtures-only` the fixtures alone
 where `wefttest.Replay(t, "testdata")` reads them; `--force` replaces
 what is there), `weft doctor`
-(`GET /api/meta`), and `weft mcp` — the same read routes as a stdio MCP
+(`GET /api/meta`; with the discovery file, the OTLP door and the
+newest run's weft version among its lines), and `weft mcp` — the same read routes as a stdio MCP
 server for a coding agent, GET only (tools `runs`, `search`, `run`,
 `step`, `request`, `events`, `tools`, `diff`, `export`, `sessions`,
 `session`, `meta`, and `explain_failure`, a composition of `run` +
@@ -357,8 +371,9 @@ One script tag puts the run loop in the corner of your own page —
 
     <script type="module" src="/studio/panel.js" data-weft data-scope="pub_…"></script>
 
-Against a Studio that wants a token — setup B, `weft studio`, which
-prints its dev token — the tag carries it (on a page you ship, a panel
+Against a Studio that wants a token — setup B, `weft studio`, whose
+token is in `<db>.token` (`weft open --with-token` prints a signed-in
+link) — the tag carries it (on a page you ship, a panel
 token your backend mints instead):
 
     <script type="module" src="http://127.0.0.1:7341/panel.js" data-weft
@@ -2752,7 +2767,8 @@ components are `tools`, `thinking`, `tool_choice`, `sequential`,
 `manifest_hash`, and the runtime `studio_url` (Studio strips userinfo,
 query and fragment).
 
-**Wire (for the TS/Python runtime clients).** The registration gains
+**Wire (for future non-Go clients — not shipped; backlog I2).** Today
+`weft/runtime` (Go) is the only runtime-link client. The registration gains
 `cwd` (string, optional) and `instance` (string: a random value per link,
 kept across its reconnects — with host and pid it is what makes a
 re-registration "the same process"). A client **must** send `instance`

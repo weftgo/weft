@@ -1,0 +1,76 @@
+{
+  "weft_version": "v0.19.0",
+  "studio_version": "v0.19.0",
+  "panel_version": "v0.19.0",
+  "db": {
+    "kind": "sqlite"
+  },
+  "title": "weft studio",
+  "has_manifest": false,
+  "ingest_open": true,
+  "ingest": {
+    "dropped": [],
+    "accepted": 0,
+    "refused": 0
+  },
+  "interrupted_after_ms": 30000,
+  "capabilities": [
+    "requests",
+    "steps",
+    "export",
+    "logs",
+    "diff",
+    "traces",
+    "search",
+    "stats",
+    "manifests",
+    "spans_tree",
+    "timeline",
+    "pricing",
+    "delete",
+    "proposals",
+    "live",
+    "scope_tags",
+    "ingest",
+    "panel-config"
+  ],
+  "capabilities_off": {
+    "auth": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one",
+    "breakpoints": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "cancel": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "handoff": "no Token: panel tokens do not exist here, so there is none to hand off from: turn it on with studio.Token(tok); weft studio always sets one",
+    "panel_token_tags": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one",
+    "playground": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "preview": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "run_commands": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "runtime_forget": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "runtimes": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "steer": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "target_check": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+  },
+  "manifest_sources": 0,
+  "auth_required": false,
+  "live_all": true,
+  "content": {
+    "ingest": "as_received",
+    "latest": {
+      "run_id": "r_stale",
+      "mark": "unmarked",
+      "note": "the latest run carries no content mark: no events stored, a weft older than the mark, or a non-weft exporter",
+      "started": "2020-01-01T09:03:00.123Z",
+      "weft_version": "v0.6.0",
+      "service": "studio-test"
+    }
+  },
+  "pricing": {
+    "source": "default",
+    "dated": "2026-10-10",
+    "models": 47
+  },
+  "retention": null,
+  "runtimes": 0,
+  "manifest_check": null,
+  "pid": 1234,
+  "discovery_file": "/run/user/1000/weft/studio.json"
+}
+

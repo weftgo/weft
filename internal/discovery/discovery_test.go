@@ -559,3 +559,28 @@ func TestOff(t *testing.T) {
 		}
 	}
 }
+
+// TestPathAndRead (B7): Path is where Write writes — the first
+// location's studio.json, "" with none — and Read reads a file under
+// the reader's rules without judging it fresh.
+func TestPathAndRead(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	useDirs(t, a, b)
+	w, err := Write(fresh("http://127.0.0.1:7347"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Path() != w.Path || w.Path != filepath.Join(a, FileName) {
+		t.Errorf("Path() = %q, Write wrote %q", Path(), w.Path)
+	}
+	if info, err := Read(w.Path); err != nil || info.URL != "http://127.0.0.1:7347" || info.PID != os.Getpid() {
+		t.Errorf("Read = %+v %v", info, err)
+	}
+	if _, err := Read(filepath.Join(b, FileName)); err == nil {
+		t.Error("Read of a missing file succeeded")
+	}
+	useDirs(t)
+	if Path() != "" {
+		t.Errorf("no location: Path() = %q", Path())
+	}
+}

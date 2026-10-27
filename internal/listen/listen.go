@@ -11,6 +11,9 @@
 //     same database file (db.path, which B5 serves to loopback and the
 //     dev token only): Choose binds nothing and returns a reuse verdict
 //     naming that Studio's URL and pid.
+//   - Before any of these, a Studio the user's discovery file names
+//     (Request.Known) is asked the same question: the same database
+//     file there is the reuse verdict too, whatever its port.
 //   - It is busy with anything else — another program, a Studio on
 //     another database, a Studio whose meta this token cannot read
 //     (401/403) or that serves no db.path — the next port of the range
@@ -89,6 +92,14 @@ type Request struct {
 	// address its user's discovery file names (plan B3), so that
 	// long-lived token never goes to whatever else holds a port.
 	TokenFor func(addr string) string
+	// Known is the address (host:port) of a Studio the user's discovery
+	// file names, "" when none: Choose probes it first, before binding,
+	// pinned or not, and a Studio there serving the same database is the
+	// reuse verdict whatever its port — a Studio started with --addr, or
+	// moved to 7332–7340, is found, and never gets a second Studio on its
+	// file (UX-S5a-13). Anything else found there is ignored: the policy
+	// goes on as without it.
+	Known string
 	// Timeout bounds each probe (0 = ProbeTimeout).
 	Timeout time.Duration
 }
@@ -134,6 +145,11 @@ func Choose(ctx context.Context, r Request) (Choice, error) {
 	}
 	if r.Timeout <= 0 {
 		r.Timeout = ProbeTimeout
+	}
+	if r.Known != "" && r.DBPath != "" {
+		if v := probe(ctx, r.Known, r); v.reuse {
+			return Choice{Addr: r.Known, Reuse: true, PID: v.pid}, nil
+		}
 	}
 	if r.Pinned {
 		ln, err := net.Listen("tcp", r.Addr)

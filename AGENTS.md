@@ -418,9 +418,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    (<db>.token beside the file, 0600, never printed; --rotate-token renews it,
 //    //    --token / WEFT_STUDIO_TOKEN override; a fileless DB gets a printed per-process
 //    //    one); studio.json {url, token, db, pid, started, version} (0600, removed on exit;
-//    //    none written under WEFT_DISCOVERY=off, said in one start line) is the discovery file apps find it through (block 6). The API over a terminal (--url
-//    //    WEFT_STUDIO_URL, --token WEFT_STUDIO_TOKEN): weft doctor checks one; weft runs
-//    //    [--agent --since --failed --status running|succeeded|failed|interrupted|parked|cancelled --limit --json] (PROMPT and STOPPED BY columns — every cell's control characters as spaces; --json carries prompt_preview/stopped_by/cancel_cause); weft open <run id> [--open --with-token]
+//    //    none written under WEFT_DISCOVERY=off, said in one start line) is the discovery file apps find it through (block 6). The API over a terminal (one resolver for runs/open/export/doctor/mcp: --url >
+//    //    WEFT_STUDIO_URL > the discovery file > 127.0.0.1:7331, a stderr line naming it when unnamed; --token >
+//    //    WEFT_STUDIO_TOKEN > the file's when it names that Studio): weft doctor checks one (+ discovery, data version, otlp); weft runs
+//    //    [--agent --since --failed --status running|succeeded|failed|interrupted|parked|cancelled --limit --json] (DUR, COST, PUBLIC ID, PROMPT, STOPPED BY and ERROR columns — every cell's control characters as spaces; --json carries prompt_preview/stopped_by/cancel_cause); weft open [run|public|session|trace id] [--open --with-token] (no id: the Studio root)
 //    //    (prints the bare <url>/runs/<id>; the token only to the browser or on --with-token);
 //    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./pkg [--fixtures-only --test Name]
 //    //    --force] (Studio's save-as-test tree: <agent>_replay_test.go + testdata/TestReplay_<run>/, a replay's
@@ -449,8 +450,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    on a .go save (300 ms debounce; its process group stopped: SIGTERM, 5 s, SIGKILL);
 //    //    one line per start: studio <url> (bare; #token= only for a fileless DB's generated
 //    //    token) · app pid n · runtime rt_… registered.
-//    //    Port policy (internal/listen): busy 7331 + a Studio on the same DB → reused
-//    //    ("studio already running at … (pid n), reusing", exit 0); anything else → the
+//    //    Port policy (internal/listen): a Studio on the same DB (busy 7331, or
+//    //    the discovery file's) — a weft studio is refused ("studio already running at … (pid n) on <db>", exit 1; weft dev reuses it),
+//    //    the discovery file's Studio probed first whatever its port (listen.Request.Known); anything else → the
 //    //    next free port in 7331–7340, said in one line; --addr / WEFT_STUDIO_ADDR pins
 //    //    (busy → exit 1 naming it). /api/meta's pid follows db.path's guard.
 

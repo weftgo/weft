@@ -16,7 +16,7 @@ import {
   studioToken,
   tabTokenDropped,
 } from "@/lib/api"
-import { TOKEN_WALL } from "@/lib/settings"
+import { SIGN_IN_COMMAND, TOKEN_FILE, TOKEN_WALL } from "@/lib/settings"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { STATUS_TEXT } from "@/lib/status-class"
@@ -32,6 +32,9 @@ export function TokenWall({ children }: { children: React.ReactNode }) {
   const meta = useQuery(metaQuery())
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState("")
+  // The refusal is said once the reader submitted a token, never on a
+  // fresh wall: there is nothing wrong yet (UX-S5a-02).
+  const [tried, setTried] = useState(false)
   if (!isUnauthorized(meta.error)) return <>{children}</>
 
   const had = studioToken() !== ""
@@ -43,6 +46,7 @@ export function TokenWall({ children }: { children: React.ReactNode }) {
     if (!tok) return
     setStudioToken(tok)
     setDraft("")
+    setTried(true)
     // Everything fetched (and refused) so far is refetched with the
     // bearer; meta first, which decides whether the wall opens.
     void queryClient.resetQueries()
@@ -58,17 +62,16 @@ export function TokenWall({ children }: { children: React.ReactNode }) {
       <h1 className="text-sm font-medium" data-token-wall>
         {TOKEN_WALL.heading}
       </h1>
-      <p className="text-xs">This Studio needs its API token.</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs">{TOKEN_WALL.intro}</p>
+      <p className="text-xs text-muted-foreground" data-token-place>
         {had
-          ? "The stored token was refused — it expired, or this Studio restarted with a new one."
+          ? TOKEN_WALL.refused
           : handoffExpired
-            ? "The hand-off token this tab's link carried expired; paste a token or ask for a new link."
-            : "The API behind this page is token-walled."}{" "}
-        The <span className="font-mono">studio</span> binary prints its dev
-        token at start (<span className="font-mono">WEFT_STUDIO_TOKEN</span> or{" "}
-        <span className="font-mono">--token</span> fixes it); a hosted Studio
-        uses the token it was configured with. It stays in this browser.
+            ? TOKEN_WALL.handoffExpired
+            : TOKEN_WALL.walled}{" "}
+        {TOKEN_WALL.run} <span className="font-mono">{SIGN_IN_COMMAND}</span>{" "}
+        {TOKEN_WALL.orPaste} <span className="font-mono">{TOKEN_FILE}</span>{" "}
+        {TOKEN_WALL.fileNote}
       </p>
       <div className="flex gap-2">
         <Input
@@ -89,8 +92,11 @@ export function TokenWall({ children }: { children: React.ReactNode }) {
           unlock
         </Button>
       </div>
-      <p className={`font-mono text-[11px] ${STATUS_TEXT.bad}`}>
-        {meta.isFetching ? "checking…" : meta.error?.message}
+      <p
+        className={`font-mono text-[11px] ${STATUS_TEXT.bad}`}
+        data-token-error
+      >
+        {meta.isFetching ? "checking…" : tried ? meta.error?.message : null}
       </p>
     </form>
   )

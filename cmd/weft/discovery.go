@@ -3,11 +3,14 @@ package main
 import (
 	"fmt"
 	"io"
+	"log/slog"
+	"net/url"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/weftgo/weft/internal/discovery"
+	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/version"
 )
 
@@ -54,6 +57,44 @@ func announce(out io.Writer, url, token, dbPath string) *discovery.Written {
 	}
 	_, _ = fmt.Fprintf(out, "studio: apps find this Studio through %s (WEFT_STUDIO_URL overrides it, WEFT_DISCOVERY=off ignores it)\n", w.Path)
 	return w
+}
+
+// knownStudio is the address (host:port) of the Studio this user's
+// discovery file names when it serves a database file, "" otherwise
+// (no file trusted, WEFT_DISCOVERY=off, a start with no database
+// file): the port policy probes it first (listen.Request.Known), so a
+// Studio on the same file is found whatever its port (UX-S5a-13).
+func knownStudio(dbPath string) string {
+	if dbPath == "" || discovery.Off(os.Getenv) {
+		return ""
+	}
+	info, _, ok := discovery.Lookup(func(k string) string {
+		if k == "WEFT_STUDIO_URL" {
+			return ""
+		}
+		return os.Getenv(k)
+	}, slog.New(slog.DiscardHandler))
+	if !ok || info.DB == "" {
+		return ""
+	}
+	u, err := url.Parse(info.URL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+// discoveryOption names the discovery file a start is about to write to
+// its server (studio.DiscoveryFile: /api/meta's discovery_file, which
+// Studio's connect lines print); none under WEFT_DISCOVERY=off.
+func discoveryOption() []studio.Option {
+	if discovery.Off(os.Getenv) {
+		return nil
+	}
+	if p := discovery.Path(); p != "" {
+		return []studio.Option{studio.DiscoveryFile(p)}
+	}
+	return nil
 }
 
 // reuseNotes are the lines a reusing start adds after its reuse line:

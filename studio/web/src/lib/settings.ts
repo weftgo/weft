@@ -448,11 +448,32 @@ export function mcpCommand(studioURL: string, authRequired?: boolean): string {
 export const LOGS_BRIDGE =
   "weft's records arrive with weft.LoggerProvider / otel.Install; the app's slog lines need a bridge to OTel logs — otel.Install(…, otel.Slog()) bridges slog.Default, otel.SlogHandler(h) any other handler. An Agent.CallTool outside a run records nothing."
 
-/** The token wall's words (UX-F-26): its heading, and the hint on the
- * sidebar's pages it hides until the token is in. */
+/** Where a token-walled `weft studio`'s token lives (B7, UX-S5a-02):
+ * the stable token's file beside the database — never printed; the
+ * start banner names its path — and the command that prints this
+ * Studio's link signed in (the token in its URL fragment). */
+export const TOKEN_FILE = "<db>.token"
+export const SIGN_IN_COMMAND = "weft open --with-token"
+
+/** The token wall's words (UX-F-26, UX-S5a-02): its heading, the hint
+ * on the sidebar's pages it hides until the token is in, and where a
+ * new user finds the token. */
 export const TOKEN_WALL = {
   heading: "Sign in to this Studio",
   needs: "needs the token",
+  intro: "This Studio needs its API token.",
+  walled: "The API behind this page is token-walled.",
+  refused:
+    "The stored token was refused — it expired, or this Studio restarted with a new one.",
+  handoffExpired:
+    "The hand-off token this tab's link carried expired; paste a token or ask for a new link.",
+  /** Before the command: how a terminal signs in. */
+  run: "Run",
+  /** Between the command and the file. */
+  orPaste: "in a terminal for a signed-in link, or paste the contents of",
+  /** After the file. */
+  fileNote:
+    "(the file beside the database; the start banner names it). A hosted Studio uses the token it was configured with. The token stays in this browser.",
 } as const
 
 /** The skip link (UX-F-25): the first tab stop of every page. */

@@ -56,7 +56,10 @@
     "latest": {
       "run_id": "r_stale",
       "mark": "unmarked",
-      "note": "the latest run carries no content mark: no events stored, a weft older than the mark, or a non-weft exporter"
+      "note": "the latest run carries no content mark: no events stored, a weft older than the mark, or a non-weft exporter",
+      "started": "2020-01-01T09:03:00.123Z",
+      "weft_version": "v0.6.0",
+      "service": "studio-test"
     }
   },
   "pricing": {

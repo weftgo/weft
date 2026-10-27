@@ -280,3 +280,33 @@ func TestFixedTokenBeatsTokenFor(t *testing.T) {
 		}
 	}
 }
+
+// TestKnownStudio (B7, UX-S5a-13): a Studio the discovery file names
+// (Request.Known) is asked first, whatever its port: the same database
+// there is the reuse verdict even with the wanted address free, pinned
+// or not; a Studio there on another database leaves the policy as it
+// was — the wanted address is bound.
+func TestKnownStudio(t *testing.T) {
+	host, port := freeBase(t, 2)
+	known := addr(host, port+1)
+	dir := t.TempDir()
+	db := filepath.Join(dir, "weft.db")
+	serveStudio(t, known, db, "")
+	for _, pinned := range []bool{false, true} {
+		c, err := listen.Choose(context.Background(), listen.Request{Addr: addr(host, port), Pinned: pinned, DBPath: db, Known: known, Timeout: 5 * time.Second})
+		if err != nil || !c.Reuse || c.Addr != known || c.PID != os.Getpid() || c.Listener != nil {
+			t.Errorf("pinned %v: same database at the known address = %+v %v, want its reuse", pinned, c, err)
+		}
+	}
+	c, err := listen.Choose(context.Background(), listen.Request{Addr: addr(host, port), DBPath: filepath.Join(dir, "other.db"), Known: known, Timeout: 5 * time.Second})
+	if err != nil || c.Reuse || c.Addr != addr(host, port) || c.Listener == nil {
+		t.Fatalf("another database = %+v %v, want the wanted address bound", c, err)
+	}
+	_ = c.Listener.Close()
+	// A known address nothing answers on is no verdict either.
+	c, err = listen.Choose(context.Background(), listen.Request{Addr: addr(host, port), DBPath: db, Known: "127.0.0.1:1", Timeout: 5 * time.Second})
+	if err != nil || c.Reuse || c.Listener == nil {
+		t.Fatalf("a dead known address = %+v %v, want the wanted address bound", c, err)
+	}
+	_ = c.Listener.Close()
+}

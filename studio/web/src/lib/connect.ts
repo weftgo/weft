@@ -4,7 +4,7 @@
 // fixed port, never "this command starts Studio" to someone already in
 // it. The token is never written: a token-walled Studio's lines name
 // where it lives (<db>.token, weft open --with-token).
-import { mcpCommand } from "./settings"
+import { SIGN_IN_COMMAND, TOKEN_FILE, mcpCommand } from "./settings"
 
 /** studioURL is this Studio's URL as an app dials it: the page's base
  * (where this UI and /api are served), without the trailing slash. */
@@ -20,15 +20,18 @@ export interface ConnectLine {
   note: string
 }
 
-/** Where a token-walled Studio's token is (B7 owns the wall itself). */
-export const TOKEN_PLACE =
-  "the token: <db>.token beside the database, or `weft open <run id> --with-token`"
+/** Where a token-walled Studio's token is (the token wall says the
+ * same, from the same words). */
+export const TOKEN_PLACE = `the token: ${TOKEN_FILE} beside the database, or \`${SIGN_IN_COMMAND}\``
 
 /** connectLines are the three ways an app, a page and a coding agent
- * reach the Studio at url. */
+ * reach the Studio at url. discoveryFile is the discovery file this
+ * Studio wrote (meta.discovery_file, B7: served to the dev token and a
+ * loopback setup A only), named in the app's note when known. */
 export function connectLines(
   url: string,
-  authRequired?: boolean
+  authRequired?: boolean,
+  discoveryFile?: string
 ): ConnectLine[] {
   // The attribute the panel reads its bearer from, with a placeholder:
   // the token itself is never written here.
@@ -39,7 +42,7 @@ export function connectLines(
       key: "app",
       label: "Go app",
       code: `export WEFT_STUDIO_URL=${url}\n${authRequired ? "export WEFT_STUDIO_TOKEN=<token>\n" : ""}go run .   # an app that calls otel.Install()`,
-      note: `otel.Install() records runs here; without WEFT_STUDIO_URL it finds the Studio a running \`weft studio\` names in its discovery file (studio.json). WEFT_STUDIO_URL turns discovery off: a Studio with an ingest token needs WEFT_STUDIO_TOKEN too${authRequired ? ` (${TOKEN_PLACE})` : ""}. runtime.Install(...) lets Studio replay them.`,
+      note: `otel.Install() records runs here; without WEFT_STUDIO_URL it finds the Studio a running \`weft studio\` names in its discovery file (${discoveryFile ?? "studio.json"}). WEFT_STUDIO_URL turns discovery off: a Studio with an ingest token needs WEFT_STUDIO_TOKEN too${authRequired ? ` (${TOKEN_PLACE})` : ""}. runtime.Install(...) lets Studio replay them.`,
     },
     {
       key: "panel",

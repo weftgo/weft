@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -147,18 +146,13 @@ func TestDiscoveryFileWrittenAndRemoved(t *testing.T) {
 		t.Error("the discovery file's token does not open the API")
 	}
 
-	// The second bare start: reuse, nothing written.
+	// The second bare start: refused, nothing written.
 	before, _ := os.ReadFile(filepath.Join(dir, discovery.FileName))
 	var second syncBuffer
-	if err := serveWith("sqlite://"+dbPath, want{addr: loop(base), span: 2}, "", &second, afterBoot{}); err != nil {
-		t.Fatalf("second start: %v", err)
-	}
-	if want := "studio already running at http://" + loop(base) + " (pid " + strconv.Itoa(os.Getpid()) + "), reusing\n"; second.String() != want {
-		t.Errorf("second bare start printed %q, want exactly %q", second.String(), want)
-	}
+	wantRefused(t, serveWith("sqlite://"+dbPath, want{addr: loop(base), span: 2}, "", &second, afterBoot{}), &second, loop(base))
 	after, _ := os.ReadFile(filepath.Join(dir, discovery.FileName))
 	if string(before) != string(after) {
-		t.Error("the reusing start rewrote the discovery file")
+		t.Error("the refused start rewrote the discovery file")
 	}
 
 	stop()
@@ -178,8 +172,10 @@ func TestReuseSaysMissingDiscovery(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, discovery.FileName)); err != nil {
 		t.Fatal(err)
 	}
+	// weft dev reuses (weft studio refuses): its reuse says the file
+	// is missing.
 	var second syncBuffer
-	if err := serveWith(db, want{addr: loop(base), span: 2}, "tok", &second, afterBoot{rotate: true}); err != nil {
+	if _, err := devStudio(db, want{addr: loop(base), span: 2}, "tok", true, &second); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
@@ -381,7 +377,8 @@ func TestTokenCreateRace(t *testing.T) {
 
 // TestFixedTokenReusesOverStableFile (round 2, finding 1): a fixed
 // token always wins the probe — a database whose <db>.token holds
-// another (stable) token is still reused by a second `--token X` start.
+// another (stable) token is still found by a second `--token X` start
+// (and that start refused: one Studio per database file).
 func TestFixedTokenReusesOverStableFile(t *testing.T) {
 	discoveryDir(t)
 	t.Setenv("WEFT_STUDIO_TOKEN", "")
@@ -393,12 +390,7 @@ func TestFixedTokenReusesOverStableFile(t *testing.T) {
 	var first syncBuffer
 	bareStudio(t, "sqlite://"+dbPath, base, 2, loop(base), "X", false, &first)
 	var second syncBuffer
-	if err := serveWith("sqlite://"+dbPath, want{addr: loop(base), span: 2}, "X", &second, afterBoot{}); err != nil {
-		t.Fatal(err)
-	}
-	if want := "studio already running at http://" + loop(base) + " (pid " + strconv.Itoa(os.Getpid()) + "), reusing\n"; second.String() != want {
-		t.Errorf("second --token X start printed %q, want %q", second.String(), want)
-	}
+	wantRefused(t, serveWith("sqlite://"+dbPath, want{addr: loop(base), span: 2}, "X", &second, afterBoot{}), &second, loop(base))
 }
 
 // TestDiscoveryRefreshedWhileServing (round 2, finding 2): a serving

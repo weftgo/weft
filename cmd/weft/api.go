@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -164,14 +165,88 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 // runRow is the part of GET /api/runs' row the table prints; --json
 // prints the row as Studio serves it.
 type runRow struct {
-	ID          string    `json:"id"`
-	Agent       string    `json:"agent"`
-	Status      string    `json:"status"`
-	Started     time.Time `json:"started"`
-	Steps       int       `json:"steps"`
-	StoppedBy   string    `json:"stopped_by"`
-	CancelCause string    `json:"cancel_cause"`
-	Prompt      string    `json:"prompt_preview"`
+	ID          string     `json:"id"`
+	Agent       string     `json:"agent"`
+	Status      string     `json:"status"`
+	Started     time.Time  `json:"started"`
+	Finished    *time.Time `json:"finished"`
+	Steps       int        `json:"steps"`
+	StoppedBy   string     `json:"stopped_by"`
+	CancelCause string     `json:"cancel_cause"`
+	Prompt      string     `json:"prompt_preview"`
+	PublicID    string     `json:"public_id"`
+	Err         string     `json:"err"`
+	ErrorType   string     `json:"error_type"`
+	CostUSD     *float64   `json:"cost_usd"`
+	CostBadge   string     `json:"cost_badge"`
+}
+
+// errorCells is the ERROR cell's width: the error cut to this many
+// runes, "…" marking the cut.
+const errorCells = 60
+
+// errorCell is the ERROR cell (UX-S5a-05): a failed run's kind
+// (error_type) and its error's last clause — what a terminal triages
+// on — cut to errorCells runes; "-" when the run carries none. The
+// error is untrusted text (an OTLP sender's), never printed raw.
+func (r runRow) errorCell() string {
+	msg := strings.TrimSpace(termsafe.Text(firstLine(r.Err)))
+	// "weft: run failed at step 0: model stream: mw: giving up …": the
+	// loop's wrapping prefixes say where (the run page shows them), the
+	// rest says why.
+	msg = errPrefix.ReplaceAllString(msg, "")
+	switch {
+	case r.ErrorType != "" && msg != "":
+		msg = r.ErrorType + ": " + msg
+	case r.ErrorType != "":
+		msg = r.ErrorType
+	}
+	if msg == "" {
+		return "-"
+	}
+	if rs := []rune(msg); len(rs) > errorCells {
+		return strings.TrimSpace(string(rs[:errorCells-1])) + "…"
+	}
+	return msg
+}
+
+// errPrefix is the loop's and the middleware's wrapping of a run error.
+var errPrefix = regexp.MustCompile(`^(weft: )?(run failed at step \d+: )?(model stream: )?(mw: )?`)
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	return line
+}
+
+// duration is the DUR cell: finished − started, "-" while running.
+func (r runRow) duration() string {
+	if r.Finished == nil || r.Finished.Before(r.Started) {
+		return "-"
+	}
+	d := r.Finished.Sub(r.Started)
+	switch {
+	case d < time.Second:
+		return d.Round(time.Millisecond).String()
+	case d < time.Minute:
+		return d.Round(100 * time.Millisecond).String()
+	}
+	return d.Round(time.Second).String()
+}
+
+// cost is the COST cell: the run's own cost in USD, "$0" for a
+// scripted model's exact zero, "-" when unpriced or unknown (Studio's
+// cost_badge says why; --json carries it).
+func (r runRow) cost() string {
+	if r.CostUSD == nil {
+		return "-"
+	}
+	if *r.CostUSD == 0 {
+		return "$0"
+	}
+	if *r.CostUSD < 0.01 {
+		return fmt.Sprintf("$%.4f", *r.CostUSD)
+	}
+	return fmt.Sprintf("$%.2f", *r.CostUSD)
 }
 
 // promptCells is the PROMPT cell's width: the preview's first line cut
@@ -251,7 +326,7 @@ func runRuns(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
-	c := newClient(*base, apiToken(*token))
+	c, _ := clientFor(*base, *token, stderr)
 	q := url.Values{}
 	if *agent != "" {
 		q.Set("agent", *agent)
@@ -347,13 +422,32 @@ pages:
 		_, _ = fmt.Fprintln(stderr, "weft: no runs match")
 		return nil
 	}
-	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tAGENT\tSTATUS\tSTARTED\tSTEPS\tPROMPT\tSTOPPED BY")
+	// The PUBLIC ID column appears when a row carries one (the id the
+	// app's logs and the panel show; weft open takes it).
+	pub := false
 	for _, r := range rows {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n", cell(r.ID), cell(r.Agent), cell(r.Status),
-			r.Started.Local().Format("2006-01-02 15:04:05"), r.Steps, r.prompt(), r.stoppedBy())
+		pub = pub || r.PublicID != ""
 	}
-	return tw.Flush()
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	head := "ID\tAGENT\tSTATUS\tSTARTED\tSTEPS\tDUR\tCOST\t"
+	if pub {
+		head += "PUBLIC ID\t"
+	}
+	_, _ = fmt.Fprintln(tw, head+"PROMPT\tSTOPPED BY\tERROR")
+	for _, r := range rows {
+		line := fmt.Sprintf("%s\t%s\t%s\t%s\t%d\t%s\t%s\t", cell(r.ID), cell(r.Agent), cell(r.Status),
+			r.Started.Local().Format("2006-01-02 15:04:05 -0700"), r.Steps, r.duration(), r.cost())
+		if pub {
+			line += cell(r.PublicID) + "\t"
+		}
+		_, _ = fmt.Fprintf(tw, "%s%s\t%s\t%s\n", line, r.prompt(), r.stoppedBy(), r.errorCell())
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	// The next step, on stderr: stdout stays the table.
+	_, _ = fmt.Fprintln(stderr, "weft: weft open <id> shows one in Studio; weft export <id> --format jsonl writes it out")
+	return nil
 }
 
 // parseSince reads --since: a duration back from now, or an RFC 3339
@@ -373,50 +467,93 @@ func parseSince(v string, now time.Time) (time.Time, error) {
 
 // ── weft open ──────────────────────────────────────────────────────
 
-// runOpen is `weft open <id>`: the run's page, checked against
-// GET /api/runs/<id>, printed and with --open opened.
+// runOpen is `weft open [id]`: the page of a run, a conversation (a
+// public id), a session or a trace — the id is tried as each kind in
+// turn against the API (UX-S5a-06) — or, with no id, the Studio root
+// (UX-S5a-02: on a fresh Studio with no run, the one signed-in link a
+// terminal can print). The link is printed and with --open opened.
 func runOpen(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("open", stderr)
 	base, token := clientFlags(fs)
 	open := fs.Bool("open", false, "open the link in the browser too, the token in its fragment")
-	withToken := fs.Bool("with-token", false, "print the link with the token in its fragment (#token=); the token may be the panel tokens' signing key: keep it out of logs")
+	withToken := fs.Bool("with-token", false, "print the link with the token in its fragment (#token=), signed in; the token may be the panel tokens' signing key: keep it out of logs")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
 	}
-	if len(pos) != 1 || pos[0] == "" {
-		return usageError("open takes one run id, got %q", pos)
+	if len(pos) > 1 || len(pos) == 1 && pos[0] == "" {
+		return usageError("open takes at most one id — a run id, a public id, a session id or a trace id — got %q", pos)
 	}
-	id := pos[0]
-	c := newClient(*base, apiToken(*token))
-	if _, err := c.get(context.Background(), runPath(id), nil); err != nil {
+	c, _ := clientFor(*base, *token, stderr)
+	ctx := context.Background()
+	page := "/"
+	if len(pos) == 1 {
+		if page, err = pageOf(ctx, c, pos[0]); err != nil {
+			return err
+		}
+	} else if _, err := c.get(ctx, "/api/meta", nil); err != nil {
+		// The root: checked the Studio answers and the token opens it.
 		return err
 	}
 	// The printed link is bare unless asked: a fixed token is the panel
 	// tokens' signing key and stays out of logs (serveBoot's banner
 	// rule). The browser gets it in the fragment.
-	printed := runLink(c.base, id, "")
+	printed := pageLink(c.base, page, "")
 	if *withToken {
-		printed = runLink(c.base, id, c.token)
+		printed = pageLink(c.base, page, c.token)
 	}
 	if _, err := fmt.Fprintln(stdout, printed); err != nil {
 		return err
 	}
 	if *open {
-		openBrowser(stdout, runLink(c.base, id, c.token))
+		openBrowser(stdout, pageLink(c.base, page, c.token))
 	}
 	return nil
 }
 
-// runLink is a run's page in the UI, <base>/runs/<id>, the token in
-// the fragment when there is one (the UI adopts it; a fragment never
-// reaches a server or a Referer).
-func runLink(base, id, token string) string {
-	link := base + "/runs/" + url.PathEscape(id)
+// idKinds are the ids `weft open` takes, in the order it tries them:
+// the API route that knows the id and the UI page that shows it.
+var idKinds = []struct{ noun, route, page string }{
+	{"run", "/api/runs/", "/runs/"},
+	{"public id", "/api/public/", "/conversations/"},
+	{"session", "/api/sessions/", "/sessions/"},
+	{"trace", "/api/traces/", "/traces/"},
+}
+
+// pageOf is the UI page of id: the first kind whose route knows it. A
+// 404 tries the next kind; any other failure is the error. An id no
+// kind knows is an error naming what was tried.
+func pageOf(ctx context.Context, c *client, id string) (string, error) {
+	var tried []string
+	for _, k := range idKinds {
+		_, err := c.get(ctx, k.route+url.PathEscape(id), nil)
+		var se *statusError
+		switch {
+		case err == nil:
+			return k.page + url.PathEscape(id), nil
+		case errors.As(err, &se) && se.Status == http.StatusNotFound:
+			tried = append(tried, k.noun)
+			continue
+		}
+		return "", err
+	}
+	return "", fmt.Errorf("%s is no %s this Studio knows (%s)", termsafe.Text(id), strings.Join(tried, ", "), c.redacted())
+}
+
+// pageLink is a UI page, <base><page>, the token in the fragment when
+// there is one (the UI adopts it; a fragment never reaches a server or
+// a Referer).
+func pageLink(base, page, token string) string {
+	link := base + page
 	if token != "" {
 		link += "#token=" + url.QueryEscape(token)
 	}
 	return link
+}
+
+// runLink is a run's page in the UI, <base>/runs/<id>.
+func runLink(base, id, token string) string {
+	return pageLink(base, "/runs/"+url.PathEscape(id), token)
 }
 
 // ── weft export ────────────────────────────────────────────────────
@@ -446,7 +583,7 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 	id := pos[0]
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-	c := newClient(*base, apiToken(*token))
+	c, _ := clientFor(*base, *token, stderr)
 	ctx := context.Background()
 	if *dir == "" {
 		if set["test"] || set["force"] || set["fixtures-only"] {

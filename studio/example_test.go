@@ -153,3 +153,43 @@ func ExampleToken_tagScope() {
 	// /api/runs?tag.arena.batch=b1 200
 	// /api/runs?tag.arena.batch=b2 403
 }
+
+// ExampleDiscoveryFile is what `weft studio` does for the discovery
+// file it writes: it names the path to the server, and api/meta serves
+// it (to the server token, or loopback with no Token) while the file
+// there names this process — Studio's connect lines print it. Here the
+// file is written by hand, as the command writes it: 0600, this pid.
+func ExampleDiscoveryFile() {
+	dir, err := os.MkdirTemp("", "weft-studio-discovery-")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	path := dir + "/studio.json"
+	body := fmt.Sprintf(`{"url":"http://127.0.0.1:7331","pid":%d,"started":%q}`, os.Getpid(), time.Now().UTC().Format(time.RFC3339))
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		fmt.Println(err)
+		return
+	}
+	srv := studio.New(studio.Open(dir+"/weft.db"), studio.DiscoveryFile(path))
+	defer func() { _ = srv.Close() }()
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/meta")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var meta struct {
+		DiscoveryFile string `json:"discovery_file"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(meta.DiscoveryFile == path)
+	// Output: true
+}

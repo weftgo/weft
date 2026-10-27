@@ -1497,6 +1497,8 @@ func TestAuthMatrix(t *testing.T) {
 	time.Sleep(2 * time.Millisecond) // strictly newer than every seeded run
 	seedRun(t, srv.db, "run_b_newer", "pub_b", "", "", nil)
 	srv.ingestHealth.heard(&obsdb.Record{Service: "svc-other-tenant", Attrs: map[string]any{"weft.records.dropped": int64(3)}})
+	// discovery_file (B7) follows db.path: the server token's alone.
+	srv.discovery = writeDiscoveryFile(t, os.Getpid())
 	for _, id := range identities {
 		if id.kind == "bad" {
 			continue
@@ -1512,6 +1514,7 @@ func TestAuthMatrix(t *testing.T) {
 		var meta struct {
 			DB           map[string]any `json:"db"`
 			PID          *int           `json:"pid"`
+			Discovery    *string        `json:"discovery_file"`
 			Runtimes     int            `json:"runtimes"`
 			AuthRequired *bool          `json:"auth_required"`
 			LiveAll      *bool          `json:"live_all"`
@@ -1579,6 +1582,9 @@ func TestAuthMatrix(t *testing.T) {
 		// pid (plan B2) follows db.path: the server token's alone.
 		if want := id.kind == "server"; (meta.PID != nil) != want || (want && *meta.PID != os.Getpid()) {
 			t.Errorf("GET /api/meta as %s: pid = %v, want present (this process's) = %v", id.name, meta.PID, want)
+		}
+		if want := id.kind == "server"; (meta.Discovery != nil) != want || (want && *meta.Discovery != srv.discovery) {
+			t.Errorf("GET /api/meta as %s: discovery_file = %v, want present = %v", id.name, meta.Discovery, want)
 		}
 		// live_all (plan A7) follows db.path too: true for the server
 		// token, false — present, never omitted — for every panel token.

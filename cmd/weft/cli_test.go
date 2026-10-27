@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -234,22 +235,25 @@ func TestStudioCommand(t *testing.T) {
 		})
 	}
 
-	// A reuse opens the running Studio, with the token this command holds.
-	t.Run("reuse", func(t *testing.T) {
+	// A second start on the same database is refused (UX-S5a-13): the
+	// running Studio's URL and pid, exit 1, nothing printed or opened.
+	t.Run("second start refused", func(t *testing.T) {
 		takeOpened()
 		base := freeBase(t, 2)
 		var first syncBuffer
 		stop := startStudio(t, db, base, 2, loop(base), &first)
 		defer stop()
 		var second strings.Builder
-		if err := serveWith(db, want{addr: loop(base), span: 2}, "tok", &second, afterBoot{notes: []string{"never printed"}, open: true}); err != nil {
-			t.Fatal(err)
+		err := serveWith(db, want{addr: loop(base), span: 2}, "tok", &second, afterBoot{notes: []string{"never printed"}, open: true})
+		if err == nil || !strings.Contains(err.Error(), "studio already running at http://"+loop(base)+" (pid "+strconv.Itoa(os.Getpid())+")") ||
+			!strings.Contains(err.Error(), "weft open --with-token") {
+			t.Errorf("second start = %v, want refused naming the running Studio", err)
 		}
-		if strings.Contains(second.String(), "never printed") || !strings.HasSuffix(second.String(), "reusing\n") {
-			t.Errorf("a reuse printed %q, want only the reuse line", second.String())
+		if second.String() != "" {
+			t.Errorf("a refused start printed %q", second.String())
 		}
-		if links := takeOpened(); len(links) != 1 || links[0] != "http://"+loop(base)+"/#token=tok" {
-			t.Errorf("reuse --open handed the browser %q", links)
+		if links := takeOpened(); len(links) != 0 {
+			t.Errorf("a refused start handed the browser %q", links)
 		}
 	})
 }
@@ -363,11 +367,13 @@ func TestRunsCommand(t *testing.T) {
 	// STOPPED BY is the last column: what ended the run (U3.2) — r_ok's
 	// model answered; r_fail's model failed, which no control decided.
 	// PROMPT sits before it (U6): the prompt preview's first 40 runes.
-	if !regexp.MustCompile(`STEPS +PROMPT +STOPPED BY$`).MatchString(strings.TrimSpace(lines[0])) {
-		t.Errorf("header = %q, want STEPS, PROMPT, STOPPED BY last", lines[0])
+	// UX-S5a-05: DUR, COST and ERROR — a failed run is triaged from
+	// the table — and STARTED carries its zone.
+	if !regexp.MustCompile(`STARTED +STEPS +DUR +COST +PROMPT +STOPPED BY +ERROR$`).MatchString(strings.TrimSpace(lines[0])) {
+		t.Errorf("header = %q, want STEPS, DUR, COST, PROMPT, STOPPED BY, ERROR", lines[0])
 	}
-	if !regexp.MustCompile(` 2 +where is order 42\? +final_answer$`).MatchString(strings.TrimSpace(lines[2])) {
-		t.Errorf("r_ok's steps / prompt / stopped by columns = %q, want 2, its prompt, final_answer", lines[2])
+	if !regexp.MustCompile(` [+-]\d{4} +2 +\S+ +\$0 +where is order 42\? +final_answer +-$`).MatchString(strings.TrimSpace(lines[2])) {
+		t.Errorf("r_ok's columns = %q, want its zone, 2 steps, a duration, $0 (scripted), its prompt, final_answer, no error", lines[2])
 	}
 	for _, c := range []struct{ in, want string }{
 		{"", "-"},
@@ -391,8 +397,36 @@ func TestRunsCommand(t *testing.T) {
 	if got := (runRow{StoppedBy: "cancel", CancelCause: "x\x1b[2Jy"}).stoppedBy(); got != "cancel (x [2Jy)" {
 		t.Errorf("stopped by = %q, want control characters as spaces", got)
 	}
-	if fs := strings.Fields(lines[1]); fs[len(fs)-1] != "-" {
-		t.Errorf("r_fail's stopped by column = %q, want - (a model error: no control decided)", fs[len(fs)-1])
+	col := func(line, name string) string {
+		i := strings.Index(lines[0], name)
+		if i < 0 || i >= len(line) {
+			return ""
+		}
+		return strings.Fields(line[i:])[0]
+	}
+	if got := col(lines[1], "STOPPED BY"); got != "-" {
+		t.Errorf("r_fail's stopped by column = %q, want - (a model error: no control decided)", got)
+	}
+	if i := strings.Index(lines[0], "ERROR"); i < 0 || !strings.Contains(lines[1][i:], "upstream down") {
+		t.Errorf("r_fail's error column = %q, want its error", lines[1])
+	}
+	if !strings.Contains(errb, "weft open <id>") {
+		t.Errorf("stderr %q, want the next step named", errb)
+	}
+	for _, c := range []struct {
+		r    runRow
+		want string
+	}{
+		{runRow{}, "-"},
+		{runRow{ErrorType: "max_steps"}, "max_steps"},
+		{runRow{Err: "weft: run failed at step 0: model stream: mw: giving up after 2 retries: server error 500: overloaded", ErrorType: "model"},
+			"model: giving up after 2 retries: server error 500: overloa…"},
+		{runRow{Err: strings.Repeat("x", 70)}, strings.Repeat("x", 59) + "…"},
+		{runRow{Err: "bad\x1b[2J\nsecond line"}, "bad [2J"},
+	} {
+		if got := c.r.errorCell(); got != c.want {
+			t.Errorf("error cell of %+v = %q, want %q", c.r, got, c.want)
+		}
 	}
 
 	t.Setenv("WEFT_STUDIO_URL", url) // the env mirrors --url
@@ -467,7 +501,7 @@ func TestRunsCommand(t *testing.T) {
 
 	// Truncation is visible: a limit that hid runs says so on stderr,
 	// --json too; one that hid nothing is silent.
-	if _, errb, _ := weft("runs", "--limit", "1"); errb != "weft: showing the newest 1; --limit 0 lists all\n" {
+	if _, errb, _ := weft("runs", "--limit", "1"); !strings.HasPrefix(errb, "weft: showing the newest 1; --limit 0 lists all\n") {
 		t.Errorf("--limit 1 stderr = %q, want the notice", errb)
 	}
 	if _, errb, _ := weft("runs", "--limit", "2", "--json"); errb != "" {
@@ -523,7 +557,7 @@ func TestRunsCommand(t *testing.T) {
 	out, errb, code = weft("runs", "--agent", "support")
 	lines = strings.Split(strings.TrimSpace(out), "\n")
 	if code != 0 || len(lines) != 2 || !strings.HasPrefix(lines[1], "r_cancel") ||
-		!strings.HasSuffix(strings.TrimSpace(lines[1]), "canceled (studio.cancel)") {
+		!strings.Contains(lines[1], " canceled (studio.cancel) ") {
 		t.Errorf("weft runs --agent support = exit %d, want r_cancel's STOPPED BY \"canceled (studio.cancel)\"\n%s%s", code, out, errb)
 	}
 	out, _, _ = weft("runs", "--agent", "support", "--json")
@@ -577,14 +611,30 @@ func TestOpenCommand(t *testing.T) {
 	if want := url + "/runs/p%2F0%2Fc\n"; code != 0 || out != want {
 		t.Errorf("child id = exit %d %q %q, want %q", code, out, errb, want)
 	}
-	if _, errb, code := weft("open", "p/9/nope", "--token", "tok"); code != 1 || !strings.Contains(errb, "/api/runs/p%2F9%2Fnope") {
-		t.Errorf("unknown child = exit %d %q, want the escaped path in the 404", code, errb)
+	// An id no kind knows names what was tried (UX-S5a-06).
+	if _, errb, code := weft("open", "p/9/nope", "--token", "tok"); code != 1 || !strings.Contains(errb, "p/9/nope is no run, public id, session, trace this Studio knows") {
+		t.Errorf("unknown child = exit %d %q, want the kinds tried", code, errb)
 	}
-	if _, errb, code := weft("open", "nope", "--token", "tok"); code != 1 || !strings.Contains(errb, "404") {
-		t.Errorf("unknown run = exit %d %q, want Studio's 404", code, errb)
+	// A trace id opens the trace's page.
+	b, err := newClient(url, "tok").get(context.Background(), runPath("r_ok"), nil)
+	var row struct {
+		TraceID string `json:"trace_id"`
 	}
-	if _, errb, code := weft("open"); code != 2 || !strings.Contains(errb, "one run id") {
-		t.Errorf("no id = exit %d %q", code, errb)
+	if err != nil || json.Unmarshal(b, &row) != nil || row.TraceID == "" {
+		t.Fatalf("r_ok's trace id: %v %s", err, b)
+	}
+	if out, errb, code := weft("open", row.TraceID, "--token", "tok"); code != 0 || out != url+"/traces/"+row.TraceID+"\n" {
+		t.Errorf("a trace id = exit %d %q %q, want its trace page", code, out, errb)
+	}
+	// No id: the Studio root (UX-S5a-02), signed in with --with-token.
+	if out, errb, code := weft("open", "--token", "tok"); code != 0 || out != url+"/\n" {
+		t.Errorf("no id = exit %d %q %q, want the root", code, out, errb)
+	}
+	if out, _, code := weft("open", "--with-token", "--token", "tok"); code != 0 || out != url+"/#token=tok\n" {
+		t.Errorf("no id --with-token = exit %d %q, want the root signed in", code, out)
+	}
+	if _, errb, code := weft("open", "a", "b"); code != 2 || !strings.Contains(errb, "at most one id") {
+		t.Errorf("two ids = exit %d %q", code, errb)
 	}
 	if got := runLink("http://h", "p/1/c", "a b"); got != "http://h/runs/p%2F1%2Fc#token=a+b" {
 		t.Errorf("a child id's link = %s", got)

@@ -74,7 +74,11 @@ describe("connect an app to this Studio (U21.2)", () => {
     expect(walled[0].code).toContain("export WEFT_STUDIO_TOKEN=<token>")
     expect(open[0].code).not.toContain("WEFT_STUDIO_TOKEN")
     expect(open[0].note).toContain("WEFT_STUDIO_TOKEN")
-    // The form of weft open that works today names a run.
-    expect(walled[1].note).toContain("weft open <run id> --with-token")
+    // Bare `weft open --with-token` prints the root signed in (B7).
+    expect(walled[1].note).toContain("`weft open --with-token`")
+    // The discovery file this Studio wrote, when meta names it (B7).
+    expect(open[0].note).toContain("(studio.json)")
+    const named = connectLines(url, false, "/run/user/1000/weft/studio.json")
+    expect(named[0].note).toContain("(/run/user/1000/weft/studio.json)")
   })
 })

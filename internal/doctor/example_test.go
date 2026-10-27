@@ -13,19 +13,21 @@ import (
 )
 
 // ExampleRun checks a Studio with nothing connected to it: one line per
-// check, each read from its /api/meta. With no runtime connected the
-// runtimes line warns, and its continuation lines name the variables
-// this shell lacks (WEFT_ENV, WEFT_STUDIO_URL).
+// check, each read from its /api/meta. No discovery file names it (an
+// embedded Studio writes none): that line warns. With the playground
+// on and no runtime connected the runtimes line warns, and its
+// continuation lines name the variables this shell lacks (WEFT_ENV,
+// WEFT_STUDIO_URL).
 func ExampleRun() {
 	dir, _ := os.MkdirTemp("", "doctor")
 	defer func() { _ = os.RemoveAll(dir) }()
-	srv := studio.New(studio.Open(filepath.Join(dir, "weft.db")))
+	srv := studio.New(studio.Open(filepath.Join(dir, "weft.db")), studio.Playground(true))
 	defer func() { _ = srv.Close() }()
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	var out strings.Builder
-	err := doctor.Run(context.Background(), &out, ts.URL, "", func(string) string { return "" })
+	err := doctor.Run(context.Background(), &out, doctor.Target{URL: ts.URL, Explicit: true}, func(string) string { return "" })
 	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
 		if f := strings.Fields(line); !strings.HasPrefix(line, " ") {
 			fmt.Println(f[0], f[1])
@@ -37,8 +39,11 @@ func ExampleRun() {
 	// Output:
 	// ok studio
 	// ok token
+	// warn discovery
 	// ok db
 	// ok content
+	// ok data
+	// ok otlp
 	// ok ingest
 	// warn runtimes
 	//   names WEFT_ENV

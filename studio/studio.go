@@ -41,6 +41,7 @@ type config struct {
 	retain       time.Duration // Retain: 0 = off
 	sweepEvery   time.Duration // the sweeper's interval in tests; 0 = sweepInterval(retain)
 	pricing      *PricingTable // Pricing; New resolves it (resolvePricing), never nil after
+	discovery    string        // DiscoveryFile: the file the hosting command writes for this server
 }
 
 // DB serves Studio over db (setup A: DB(otel.LocalDB()) — the same
@@ -156,6 +157,17 @@ func Capabilities(names ...string) Option {
 // enables); without it meta.capabilities does not list the playground.
 func Playground(on bool) Option {
 	return func(c *config) { c.playground = on }
+}
+
+// DiscoveryFile names the discovery file the command hosting this
+// server writes for it (`weft studio` and `weft dev`, plan B3: the
+// studio.json apps find a running Studio through). api/meta serves it
+// as discovery_file, under db.path's rule, while the file at path names
+// this process — a file never written, removed, or since taken over by
+// another Studio is not served. An embedded Studio (setup A) writes no
+// such file and leaves it unset.
+func DiscoveryFile(path string) Option {
+	return func(c *config) { c.discovery = path }
 }
 
 // Server is one Studio: the embedded UI, the JSON API, the live

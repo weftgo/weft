@@ -18,7 +18,6 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/weftgo/weft/internal/discovery"
 	"github.com/weftgo/weft/version"
 )
 
@@ -293,42 +292,17 @@ type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
 
-// mcpStudio resolves the Studio and its token and says where the token
-// came from (never the token): the URL is --url, else WEFT_STUDIO_URL,
-// else the discovery file's, else the default address; the token is
-// --token, else WEFT_STUDIO_TOKEN, else the discovery file's when that
-// file names the resolved URL (a token goes only to the Studio it
-// belongs to). WEFT_DISCOVERY=off skips the file.
+// mcpStudio resolves the Studio and its token through the one
+// resolver every client shares (resolveStudio: --url, WEFT_STUDIO_URL,
+// the discovery file, the default address; the token --token,
+// WEFT_STUDIO_TOKEN, else the discovery file's when it names that
+// Studio) and says where the token came from (never the token).
 func mcpStudio(urlFlag, tokenFlag string) (base, token, from string) {
-	base = urlFlag
-	if base == "" {
-		base = studioURL()
+	t := resolveStudio(urlFlag, tokenFlag)
+	if t.tokenFrom == "none" {
+		return t.base, "", "none"
 	}
-	off := strings.EqualFold(strings.TrimSpace(os.Getenv("WEFT_DISCOVERY")), "off")
-	var info discovery.Info
-	found := false
-	if !off {
-		// Read the file whatever named the URL: its token is used only
-		// when it names the same Studio.
-		info, _, found = discovery.Lookup(func(k string) string {
-			if k == "WEFT_STUDIO_URL" {
-				return ""
-			}
-			return os.Getenv(k)
-		}, slog.New(slog.DiscardHandler))
-	}
-	if urlFlag == "" && os.Getenv("WEFT_STUDIO_URL") == "" && found {
-		base = info.URL
-	}
-	switch {
-	case tokenFlag != "":
-		return base, tokenFlag, "from --token"
-	case os.Getenv("WEFT_STUDIO_TOKEN") != "":
-		return base, os.Getenv("WEFT_STUDIO_TOKEN"), "from WEFT_STUDIO_TOKEN"
-	case found && info.Token != "" && strings.TrimRight(info.URL, "/") == strings.TrimRight(base, "/"):
-		return base, info.Token, "from the discovery file"
-	}
-	return base, "", "none"
+	return t.base, t.token, "from " + t.tokenFrom
 }
 
 // readOnlyTransport is the wall under every tool: a request with any

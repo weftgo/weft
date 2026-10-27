@@ -251,6 +251,7 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	choice, err := listen.Choose(context.Background(), listen.Request{
 		Addr: w.addr, Pinned: w.pinned, Span: w.span, DBPath: dbPath,
 		Token: fixedToken(tokenFlag), TokenFor: stableProbe(dbPath),
+		Known: knownStudio(dbPath),
 	})
 	if err != nil {
 		return nil, err
@@ -270,7 +271,7 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 		_, _ = fmt.Fprintln(out, "studio: "+choice.Note)
 	}
 	// The banner is the one line's job here: serveBoot's goes nowhere.
-	srv, err := serveBootWith(dbFlag, choice.Addr, tokenFlag, rotate, io.Discard, opts...)
+	srv, err := serveBootWith(dbFlag, choice.Addr, tokenFlag, rotate, io.Discard, append(discoveryOption(), opts...)...)
 	if err != nil {
 		_ = choice.Listener.Close()
 		return nil, err

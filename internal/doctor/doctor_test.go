@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/internal/discovery"
 	"github.com/weftgo/weft/internal/doctor"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
@@ -41,23 +43,33 @@ func env(vars map[string]string) func(string) string {
 func run(t *testing.T, url, token string, getenv func(string) string) (string, error) {
 	t.Helper()
 	var out strings.Builder
-	err := doctor.Run(context.Background(), &out, url, token, getenv)
+	err := doctor.Run(context.Background(), &out, doctor.Target{URL: url, Token: token, Explicit: true}, getenv)
 	return out.String(), err
 }
 
-// TestNoRuntimeNamesTheEnv is B5's Done line: against a Studio with no
-// runtime connected, the doctor's output names the variables to set —
-// WEFT_ENV and WEFT_STUDIO_URL — and a missing runtime is a warning,
-// not a failure.
+// TestNoRuntimeNamesTheEnv is B5's Done line: against a Studio with the
+// playground on and no runtime connected, the doctor's output names the
+// variables to set — WEFT_ENV and WEFT_STUDIO_URL — and a missing
+// runtime is a warning, not a failure. With the playground off
+// (UX-S5a-08) the line says so with the flag that did it, and the
+// shell's variables, which cannot help, are not named.
 func TestNoRuntimeNamesTheEnv(t *testing.T) {
-	ts := newStudio(t)
-	out, err := run(t, ts.URL, tok, env(nil))
+	off := newStudio(t)
+	out, err := run(t, off.URL, tok, env(nil))
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "ok   runtimes  none: studio has no runtime link (the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off)") ||
+		strings.Contains(out, "WEFT_ENV is") {
+		t.Errorf("playground off:\n%s", out)
+	}
+	ts := newStudio(t, studio.Playground(true))
+	out, err = run(t, ts.URL, tok, env(nil))
 	if err != nil {
 		t.Fatalf("doctor: %v\n%s", err, out)
 	}
 	for _, want := range []string{
 		"warn runtimes  none connected",
-		"the playground is off (studio.Playground(true))",
 		"WEFT_ENV is unset in this shell: the app opens the runtime link only with WEFT_ENV=dev",
 		"WEFT_STUDIO_URL is unset in this shell",
 		"set WEFT_STUDIO_URL=" + ts.URL,
@@ -70,7 +82,7 @@ func TestNoRuntimeNamesTheEnv(t *testing.T) {
 	// to check.
 	pg := newStudio(t, studio.Playground(true))
 	out, _ = run(t, pg.URL, tok, env(map[string]string{"WEFT_ENV": "dev", "WEFT_STUDIO_URL": pg.URL}))
-	if strings.Contains(out, "playground is off") || strings.Contains(out, "WEFT_ENV is") ||
+	if strings.Contains(out, "runtime link (") || strings.Contains(out, "WEFT_ENV is") ||
 		strings.Contains(out, "WEFT_STUDIO_URL is unset") || !strings.Contains(out, "check the app's own environment") {
 		t.Errorf("playground on, env set:\n%s", out)
 	}
@@ -86,7 +98,9 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := newStudio(t, studio.Manifest(manifest), studio.IngestToken("ing"))
+	// A discovery file naming this process: meta serves discovery_file.
+	discPath := writeDiscovery(t, discovery.Info{URL: "http://127.0.0.1:1"})
+	ts := newStudio(t, studio.Manifest(manifest), studio.IngestToken("ing"), studio.DiscoveryFile(discPath))
 	ctx := context.Background()
 	p, err := otel.Start(ctx, otel.Studio(ts.URL, "ing", otel.NoContent()), otel.NoGlobal())
 	if err != nil {
@@ -151,7 +165,7 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 		meta := 0
 		for _, f := range l.Fields {
 			switch {
-			case strings.HasPrefix(f, "env:"):
+			case strings.HasPrefix(f, "env:"), strings.HasPrefix(f, "local:"):
 				continue
 			case f == "status":
 				meta++
@@ -191,6 +205,8 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 		t.Errorf("doctor printed checks %v, want Lines' %v:\n%s", labels, want, out)
 	}
 	for _, s := range []string{"content   studio stores content as received; latest run", ": stripped", "fix: drop otel.NoContent()",
+		"ok   data      newest run ", " by weft ", "ok   otlp      walled: OTLP at " + ts.URL + "/v1/traces",
+		"warn discovery this Studio wrote " + discPath + ", which this shell does not find",
 		"db        sqlite /", "weft.json 1 agents, 1 checked against their latest runs: current",
 		// The ingest counters (UX-E-37): the app's batches accepted, the
 		// one refused above, and the refusal with its fix.
@@ -217,7 +233,7 @@ func TestUnreachable(t *testing.T) {
 	defer cancel()
 	var b strings.Builder
 	start := time.Now()
-	err = doctor.Run(ctx, &b, hang.URL, "", env(nil))
+	err = doctor.Run(ctx, &b, doctor.Target{URL: hang.URL, Explicit: true}, env(nil))
 	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(b.String(), "studio not reachable at "+hang.URL+": ") || time.Since(start) > 2*time.Second {
 		t.Errorf("hung studio: %v after %v\n%s", err, time.Since(start), b.String())
 	}
@@ -229,7 +245,7 @@ func TestUnreachable(t *testing.T) {
 func TestToken(t *testing.T) {
 	ts := newStudio(t)
 	for _, c := range []struct{ token, want string }{
-		{"", "FAIL token     studio requires one: set WEFT_STUDIO_TOKEN or --token"},
+		{"", "FAIL token     studio requires one: it is in <db>.token beside the database (the start banner names the file); set WEFT_STUDIO_TOKEN or --token to it\n               - `weft open --with-token` prints this Studio's link signed in"},
 		{"wrong", "FAIL token     refused: it is not this studio's token (WEFT_STUDIO_TOKEN / --token)"},
 	} {
 		out, err := run(t, ts.URL, c.token, env(nil))
@@ -325,11 +341,12 @@ func TestStaleManifest(t *testing.T) {
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	want := "warn weft.json stale for orders: weft.json and the latest runs disagree: regenerate weft.json, or redeploy the app if weft.json is newer"
+	want := "warn weft.json stale for orders: weft.json and the latest runs disagree (the latest run of orders ran manifest "
+	want2 := "): regenerate weft.json, or redeploy the app if weft.json is newer"
 	var out string
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		out, _ = run(t, ts.URL, tok, env(nil))
-		if strings.Contains(out, want) {
+		if strings.Contains(out, want) && strings.Contains(out, want2) {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -415,5 +432,96 @@ func TestControlCharactersStripped(t *testing.T) {
 	// weft.records.dropped counts failed exports too: the fix names both.
 	if !strings.Contains(out, "fix: queue full or exports failing — the app's WARN names which") {
 		t.Errorf("ingest fix = %q, want it to name the queue and failing exports", out)
+	}
+}
+
+// writeDiscovery writes a discovery file naming this process (fresh,
+// 0600) into a directory of the test's own and returns its path.
+func writeDiscovery(t *testing.T, info discovery.Info) string {
+	t.Helper()
+	dir := t.TempDir()
+	old := discovery.Dirs
+	discovery.Dirs = func() []string { return []string{dir} }
+	t.Cleanup(func() { discovery.Dirs = old })
+	info.PID = os.Getpid()
+	info.Started = time.Now().UTC()
+	w, err := discovery.Write(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w.Path
+}
+
+// TestDiscoveryLine (UX-S5a-01, UX-S5a-08): the discovery line says
+// which Studio the file this shell reads names — this one, another
+// (and two on one database), none, or none read under
+// WEFT_DISCOVERY=off — and the unreachable line names where the
+// address came from when the user did not name it.
+func TestDiscoveryLine(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "weft.db")
+	srv := studio.New(studio.Open(db), studio.Token(tok))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	check := func(d doctor.Discovery, want ...string) {
+		t.Helper()
+		var out strings.Builder
+		err := doctor.Run(context.Background(), &out, doctor.Target{URL: ts.URL, Token: tok, Discovery: d,
+			Source: "discovery file " + d.Path}, env(nil))
+		if err != nil {
+			t.Fatalf("doctor: %v\n%s", err, out.String())
+		}
+		for _, w := range want {
+			if !strings.Contains(out.String(), w) {
+				t.Errorf("discovery %+v: output lacks %q:\n%s", d, w, out.String())
+			}
+		}
+	}
+	check(doctor.Discovery{Path: "/run/weft/studio.json", URL: ts.URL, DB: db, PID: 7},
+		"ok   studio    reachable at "+ts.URL+" (discovery file /run/weft/studio.json)",
+		"ok   discovery /run/weft/studio.json -> "+ts.URL+" (this Studio)")
+	check(doctor.Discovery{Path: "/run/weft/studio.json", URL: "http://127.0.0.1:7347", DB: db, PID: 42},
+		"warn discovery /run/weft/studio.json -> http://127.0.0.1:7347, ANOTHER Studio (pid 42, db "+db+")",
+		"- two Studios serve "+db+": stop one")
+	check(doctor.Discovery{Off: true}, "ok   discovery WEFT_DISCOVERY=off in this shell")
+	check(doctor.Discovery{}, "warn discovery no discovery file")
+
+	var out strings.Builder
+	err := doctor.Run(context.Background(), &out, doctor.Target{URL: "http://127.0.0.1:1", Source: "the default address; no discovery file"}, env(nil))
+	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(out.String(), "studio not reachable at http://127.0.0.1:1 (the default address; no discovery file): ") {
+		t.Errorf("unreachable default: %v\n%s", err, out.String())
+	}
+}
+
+// TestDataOtlpAndPanelLines (UX-S5a-08): the newest run from another
+// weft warns with both versions; a walled, open and switched-off OTLP
+// door each read as such; a stale panel bundle names the reinstall, not
+// a repo make target alone.
+func TestDataOtlpAndPanelLines(t *testing.T) {
+	serve := func(body string) string {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, body) }))
+		t.Cleanup(ts.Close)
+		out, _ := run(t, ts.URL, tok, env(nil))
+		return out
+	}
+	at := time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339)
+	out := serve(`{"auth_required":true,"weft_version":"v0.19.0","studio_version":"v0.19.0","panel_version":"v0.18.0",` +
+		`"db":{"kind":"sqlite"},"capabilities":["ingest"],"ingest_open":true,` +
+		`"content":{"ingest":"as_received","latest":{"run_id":"r1","mark":"full","note":"n","started":"` + at + `","weft_version":"v0.15.0","service":"shop"}}}`)
+	for _, want := range []string{
+		"warn data      newest run 2m0s ago by weft v0.15.0 (service shop), this Studio is weft v0.19.0",
+		"ok   otlp      open: OTLP at ",
+		"FAIL panel     /panel.js is v0.18.0, studio is v0.19.0: this weft build embeds a stale panel bundle",
+		"fix: install weft v0.19.0 again (go install github.com/weftgo/weft/cmd/weft@v0.19.0)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	out = serve(`{"auth_required":true,"weft_version":"v","studio_version":"s","panel_version":"s","db":{"kind":"sqlite"},` +
+		`"capabilities":[],"capabilities_off":{"ingest":"OTLP ingest is off: studio.NoIngest() turned it off"},"content":{"ingest":"as_received"}}`)
+	if !strings.Contains(out, "warn otlp      OTLP ingest is off: studio.NoIngest() turned it off: an app's spans cannot reach this Studio") ||
+		!strings.Contains(out, "ok   data      no run stored yet") {
+		t.Errorf("ingest off:\n%s", out)
 	}
 }

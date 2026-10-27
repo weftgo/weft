@@ -21,6 +21,7 @@ import (
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
 	"github.com/weftgo/weft/internal/doctor"
+	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/version"
 )
 
@@ -402,7 +403,7 @@ func TestDoctorSubcommand(t *testing.T) {
 		t.Errorf("unreachable: exit %d, stderr %q\n%s", code, errb.String(), out.String())
 	}
 
-	srv, err := newServer("sqlite://"+t.TempDir()+"/weft.db", "tok")
+	srv, err := newServer("sqlite://"+t.TempDir()+"/weft.db", "tok", studio.Playground(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +425,7 @@ func TestDoctorSubcommand(t *testing.T) {
 		t.Errorf("doctor with an argument: exit %d, stderr %q, want 2 and a usage line", code, errb.String())
 	}
 	// A doctor error must not be mistaken for ErrUnhealthy's silence.
-	if !errors.Is(doctor.Run(context.Background(), io.Discard, "http://127.0.0.1:1", "", os.Getenv), doctor.ErrUnhealthy) {
+	if !errors.Is(doctor.Run(context.Background(), io.Discard, doctor.Target{URL: "http://127.0.0.1:1"}, os.Getenv), doctor.ErrUnhealthy) {
 		t.Error("doctor.Run on an unreachable Studio is not ErrUnhealthy")
 	}
 }

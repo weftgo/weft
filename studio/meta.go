@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"time"
 
+	"github.com/weftgo/weft/internal/discovery"
 	"github.com/weftgo/weft/internal/linkreg"
 	"github.com/weftgo/weft/obsdb"
 	linkruntime "github.com/weftgo/weft/studio/runtime"
@@ -98,6 +100,12 @@ type metaDoc struct {
 	// under db.path's rule (an address on the operator's network, as
 	// /api/runtimes' studio_url): absent to a panel token.
 	RuntimeLink *metaRuntimeLink `json:"runtime_link,omitempty"`
+	// DiscoveryFile is the discovery file apps find this Studio through
+	// (DiscoveryFile: the one `weft studio` / `weft dev` wrote), while
+	// it names this process; omitted when there is none (setup A, or
+	// WEFT_DISCOVERY=off) and, under db.path's rule, to anyone else (a
+	// local path).
+	DiscoveryFile string `json:"discovery_file,omitempty"`
 }
 
 // metaRuntimeLink is api/meta's runtime_link.
@@ -171,6 +179,14 @@ type metaContentRun struct {
 	Mark string `json:"mark"`
 	Note string `json:"note"`
 	Fix  string `json:"fix,omitempty"`
+	// Started, WeftVersion and Service are the run's own (its row's):
+	// when the newest data arrived and which weft and service sent it —
+	// `weft doctor`'s data line, which warns when the weft differs from
+	// this Studio's. weft_version and service are omitted when the run
+	// carries none (a non-weft exporter).
+	Started     time.Time `json:"started"`
+	WeftVersion string    `json:"weft_version,omitempty"`
+	Service     string    `json:"service,omitempty"`
 }
 
 // metaManifest is the manifest staleness check.
@@ -251,6 +267,7 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		doc.DB.Path, doc.DB.Size = dbFile(s.db)
 		doc.PID = os.Getpid()
 		doc.RuntimeLink = s.runtimeLink()
+		doc.DiscoveryFile = s.discoveryFile()
 	}
 	if id.panel == nil {
 		doc.ManifestCheck = s.manifestCheck(r.Context(), reg)
@@ -261,6 +278,18 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		doc.Ingest = &ingest
 	}
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// discoveryFile is DiscoveryFile's path while the file there names this
+// process, "" otherwise.
+func (s *Server) discoveryFile() string {
+	if s.discovery == "" {
+		return ""
+	}
+	if info, err := discovery.Read(s.discovery); err != nil || info.PID != os.Getpid() {
+		return ""
+	}
+	return s.discovery
 }
 
 // mayReadDBPath is the db.path/db.size/pid rule (and live_all's, the
@@ -329,7 +358,8 @@ func (s *Server) latestContent(ctx context.Context, id identity) metaContent {
 		}
 	}
 	n := contentNotes[mark]
-	out.Latest = &metaContentRun{RunID: run.ID, Mark: mark, Note: n[0], Fix: n[1]}
+	out.Latest = &metaContentRun{RunID: run.ID, Mark: mark, Note: n[0], Fix: n[1],
+		Started: run.Started, WeftVersion: run.WeftVersion, Service: run.Service}
 	return out
 }
 

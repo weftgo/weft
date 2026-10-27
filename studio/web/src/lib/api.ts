@@ -741,7 +741,16 @@ export interface Meta {
   /** Studio's ingest policy and the latest run's content mark (B5). */
   content?: {
     ingest: string
-    latest: { run_id: string; mark: string; note: string; fix?: string } | null
+    latest: {
+      run_id: string
+      mark: string
+      note: string
+      fix?: string
+      /** B7: the run's start, and the weft and service that sent it. */
+      started?: string
+      weft_version?: string
+      service?: string
+    } | null
     /** The read that failed while looking for the latest run. */
     error?: string
   }
@@ -756,6 +765,10 @@ export interface Meta {
    * when it talks to this server, studio_url the Studio it dialled
    * instead; absent with none open. */
   runtime_link?: { studio_url?: string; in_process: boolean }
+  /** B7: the discovery file apps find this Studio through (the one
+   * `weft studio` / `weft dev` wrote, while it names this process);
+   * db.path's rule — absent to a panel token, and with none. */
+  discovery_file?: string
   manifest_check?: {
     /** file (weft.json) or runtime (registered; no weft.json). */
     source?: "file" | "runtime"

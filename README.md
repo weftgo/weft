@@ -378,14 +378,14 @@ environment variable one to one (the table below).
 
 | Command | What it does |
 |---|---|
-| `weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground]` | Setup B: `studio.New` with the UI, OTLP ingest, the playground (inert until an app's `weft/runtime` connects; `--no-playground` turns it off) and a dev token stable per database. Reuses a Studio already serving the same database on 7331, else takes the next free port in 7331–7340; `--addr` pins. Writes the discovery file apps find it through (below). The manifest is `--manifest`, else the nearest `weft.json` upward (one line says which). `--open` (default on a terminal) opens the UI with the token in the URL fragment. |
+| `weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground]` | Setup B: `studio.New` with the UI, OTLP ingest, the playground (inert until an app's `weft/runtime` connects; `--no-playground` turns it off) and a dev token stable per database. Takes 7331, else the next free port in 7331–7340; `--addr` pins. A Studio already serving the same database — on the wanted port, or wherever your discovery file says — refuses the start (exit 1, naming its URL and pid; `weft dev` reuses it instead). Unless `--open` handed the browser the link, the banner ends `studio: sign in with weft open --with-token`. Writes the discovery file apps find it through (below). The manifest is `--manifest`, else the nearest `weft.json` upward (one line says which). `--open` (default on a terminal) opens the UI with the token in the URL fragment. |
 | `weft dev [studio's flags] [--no-watch] [--watch dir] [-- go run ./cmd/app]` | Studio (as `weft studio`, in-process, same port policy) plus your app run beside it and restarted on a `.go` save. Prints one line per start: `studio http://127.0.0.1:7331/ · app pid 4242 · runtime rt_… registered`. See below. |
-| `weft runs [--agent] [--since 2h\|RFC3339] [--failed] [--limit] [--json]` | One row per run (id, agent, status, started, steps) from `GET /api/runs`; `--limit` defaults to 50 (0 lists all) and says so on stderr when it hid runs; `--json` for scripts. |
-| `weft open <run id> [--open] [--with-token]` | Prints the run's page, `<url>/runs/<id>`, bare — a fixed token may be the panel tokens' signing key, so it stays out of logs; `--with-token` prints the `#token=` fragment too; `--open` hands the browser the link with the token. |
+| `weft runs [--agent] [--since 2h\|RFC3339] [--failed] [--limit] [--json]` | One row per run (id, agent, status, started with its zone, steps, duration, cost, public id when any, prompt, stopped by, and the error — its kind and why, so `--failed` is triageable) from `GET /api/runs`, the next step (`weft open`, `weft export`) on stderr; `--limit` defaults to 50 (0 lists all) and says so on stderr when it hid runs; `--json` for scripts. |
+| `weft open [id] [--open] [--with-token]` | The id is a run id, a public id, a session id or a trace id (tried in that order); prints its page — `/runs`, `/conversations`, `/sessions`, `/traces` — and with no id the Studio root (`weft open --with-token` is a terminal's signed-in link to a fresh Studio), bare — a fixed token may be the panel tokens' signing key, so it stays out of logs; `--with-token` prints the `#token=` fragment too; `--open` hands the browser the link with the token. |
 | `weft export <run id> [--format json\|jsonl\|otlp]` | `GET /api/runs/<id>/export` to stdout. |
 | `weft export <run id> --wefttest ./pkg [--force]` | The run's save-as-test tree — the files of Studio's "save as test" zip, byte for byte: `<agent>_replay_test.go` beside `testdata/TestReplay_<run>/*.json`, a test that passes under `go test` (a replay's composes its source's fixtures for the steps it kept); a test file or fixtures already there need `--force`, which replaces the `*.json` fixtures (never merges). |
 | `weft export <run id> --wefttest ./testdata --fixtures-only [--test TestName] [--force]` | The fixtures alone, unzipped into `./testdata/<TestName>/` (default: the run id), where `wefttest.Replay(t, "testdata")` reads them. |
-| `weft doctor` | One line per check of a running Studio, each read from `GET /api/meta`. |
+| `weft doctor` | One line per check of a running Studio, each read from `GET /api/meta`: reachable, token (a missing one names `<db>.token` and `weft open --with-token`), the discovery file (this Studio, another, none), db, content, the newest run's age and weft version, the OTLP door, runtimes (`--no-playground` named when it turned the link off), panel, weft.json. |
 | `weft mcp [--url] [--token]` | A read-only MCP server over stdio for a coding agent (Claude Code, Cursor) to read runs while you debug: one tool per read route — `runs`, `search`, `run`, `step`, `request`, `events`, `tools`, `diff`, `export` (json/jsonl/otlp; not wefttest), `sessions`, `session`, `meta`, `logs`, `spans`, `trace`, `transcript`, `live`, `agents`, `experiments`, `runtimes` — plus `explain_failure <run id>` (the run, every step, its child runs and the transcript composed: status, error, the first error anywhere with the run and step it happened in, a per-step and per-child digest, a decided park as decided, this run's own last assistant text). Every tool is a GET; write verbs (approve, deny, steer, cancel, delete, …) are not offered. Outputs are the route's JSON — compact rows on the list tools and compact spans on `spans`/`trace` (`full: true` as served) — cut at `max_bytes` (default 64 KiB) with a note; a 403 is the tool's error. With no `--url`/`WEFT_STUDIO_URL` it reads the discovery file (`WEFT_DISCOVERY=off` skips it). `claude mcp add weft -- weft mcp` (the discovery file finds the running Studio); Cursor: `.cursor/mcp.json` `{"mcpServers":{"weft":{"command":"weft","args":["mcp"]}}}`. To name another Studio add `--url http://127.0.0.1:7331` (`"args":["mcp","--url","http://127.0.0.1:7331"]`). The recipe — setup, which tool answers which question with worked examples, tokens, limits, troubleshooting — is [docs/mcp-recipe.md](docs/mcp-recipe.md); `make mcp-check` runs it end to end against a real Studio. |
 | `weft version` | The weft version this binary was built from. |
 
@@ -395,7 +395,7 @@ environment variable one to one (the table below).
 | `--db` | `WEFT_DB` | `./.weft/weft.db` |
 | `--token` | `WEFT_STUDIO_TOKEN` | `weft studio`, `weft dev`: the database's stable token, `<db>.token` (never printed); a generated one, printed, for a database with no file |
 | `--manifest` | `WEFT_MANIFEST` | the nearest `weft.json` upward |
-| `--url` (runs, open, export, doctor, mcp) | `WEFT_STUDIO_URL` | `http://127.0.0.1:7331` (`weft mcp`: the discovery file's Studio first) |
+| `--url` (runs, open, export, doctor, mcp) | `WEFT_STUDIO_URL` | the discovery file's Studio, else `http://127.0.0.1:7331` — one resolver for every client, one stderr line naming the Studio and its source when you named none |
 
 `weft dev`'s `--watch` and `--no-watch` shape the dev loop only and
 have no environment mirror; like `--open` and `--no-playground` they
@@ -438,9 +438,10 @@ Anything untrusted is skipped without a word above Debug and the next
 writer removes it. The writer also drops a `.gitignore` (`*`) into
 `./.weft` when it has none, so the database, its token and the file
 stay out of commits. Two Studios never erase each other's file: the
-second one's exit puts the first's back. A reusing start writes nothing
-(the running Studio owns the file) and says so when that file is
-missing; its port probe sends the stable token only to an address your
+second one's exit puts the first's back. A second `weft studio` on the
+database the file's Studio serves is refused before it binds (one
+Studio per database file); a reusing `weft dev` writes nothing (the
+running Studio owns the file) and says so when that file is missing; its port probe sends the stable token only to an address your
 discovery file names (anything else on the port is probed bare). `weft
 studio` stops gracefully on SIGHUP too, so a closed terminal removes
 the file.

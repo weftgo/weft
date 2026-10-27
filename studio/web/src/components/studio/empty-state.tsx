@@ -74,9 +74,11 @@ export function ConnectApp({
 }) {
   const meta = useQuery(metaQuery())
   const url = studioURL()
-  const lines = connectLines(url, meta.data?.auth_required).filter(
-    (l) => !only || only.includes(l.key)
-  )
+  const lines = connectLines(
+    url,
+    meta.data?.auth_required,
+    meta.data?.discovery_file
+  ).filter((l) => !only || only.includes(l.key))
   return (
     <div className="w-full max-w-2xl space-y-2 text-left" data-connect={url}>
       {lines.map((l) => (

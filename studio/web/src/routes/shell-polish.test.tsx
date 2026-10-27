@@ -14,7 +14,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "@/lib/api"
 import type { RunsPage } from "@/lib/api"
 import { notFoundWords, SEARCH_FOR_IT } from "@/lib/not-found"
-import { INGEST_WORDS, SKIP_TO_CONTENT, TOKEN_WALL } from "@/lib/settings"
+import {
+  INGEST_WORDS,
+  SIGN_IN_COMMAND,
+  SKIP_TO_CONTENT,
+  TOKEN_FILE,
+  TOKEN_WALL,
+} from "@/lib/settings"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, apiError, golden } from "@/test/fake-studio"
@@ -85,6 +91,31 @@ describe("the token wall (UX-F-26)", () => {
     fireEvent.click(screen.getByRole("button", { name: "unlock" }))
     await screen.findByText("r_ok")
     expect(document.querySelector("[data-nav-locked]")).toBeNull()
+  })
+})
+
+describe("the token wall tells a new user where the token is (B7, UX-S5a-02)", () => {
+  it("names <db>.token and weft open --with-token, and says no refusal before a submit", async () => {
+    studio.requireToken("dev-secret").on("GET runs", runs)
+    renderApp("/runs")
+    await screen.findByRole("heading", { level: 1, name: TOKEN_WALL.heading })
+    const place = document.querySelector<HTMLElement>("[data-token-place]")
+    expect(place?.textContent).toContain(TOKEN_FILE)
+    expect(place?.textContent).toContain(SIGN_IN_COMMAND)
+    expect(SIGN_IN_COMMAND).toBe("weft open --with-token")
+    expect(TOKEN_FILE).toBe("<db>.token")
+    // The retired instruction (the token is never printed since B3).
+    expect(place?.textContent).not.toContain("prints its dev token")
+    // A fresh wall paints no refusal: nothing was submitted yet.
+    const error = () =>
+      document.querySelector("[data-token-error]")?.textContent ?? ""
+    expect(error()).toBe("")
+    fireEvent.change(screen.getByLabelText("API token"), {
+      target: { value: "wrong" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "unlock" }))
+    // A refused submit says the server's refusal.
+    await waitFor(() => expect(error()).not.toMatch(/^(|checking…)$/))
   })
 })
 

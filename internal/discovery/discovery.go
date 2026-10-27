@@ -318,6 +318,23 @@ func Find(url string) string {
 	return ""
 }
 
+// Path is where Write would write the file now: the first location's
+// studio.json, "" when there is no location. A start names it to its
+// server before the write (studio.DiscoveryFile), which serves it only
+// while the file there names that server's process (Read).
+func Path() string {
+	dirs := Dirs()
+	if len(dirs) == 0 {
+		return ""
+	}
+	return filepath.Join(dirs[0], FileName)
+}
+
+// Read reads one discovery file under the reader's rules — a regular
+// file, at most 64 KiB, and on unix 0600 and this user's — without
+// judging it fresh (Stale does).
+func Read(path string) (Info, error) { return load(path) }
+
 // Off reports whether getenv("WEFT_DISCOVERY") is "off" (any case,
 // spaces trimmed): the file is then neither read (Lookup) nor written —
 // `weft studio` and `weft dev` call Write only when Off is false.

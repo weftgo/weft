@@ -238,6 +238,9 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		{"stats-step.golden.json", "/api/stats?by=step", []string{".groups[].unpriced_models[]", ".groups[].cost_usd=<nil>"}},
 		// This server has no manifest (manifest_check is null).
 		{"meta.golden.json", "/api/meta", []string{".manifest_check"}},
+		// discovery_file is served only with DiscoveryFile (B7): this
+		// server is embedded and names none.
+		{"meta-discovery.golden.json", "/api/meta", []string{".manifest_check", ".discovery_file"}},
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", "api", c.golden))
 		if err != nil {

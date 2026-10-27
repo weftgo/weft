@@ -57,6 +57,7 @@ import {
 import { lineageOf } from "@/lib/run-row"
 import { PICKS } from "@/lib/compare-picker"
 import { costView, delegatedView } from "@/lib/cost"
+import { DotWrap } from "@/components/studio/dot-wrap"
 import { CacheHint, CostText } from "@/components/studio/cost"
 import { DerivedChip } from "@/components/studio/hole-badge"
 import { derivedUsageUnknown } from "@/lib/honesty"
@@ -297,21 +298,27 @@ function TokensCell({
     usage.cached_input_tokens ||
     usage.cache_write_tokens ||
     usage.reasoning_tokens
+  // The delegated figure on its own line, under the own one (P020.2):
+  // inline it widened the column past the frame.
   const cell = split ? (
     <span
-      className="font-mono whitespace-nowrap tabular-nums"
+      className="inline-flex flex-col items-end font-mono tabular-nums"
       title={split.title}
       data-token-split
     >
-      {split.own}{" "}
-      <span className="text-muted-foreground">{split.delegated}</span>
+      <span>
+        <DotWrap text={split.own} />
+      </span>
+      <span className="text-[11px] text-muted-foreground">
+        <DotWrap text={split.delegated} />
+      </span>
     </span>
   ) : (
     <span
       className="font-mono tabular-nums"
       title={tokenPair(usage.input_tokens, usage.output_tokens, true)}
     >
-      {tokenPair(usage.input_tokens, usage.output_tokens)}
+      <DotWrap text={tokenPair(usage.input_tokens, usage.output_tokens)} />
     </span>
   )
   if (!splits) return cell
@@ -736,7 +743,7 @@ function RunTableRow({
           ) : null}
         </TableCell>
         <TableCell
-          className="max-w-0 sm:max-w-64 2xl:max-w-80"
+          className="max-w-0 min-[1360px]:max-w-64 sm:max-w-56"
           style={depth ? { paddingLeft: `${0.5 + depth * 1.25}rem` } : {}}
         >
           <div className="flex min-w-0 items-center gap-1.5">
@@ -789,7 +796,7 @@ function RunTableRow({
           ) : null}
         </TableCell>
         <TableCell
-          className={`max-w-28 truncate whitespace-nowrap ${COL.agent}`}
+          className={`max-w-36 truncate whitespace-nowrap ${COL.agent}`}
         >
           {run.agent || (
             <span className="text-faint" title={UNNAMED_AGENT_HINT}>
@@ -811,7 +818,7 @@ function RunTableRow({
             <span className="text-faint">—</span>
           )}
         </TableCell>
-        <TableCell className={`max-w-44 ${COL.model}`}>
+        <TableCell className={`max-w-36 ${COL.model}`}>
           <Badge
             variant="outline"
             className="max-w-full truncate font-mono text-[11px] font-normal"

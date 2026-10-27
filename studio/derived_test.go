@@ -26,7 +26,7 @@ const (
 // HoleDerived, CauseStockSpans)) — pinned here so a change is seen.
 const (
 	derivedReason = "derived from spans · no events"
-	derivedFix    = "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session (docs/record-contract.md §9); weft's own records need a weft SDK (Go today)"
+	derivedFix    = "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session; weft's own records need a weft SDK (Go today)"
 )
 
 // derivedFixture is a setup-A server over a fresh file database that

@@ -112,7 +112,7 @@ export function decisionLine(
 }
 
 /** The one field beside the verbs: a resolve's result, a deny's reason. */
-export const DECIDE_FIELD = "result to resolve with · reason to deny"
+export const DECIDE_FIELD = "result or deny reason"
 
 /** A sent decision's word once its command finished. */
 export const DONE: Record<string, string> = {

@@ -215,3 +215,34 @@ describe("a note hole's outline (UX-F-21)", () => {
     expect(badge("gap").className).toContain("weft-warn-badge")
   })
 })
+
+describe("the header's figures and a running row (P020.2)", () => {
+  it("the stats and the cost sit in one group after the title, none in the title", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mount()
+    const group = $(el, ".weft-head > .weft-hs")!
+    expect(group).not.toBeNull()
+    // Each figure is a child of the group (shown whole or wrapped onto
+    // its hidden line), the buttons after it, never inside.
+    expect(group.querySelector("[data-weft-stats]")).not.toBeNull()
+    expect(group.querySelector("button, a.weft-btn")).toBeNull()
+    expect($(el, ".weft-head > .weft-grow")).toBeNull()
+  })
+
+  it("a running row's duration reads … — not the — of a run with no end", async () => {
+    const routes = baseRoutes()
+    const runs = routes["runs?public_id=pub_orders&limit=50"] as {
+      runs: Record<string, unknown>[]
+    }
+    runs.runs[0] = { ...runs.runs[0], status: "running", finished: null }
+    routes["runs/s_01-t1"] = {
+      ...runRow({ status: "running", finished: null }),
+      children: [],
+    }
+    fakeStudio(routes)
+    const el = await mount()
+    const row2 = $(el, ".weft-turn .weft-row2")!
+    expect(row2.lastElementChild?.textContent).toBe("…")
+    expect(row2.textContent).not.toContain("— —")
+  })
+})

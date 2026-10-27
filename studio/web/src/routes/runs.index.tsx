@@ -437,152 +437,159 @@ function RunsPage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-sm font-medium tracking-tight">Runs</h1>
-        <span
-          className="font-mono text-xs text-faint tabular-nums"
-          data-runs-count
-        >
-          {page.isPending
-            ? "…"
-            : local.length > 0
-              ? // A loaded-rows filter: the server's total counts what it
-                // was asked, not the matches.
-                `${runs.length.toLocaleString()} listed of ${loaded.length.toLocaleString()} loaded`
-              : filtered
-                ? `${total.toLocaleString()} matching`
-                : search.subagents === "all"
-                  ? `${total.toLocaleString()} runs`
-                  : `${total.toLocaleString()} top-level`}
-        </span>
-        {notRunLink}
-        <div className="relative w-full min-w-0 sm:w-72">
-          <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-faint" />
-          <FilterBox
-            inputRef={searchInput}
-            value={search.q ?? ""}
-            placeholder={
-              searchOff
-                ? "search unavailable"
-                : 'search: refund "card declined"'
-            }
-            label="search runs"
-            width="w-full pl-7"
-            debounceMs={400}
-            disabled={searchOff}
-            title={
-              searchOff
-                ? searchOffWhy
-                : 'every term must match the prompt, answer, error or a tool name (case-insensitive); a "quoted phrase" is one term'
-            }
-            onApply={(v) => setSearch({ q: v || undefined })}
-          />
-        </div>
-        {searchOff ? (
-          <span className="font-mono text-[11px] text-faint" data-search-off>
-            {searchOffWhy}
-          </span>
-        ) : null}
-        <FilterBox
-          inputRef={agentInput}
-          value={search.agent ?? ""}
-          placeholder="agent"
-          label="filter by agent"
-          width="w-32"
-          onApply={(v) => setSearch({ agent: v || undefined })}
-        />
-        <Select
-          value={search.status ?? "all"}
-          onValueChange={(v) =>
-            setSearch({
-              status: v === "all" ? undefined : (v as RunsSearch["status"]),
-            })
-          }
-        >
-          <SelectTrigger
-            className="h-8 w-32 text-xs"
-            aria-label="filter by status"
+      {/* The refresh button outside the wrapping row (P020.2): at 1280
+          px the filters wrap among themselves, never the button alone. */}
+      <div className="flex items-start gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <h1 className="text-sm font-medium tracking-tight">Runs</h1>
+          <span
+            className="font-mono text-xs text-faint tabular-nums"
+            data-runs-count
           >
-            <SelectValue>{(v: string) => statusPick(v)}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{ANY_STATUS}</SelectItem>
-            {STATUS_PICKS.map((s) => (
-              <SelectItem key={s} value={s}>
-                {statusPick(s)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          variant={moreOpen ? "secondary" : "outline"}
-          size="sm"
-          className="h-8 gap-1 text-xs"
-          aria-expanded={moreOpen}
-          aria-controls="run-filters"
-          title={FILTERS_HINT}
-          onClick={() => setMoreOpen((o) => !o)}
-          data-more-filters
-        >
-          {moreFilterLabel(moreSet)}
-          <ChevronDown
-            data-slot="icon"
-            className={moreOpen ? "rotate-180" : ""}
+            {page.isPending
+              ? "…"
+              : local.length > 0
+                ? // A loaded-rows filter: the server's total counts what it
+                  // was asked, not the matches.
+                  `${runs.length.toLocaleString()} listed of ${loaded.length.toLocaleString()} loaded`
+                : filtered
+                  ? `${total.toLocaleString()} matching`
+                  : search.subagents === "all"
+                    ? `${total.toLocaleString()} runs`
+                    : `${total.toLocaleString()} top-level`}
+          </span>
+          {notRunLink}
+          <div className="relative w-full min-w-0 sm:w-72">
+            <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-faint" />
+            <FilterBox
+              inputRef={searchInput}
+              value={search.q ?? ""}
+              placeholder={
+                searchOff
+                  ? "search unavailable"
+                  : 'search: refund "card declined"'
+              }
+              label="search runs"
+              width="w-full pl-7"
+              debounceMs={400}
+              disabled={searchOff}
+              title={
+                searchOff
+                  ? searchOffWhy
+                  : 'every term must match the prompt, answer, error or a tool name (case-insensitive); a "quoted phrase" is one term'
+              }
+              onApply={(v) => setSearch({ q: v || undefined })}
+            />
+          </div>
+          {searchOff ? (
+            <span className="font-mono text-[11px] text-faint" data-search-off>
+              {searchOffWhy}
+            </span>
+          ) : null}
+          <FilterBox
+            inputRef={agentInput}
+            value={search.agent ?? ""}
+            placeholder="agent"
+            label="filter by agent"
+            width="w-32"
+            onApply={(v) => setSearch({ agent: v || undefined })}
           />
-        </Button>
-        {search.parent ? null : (
-          <Button
-            variant={search.subagents === "all" ? "default" : "outline"}
-            size="sm"
-            className="h-8 text-xs"
-            aria-pressed={search.subagents !== "all"}
-            title={
-              search.subagents === "all"
-                ? RUNS_TREE.onTitle
-                : RUNS_TREE.offTitle
-            }
-            onClick={() =>
+          <Select
+            value={search.status ?? "all"}
+            onValueChange={(v) =>
               setSearch({
-                subagents: search.subagents === "all" ? undefined : "all",
+                status: v === "all" ? undefined : (v as RunsSearch["status"]),
               })
             }
           >
-            {search.subagents === "all" ? RUNS_TREE.on : RUNS_TREE.off}
-          </Button>
-        )}
-        {search.agent && liveCapable ? (
+            <SelectTrigger
+              className="h-8 w-32 text-xs"
+              aria-label="filter by status"
+            >
+              <SelectValue>{(v: string) => statusPick(v)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{ANY_STATUS}</SelectItem>
+              {STATUS_PICKS.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {statusPick(s)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
-            variant={follow ? "default" : "outline"}
+            variant={moreOpen ? "secondary" : "outline"}
             size="sm"
-            className="h-8 gap-1.5 text-xs"
-            aria-pressed={follow}
-            title={
-              follow
-                ? "following this agent's runs live (/api/live?agent=)"
-                : "follow this agent's runs live (/api/live?agent=)"
-            }
-            onClick={() => setFollow((f) => !f)}
+            className="h-8 gap-1 text-xs"
+            aria-expanded={moreOpen}
+            aria-controls="run-filters"
+            title={FILTERS_HINT}
+            onClick={() => setMoreOpen((o) => !o)}
+            data-more-filters
           >
-            <Radio data-slot="icon" className={follow ? "animate-pulse" : ""} />
-            {follow ? "following" : "follow"}
+            {moreFilterLabel(moreSet)}
+            <ChevronDown
+              data-slot="icon"
+              className={moreOpen ? "rotate-180" : ""}
+            />
           </Button>
-        ) : null}
-        {follow && liveRefused ? (
-          <span className="font-mono text-[11px] text-faint">
-            streaming needs the server token · polling
+          {search.parent ? null : (
+            <Button
+              variant={search.subagents === "all" ? "default" : "outline"}
+              size="sm"
+              className="h-8 text-xs"
+              aria-pressed={search.subagents !== "all"}
+              title={
+                search.subagents === "all"
+                  ? RUNS_TREE.onTitle
+                  : RUNS_TREE.offTitle
+              }
+              onClick={() =>
+                setSearch({
+                  subagents: search.subagents === "all" ? undefined : "all",
+                })
+              }
+            >
+              {search.subagents === "all" ? RUNS_TREE.on : RUNS_TREE.off}
+            </Button>
+          )}
+          {search.agent && liveCapable ? (
+            <Button
+              variant={follow ? "default" : "outline"}
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              aria-pressed={follow}
+              title={
+                follow
+                  ? "following this agent's runs live (/api/live?agent=)"
+                  : "follow this agent's runs live (/api/live?agent=)"
+              }
+              onClick={() => setFollow((f) => !f)}
+            >
+              <Radio
+                data-slot="icon"
+                className={follow ? "animate-pulse" : ""}
+              />
+              {follow ? "following" : "follow"}
+            </Button>
+          ) : null}
+          {follow && liveRefused ? (
+            <span className="font-mono text-[11px] text-faint">
+              streaming needs the server token · polling
+            </span>
+          ) : null}
+          <span
+            className="hidden items-center gap-1 text-[11px] text-faint lg:flex"
+            title="/ search · j k move · enter open — every key: press ?"
+            data-keys-hint
+          >
+            <Kbd>?</Kbd> keys
           </span>
-        ) : null}
-        <span
-          className="hidden items-center gap-1 text-[11px] text-faint lg:flex"
-          title="/ search · j k move · enter open — every key: press ?"
-          data-keys-hint
-        >
-          <Kbd>?</Kbd> keys
-        </span>
+        </div>
         <Button
           variant="ghost"
           size="icon-sm"
-          className="ml-auto text-muted-foreground"
+          className="mt-0.5 shrink-0 text-muted-foreground"
           aria-label="refresh"
           title="refresh the list"
           onClick={() => {

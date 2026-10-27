@@ -3485,8 +3485,9 @@ describe("a settling run on both surfaces (U2-fix2)", () => {
 })
 
 // Titles, not ids (U6): one row, both surfaces, one helper
-// (lib/title.ts). The panel's narrow picker reads "● parked t3 How many
-// units… · 1 step · 811 ms", its turn row "t3 How many units…"; the run page's
+// (lib/title.ts). The panel's narrow picker reads "● parked t3 · 1 step
+// · 811 ms · How many units…" (P020.2: the title last, so a narrow
+// select cuts it, never the figures), its turn row "t3 How many units…"; the run page's
 // heading is "agent · the prompt" and the tab "agent · How many units…
 // · succeeded · weft studio"; the id rides in a title / a mono line,
 // never as the label. A content-off row reads "(content not captured)"
@@ -3508,7 +3509,7 @@ describe("titles, not ids, on both surfaces (U6)", () => {
     {
       name: "a parked turn with a prompt",
       doc: { prompt_preview: PROMPT, pending: 1, turn: 3, finished: AT(811) },
-      option: `● parked t3 ${CUT} · 1 step · 811 ms`,
+      option: `● parked t3 · 1 step · 811 ms · ${CUT}`,
       row: `t3 ${CUT}`,
       heading: `acme-support·${PROMPT}`,
       tab: `acme-support · ${CUT} · succeeded · weft studio`,
@@ -3517,7 +3518,7 @@ describe("titles, not ids, on both surfaces (U6)", () => {
     {
       name: "a content-off turn of an unnamed agent",
       doc: { agent: "", message_count: 0, event_count: 6, turn: 3 },
-      option: `● succeeded t3 ${NO_CONTENT} · 1 step · 0 ms`,
+      option: `● succeeded t3 · 1 step · 0 ms · ${NO_CONTENT}`,
       row: `t3 ${NO_CONTENT}`,
       heading: `unnamed agent·${NO_CONTENT}`,
       tab: `${NO_CONTENT} · succeeded · weft studio`,
@@ -3528,7 +3529,7 @@ describe("titles, not ids, on both surfaces (U6)", () => {
     {
       name: "a content-off turn of a named agent",
       doc: { agent: "director", message_count: 0, event_count: 6, turn: 3 },
-      option: `● succeeded t3 director · ${NO_CONTENT} · 1 step · 0 ms`,
+      option: `● succeeded t3 · 1 step · 0 ms · director · ${NO_CONTENT}`,
       row: `t3 director · ${NO_CONTENT}`,
       heading: `director · ${NO_CONTENT}`,
       tab: `director · ${NO_CONTENT} · succeeded · weft studio`,
@@ -3644,9 +3645,9 @@ describe("a resume and an experiment on both surfaces (U6-fix)", () => {
       ])
     )
     expect(opts).toEqual({
-      "s_01-t4": `● succeeded t4 ${RESUME} · 1 step · 811 ms`,
+      "s_01-t4": `● succeeded t4 · 1 step · 811 ms · ${RESUME}`,
       // t4 resumed t3 (U1): its word is the decided park's.
-      "s_01-t3": `● parked → t4 t3 ${PROMPT} · 1 step · 1.0 s`,
+      "s_01-t3": `● parked → t4 t3 · 1 step · 1.0 s · ${PROMPT}`,
       pg_x1: "↻ replay of t3 · step 0 · scripted · ● failed · 1 step · 2.5 s",
     })
     const rows = Object.fromEntries(

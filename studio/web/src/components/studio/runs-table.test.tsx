@@ -36,7 +36,15 @@ describe("RunsTable", () => {
     expect(screen.getAllByText("wefttest/script").length).toBe(4)
 
     // Token columns: r_ok carries 10/4 (S4.3's row).
-    expect(screen.getByText("10 in · 4 out")).toBeTruthy()
+    // One pair that wraps only at its dot (P020.2): "10 in ·" and
+    // "4 out" whole.
+    const pair = [...document.querySelectorAll("td span")].find(
+      (n) => n.textContent === "10 in · 4 out"
+    )
+    expect(pair).toBeTruthy()
+    expect(
+      [...pair!.querySelectorAll("[data-dot-part]")].map((n) => n.textContent)
+    ).toEqual(["10 in ·", "4 out"])
 
     // The session column links each turn to its thread (S4.7).
     expect(screen.getAllByText(/s_orders/).length).toBeGreaterThanOrEqual(3)

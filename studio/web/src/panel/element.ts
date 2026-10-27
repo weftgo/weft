@@ -3099,7 +3099,12 @@ export class WeftDevtools extends HTMLElement {
             title: SHORT.tag,
           })
         )
-    h.append(el("span", "weft-grow"))
+    // The stats, the cost and the unpriced chip (P020.2): each one whole
+    // or out of sight (.weft-hs wraps what does not fit onto a hidden
+    // line) — never cut mid-figure; the title's tooltip says them. The
+    // group takes the free space only: the title gives way to none.
+    const g = el("span", "weft-hs")
+    h.append(g)
     // A derived turn whose spans reported no usage is left out of the
     // total (its zeros are "not reported"): the total then reads "≥",
     // or "—" when no turn's usage is known, titled with the API's reason.
@@ -3129,7 +3134,7 @@ export class WeftDevtools extends HTMLElement {
     // the header keeps to two lines; a screen reader still reads them);
     // the title's tooltip says them.
     te.title += ` · ${n} · ${tok}`
-    h.append(
+    g.append(
       el("span", "", stats, {
         title: [stats, unknown?.cost_reason, cut].filter(Boolean).join(" — "),
         "data-weft-stats": "",
@@ -3156,10 +3161,10 @@ export class WeftDevtools extends HTMLElement {
         { "data-weft-cost-total": "" }
       )
       te.title += ` · ${cost.textContent}`
-      h.append(cost)
+      g.append(cost)
       const u = unpricedLine(s.turns, noun, s.turnsCapped)
       if (u) {
-        h.append(
+        g.append(
           this.studioA(
             "weft-chip weft-tag weft-unp",
             u.text,
@@ -5146,7 +5151,7 @@ export class WeftDevtools extends HTMLElement {
             "data-weft-usage": "unknown",
           })
         : el("span", "", tokenPair(usage.input_tokens, usage.output_tokens)),
-      el("span", "", duration(r.started, r.finished) || "…"),
+      el("span", "", tookOf(r)),
     ])
     // Its cost beside its tokens (A5.3), only where Studio prices usage.
     // The open turn's summarizer calls, apart (U16, UX-B-13): the run
@@ -5197,14 +5202,16 @@ export class WeftDevtools extends HTMLElement {
       // t3 · scripted · ● failed · 2 steps · 811ms". The id is the
       // option's title only.
       const t = turnTitle(prevTurn(r, s.turns), r)
-      const tail = `${stepCount(r.steps)} · ${duration(r.started, r.finished)}`
+      const tail = `${stepCount(r.steps)} · ${tookOf(r)}`
       // A replay's lineage in the runs list's words (lib/run-row.ts).
       const line = r.forked_from && lineageOf(r, s.turns).at(-1)?.text
       option(
         sel,
         line
           ? `${line} · ${engineWord(r)} · ● ${this.st(r).word} · ${tail}`
-          : `${["●", this.st(r).word, turnLabel(r), clipTitle(t.text)].filter(Boolean).join(" ")} · ${tail}`,
+          : // The tail before the title (P020.2): a narrow select cuts
+            // the title, never "· 3 st".
+            `${["●", this.st(r).word, turnLabel(r)].filter(Boolean).join(" ")} · ${tail} · ${clipTitle(t.text)}`,
         { value: r.id, "data-key": r.id, title: `${r.id}\n${t.full}` },
         r.id === s.selected
       )
@@ -7341,13 +7348,20 @@ function handOff(endpoint: string, runId: string): HTMLElement {
 
 /** parkedHead is a parked call's line: its name, its arguments (the
  * JSON, "(…)" when the record has none), then what follows them. */
+/** tookOf is a row's duration, "…" while it runs (P020.2: duration's
+ * "—" for an unfinished run read "— —" beside an unknown cost). */
+const tookOf = (r: { started: string; finished: string | null }) =>
+  r.finished ? duration(r.started, r.finished) : "…"
+
 function parkedHead(call: ToolCallPart, after: HTMLElement[]): HTMLElement {
   return el("div", "weft-call-h", [
     el("span", "weft-name", call.name),
     el(
       "span",
       "weft-args",
-      call.args === undefined ? "(…)" : fmtJSON(call.args)
+      // One line, as the Story's call row (P020.2): pretty-printed it
+      // hung its lines off the name's right edge.
+      `(${call.args === undefined ? "…" : fmtJSON(call.args, 0)})`
     ),
     ...after,
   ])

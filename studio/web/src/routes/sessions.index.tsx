@@ -56,6 +56,7 @@ import { statusClass, STATUS_TEXT } from "@/lib/status-class"
 import { forkOf } from "@/lib/timeline"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { Term } from "@/components/studio/term"
+import { DotWrap } from "@/components/studio/dot-wrap"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { DERIVED_HOLE, DERIVED_WORDS } from "@/lib/honesty"
 
@@ -118,11 +119,14 @@ function FilterBox({
   placeholder,
   label,
   onApply,
+  width = "w-40",
 }: {
   value: string
   placeholder: string
   label: string
   onApply: (v: string) => void
+  /** Wide enough for the placeholder whole (P020.2). */
+  width?: string
 }) {
   const [draft, setDraft] = useState(value)
   useEffect(() => setDraft(value), [value])
@@ -131,7 +135,7 @@ function FilterBox({
       value={draft}
       placeholder={placeholder}
       aria-label={label}
-      className="h-8 w-40 rounded-md border bg-background px-2 font-mono text-xs"
+      className={`h-8 ${width} rounded-md border bg-background px-2 font-mono text-xs`}
       onChange={(e) => setDraft(e.currentTarget.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") onApply(e.currentTarget.value.trim())
@@ -238,6 +242,7 @@ function SessionsPage() {
           value={search.q ?? ""}
           placeholder="find title, prompt, id"
           label="find sessions"
+          width="w-52"
           onApply={(v) => set({ q: v || undefined })}
         />
       </div>
@@ -398,13 +403,14 @@ function SessionsPage() {
                   return (
                     <TableRow key={s.id} className="group h-9">
                       {/* At 1280 px every column fits the frame: the
-                          status, agent and turns wrap or cut before
-                          tokens, cost and last seen leave it (P020.1). */}
-                      <TableCell className="max-w-40 whitespace-normal">
+                          title and agent cut before tokens, cost and
+                          last seen leave it (P020.1); the status and
+                          the turns wrap only at their dots (P020.2). */}
+                      <TableCell className="max-w-44 whitespace-normal">
                         <SessionState row={s} />
                         <OutcomeStrip row={s} />
                       </TableCell>
-                      <TableCell className="max-w-64 2xl:max-w-80">
+                      <TableCell className="max-w-52 min-[1360px]:max-w-64 2xl:max-w-80">
                         <Link
                           {...sessionLink(s.id)}
                           className="flex min-w-0 items-center gap-1.5 text-[13px] hover:text-thread-ink"
@@ -465,7 +471,7 @@ function SessionsPage() {
                         className="text-right font-mono whitespace-normal tabular-nums"
                         data-session-exchanges
                       >
-                        {exchangesOfRow(s)}
+                        <DotWrap text={exchangesOfRow(s)} />
                       </TableCell>
                       <TableCell className="text-right font-mono tabular-nums">
                         {tokens(s.usage.input_tokens)} /{" "}

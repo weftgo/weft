@@ -70,7 +70,7 @@ export const CHAT_ONLY_TRACE = "8d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60"
  * as the goldens carry them. */
 export const STOCK = {
   reason: "derived from spans · no events",
-  fix: "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session (docs/record-contract.md §9); weft's own records need a weft SDK (Go today)",
+  fix: "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session; weft's own records need a weft SDK (Go today)",
 }
 
 export const derivedDoc = () => golden<RunDoc>("run-derived")

@@ -6,7 +6,7 @@
 // chips — the session header's "decide…" and its conversation link, and
 // the conversation page /conversations/$id: every run of a public id
 // with its experiments nested, for a public id no session holds.
-import { cleanup, configure, screen } from "@testing-library/react"
+import { cleanup, configure, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -136,7 +136,21 @@ describe("the sessions list's states", () => {
       next_before: null,
     })
     const { container } = renderApp("/sessions")
-    await screen.findByText(awaitingWords(1))
+    // Wraps only at its dots (P020.2): one text across its parts.
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-status="awaiting"]')?.textContent
+      ).toBe(awaitingWords(1))
+    )
+    expect(
+      [
+        ...container.querySelectorAll(
+          '[data-status="awaiting"] [data-dot-part]'
+        ),
+      ].map((p) => p.textContent)
+    ).toEqual(["⏸ awaiting a decision ·", "1 call"])
+    // The find box holds its placeholder whole (P020.2).
+    expect(screen.getByLabelText("find sessions").className).toContain("w-52")
     const war = container.querySelector('[data-session-ended="2"]')
     expect(war?.textContent).toBe("2✗ ended by a newer message")
     expect(war?.className).toContain("text-muted-foreground") // neutral, never red
@@ -151,7 +165,11 @@ describe("the sessions list's states", () => {
     expect(strip.getAttribute("aria-label")).toContain(
       "ended by a newer message"
     )
-    expect(screen.getByText("3 exchanges · 4 turns")).toBeTruthy()
+    expect(
+      [...container.querySelectorAll("[data-session-exchanges]")].map(
+        (c) => c.textContent
+      )
+    ).toContain("3 exchanges · 4 turns")
     // A turn cancelled for another reason: apart from the failures,
     // neutral (U16-fix).
     const cancelled = container.querySelector('[data-session-cancelled="1"]')

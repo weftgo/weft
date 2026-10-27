@@ -160,7 +160,7 @@ export const PANEL_CSS = `
 .weft-howto { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
 @media (prefers-reduced-motion: reduce) { .weft-dot.weft-run, .weft-fab-pulse { animation: none; } }
 .weft-head .weft-title, .weft-tv { overflow: hidden; text-overflow: ellipsis; }
-.weft-q { display: flex; min-width: 20ch; white-space: nowrap; }
+.weft-q { display: flex; min-width: 20ch; white-space: pre; }
 .weft-head .weft-grow { flex: 1; }
 .weft-switch { max-width: 40%; background: var(--weft-bg); color: var(--weft-dim); border: 1px solid var(--weft-line);
   border-radius: var(--weft-radius-sm); font-size: 11px; }
@@ -233,7 +233,8 @@ details[data-depth] { margin-left: -10px; }
 .weft-badge.weft-info { border-color: var(--weft-info); color: var(--weft-info); }
 .weft-holes { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .weft-tag { border: 1px solid var(--weft-line); color: var(--weft-dim); }
-.weft-unp, [data-weft-stats], [data-weft-cost-total] { flex: 0 99 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.weft-hs { display: flex; flex: 1; flex-wrap: wrap; gap: 0 8px; height: 18px; overflow: hidden; white-space: nowrap; }
+.weft-hs:before { content: ""; height: 18px; flex: 1; }
 .weft-unp { color: var(--weft-dim); }
 .weft-tag[data-tone=bad] { color: var(--weft-err); }
 .weft-note { color: var(--weft-dim); border: 1px dashed var(--weft-line); border-radius: var(--weft-radius);

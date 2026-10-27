@@ -225,7 +225,7 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 // stockSpansFix is the derived badge's fix (cause stock_spans): what a
 // Python or TypeScript developer sets on the spans — the levers a stock
 // producer has — and where weft's own records come from.
-const stockSpansFix = "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session (docs/record-contract.md §9); weft's own records need a weft SDK (Go today)"
+const stockSpansFix = "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session; weft's own records need a weft SDK (Go today)"
 
 // HoleNoteFor is HoleNote for a hole whose cause the reader knows: the
 // cause's own reason and fix where the table words it, HoleNote(h)

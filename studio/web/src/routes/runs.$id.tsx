@@ -1737,6 +1737,31 @@ function RunPage() {
         }
       : null
 
+  // The waterfall's layout toggle: beside the step strip, or ending the
+  // view's header row when there is no strip (P020.2).
+  const layoutToggle = (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className="shrink-0 text-muted-foreground"
+      aria-label={`layout: ${layout}`}
+      title={
+        layout === "auto"
+          ? "layout: side by side when the page is wide enough (click: always side by side)"
+          : layout === "split"
+            ? "layout: side by side (click: stacked)"
+            : "layout: stacked (click: automatic)"
+      }
+      onClick={cycleLayout}
+    >
+      {layout === "stack" ? (
+        <Rows3 data-slot="icon" />
+      ) : (
+        <Columns2 data-slot="icon" />
+      )}
+    </Button>
+  )
+
   return (
     <ReplayContext.Provider value={replayOn ? openReplay : null}>
       <EditorContext.Provider value={editor}>
@@ -1981,6 +2006,12 @@ function RunPage() {
                   <Spinner className="size-3" /> loading events…
                 </span>
               ) : null}
+              {/* No step strip (a derived run): the layout toggle ends
+                  this row instead of standing alone over the waterfall
+                  (P020.2). */}
+              {view === "waterfall" && flow.length === 0 ? (
+                <span className="ml-auto">{layoutToggle}</span>
+              ) : null}
             </div>
 
             <TabsContent
@@ -1994,38 +2025,23 @@ function RunPage() {
                 <DerivedNote what="waterfall" />
               ) : (
                 <>
-                  <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <StepStrip
-                        pills={flow}
-                        runStatus={viewStatus}
-                        errorType={replaying ? undefined : run.data.error_type}
-                        selectedKey={selKey}
-                        onSelect={select}
-                        ended={replaying ? undefined : ended}
-                      />
+                  {flow.length > 0 ? (
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <StepStrip
+                          pills={flow}
+                          runStatus={viewStatus}
+                          errorType={
+                            replaying ? undefined : run.data.error_type
+                          }
+                          selectedKey={selKey}
+                          onSelect={select}
+                          ended={replaying ? undefined : ended}
+                        />
+                      </div>
+                      {layoutToggle}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="shrink-0 text-muted-foreground"
-                      aria-label={`layout: ${layout}`}
-                      title={
-                        layout === "auto"
-                          ? "layout: side by side when the page is wide enough (click: always side by side)"
-                          : layout === "split"
-                            ? "layout: side by side (click: stacked)"
-                            : "layout: stacked (click: automatic)"
-                      }
-                      onClick={cycleLayout}
-                    >
-                      {layout === "stack" ? (
-                        <Rows3 data-slot="icon" />
-                      ) : (
-                        <Columns2 data-slot="icon" />
-                      )}
-                    </Button>
-                  </div>
+                  ) : null}
                   {treeHoles.length > 0 ? (
                     <div data-tree-holes>
                       <HoleBadges holes={treeHoles} />

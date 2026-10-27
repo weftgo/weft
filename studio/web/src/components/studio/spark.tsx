@@ -108,11 +108,17 @@ export interface Bar {
 export function BarList({ bars, label }: { bars: Bar[]; label: string }) {
   const scale = barScale(bars.map((b) => (b.unknown ? 0 : b.value)))
   return (
-    <ul className="space-y-1" aria-label={label} data-bar-list={label}>
+    // One grid for the list, each row a subgrid of it (P020.2): the
+    // value column is the widest value's, so every track ends at one x.
+    <ul
+      className="grid grid-cols-[minmax(0,8rem)_1fr_auto] gap-x-2 gap-y-1"
+      aria-label={label}
+      data-bar-list={label}
+    >
       {bars.map((b, i) => (
         <li
           key={b.key}
-          className="grid grid-cols-[minmax(0,8rem)_1fr_auto] items-center gap-2 text-[11px]"
+          className="col-span-3 grid grid-cols-subgrid items-center text-[11px]"
           title={`${b.label}: ${b.text}`}
           data-bar={b.key}
         >

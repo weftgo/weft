@@ -57,7 +57,12 @@ import {
 } from "./testkit"
 import type { WeftDevtools } from "./element"
 import { clockTime } from "../lib/format"
-import { EXPIRY_UNREAD, expiryTitle, RUN_MARKS_HOLE } from "../lib/decisions"
+import {
+  DECIDE_FIELD,
+  EXPIRY_UNREAD,
+  expiryTitle,
+  RUN_MARKS_HOLE,
+} from "../lib/decisions"
 
 vi.setConfig({ testTimeout: 30_000 })
 
@@ -197,6 +202,20 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
         ).toContain(RESUMED),
       { timeout: 5_000 }
     )
+  })
+
+  it("the parked call reads its arguments on one line; the field's placeholder is whole (P020.2)", async () => {
+    const { el } = await open()
+    const head = call(el).querySelector(".weft-call-h .weft-args")!
+    // One line, as the Story's call row: pretty-printed JSON hung its
+    // lines off the name's right edge.
+    expect(head.textContent).toBe(`(${JSON.stringify(CALL.args)})`)
+    expect(head.textContent).not.toContain("\n")
+    // The placeholder fits the 25ch field (its padding and border
+    // inside: 23 characters of the monospace face).
+    const field = call(el).querySelector<HTMLInputElement>(".weft-resolve")!
+    expect(field.placeholder).toBe(DECIDE_FIELD)
+    expect(DECIDE_FIELD.length).toBeLessThanOrEqual(23)
   })
 
   it("skip carries the typed reason", async () => {

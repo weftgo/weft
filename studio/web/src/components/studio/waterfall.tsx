@@ -109,12 +109,12 @@ function pct(v: number, [lo, hi]: [number, number]): number {
  * track a thin bar on its own line under them (dense flow puts each
  * row's figure back beside its name): the bars stay at phone width. */
 const COLS =
-  "grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_3.5rem] max-[480px]:grid-flow-row-dense max-[480px]:grid-cols-[minmax(0,1fr)_3.5rem]"
+  "grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)_4rem] max-[480px]:grid-flow-row-dense max-[480px]:grid-cols-[minmax(0,1fr)_4rem]"
 /** On the time scale a fourth column, the row's offset from the run's
  * start ("+4 ms", UX-F-16) before its duration; under COMPACT it is
  * left out (the duration's hover keeps it). */
 const COLS_TIME =
-  "grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_4rem_3.5rem] max-[480px]:grid-flow-row-dense max-[480px]:grid-cols-[minmax(0,1fr)_3.5rem]"
+  "grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)_4rem_4rem] max-[480px]:grid-flow-row-dense max-[480px]:grid-cols-[minmax(0,1fr)_4rem]"
 
 /** The width under which the tree draws its compact bars. */
 const COMPACT = "(max-width: 480px)"
@@ -453,7 +453,7 @@ export function Waterfall({
                   className={`flex min-w-0 cursor-pointer items-center gap-1 overflow-hidden border-b border-border/60 py-0.5 pr-2 max-[480px]:h-6 max-[480px]:border-b-0 ${cell(selected)} ${
                     selected ? "shadow-[inset_2px_0_0_var(--thread)]" : ""
                   } ${revealed && !dim ? "" : "opacity-40"}`}
-                  style={{ paddingLeft: `${0.4 + sp.depth * 0.8}rem` }}
+                  style={{ paddingLeft: `${0.4 + sp.depth * 0.6}rem` }}
                   onClick={() => onSelect?.(sp)}
                   title={`${sp.label}${sp.sub ? ` — ${sp.sub}` : ""}`}
                 >
@@ -489,12 +489,7 @@ export function Waterfall({
                         : ""
                     }`
                     const href = hrefOf?.(sp)
-                    if (!href)
-                      return (
-                        <span className={cls} style={{ maxWidth: "8rem" }}>
-                          {sp.label}
-                        </span>
-                      )
+                    if (!href) return <span className={cls}>{sp.label}</span>
                     // Out of the tab order: the tree is one stop, its rows
                     // walked with the arrows (the selection is the URL).
                     return (
@@ -503,7 +498,6 @@ export function Waterfall({
                         tabIndex={-1}
                         data-span-link
                         className={`${cls} hover:underline`}
-                        style={{ maxWidth: "8rem" }}
                         onClick={(e) => {
                           if (
                             e.metaKey ||
@@ -533,7 +527,7 @@ export function Waterfall({
                   ) : null}
                   {sp.badge ? (
                     <span
-                      className={`max-w-28 shrink-0 truncate rounded-full border px-1.5 text-[9.5px] leading-4 ${selectedInk(sp.tone, selected) ? "border-ev-error/50 text-foreground" : badgeTone[sp.tone]}`}
+                      className={`max-w-28 shrink-0 truncate rounded-full border px-1 text-[9.5px] leading-4 ${selectedInk(sp.tone, selected) ? "border-ev-error/50 text-foreground" : badgeTone[sp.tone]}`}
                       title={sp.badge}
                     >
                       {sp.badge}
@@ -592,7 +586,7 @@ export function Waterfall({
                 </div>
                 {time ? (
                   <div
-                    className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums max-[480px]:hidden ${cell(selected)}`}
+                    className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] whitespace-nowrap text-faint tabular-nums max-[480px]:hidden ${cell(selected)}`}
                     onClick={() => onSelect?.(sp)}
                     data-offset
                   >
@@ -600,7 +594,7 @@ export function Waterfall({
                   </div>
                 ) : null}
                 <div
-                  className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums max-[480px]:h-6 max-[480px]:border-b-0 ${cell(selected)}`}
+                  className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] whitespace-nowrap text-faint tabular-nums max-[480px]:h-6 max-[480px]:border-b-0 ${cell(selected)}`}
                   onClick={() => onSelect?.(sp)}
                   title={time ? offsetText(sp.from) : undefined}
                 >

@@ -396,6 +396,15 @@ describe("a derived run's page (the Done line)", () => {
     await waitFor(() => expect(document.body.textContent).toContain("span id"))
     expect(document.body.textContent).not.toContain("replay here")
     expect(document.body.textContent).not.toMatch(/space\s*replay/)
+
+    // No step strip (P020.2): the layout toggle ends the view's header
+    // row, never a row of its own over the waterfall; the fix says no
+    // repo path a reader cannot follow.
+    const toggle = screen.getByRole("button", { name: /^layout: / })
+    expect(toggle.parentElement?.parentElement).toBe(
+      document.querySelector("[role=tablist]")?.parentElement
+    )
+    expect(document.body.textContent).not.toContain("docs/record-contract.md")
   })
 
   it("lands on step 0 like any run, its answer read from the spans (U10.1-fix #5)", async () => {

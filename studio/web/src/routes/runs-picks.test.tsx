@@ -120,11 +120,34 @@ describe("the tokens cell's own + delegated (U30.2, UX-A-19)", () => {
       expect(c).toBeTruthy()
       return c!
     })
-    expect(cell.textContent).toBe("3 in · 1 out +9 in · 5 out")
+    // The delegated figure on its own line under the own one (P020.2).
+    expect([...cell.children].map((c) => c.textContent)).toEqual([
+      "3 in · 1 out",
+      "+9 in · 5 out",
+    ])
     expect(cell.title).toBe(
       "own 3 in · 1 out · + 9 in · 5 out by its child runs · 12 in · 6 out in all (the run's usage counts both)"
     )
     // One row delegates in the fixture; the others read the plain pair.
     expect(document.querySelectorAll("[data-token-split]")).toHaveLength(1)
+  })
+})
+
+describe("the runs list's fit (P020.2)", () => {
+  it("the refresh button stands outside the wrapping filter row; the agent column holds a longer name", async () => {
+    serve()
+    renderApp("/runs")
+    await screen.findByText("r_ok")
+    const refresh = screen.getByRole("button", { name: "refresh" })
+    // Its row does not wrap: the filters wrap among themselves, never
+    // the button alone onto a line of its own.
+    expect(refresh.parentElement!.className).not.toContain("flex-wrap")
+    expect(
+      refresh.parentElement!.querySelector(":scope > .flex-wrap h1")
+    ).toBeTruthy()
+    const agent = [...document.querySelectorAll("tbody td")].find((td) =>
+      td.className.includes("truncate whitespace-nowrap")
+    )!
+    expect(agent.className).toContain("max-w-36")
   })
 })

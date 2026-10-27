@@ -15,6 +15,7 @@ import {
 } from "@/lib/session-states"
 import { statusClass } from "@/lib/status-class"
 import { StatusChip } from "@/components/studio/runs-table"
+import { DotWrap } from "@/components/studio/dot-wrap"
 
 /** The outcomes that are a run's own status word: the run chip says them. */
 const RUN_WORDS: readonly string[] = [
@@ -39,7 +40,7 @@ export function SessionState({ row }: { row: SessionRow }) {
           title={AWAITING_TITLE}
           data-status="awaiting"
         >
-          {awaitingWords(row.pending)}
+          <DotWrap text={awaitingWords(row.pending)} />
         </span>
       ) : o ? (
         <span

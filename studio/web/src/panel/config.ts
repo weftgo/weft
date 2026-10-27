@@ -197,21 +197,6 @@ const entry = {
   })(),
 }
 
-/** normalize turns a raw endpoint into a base URL with a trailing
- * slash, or "" when it is not http(s). Never throws: the element reads
- * its configuration inside custom-element callbacks, where a throw
- * lands in the host page's error handler. */
-function normalize(raw: string, base: string): string {
-  try {
-    const url = new URL(raw, base)
-    if (url.protocol !== "http:" && url.protocol !== "https:") return ""
-    if (!url.pathname.endsWith("/")) url.pathname += "/"
-    return url.toString()
-  } catch {
-    return ""
-  }
-}
-
 /** scriptDir is the script's own origin + directory (rung 6) — what
  * /studio/panel.js, or /assets/devtools.abc123.js, serves from. "" for
  * a script without a src. */
@@ -342,28 +327,24 @@ const attrRung =
   (f) =>
     n?.getAttribute(`data-${f}`) ?? null
 
+/** normalize turns a raw endpoint into a base URL with a trailing
+ * slash, or "" when it is not http(s). Never throws: the element reads
+ * its configuration inside custom-element callbacks, where a throw
+ * lands in the host page's error handler. */
+function normalize(raw: string, base: string): string {
+  try {
+    const url = new URL(raw, base)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return ""
+    if (!url.pathname.endsWith("/")) url.pathname += "/"
+    return url.toString()
+  } catch {
+    return ""
+  }
+}
+
 /** setViaPackage sets it (the element class's npmEntry setter). */
 export function setViaPackage(v: boolean): void {
   entry.npm = v
-}
-
-/** weftScope reads window.__WEFT__: its scope (the serialised form, or
- * a Scope object), else its publicId — the page's object, as the page
- * wrote it. The empty scope when there is none or it cannot be read
- * (a getter of the page's that throws is not the panel's to surface). */
-export function weftScope(): Scope {
-  try {
-    const w = (
-      window as { __WEFT__?: { scope?: unknown; publicId?: unknown } | null }
-    ).__WEFT__
-    const sc = w?.scope
-    if (typeof sc === "string") return parseScope(sc)
-    const form = scopeOption(sc)
-    if (form !== undefined) return parseScope(form)
-  } catch {
-    // fall through to the public id
-  }
-  return { publicId: weftPublicId() }
 }
 
 /** weftPublicId reads window.__WEFT__.publicId — the page's object, as
@@ -388,6 +369,25 @@ export { isLoopback }
  * to draw, never a check: Studio enforces the scope on every route,
  * and the token is read here, not sent or logged. */
 export type TokenScope = ReturnType<typeof tokenScopeOf>
+
+/** weftScope reads window.__WEFT__: its scope (the serialised form, or
+ * a Scope object), else its publicId — the page's object, as the page
+ * wrote it. The empty scope when there is none or it cannot be read
+ * (a getter of the page's that throws is not the panel's to surface). */
+export function weftScope(): Scope {
+  try {
+    const w = (
+      window as { __WEFT__?: { scope?: unknown; publicId?: unknown } | null }
+    ).__WEFT__
+    const sc = w?.scope
+    if (typeof sc === "string") return parseScope(sc)
+    const form = scopeOption(sc)
+    if (form !== undefined) return parseScope(form)
+  } catch {
+    // fall through to the public id
+  }
+  return { publicId: weftPublicId() }
+}
 
 /** scopeOption is mount's scope option in its string form (a Scope
  * object serialised; anything else is unset). */

@@ -43,20 +43,23 @@ function knownPart(
 /** partialView is a set's unknown figure (a session's, an
  * experiment's) with the known part the API sent (cost_partial,
  * UX-H-07) in the panel header's words — atLeastCost's over the same
- * turns: "≥ $x · k of n turns priced", the reason its title. Undefined
- * for a known figure or one with no priced part (costView's "—"). */
+ * turns: "≥ $x · k of n turns priced" ("≥ $0 · …" when the priced
+ * parts are $0), the reason its title. Undefined for a known figure or
+ * one with no priced part (costView's "—"). */
 export function partialView(
   f: CostFields | null | undefined,
   noun = "turn"
 ): CostView | undefined {
   const p = f?.cost_partial
-  if (f?.cost_known || !p?.priced || !p.usd) return undefined
-  return knownPart(
-    p.usd,
-    `${p.priced} of ${p.of} ${noun}s priced`,
-    f?.cost_reason ?? "",
-    f?.cost_badge ?? "unknown"
-  )
+  if (f?.cost_known || !p?.priced) return undefined
+  const priced = `${p.priced} of ${p.of} ${noun}s priced`
+  const title = f?.cost_reason ?? ""
+  const badge = f?.cost_badge ?? "unknown"
+  // The priced parts known at $0 (U33.2-fix): a floor of $0, said so,
+  // never "—" over parts that are known.
+  if (!p.usd)
+    return { known: false, text: `≥ $0 · ${priced}`, title, badge, usd: 0 }
+  return knownPart(p.usd, priced, title, badge)
 }
 
 /** costView reads an object's own cost block. */
@@ -126,112 +129,21 @@ export const isScripted = (r: Pick<RunRow, "model">) =>
 export const SCRIPTED_HINT =
   "model weft/runtime/scripted: the source run's recorded turns, replayed"
 
-/** The summarizer's figure (UX-B-13): thread's compaction and branch
- * summaries are model calls of their own, never in a turn's usage —
- * drawn beside a turn's and the session's cost as "+ summarizer $x"
- * (studio/timeline.go prices it: each call at its summarizer model's
- * rates when recorded, else the turn's). The title names its tokens and
- * the figure's own title (its reason when it is not known). */
-export function summarizerView(
-  f:
-    | (CostFields & { usage: { input_tokens: number; output_tokens: number } })
-    | null
-    | undefined
-): CostView | null {
-  if (!f) return null
-  const v = costView(f)
-  const toks = tokenPair(f.usage.input_tokens, f.usage.output_tokens, true)
-  // An estimate (cost_badge "estimate"): known, priced at a stand-in
-  // model's rates — "≈", its reason in the title.
-  const est = v.known && f.cost_badge === ESTIMATE_BADGE
-  return {
-    ...v,
-    badge: est ? ESTIMATE_BADGE : v.badge,
-    text: `+ summarizer ${est ? ESTIMATE_MARK : ""}${v.text}`,
-    title: [
-      `the summarizer's model calls (compaction, branch summaries): ${toks} tokens, never in the turns' usage`,
-      est ? `${ESTIMATE_WORD}: ${f.cost_reason ?? ""}` : "",
-      v.title,
-    ]
-      .filter(Boolean)
-      .join(" · "),
-  }
+/** scriptedTitle is a scripted sum's title: sumCost's words. */
+function scriptedTitle(rows: readonly unknown[]): string {
+  return rows.length > 1 ? "every run a scripted model's" : ""
 }
 
-/** "$1.23"; under a cent four decimals ("$0.0042"), under that
- * "<$0.0001"; a known zero "$0.00". Only ever called on a known
- * figure — an unknown one is "—" (costView). */
-export function formatUSD(v: number): string {
-  if (!Number.isFinite(v)) return "—"
-  if (v === 0) return "$0.00"
-  const abs = Math.abs(v)
-  const sign = v < 0 ? "-" : ""
-  if (abs < 0.0001) return `${sign}<$0.0001`
-  if (abs < 0.01) return `${sign}$${abs.toFixed(4)}`
-  return `${sign}$${abs.toFixed(2)}`
+/** The reason a lost matrix cell's cost carries: Studio stopped
+ * following its command, so the run it may have started is not read
+ * and the variant's total cannot be known. */
+export const LOST_CELL_REASON =
+  "a lost cell has no cost: Studio stopped following its command, so the run it started is not read"
+
+/** lostCellCost is a lost cell's figure: unknown, its own reason. */
+export function lostCellCost(): CostView {
+  return view(null, false, LOST_CELL_REASON, "unknown")
 }
-
-/** The bill's two parts in words (U21.1, UX-F-15, UX-F-16): "$0.0012
- * own · $0.0040 delegated" — the figure, then its word — on the
- * panel's turn row and Studio's run header alike; delegated is a cost
- * and usage word only (lib/glossary.ts). */
-export const COST_PARTS = { own: "own", delegated: "delegated", sep: " · " }
-
-/** costLine is the two parts as one line: "$x own · $y delegated". */
-export const costLine = (own: string, delegated: string) =>
-  `${own} ${COST_PARTS.own}${COST_PARTS.sep}${delegated} ${COST_PARTS.delegated}`
-
-/** A whole bill's hover (a replayed run's result, both surfaces). */
-export const BILL_TITLE =
-  "the run's whole bill: own + delegated (its model calls and its child runs')"
-
-/** scriptedChip is a scripted run's chip (UX-C-42), the same words on
- * the panel's turn row, Studio's run header and experiment grid:
- * "scripted · 0 tokens" only when the row's usage is zero — a scripted
- * parent's Subagent child on a real model rolls real usage in. */
-export function scriptedChip(
-  r: Pick<RunRow, "model" | "usage">
-): string | undefined {
-  if (!isScripted(r)) return undefined
-  return r.usage.input_tokens + r.usage.output_tokens
-    ? "scripted"
-    : "scripted · 0 tokens"
-}
-
-/** An estimate's badge, mark and word (studio/pricing.go's
- * costEstimate): a known figure priced at a stand-in model's rates — a
- * summarizer call whose own model was not recorded, at its turn's. */
-export const ESTIMATE_BADGE = "estimate"
-export const ESTIMATE_MARK = "≈"
-export const ESTIMATE_WORD = "an estimate"
-
-/** totalUnknown is a run's whole bill when a part is not known: the
- * part's reason, led by what it means for a total. */
-function totalUnknown(r: CostRow): CostView {
-  const own = costView(r)
-  const part = own.known ? delegatedView(r) : own
-  const badge = part.badge ?? "unpriced"
-  // A derived run's own figure never resolves (its spans carry what usage
-  // there is): "not known", never "not known yet" — keyed on the row's
-  // derived mark, not on the API's words.
-  // An unpriced part's title names its model already: no lead.
-  if (badge !== "unknown") return view(null, false, part.title, badge)
-  const what = `a run's cost is not known${!own.known && isDerived(r) ? "" : " yet"}`
-  return view(null, false, `${what}: ${part.title}`, badge)
-}
-
-/** The reason words studio/pricing.go gives a model no pricing row
- * matches (or a run that names none): what makes a figure "unpriced"
- * rather than "unknown" (tally's "n of m child runs unpriced", a
- * Studio before U7's "no row … matches"). */
-const UNPRICED_WORDS =
-  /unpriced|has no price|\bno row\b.*\bmatches\b|reported no model/
-
-/** The words studio/pricing.go's tally gives a delegated reason when
- * any child's part is unknown ("1 of 3 child runs' cost not known
- * yet (…)"; before U7 "…'s cost is not known yet: …"): the whole is
- * unknown then, whatever unpriced child it goes on to count. */
-const UNKNOWN_LEAD = /not known yet/
 
 /** unpricedLine is the one line a page draws over its rows (the runs
  * list, the sessions list, a run header, the panel's header) when any
@@ -361,21 +273,112 @@ export function sumCost(
   })
 }
 
-/** scriptedTitle is a scripted sum's title: sumCost's words. */
-function scriptedTitle(rows: readonly unknown[]): string {
-  return rows.length > 1 ? "every run a scripted model's" : ""
+/** The summarizer's figure (UX-B-13): thread's compaction and branch
+ * summaries are model calls of their own, never in a turn's usage —
+ * drawn beside a turn's and the session's cost as "+ summarizer $x"
+ * (studio/timeline.go prices it: each call at its summarizer model's
+ * rates when recorded, else the turn's). The title names its tokens and
+ * the figure's own title (its reason when it is not known). */
+export function summarizerView(
+  f:
+    | (CostFields & { usage: { input_tokens: number; output_tokens: number } })
+    | null
+    | undefined
+): CostView | null {
+  if (!f) return null
+  const v = costView(f)
+  const toks = tokenPair(f.usage.input_tokens, f.usage.output_tokens, true)
+  // An estimate (cost_badge "estimate"): known, priced at a stand-in
+  // model's rates — "≈", its reason in the title.
+  const est = v.known && f.cost_badge === ESTIMATE_BADGE
+  return {
+    ...v,
+    badge: est ? ESTIMATE_BADGE : v.badge,
+    text: `+ summarizer ${est ? ESTIMATE_MARK : ""}${v.text}`,
+    title: [
+      `the summarizer's model calls (compaction, branch summaries): ${toks} tokens, never in the turns' usage`,
+      est ? `${ESTIMATE_WORD}: ${f.cost_reason ?? ""}` : "",
+      v.title,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  }
 }
 
-/** The reason a lost matrix cell's cost carries: Studio stopped
- * following its command, so the run it may have started is not read
- * and the variant's total cannot be known. */
-export const LOST_CELL_REASON =
-  "a lost cell has no cost: Studio stopped following its command, so the run it started is not read"
-
-/** lostCellCost is a lost cell's figure: unknown, its own reason. */
-export function lostCellCost(): CostView {
-  return view(null, false, LOST_CELL_REASON, "unknown")
+/** "$1.23"; under a cent four decimals ("$0.0042"), under that
+ * "<$0.0001"; a known zero "$0.00". Only ever called on a known
+ * figure — an unknown one is "—" (costView). */
+export function formatUSD(v: number): string {
+  if (!Number.isFinite(v)) return "—"
+  if (v === 0) return "$0.00"
+  const abs = Math.abs(v)
+  const sign = v < 0 ? "-" : ""
+  if (abs < 0.0001) return `${sign}<$0.0001`
+  if (abs < 0.01) return `${sign}$${abs.toFixed(4)}`
+  return `${sign}$${abs.toFixed(2)}`
 }
+
+/** The bill's two parts in words (U21.1, UX-F-15, UX-F-16): "$0.0012
+ * own · $0.0040 delegated" — the figure, then its word — on the
+ * panel's turn row and Studio's run header alike; delegated is a cost
+ * and usage word only (lib/glossary.ts). */
+export const COST_PARTS = { own: "own", delegated: "delegated", sep: " · " }
+
+/** costLine is the two parts as one line: "$x own · $y delegated". */
+export const costLine = (own: string, delegated: string) =>
+  `${own} ${COST_PARTS.own}${COST_PARTS.sep}${delegated} ${COST_PARTS.delegated}`
+
+/** A whole bill's hover (a replayed run's result, both surfaces). */
+export const BILL_TITLE =
+  "the run's whole bill: own + delegated (its model calls and its child runs')"
+
+/** scriptedChip is a scripted run's chip (UX-C-42), the same words on
+ * the panel's turn row, Studio's run header and experiment grid:
+ * "scripted · 0 tokens" only when the row's usage is zero — a scripted
+ * parent's Subagent child on a real model rolls real usage in. */
+export function scriptedChip(
+  r: Pick<RunRow, "model" | "usage">
+): string | undefined {
+  if (!isScripted(r)) return undefined
+  return r.usage.input_tokens + r.usage.output_tokens
+    ? "scripted"
+    : "scripted · 0 tokens"
+}
+
+/** An estimate's badge, mark and word (studio/pricing.go's
+ * costEstimate): a known figure priced at a stand-in model's rates — a
+ * summarizer call whose own model was not recorded, at its turn's. */
+export const ESTIMATE_BADGE = "estimate"
+export const ESTIMATE_MARK = "≈"
+export const ESTIMATE_WORD = "an estimate"
+
+/** totalUnknown is a run's whole bill when a part is not known: the
+ * part's reason, led by what it means for a total. */
+function totalUnknown(r: CostRow): CostView {
+  const own = costView(r)
+  const part = own.known ? delegatedView(r) : own
+  const badge = part.badge ?? "unpriced"
+  // A derived run's own figure never resolves (its spans carry what usage
+  // there is): "not known", never "not known yet" — keyed on the row's
+  // derived mark, not on the API's words.
+  // An unpriced part's title names its model already: no lead.
+  if (badge !== "unknown") return view(null, false, part.title, badge)
+  const what = `a run's cost is not known${!own.known && isDerived(r) ? "" : " yet"}`
+  return view(null, false, `${what}: ${part.title}`, badge)
+}
+
+/** The reason words studio/pricing.go gives a model no pricing row
+ * matches (or a run that names none): what makes a figure "unpriced"
+ * rather than "unknown" (tally's "n of m child runs unpriced", a
+ * Studio before U7's "no row … matches"). */
+const UNPRICED_WORDS =
+  /unpriced|has no price|\bno row\b.*\bmatches\b|reported no model/
+
+/** The words studio/pricing.go's tally gives a delegated reason when
+ * any child's part is unknown ("1 of 3 child runs' cost not known
+ * yet (…)"; before U7 "…'s cost is not known yet: …"): the whole is
+ * unknown then, whatever unpriced child it goes on to count. */
+const UNKNOWN_LEAD = /not known yet/
 
 /** total adds the rows' parts, in order: the first unknown part is the
  * total; every run a scripted model's $0 is "$0 · scripted" too. */

@@ -61,6 +61,17 @@ describe("eventMessage (UX-H-10)", () => {
     })
   })
 
+  it("reads the event.name attribute when the record has no EventName (older SDKs)", () => {
+    expect(
+      eventMessage("", `{"content":"hi"}`, {
+        "event.name": "gen_ai.user.message",
+      })
+    ).toMatchObject({ role: "user", parts: [{ kind: "text", text: "hi" }] })
+    expect(
+      eventMessage(undefined, `{"content":"x"}`, { "event.name": "app.x" })
+    ).toBeUndefined()
+  })
+
   it("a body that is not JSON is the text; a plain line is no message", () => {
     expect(eventMessage("gen_ai.user.message", "hi there")?.parts).toEqual([
       { kind: "text", text: "hi there" },
@@ -82,7 +93,7 @@ describe("a replay's provenance in words (UX-S5b-04)", () => {
     expect(editsSummary(row("0:reply"))).toBe("1 edit (reply)")
   })
   it("counts what the mark's cap left out", () => {
-    expect(editsSummary(row("0:user,+3 more"))).toBe("4 edits (user)")
+    expect(editsSummary(row("0:user,+3 more"))).toBe("4 edits (user, …)")
   })
   it("says nothing without a mark, or on a child run", () => {
     expect(editsSummary({ id: "pg_1", meta: {} })).toBe("")
@@ -131,6 +142,20 @@ describe("partialView (UX-H-07)", () => {
       )?.text
     ).toBe("> $0 · 1 of 2 runs priced")
   })
+  it("priced parts at $0 read a $0 floor, never — (U33.2-fix)", () => {
+    expect(
+      partialView({
+        cost_known: false,
+        cost_reason: reason,
+        cost_partial: { usd: 0, priced: 2, of: 3 },
+      })
+    ).toMatchObject({
+      known: false,
+      text: "≥ $0 · 2 of 3 turns priced",
+      usd: 0,
+    })
+  })
+
   it("is undefined for a known figure or one with no priced part", () => {
     expect(partialView({ cost_usd: 1, cost_known: true })).toBeUndefined()
     expect(

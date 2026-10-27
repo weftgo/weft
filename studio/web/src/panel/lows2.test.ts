@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { NEEDS_APPROVAL } from "../lib/drawer-spec"
-import { NO_ENDPOINT, NO_SCOPE_LABEL } from "./element"
+import { noEndpoint, NO_SCOPE_LABEL } from "./element"
 import {
   $,
   all,
@@ -101,7 +101,26 @@ describe("a bare script tag's dock (UX-S5b-10)", () => {
     document.body.appendChild(el)
     await settle()
     expect(el.isConnected).toBe(false)
-    expect(warn.mock.calls).toEqual([[NO_ENDPOINT]])
+    expect(warn.mock.calls).toHaveLength(1)
+    const ep = String(warn.mock.calls[0][0]).replace(/^.* at (\S+);.*$/, "$1")
+    expect(warn.mock.calls[0]).toEqual([noEndpoint(ep)])
+    expect(ep).toMatch(/^http:\/\/(localhost|127\.0\.0\.1)/)
+    warn.mockRestore()
+  })
+
+  it("off loopback a bare tag's dock leaves silently (U22: a production page)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.stubGlobal("fetch", down())
+    const base = document.createElement("base")
+    base.href = "https://shop.example/app/"
+    document.head.appendChild(base)
+    const el = create({})
+    el.autoMounted = true
+    document.body.appendChild(el)
+    await settle()
+    base.remove()
+    expect(el.isConnected).toBe(false)
+    expect(warn).not.toHaveBeenCalled()
     warn.mockRestore()
   })
 

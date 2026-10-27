@@ -1300,9 +1300,11 @@ itself silently unless the endpoint is one you named on loopback (production saf
 — at most two requests (`panel-config.json`, then meta;
 `panel-config.json` gives up after 3 s), and no console line unless its
 `<script>` tag names no endpoint and carries no `data-weft` (a bare
-include, which 0.10 recognised by its file name): then one `console.warn`,
-"weft devtools: no endpoint found; add data-weft or data-endpoint on the
-panel's <script> tag" (UX-S5b-10). On a loopback endpoint you
+include, which 0.10 recognised by its file name) and the endpoint it
+guessed is on loopback (a dev page): then one `console.warn`, "weft
+devtools: Studio did not answer at <endpoint>; add data-weft or
+data-endpoint on the panel's <script> tag" (UX-S5b-10). Off loopback (a
+production page with a vendored bare tag) the removal stays silent. On a loopback endpoint you
 named (your own Studio, not started yet), and on a mount you made (a
 `<weft-devtools>` element in your markup, `mount(opts)`, or
 `data-auto="false"`), it shows one quiet line instead, `Studio not
@@ -1322,8 +1324,8 @@ retries one `/api/meta` read a minute, while the page is visible,
 brings it back by itself. The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 294,376 B raw / 98,777 B gzip
-(96.5 KiB, the bundle of the ledger's row "U30.3-fix"; 7,719 B — 7.5 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 294,415 B raw / 98,790 B gzip
+(96.5 KiB, the bundle of the ledger's row "U33.2-fix"; 7,706 B — 7.5 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

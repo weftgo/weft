@@ -922,7 +922,8 @@ func TestDerivedSessionMarkedAndNumbered(t *testing.T) {
 }
 
 // numberDerivedTurns leaves a thread's numbers and child runs alone,
-// and orders a start tie by id.
+// numbers a mixed session's derived turns after the thread's highest
+// (U33.2-fix) and orders a start tie by id.
 func TestNumberDerivedTurns(t *testing.T) {
 	at := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
 	rows := []runRow{
@@ -937,7 +938,16 @@ func TestNumberDerivedTurns(t *testing.T) {
 	for _, r := range rows {
 		got = append(got, r.Turn)
 	}
-	if want := []int{3, 4, 2, 1, 0}; !slices.Equal(got, want) {
-		t.Errorf("turns = %v, want %v", got, want)
+	if want := []int{7, 4, 6, 5, 0}; !slices.Equal(got, want) {
+		t.Errorf("turns = %v, want %v (derived turns after the thread's t4)", got, want)
+	}
+	// Every turn derived: 1..n.
+	rows = []runRow{
+		{ID: "otel-b", Started: at, Derived: true},
+		{ID: "otel-a", Started: at.Add(-time.Minute), Derived: true},
+	}
+	numberDerivedTurns(rows)
+	if rows[0].Turn != 2 || rows[1].Turn != 1 {
+		t.Errorf("all derived: turns %d, %d, want 2, 1", rows[0].Turn, rows[1].Turn)
 	}
 }

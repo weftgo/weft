@@ -2367,10 +2367,15 @@ func allDerived(runs []obsdb.RunRow) bool {
 // no thread turn (its row reads 0, docs/record-contract.md §9), so the
 // session page would list every one as turn 0. Presentation only:
 // the run's own row (/api/runs/{id}) keeps 0, nothing is stored, and a
-// turn a thread numbered keeps its number.
+// turn a thread numbered keeps its number. In a mixed session (a
+// thread's turns beside derived ones sharing its id) the derived turns
+// are numbered after the thread's highest (U33.2-fix), never on top of
+// its t1..tn.
 func numberDerivedTurns(rows []runRow) {
 	var idx []int
+	base := 0
 	for i, r := range rows {
+		base = max(base, r.Turn)
 		if r.Derived && r.Turn == 0 && r.ParentRunID == "" {
 			idx = append(idx, i)
 		}
@@ -2382,7 +2387,7 @@ func numberDerivedTurns(rows []runRow) {
 		return strings.Compare(rows[a].ID, rows[b].ID)
 	})
 	for n, i := range idx {
-		rows[i].Turn = n + 1
+		rows[i].Turn = base + n + 1
 	}
 }
 

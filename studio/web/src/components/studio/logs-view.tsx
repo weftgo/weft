@@ -73,7 +73,8 @@ export function LogLines({
         const attrs = attrsLine(l.attrs)
         // A GenAI event (UX-H-10): its message, role and content, as
         // the chat view draws one — never its JSON body as a line.
-        const msg = eventMessage(l.event_name, l.body)
+        const msg = eventMessage(l.event_name, l.body, l.attrs)
+        const evName = l.event_name || String(l.attrs["event.name"] ?? "")
         return (
           <li
             key={l.index}
@@ -95,8 +96,8 @@ export function LogLines({
             </span>
             <div
               className="min-w-0 flex-1 break-words"
-              data-log-event={msg ? l.event_name : undefined}
-              title={msg ? l.event_name : undefined}
+              data-log-event={msg ? evName : undefined}
+              title={msg ? evName : undefined}
             >
               {msg ? <ChatMessages messages={[msg]} /> : l.body}
               {attrs ? (

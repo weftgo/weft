@@ -492,9 +492,8 @@ type cost struct {
 	models                  []string
 	runs, unknown, unpriced int
 	why, cause              string
-	// A tally's known part (UX-H-07): floor sums the parts whose
-	// figure is known (a part's own when only its delegated is not),
-	// priced counts the parts whose whole bill is known; never counts
+	// A tally's known part (UX-H-07): floor sums, and priced counts,
+	// the parts whose whole bill (own + delegated) is known; never counts
 	// the unknown parts that will never be known (a derived run whose
 	// stock spans report no usage), so "not known yet" is not said of
 	// them.
@@ -895,12 +894,11 @@ func tally(parts []runCost, noun string, nested bool) cost {
 	out := cost{known: true}
 	for _, p := range parts {
 		out.usd += p.own.usd + p.delegated.usd
-		if p.own.known {
-			out.floor += p.own.usd
-			if p.delegated.known {
-				out.floor += p.delegated.usd
-				out.priced++
-			}
+		// The floor is the k priced parts' sum (U33.2-fix): a part whose
+		// delegated cost is unknown adds nothing, its own figure included.
+		if p.own.known && p.delegated.known {
+			out.floor += p.own.usd + p.delegated.usd
+			out.priced++
 		}
 		if p.own.reason == derivedUsageUnknown {
 			out.never++

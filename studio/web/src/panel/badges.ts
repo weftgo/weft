@@ -149,6 +149,9 @@ export function capLine(
 }
 
 export { SCRIPTED_MODEL }
+export function catalogCapped(n: number): HoleMark {
+  return { hole: "truncated", ...requestCappedWords(n) }
+}
 
 /** requestLabel is a request hole's badge text: the table's label,
  * prefixed where it does not name the request; not_recorded names the
@@ -170,12 +173,6 @@ export function requestLabel(hole: string, cause?: string): string {
 export const CONTENT_OFF: Record<string, string> = {
   none: "captured none (weft.Content(false), or no destination takes content)",
   stripped: "otel.NoContent()",
-}
-
-/** title is a badge's tooltip: the reason, and the fix where one
- * exists — the run page's HoleBadge words it the same. */
-export function badgeTitle(reason: string, fix?: string): string {
-  return fix ? `${reason} — fix: ${fix}` : reason
 }
 
 /** requestCapped is the badge for a step past the request pages the
@@ -268,23 +265,10 @@ export function holeLine(m: HoleMark): HTMLElement {
   ])
 }
 
-/** requestHole draws a request pane's hole (a step's request line,
- * the Request tab): the badge, then the reason and fix as words. */
-export function requestHole(hole: string, note: BadgeNote = {}): HTMLElement[] {
-  const w = holeWords({ hole, ...note })
-  const b = badge(hole, {
-    ...note,
-    label: note.label ?? requestLabel(hole, note.cause),
-  })
-  b.lastChild?.remove() // said visibly below
-  return [
-    b,
-    el(
-      "div",
-      "weft-reason",
-      [w.reason, w.fix && `fix: ${w.fix}`].filter(Boolean).join(" — ")
-    ),
-  ]
+/** title is a badge's tooltip: the reason, and the fix where one
+ * exists — the run page's HoleBadge words it the same. */
+export function badgeTitle(reason: string, fix?: string): string {
+  return fix ? `${reason} — fix: ${fix}` : reason
 }
 
 /** The edit-the-prompt fallback's hole when the step's prompt cannot
@@ -311,6 +295,25 @@ export function noPublicIdWords(reason?: string, fix?: string): string {
 /** badgeLabel is a badge's visible words (its first text). */
 export function badgeLabel(b: Element | null | undefined): string {
   return b?.firstChild?.nodeType === 3 ? (b.firstChild.textContent ?? "") : ""
+}
+
+/** requestHole draws a request pane's hole (a step's request line,
+ * the Request tab): the badge, then the reason and fix as words. */
+export function requestHole(hole: string, note: BadgeNote = {}): HTMLElement[] {
+  const w = holeWords({ hole, ...note })
+  const b = badge(hole, {
+    ...note,
+    label: note.label ?? requestLabel(hole, note.cause),
+  })
+  b.lastChild?.remove() // said visibly below
+  return [
+    b,
+    el(
+      "div",
+      "weft-reason",
+      [w.reason, w.fix && `fix: ${w.fix}`].filter(Boolean).join(" — ")
+    ),
+  ]
 }
 
 /** A turn's chips (D5): what its record says it is, beside its id —
@@ -396,9 +399,6 @@ export function cutBadge(cut: Truncation): HTMLElement {
     })
   // The loop already retried the step: no fix applies to this call.
   return badge("max_tokens", { reason: UNRUN_CALL_REASON, fix: "" })
-}
-export function catalogCapped(n: number): HoleMark {
-  return { hole: "truncated", ...requestCappedWords(n) }
 }
 
 // ── Cost (A5.3) ──────────────────────────────────────────────────

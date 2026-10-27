@@ -85,13 +85,6 @@ const textOf = (m: Message) =>
     .map((p) => (p as { text: string }).text)
     .join("")
 
-/** editable: the target is one a replay can keep — the from_step it
- * implies (impliedFromStep) within the server's bound (max: the
- * highest from_step it accepts; null: unknown, nothing offered). */
-export function editable(target: ReplayEdit, max: number | null): boolean {
-  return max !== null && target.step >= 0 && impliedFromStep([target]) <= max
-}
-
 /** markedPart is what the replay's input holds for a call token. The
  * kept prefix is the source's steps 0..fromStep−1, one assistant
  * message each, at the input's end: the token's step ordinal picks its
@@ -237,6 +230,13 @@ const fits = (t: string, v: unknown): boolean =>
       kind(v) === (t === "boolean" ? "bool" : t)
 type Schema = Record<string, unknown>
 
+/** editable: the target is one a replay can keep — the from_step it
+ * implies (impliedFromStep) within the server's bound (max: the
+ * highest from_step it accepts; null: unknown, nothing offered). */
+export function editable(target: ReplayEdit, max: number | null): boolean {
+  return max !== null && target.step >= 0 && impliedFromStep([target]) <= max
+}
+
 /** putEdit replaces the edit on e's target, appends it, or (value
  * empty) drops it. */
 export function putEdit(
@@ -353,6 +353,92 @@ export function checkArgs(
   }
 }
 
+/** wireEdits is §5.1's transcript_edits: kind always sent, each kind
+ * with the fields it takes and no other (studio/edits.go's editKindOf
+ * refuses the rest), args an object. */
+export function wireEdits(list: ReplayEdit[]): unknown[] {
+  return list.map((e) => {
+    const k = kindOf(e)
+    const w: Record<string, unknown> = { kind: k, step: e.step }
+    if (k === "tool_result" || k === "tool_args") w.call_id = e.callID
+    if (k === "tool_result") w.tool_result = e.toolResult
+    else if (k === "tool_args") w.args = e.args
+    else w.content = e.content
+    if (k === "user" && e.index) w.index = e.index
+    return w
+  })
+}
+
+// ── The editor's schema check ─────────────────────────────────────
+// obsdb.CheckToolArgs, rule for rule: type (a name or a list; integer
+// is an integral literal), enum, required, properties, additional-
+// Properties (false refuses, a schema checks), items; a null field is
+// absent (encoding/json's rule). Its sentence is the loop's
+// INVALID_INPUT, field named.
+
+type Num = number & { lit?: string }
+
+/** editsSummary is a replay's weft.edits in words (UX-S5b-04): "5
+ * edits (user, args, result, insert)" — the count (the "+N more" the
+ * mark's cap left out included), then each kind once in first-seen
+ * order, ", …" after them when the cap left kinds out; "" for a run with no mark (a child run's inherited one
+ * included). Kinds only, never content. */
+export function editsSummary(row: Parameters<typeof editMarks>[0]): string {
+  const { marks, more } = editMarks(row)
+  const n = marks.length + more
+  return n
+    ? `${n} edit${n > 1 ? "s" : ""} (${[...new Set(marks.map((m) => m.what))].join(", ")}${more ? ", …" : ""})`
+    : ""
+}
+
+/** replayViewWords is a replay's weft.replay.view in words (UX-S5b-04;
+ * ADR 0029 §2): what the model was fed at the step the replay
+ * continued from — "fed the compacted view #7"; a view the records
+ * did not place reads "prefix derived" / "prefix view unknown" (the
+ * header's derived badge says why); "" for the plain transcript or no
+ * mark. */
+export function replayViewWords(v: string | undefined): string {
+  const c = /^compacted:(\d+)$/.exec(v ?? "")
+  return c
+    ? `fed the compacted view #${c[1]}`
+    : v == "derived"
+      ? "prefix derived"
+      : v == "unknown"
+        ? "prefix view unknown"
+        : ""
+}
+
+/** The run metadata a replay's header sentence says in words, kept
+ * behind its "details" (UX-S5b-04): the raw chips stay one click away. */
+export const PROVENANCE_KEYS = [
+  "weft.edits",
+  "weft.replay.view",
+  "weft.playground.command",
+  "weft.playground.actor",
+]
+
+/** The disclosure that holds PROVENANCE_KEYS' raw chips. */
+export const PROVENANCE_DETAILS = "details"
+
+/** One user message of a step as the user edit counts them (studio/
+ * edits.go's userSeqs): step 0's turn prompt (the input's last message,
+ * when a user message) first, then the user messages the step's own
+ * records hold (a steer, a resumed turn's prompt). */
+export interface UserMessage {
+  step: number
+  index: number
+  text: string
+}
+
+/** The chip each token draws on the replayed run's Story. */
+export const MARK_CHIPS: Record<EditMark["what"], string> = {
+  args: "args edited",
+  result: "result edited",
+  reply: "edited",
+  user: "edited",
+  insert: "inserted",
+}
+
 export function userMessagesOf(batches: TranscriptBatch[]): UserMessage[] {
   const out: UserMessage[] = []
   const placed = placeBatches(batches)
@@ -393,40 +479,6 @@ export const EDIT_FIELD = {
   edited: "edited",
   same: "same as the recording · not an edit",
 } as const
-
-/** wireEdits is §5.1's transcript_edits: kind always sent, each kind
- * with the fields it takes and no other (studio/edits.go's editKindOf
- * refuses the rest), args an object. */
-export function wireEdits(list: ReplayEdit[]): unknown[] {
-  return list.map((e) => {
-    const k = kindOf(e)
-    const w: Record<string, unknown> = { kind: k, step: e.step }
-    if (k === "tool_result" || k === "tool_args") w.call_id = e.callID
-    if (k === "tool_result") w.tool_result = e.toolResult
-    else if (k === "tool_args") w.args = e.args
-    else w.content = e.content
-    if (k === "user" && e.index) w.index = e.index
-    return w
-  })
-}
-
-// ── The editor's schema check ─────────────────────────────────────
-// obsdb.CheckToolArgs, rule for rule: type (a name or a list; integer
-// is an integral literal), enum, required, properties, additional-
-// Properties (false refuses, a schema checks), items; a null field is
-// absent (encoding/json's rule). Its sentence is the loop's
-// INVALID_INPUT, field named.
-
-type Num = number & { lit?: string }
-
-/** The chip each token draws on the replayed run's Story. */
-export const MARK_CHIPS: Record<EditMark["what"], string> = {
-  args: "args edited",
-  result: "result edited",
-  reply: "edited",
-  user: "edited",
-  insert: "inserted",
-}
 
 /** lossy names the first number the browser cannot carry as written:
  * past the doubles' exact integers (9007199254740993 would be sent as
@@ -477,56 +529,4 @@ export function editLine(e: ReplayEdit): string {
       : (e.toolResult ?? e.content)) ?? ""
   )
   return `${k} · ${at}${who} → ${v.length > 60 ? `${v.slice(0, 59)}…` : v}`
-}
-
-/** editsSummary is a replay's weft.edits in words (UX-S5b-04): "5
- * edits (user, args, result, insert)" — the count (the "+N more" the
- * mark's cap left out included), then each kind once in first-seen
- * order; "" for a run with no mark (a child run's inherited one
- * included). Kinds only, never content. */
-export function editsSummary(row: Parameters<typeof editMarks>[0]): string {
-  const { marks, more } = editMarks(row)
-  const n = marks.length + more
-  return n
-    ? `${n} edit${n > 1 ? "s" : ""} (${[...new Set(marks.map((m) => m.what))].join(", ")})`
-    : ""
-}
-
-/** replayViewWords is a replay's weft.replay.view in words (UX-S5b-04;
- * ADR 0029 §2): what the model was fed at the step the replay
- * continued from — "fed the compacted view #7"; a view the records
- * did not place reads "prefix derived" / "prefix view unknown" (the
- * header's derived badge says why); "" for the plain transcript or no
- * mark. */
-export function replayViewWords(v: string | undefined): string {
-  const c = /^compacted:(\d+)$/.exec(v ?? "")
-  return c
-    ? `fed the compacted view #${c[1]}`
-    : v == "derived"
-      ? "prefix derived"
-      : v == "unknown"
-        ? "prefix view unknown"
-        : ""
-}
-
-/** The run metadata a replay's header sentence says in words, kept
- * behind its "details" (UX-S5b-04): the raw chips stay one click away. */
-export const PROVENANCE_KEYS = [
-  "weft.edits",
-  "weft.replay.view",
-  "weft.playground.command",
-  "weft.playground.actor",
-]
-
-/** The disclosure that holds PROVENANCE_KEYS' raw chips. */
-export const PROVENANCE_DETAILS = "details"
-
-/** One user message of a step as the user edit counts them (studio/
- * edits.go's userSeqs): step 0's turn prompt (the input's last message,
- * when a user message) first, then the user messages the step's own
- * records hold (a steer, a resumed turn's prompt). */
-export interface UserMessage {
-  step: number
-  index: number
-  text: string
 }

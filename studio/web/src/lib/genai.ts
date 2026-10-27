@@ -318,13 +318,19 @@ const EVENT_ROLE = /^gen_ai\.(system|user|assistant|tool)\.message$/
  * an assistant's tool_calls ({id, function: {name, arguments}}) and a
  * tool message's id as their parts, a choice's finish_reason. A body
  * that is not JSON is the message's text. Undefined for any other row:
- * a plain log line. Nothing is read that the row did not carry — the
+ * a plain log line. With no event_name the row's event.name attribute
+ * (older SDKs) names the event. Nothing is read that the row did not carry — the
  * logs route's own rules (a read token reads no logs) stand.
  */
 export function eventMessage(
-  eventName: string | undefined,
-  body: string
+  name: string | undefined,
+  body: string,
+  attrs?: Record<string, unknown>
 ): ChatMessage | undefined {
+  // An older SDK sends the name as the event.name attribute, the
+  // record's EventName empty (U33.2-fix).
+  const ev = attrs?.["event.name"]
+  const eventName = name || (typeof ev === "string" ? ev : "")
   const m = eventName ? EVENT_ROLE.exec(eventName) : null
   const choice = eventName === "gen_ai.choice"
   if (!m && !choice) return undefined

@@ -315,6 +315,14 @@ describe("the sessions list", () => {
     expect(cells[0].querySelector("[data-cost]")!.getAttribute("title")).toBe(
       sessions.sessions[0].cost_reason
     )
+    // The golden's cost_partial: two of three turns priced at $0 — a $0
+    // floor, said so, never "—" (U33.2-fix).
+    expect(sessions.sessions[0].cost_partial).toEqual({
+      usd: 0,
+      priced: 2,
+      of: 3,
+    })
+    expect(visible(cells[0])).toBe("≥ $0 · 2 of 3 turns priced")
 
     studio.on("GET meta", meta([]))
     renderApp("/sessions")
@@ -354,6 +362,7 @@ describe("the sessions list", () => {
       cost_usd: null,
       cost_known: false,
       cost_badge: "unpriced" as const,
+      cost_partial: undefined,
       cost_reason:
         "9 of 9 turns unpriced: no price for openai/kimi-k2.7-code, acme/x, acme/y",
       unpriced_models: ["openai/kimi-k2.7-code", "acme/x", "acme/y"],

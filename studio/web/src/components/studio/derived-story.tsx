@@ -213,7 +213,7 @@ function DerivedStepCard({
 function LoggedMessages({ runId }: { runId: string }) {
   const q = useQuery({ ...allLogsQuery(runId), retry: false })
   const msgs = (q.data?.logs ?? []).flatMap((l) => {
-    const m = eventMessage(l.event_name, l.body)
+    const m = eventMessage(l.event_name, l.body, l.attrs)
     return m ? [m] : []
   })
   if (!msgs.length) return null

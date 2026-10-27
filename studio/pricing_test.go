@@ -1126,6 +1126,13 @@ func TestTallyDerivedNeverAndPartial(t *testing.T) {
 	if want := "2 of 3 turns' cost not known yet ("; !strings.HasPrefix(got.reason, want) {
 		t.Errorf("reason = %q, want prefix %q", got.reason, want)
 	}
+	// A part whose delegated cost is unknown is not priced and adds
+	// nothing to the floor, its own figure included (U33.2-fix).
+	halfKnown := runCost{id: "r3", own: cost{known: true, usd: 0.5}, delegated: cost{badge: costUnknown, reason: "running: usage arrives at run end"}}
+	f = tally([]runCost{priced, halfKnown}, "turn", false).fields()
+	if f.CostPartial == nil || *f.CostPartial != (costPartial{USD: 0.00003, Priced: 1, Of: 2}) {
+		t.Errorf("half-known part: partial %+v, want 0.00003, 1 of 2", f.CostPartial)
+	}
 	// No part priced: no partial; a known figure: none either.
 	if f := tally([]runCost{derived}, "turn", false).fields(); f.CostPartial != nil {
 		t.Errorf("no part priced: partial = %+v, want none", f.CostPartial)

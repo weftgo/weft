@@ -534,10 +534,11 @@ export const HOW_TO_SCOPE: readonly string[] = [
 ]
 
 /** The one console line (UX-S5b-10): an auto dock whose tag names no
- * endpoint and carries no data-weft, removed where Studio did not
- * answer. */
-export const NO_ENDPOINT =
-  "weft devtools: no endpoint found; add data-weft or data-endpoint on the panel's <script> tag"
+ * endpoint and carries no data-weft, removed where the Studio guessed
+ * on loopback (a dev page) did not answer — never off loopback (U22:
+ * a production page's removal stays silent). */
+export const noEndpoint = (ep: string) =>
+  `weft devtools: Studio did not answer at ${ep}; add data-weft or data-endpoint on the panel's <script> tag`
 
 /** The fallback's header label: no rung names a scope. */
 export const NO_SCOPE_LABEL = "no conversation detected on this page"
@@ -2443,10 +2444,11 @@ export class WeftDevtools extends HTMLElement {
       // one line says why the dock left — never on a tag that asked.
       if (
         !cfg.endpointExplicit &&
+        isLoopback(endpoint) &&
         !viaPackage() &&
         !findPanelScript()?.hasAttribute("data-weft")
       )
-        console.warn(NO_ENDPOINT)
+        console.warn(noEndpoint(endpoint))
       this.remove()
     } else {
       // The host wrote the mount: it wants to see why nothing is there.

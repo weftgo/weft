@@ -54,6 +54,45 @@ describe("useKeepInView", () => {
     expect(scroll).toHaveBeenCalledTimes(3)
   })
 
+  it("once the reader takes over, new data never pulls the page back", () => {
+    stubRO()
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    const { rerender } = render(<Page ready data={false} />)
+    expect(scroll).toHaveBeenCalledTimes(1)
+    window.dispatchEvent(new Event("wheel"))
+    rerender(<Page ready data />)
+    resized?.()
+    expect(scroll).toHaveBeenCalledTimes(1)
+  })
+
+  it("a scroll the hold did not make (a scrollbar drag: no pointer event) ends it", () => {
+    stubRO()
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    let at = 0
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => ({ top: at }) as DOMRect)
+    try {
+      const { rerender } = render(<Page ready data={false} />)
+      // The hold's own scroll event: not the reader's.
+      window.dispatchEvent(new Event("scroll"))
+      // Scroll anchoring: a scroll that leaves the item where it was.
+      window.dispatchEvent(new Event("scroll"))
+      resized?.()
+      expect(scroll).toHaveBeenCalledTimes(2)
+      // The reader drags the scrollbar: the item moves.
+      at = -600
+      window.dispatchEvent(new Event("scroll"))
+      resized?.()
+      rerender(<Page ready data />)
+      expect(scroll).toHaveBeenCalledTimes(2)
+    } finally {
+      rect.mockRestore()
+    }
+  })
+
   it("lets go when the reader scrolls, or after HOLD_MS", () => {
     stubRO()
     vi.useFakeTimers()

@@ -349,28 +349,63 @@ export const MCP_NODE_HINT = `an MCP server (the tools' Origin, weft.tool.origin
 /** The call graph's least node width and column gap, in viewBox px. */
 export const GRAPH_NODE_W = 230
 export const GRAPH_GAP_X = 110
+/** The widest a node grows (P020.1-ui-fix): past it its lines are cut
+ * with an ellipsis (fitText), the whole name in its label and hover. */
+export const GRAPH_NODE_MAX = 420
+
+/** A character drawn two cells wide in a mono face: CJK, Hangul, the
+ * full-width forms and emoji. */
+const WIDE =
+  /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}\u{20000}-\u{3FFFD}]/u
+
+/** cells is a text's width in mono cells: a wide character two, a
+ * combining mark or a joiner none, any other one. */
+export function cells(t: string): number {
+  let n = 0
+  for (const c of t)
+    n += WIDE.test(c) ? 2 : /\p{M}|[\u200B-\u200F]/u.test(c) ? 0 : 1
+  return n
+}
+
+/** textPx is a line's drawn width at `px` (the mono stack's 0.6 em a
+ * cell). */
+const textPx = (t: string, px: number) => Math.ceil(cells(t) * px * 0.6)
+
+/** fitText cuts a line to `width` px at `px`, an ellipsis where it was
+ * cut; a line that fits is itself. */
+export function fitText(t: string, px: number, width: number): string {
+  if (textPx(t, px) <= width) return t
+  let out = ""
+  for (const c of t) {
+    if (textPx(`${out}${c}…`, px) > width) break
+    out += c
+  }
+  return `${out}…`
+}
 
 /** graphBox is the call graph's node width and column gap for what it
  * draws (P020.1): every node line inside its box — the first (11 px,
  * the name and the cost beside it) and the rest (10 px) at the mono
- * stack's 0.6 em a character, 10 px inset each side — and every edge
- * label inside its gap with room for the arrow (a self-call's beside
- * its loop, over the node's right fifth). Never under the least. */
+ * stack's 0.6 em a display cell (a CJK character or an emoji two), 10
+ * px inset each side — never under GRAPH_NODE_W nor over
+ * GRAPH_NODE_MAX (a longer line is cut, fitText); and every edge label
+ * inside its gap with room for the arrow (a self-call's beside its
+ * loop, over the node's right fifth). */
 export function graphBox(
   nodeLines: readonly (readonly string[])[],
   edgeLabels: readonly string[],
   loopLabels: readonly string[] = []
 ): { w: number; gx: number } {
-  const len = (t: string, px: number) => Math.ceil([...t].length * px * 0.6)
   let w = GRAPH_NODE_W
   for (const lines of nodeLines)
     lines.forEach((t, i) => {
-      w = Math.max(w, len(t, i ? 10 : 11) + 20)
+      w = Math.max(w, textPx(t, i ? 10 : 11) + 20)
     })
+  w = Math.min(w, GRAPH_NODE_MAX)
   let gx = GRAPH_GAP_X
-  for (const t of edgeLabels) gx = Math.max(gx, len(t, 10) + 28)
+  for (const t of edgeLabels) gx = Math.max(gx, textPx(t, 10) + 28)
   for (const t of loopLabels)
-    gx = Math.max(gx, Math.ceil(len(t, 10) + 6 - w * 0.2) + 8)
+    gx = Math.max(gx, Math.ceil(textPx(t, 10) + 6 - w * 0.2) + 8)
   return { w, gx }
 }
 

@@ -20,6 +20,7 @@ import type { CallGraph, GraphNode, GraphRow } from "@/lib/graph"
 import {
   EDGE_HINT,
   GRAPH_ALONE,
+  fitText,
   fittedSize,
   graphBox,
   graphScrollLabel,
@@ -269,7 +270,17 @@ export function CallGraphView({
             const paint =
               ROLE_SVG[st ? studioVar(st.status.role) : "muted-foreground"]
             const loud = st !== undefined && LOUD.has(st.status.key)
-            const hint = n.kind === "mcp" ? MCP_NODE_HINT : cost?.title
+            const base = n.kind === "mcp" ? MCP_NODE_HINT : cost?.title
+            // Past GRAPH_NODE_MAX a line is cut (P020.1-ui-fix): the name
+            // whole in the label and the hover.
+            const room = W - 20
+            const name = fitText(
+              n.label,
+              11,
+              room - 14 - (cost ? Math.ceil(cost.text.length * 6) + 8 : 0)
+            )
+            const hint =
+              name === n.label ? base : `${n.label}${base ? ` — ${base}` : ""}`
             return (
               <GraphTip key={n.id} hint={hint}>
                 <g
@@ -347,14 +358,14 @@ export function CallGraphView({
                     <tspan aria-hidden>
                       {n.kind === "agent" ? "▣ " : "⧉ "}
                     </tspan>
-                    {n.label}{" "}
+                    <Cut text={name} />{" "}
                   </text>
                   <text
                     x={10}
                     y={34}
                     className="fill-muted-foreground text-[10px]"
                   >
-                    {nodeLine(n)}{" "}
+                    <Cut text={fitText(nodeLine(n), 10, room)} />{" "}
                   </text>
                   {mcp ? (
                     <text
@@ -363,7 +374,7 @@ export function CallGraphView({
                       className={`text-[10px] ${TONE_SVG.error.fill}`}
                       data-node-mcp-failures
                     >
-                      {mcp}{" "}
+                      <Cut text={fitText(mcp, 10, room)} />{" "}
                     </text>
                   ) : null}
                   {line ? (
@@ -372,7 +383,13 @@ export function CallGraphView({
                         {line.word}
                       </tspan>
                       <tspan className="fill-muted-foreground">
-                        {line.rest}{" "}
+                        <Cut
+                          text={fitText(
+                            line.rest,
+                            10,
+                            room - Math.ceil(line.word.length * 6)
+                          )}
+                        />{" "}
                       </tspan>
                     </text>
                   ) : null}
@@ -405,5 +422,19 @@ export function CallGraphView({
         </p>
       ) : null}
     </div>
+  )
+}
+
+/** Cut draws a line fitText cut: its ellipsis aria-hidden, so the
+ * node's visible words stay the start of its name (axe
+ * label-content-name-mismatch). */
+function Cut({ text }: { text: string }) {
+  return text.endsWith("…") ? (
+    <>
+      {text.slice(0, -1)}
+      <tspan aria-hidden>…</tspan>
+    </>
+  ) : (
+    <>{text}</>
   )
 }

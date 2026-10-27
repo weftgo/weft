@@ -9,7 +9,10 @@ import {
   catalogSources,
   edgeLabel,
   GRAPH_GAP_X,
+  GRAPH_NODE_MAX,
   GRAPH_NODE_W,
+  cells,
+  fitText,
   graphBox,
   graphUnsourced,
   loopLabel,
@@ -305,5 +308,27 @@ describe("graphBox (P020.1: the call graph's words fit)", () => {
     const loop = "↻ 12× · 1.2 s · 4 failed"
     const { w, gx } = graphBox([["▣ a"]], [], [loop])
     expect(w * 0.8 + 6 + [...loop].length * 6).toBeLessThanOrEqual(w + gx)
+  })
+})
+
+describe("graphBox's bound and display cells (P020.1-ui-fix)", () => {
+  it("a 120-character name widens no node past GRAPH_NODE_MAX; its line is cut to fit", () => {
+    const name = "an-agent-with-a-very-long-name-".repeat(4)
+    const { w } = graphBox([[`▣ ${name}`, "1 run · slowest 1 ms"]], [])
+    expect(w).toBe(GRAPH_NODE_MAX)
+    const cut = fitText(name, 11, w - 20)
+    expect(cut.endsWith("…")).toBe(true)
+    expect(cut.length).toBeLessThan(name.length)
+    expect(Math.ceil(cells(cut) * 11 * 0.6)).toBeLessThanOrEqual(w - 20)
+    expect(fitText("billing-desk", 11, w - 20)).toBe("billing-desk")
+  })
+  it("CJK and emoji count two cells: they widen a node as their drawn width does", () => {
+    expect(cells("abc")).toBe(3)
+    expect(cells("请求处理")).toBe(8)
+    expect(cells("🤖 bot")).toBe(6)
+    expect(cells("e\u0301")).toBe(1)
+    const ascii = graphBox([["▣ " + "a".repeat(30)]], []).w
+    const cjk = graphBox([["▣ " + "请".repeat(30)]], []).w
+    expect(cjk).toBeGreaterThan(ascii)
   })
 })

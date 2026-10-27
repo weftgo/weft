@@ -2,6 +2,7 @@ package studio
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -157,5 +158,44 @@ func TestAppTurnGoneAppWinsOverACLI(t *testing.T) {
 		!strings.Contains(body, `"message":"app-owned turn · read-only: the app's runtime rt_app of service acme-api disconnected — last seen `) ||
 		!strings.Contains(body, `"fix":"restart the app: its runtime link registers again"`) {
 		t.Errorf("approve beside a CLI = %d %s, want the gone app's words", code, body)
+	}
+}
+
+// TestAppTurnPlainGenerateFix (U28, UX-D-17): with a Sessions runtime of
+// the service connected, a parked plain Generate (no session) is the
+// app's to resume — the 403's fix says so and never asks a harness to
+// rewrite onto weft/thread; a session turn without a public id keeps
+// the thread.PublicID fix.
+func TestAppTurnPlainGenerateFix(t *testing.T) {
+	pt := newPlaygroundServer(t, "s3cr3t")
+	reg := `{"runtime_id":"rt_plain","host":"tester","pid":44,"service":"acme-api","sessions":true,
+	         "agents":[{"name":"acme-support","manifest":"{}"}]}`
+	if code, body := pt.authed(t, http.MethodPost, "/api/runtime/register", pt.token, reg); code != http.StatusOK {
+		t.Fatalf("register = %d %s", code, body)
+	}
+	req, _ := http.NewRequest(http.MethodGet, pt.ts.URL+"/api/runtime/commands?runtime=rt_plain", nil)
+	req.Header.Set("Authorization", "Bearer "+pt.token)
+	stream, err := http.DefaultClient.Do(req)
+	if err != nil || stream.StatusCode != http.StatusOK {
+		t.Fatalf("commands stream: %v", err)
+	}
+	t.Cleanup(func() { _ = stream.Body.Close() })
+	go func() { _, _ = io.Copy(io.Discard, stream.Body) }()
+
+	seedRunAs(t, pt.db, "acme-api", "plain_gen", "", "", "", nil)
+	seedRunAs(t, pt.db, "acme-api", "s_np-t1", "", "s_np", "", nil)
+	approve := func(id string) (int, string) {
+		t.Helper()
+		return pt.authed(t, http.MethodPost, "/api/runs/"+id+"/approvals", pt.token, `{"call_id":"call_1","decision":"approve"}`)
+	}
+	code, body := approve("plain_gen")
+	if code != http.StatusForbidden ||
+		!strings.Contains(body, `"fix":"resume it in your app; to decide here, run it as a session turn (weft/thread)"`) {
+		t.Errorf("a plain Generate's approve = %d %s, want the resume-in-your-app fix", code, body)
+	}
+	code, body = approve("s_np-t1")
+	if code != http.StatusForbidden ||
+		!strings.Contains(body, `"fix":"run the agent through weft/thread with thread.PublicID(...): runtime.Sessions resolves a session by its public id"`) {
+		t.Errorf("a session turn without a public id = %d %s, want the thread.PublicID fix", code, body)
 	}
 }

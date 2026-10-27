@@ -26,7 +26,7 @@
 // globals — plain values and strings.
 
 import type { ReplayVerb } from "./replay"
-import { ordinalOf } from "./format"
+import { ordinalOf, plural } from "./format"
 import { serializeScope } from "./scope"
 import type { Scope } from "./scope"
 
@@ -809,6 +809,15 @@ export function liveLink(
   if (search.q) out.q = search.q
   if (search.agent) out.agent = search.agent
   return { to: "/live", search: out }
+}
+
+/** HANDOFF is the panel's words for its hand-offs to the Studio-only
+ * views (U28, UX-F-03): the running dot to the live page, the turn
+ * filter to the runs list's, a turn's replays to their experiments. */
+export const HANDOFF = {
+  live: "running · live in Studio ⤢",
+  filters: "more filters in Studio ⤢",
+  replays: (n: number) => `${plural(n, "replay")} in Studio ⤢`,
 }
 
 /** agentsLink is the agents page with one agent's card opened. */

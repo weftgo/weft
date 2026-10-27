@@ -26,6 +26,7 @@ import {
   fakeStudio,
   idle,
   mount,
+  OPEN_IN_STUDIO,
   page,
   runRow,
   setup,
@@ -159,7 +160,7 @@ async function panel(opts: { finished?: boolean } = {}) {
 }
 
 const expand = (el: Element) =>
-  ($(el as never, ".weft-head a") as HTMLAnchorElement).getAttribute("href")
+  ($(el as never, OPEN_IN_STUDIO) as HTMLAnchorElement).getAttribute("href")
 
 describe("the panel's ⤢ carries the step ordinal (G1)", () => {
   beforeEach(setup)

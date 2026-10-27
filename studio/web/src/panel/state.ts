@@ -319,8 +319,11 @@ export interface PanelState {
   /** GET /api/meta failed: the panel removes itself silently (§5.3). */
   gone: boolean
   /** That failure was a 401/403 (UX-S5a-03): Studio is there and wants
-   * a token — said, never removed. */
+   * a token — said, never removed. After boot, the list read's. */
   walled?: boolean
+  /** Studio stopped answering after boot (UX-F-09): the list read
+   * failed — no answer, or a 401/403. The list stays, dimmed. */
+  down?: boolean
   /** A query scope's (tag, agent, flow: U22) run count, the list's
    * total. */
   total?: number
@@ -665,6 +668,9 @@ export class PanelModel {
   private disposed = false
   private loadSeq = 0 // selects the freshest async load after a rescope
   private timers = new Set<ReturnType<typeof setTimeout>>()
+  /** Dev-list reads while Studio is down (armDev: LIVE_RETRIES at
+   * most). */
+  private downs = 0
   /** Reopen attempts since each stream last opened (LIVE_RETRIES). */
   private retries = { scope: 0, run: 0, exp: 0, dev: 0 }
   /** Each lane's overflow backoff: the step it is at and its last reopen. */
@@ -827,6 +833,31 @@ export class PanelModel {
       if (x) return x
     }
     return undefined
+  }
+
+  /** slow is a down Studio's slow poll, past the lanes' bounded fast
+   * retries (UX-F-09): one meta read a minute while the page is visible;
+   * an answer reads the list again (reach). */
+  private slowT: ReturnType<typeof setTimeout> | null = null
+  private slow() {
+    this.slowT ||= this.after(60_000, () => {
+      this.slowT = null
+      if (!this.state.down) return
+      if (document.visibilityState == "visible")
+        fetchMeta(this.ep).then(() => this.reach(), quiet)
+      this.slow()
+    })
+  }
+
+  /** reach asks a Studio that stopped answering again now (the
+   * header's retry, UX-F-09): the backoffs start over, the live lane
+   * reopens, the list is read. */
+  reach() {
+    this.downs = this.retries.scope = 0
+    if (this.scoped && !this.scopeSub) this.subscribe(this.loadSeq)
+    void this.refresh()
+      .catch(quiet)
+      .then(() => this.armDev())
   }
 
   /** scope starts over on the conversation: the header and the turn
@@ -1039,18 +1070,25 @@ export class PanelModel {
   private armDev() {
     this.cancel(this.devTimer)
     this.devTimer = null
+    const down = this.state.down
     if (
       !this.watching ||
       this.scoped ||
       this.disposed ||
       !this.state.meta ||
-      this.state.tooNew
+      this.state.tooNew ||
+      (down && this.downs >= LIVE_RETRIES)
     )
       return
     // The agent stream keeps its agent's rows current; the slower read
-    // finds the other agents' runs.
+    // finds the other agents' runs. Studio down: once a minute,
+    // LIVE_RETRIES reads at most (UX-F-09).
     this.devTimer = this.after(
-      this.devSub ? DEV_DISCOVERY_MS : DEV_POLL_MS,
+      down && ++this.downs
+        ? 60_000
+        : this.devSub
+          ? DEV_DISCOVERY_MS
+          : DEV_POLL_MS,
       () => {
         this.devTimer = null
         if (
@@ -1151,6 +1189,7 @@ export class PanelModel {
       this.liveTimer =
       this.pinTimer =
       this.rtTimer =
+      this.slowT =
         null
   }
 
@@ -1688,9 +1727,20 @@ export class PanelModel {
       s.turnsCapped = this.cursor != null
       for (const r of during) this.upsertRun(r)
       this.state.listKey = listKey(this.publicId, this.narrowing.session)
-    } catch {
-      // A refresh that fails leaves what was there; run frames will
-      // retry the shape naturally.
+      s.down = false
+      this.downs = 0
+    } catch (e) {
+      // A refresh that fails leaves what was there. No answer (or a
+      // 401/403) is Studio gone after boot (UX-F-09): said, the list
+      // kept; the lanes' bounded backoff and the dev poll's (armDev)
+      // read again, and a read that lands clears it.
+      const st = (e as { status?: number }).status
+      if (seq === this.loadSeq && (!st || [401, 403].includes(st))) {
+        this.state.down = true
+        this.state.walled = !!st
+        this.emit()
+        this.slow()
+      }
       return
     } finally {
       this.collectors.delete(during)

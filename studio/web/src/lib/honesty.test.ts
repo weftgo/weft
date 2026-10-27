@@ -20,6 +20,7 @@ import {
   APP_OWNED,
   APP_RUN,
   APP_RUN_FIX,
+  APP_PUBLIC_ID_FIX,
   CAPS_UNREAD,
   PLAYGROUND_OFF,
   PLAYGROUND_OFF_FIX,
@@ -348,7 +349,7 @@ describe("the app turn's kinds and refusal words", () => {
     expect(parkedKind(row, [rt()])).toBe("no-public-id")
     expect(refusalWords("no-public-id", row, [rt()], false)).toEqual({
       words: noPublicIDWords("s-t1"),
-      fix: APP_RUN_FIX,
+      fix: APP_PUBLIC_ID_FIX,
     })
     expect(go("appturn.go")).toContain(
       `appOwned+" · read-only: run "+row.ID+" is not a turn of a session with a public id"`

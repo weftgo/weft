@@ -1229,11 +1229,18 @@ there and wants a token (UX-S5a-03): never removed, whatever the
 install path, the line reads `Studio needs a token at <endpoint> — add
 data-token (the dev token) or a panel token (POST /api/panel-tokens)
 · retry` (`weft open --with-token` opens Studio
-itself signed in). The
+itself signed in). A Studio that stops answering after the panel
+booted (a turn-list read gets no answer, or a 401/403) gets the same
+line under the dock's header (U28, UX-F-09): the turns stay, dimmed;
+the live lane's bounded backoff reads the list again (the list without
+a public id: once a minute, five times at most), a read that lands
+clears the line, and `retry` starts the backoff over; past those
+retries one `/api/meta` read a minute, while the page is visible,
+brings it back by itself. The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 290,856 B raw / 98,548 B gzip
-(96.2 KiB, the bundle of the ledger's row "U23.2-fix2"; 7,948 B — 7.8 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 292,834 B raw / 99,239 B gzip
+(96.9 KiB, the bundle of the ledger's row "U28"; 7,257 B — 7.1 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

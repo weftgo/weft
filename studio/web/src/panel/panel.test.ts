@@ -11,7 +11,7 @@ import { eventStatus, studioLink, turnHoles, WeftDevtools } from "./element"
 import { fold } from "../lib/events"
 import { partitionRuns, strippedContent } from "./state"
 import type { TurnView } from "./state"
-import { idle } from "./testkit"
+import { idle, OPEN_IN_STUDIO } from "./testkit"
 import {
   answerLiveGrant,
   checkLiveURL,
@@ -345,7 +345,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect($(el, ".weft-dot")?.className).toContain("weft-on")
     expect(text(el, ".weft-head")).toContain("2 turns")
     expect(text(el, ".weft-head")).toContain("20 in · 8 out")
-    const link = $(el, ".weft-head a") as HTMLAnchorElement
+    const link = $(el, OPEN_IN_STUDIO) as HTMLAnchorElement
     expect(link.getAttribute("href")).toBe(
       "http://studio.test/studio/runs/r_ok"
     )

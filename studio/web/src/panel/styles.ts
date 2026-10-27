@@ -137,6 +137,7 @@ export const PANEL_CSS = `
 .weft-fab::before { content: "\\25C8"; color: var(--weft-accent); margin-right: 4px; }
 
 .weft-unreachable { display: inline; font: 12px/1.45 var(--weft-font); color: inherit; }
+.weft-down .weft-turn { color: var(--weft-dim); }
 .weft-retry { background: none; border: none; padding: 0; color: inherit; cursor: pointer;
   text-decoration: underline; font: inherit; }
 
@@ -170,23 +171,24 @@ export const PANEL_CSS = `
 
 .weft-cols { display: flex; min-height: 0; flex: 1; }
 .weft-turns {
-  width: 218px; flex: none; overflow-y: auto;
+  width: clamp(240px, 28%, 420px); flex: none; overflow-y: auto;
   border-right: 1px solid var(--weft-line); background: var(--weft-bg);
 }
 .weft-main { flex: 1; overflow-y: auto; padding: 10px; min-width: 0; }
 
 .weft-turn {
-  display: block; width: 100%; text-align: left; background: none; border: none;
+  display: block; width: 100%; text-align: left; background: none; border: none; overflow: hidden;
   border-bottom: 1px solid var(--weft-line); padding: 7px 9px; cursor: pointer;
   color: var(--weft-fg); font: inherit;
 }
 .weft-turn:hover, .weft-tl.weft-sel { background: var(--weft-bg3); }
 .weft-turn:hover .weft-when, .weft-turn.weft-sel .weft-when { color: var(--weft-dim); }
 .weft-turn.weft-sel { background: var(--weft-bg3); box-shadow: inset 2px 0 0 var(--weft-accent); }
-.weft-turn .weft-row1 { display: flex; gap: 6px; align-items: baseline; }
+.weft-turn .weft-row1 { display: flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; }
 .weft-turn .weft-ttl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .weft-turn .weft-when { margin-left: auto; color: var(--weft-faint); flex: none; }
-.weft-turn .weft-row2 { display: flex; gap: 8px; color: var(--weft-dim); margin-top: 2px; }
+.weft-turn .weft-row2 { display: flex; flex-wrap: wrap; gap: 0 8px; color: var(--weft-dim); margin-top: 2px; }
+.weft-turn .weft-row1 > *, .weft-turn .weft-row2 > *, .weft-src { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .weft-chip { border-radius: var(--weft-radius-sm); background: var(--weft-bg); padding: 0 4px; font-size: 10px; line-height: 16px; flex: none; text-decoration: none; }
 ${statusRules()}
 .weft-st::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 3px; }
@@ -255,7 +257,6 @@ ${decisionRules()}
 .weft-tl[data-critical] .weft-wf-bar { box-shadow: 0 2px 0 var(--weft-accent); }
 .weft-tl-u { font-size: 10px; color: var(--weft-dim); }
 
-.weft-usage { display: flex; gap: 12px; flex-wrap: wrap; color: var(--weft-dim); margin-top: 4px; }
 .weft-footer {
   padding: 5px 10px; border-top: 1px solid var(--weft-line); color: var(--weft-faint);
   background: var(--weft-bg2); white-space: normal; font-size: 11px;
@@ -364,5 +365,5 @@ div[data-weft-editable] { display: block; }
 .weft-v-runs .weft-v { color: var(--weft-info); }
 .weft-v-parked .weft-v { color: var(--weft-warn); }
 .weft-run-btn:disabled { background: var(--weft-bg3); color: var(--weft-dim); cursor: not-allowed; }
-.weft-src { margin: 2px 0 0 18px; font-size: 11px; }
+.weft-src { margin: 2px 0 0 18px; font-size: 11px; display: inline-block; max-width: calc(100% - 24px); vertical-align: top; }
 `

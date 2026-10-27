@@ -22,11 +22,14 @@ import {
   APP_LINK_FIX,
   APP_RUN,
   APP_RUN_FIX,
+  APP_PUBLIC_ID_FIX,
   PLAYGROUND_OFF,
   PLAYGROUND_OFF_FIX,
   READ_TOKEN,
 } from "../lib/honesty"
 import { apiError, FakeStudio, golden } from "../test/fake-studio"
+import { href, runtimesLink } from "../lib/links"
+import { RUNS_IN } from "../lib/runs-in"
 import {
   APP_PUB,
   APP_SESSION,
@@ -154,6 +157,7 @@ describe("the server's words", () => {
       `"${APP_ELSEWHERE_FIX}"`,
       `"${APP_LINK_FIX}"`,
       `"${APP_RUN_FIX}"`,
+      `"${APP_PUBLIC_ID_FIX}"`,
     ])
       expect(go).toContain(words)
     expect(go).not.toContain("take approvals, steer and cancel")
@@ -244,10 +248,15 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
       "deny",
       "resolve…",
     ])
+    // Said once (UX-D-17): each verb points at the line, none repeats it.
+    const id = $(el, "[data-weft-app-owned]")!.id
+    expect(id).toBe(`weft-why${PARKED}`)
     for (const b of refusedVerbs(el)) {
       expect(b.disabled).toBe(true)
-      expect(b.getAttribute("title")).toBe(said)
+      expect(b.getAttribute("aria-describedby")).toBe(id)
+      expect(b.textContent).not.toContain("read-only")
     }
+    expect(el.shadowRoot!.textContent.split(said).length - 1).toBe(1)
   })
 
   it("a 403 a later runtimes read re-gates to decide gives the verbs back (the runtime reconnected)", async () => {
@@ -450,18 +459,39 @@ describe("an app turn no Sessions runtime of its service acts on", () => {
       debugScope: "own+runtime",
     })
     expect(line(el)).toBe(LINK_WORDS)
+    // A refusal that names a runtime hands off to Studio's runtimes
+    // page (UX-F-03), beside the line: the line stays the server's.
+    const rt = all(el, "a").find((a) => a.textContent === RUNS_IN.manage)
+    expect(rt?.getAttribute("href")).toBe(
+      href("http://studio.test/studio/", runtimesLink())
+    )
+    expect(
+      rt?.previousElementSibling?.getAttribute("data-weft-app-owned")
+    ).toBe("read-only")
   })
 
   it("a read-scoped token: auth.go's words", async () => {
     const { el } = await open({}, APP_PUB, READ)
     expect(line(el)).toBe(READ_TOKEN)
     expect(refusedVerbs(el)).toHaveLength(3)
+    // Nothing about a runtime: no runtimes hand-off.
+    expect(all(el, "a").some((a) => a.textContent === RUNS_IN.manage)).toBe(
+      false
+    )
   })
 
   it("a plain Generate's park: the app resumes it (weft.Approve), the thread.PublicID fix", async () => {
     const { el, fake } = await open({}, "")
     expect(line(el, "plain")).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
     expect(refusedVerbs(el)).toHaveLength(3)
+    // Said once (UX-D-17): the verbs drawn disabled, their words none
+    // of the refusal's — each points at the one line.
+    const id = $(el, '[data-weft-app-owned="plain"]')!.id
+    for (const b of refusedVerbs(el)) {
+      expect(b.textContent).toMatch(/^(approve|deny|resolve…)$/)
+      expect(b.getAttribute("aria-describedby")).toBe(id)
+    }
+    expect(el.shadowRoot!.textContent.split(APP_RUN).length - 1).toBe(1)
     expect(fake.calls(`POST runs/${PLAIN}/approvals`)).toHaveLength(0)
   })
 })

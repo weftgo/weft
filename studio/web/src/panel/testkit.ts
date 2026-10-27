@@ -429,6 +429,9 @@ export async function mount(
 
 export const $ = (el: WeftDevtools, sel: string): Element | null =>
   el.shadowRoot?.querySelector(sel) ?? null
+/** The header's ⤢ (the open run in Studio): other header links (the
+ * agent's card, the live dot, U28) come before it. */
+export const OPEN_IN_STUDIO = '.weft-head a[aria-label="open in Studio"]'
 export const all = (el: WeftDevtools, sel: string): Element[] =>
   Array.from(el.shadowRoot?.querySelectorAll(sel) ?? [])
 export const text = (el: WeftDevtools, sel: string): string =>

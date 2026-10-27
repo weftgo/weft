@@ -32,6 +32,7 @@ import {
   trap,
   user,
   runBtn,
+  OPEN_IN_STUDIO,
 } from "./testkit"
 import { WeftDevtools } from "./element"
 import { OVERFLOW_CALM_MS, OVERFLOW_MIN_MS } from "./state"
@@ -269,7 +270,7 @@ describe("the live tail", () => {
     await settle(OVERFLOW_MIN_MS + 50)
     expect(studio.gets("runs/s_01-t1/events").length).toBe(2)
     expect(FakeEventSource.live("run=s_01-t1")).toHaveLength(1)
-    expect($(el, ".weft-head a")?.getAttribute("href")).toContain("step=0") // the step being read survived
+    expect($(el, OPEN_IN_STUDIO)?.getAttribute("href")).toContain("step=0") // the step being read survived
   })
 
   it("review: an overflow frame reopens on a bounded backoff — never at once, further apart while overflows repeat", async () => {
@@ -783,13 +784,13 @@ describe("the open turn", () => {
     click($(el, "[data-weft-step]"))
     click(button(el, "✎ Replay…"))
     await settle()
-    expect($(el, ".weft-head a")?.getAttribute("href")).toContain(
+    expect($(el, OPEN_IN_STUDIO)?.getAttribute("href")).toContain(
       "s_01-t2?step=0"
     )
     expect($(el, ".weft-drawer")).toBeTruthy()
     click(row(el, "s_01-t1"))
     await settle()
-    expect($(el, ".weft-head a")?.getAttribute("href")).toBe(
+    expect($(el, OPEN_IN_STUDIO)?.getAttribute("href")).toBe(
       "http://studio.test/studio/runs/s_01-t1"
     )
     expect($(el, ".weft-drawer")).toBeNull() // t2's drawer is not t1's

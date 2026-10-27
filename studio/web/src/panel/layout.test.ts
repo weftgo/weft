@@ -21,6 +21,7 @@ import {
   text,
   transcript,
   user,
+  OPEN_IN_STUDIO,
 } from "./testkit"
 import { SHORTCUTS } from "./element"
 import type { WeftDevtools } from "./element"
@@ -830,15 +831,15 @@ describe("the keyboard (only inside the panel, except Alt+W)", () => {
     d().focus()
     expect(key(d(), { key: "J" }).defaultPrevented).toBe(true)
     await settle()
-    expect($(el, ".weft-head a")!.getAttribute("href")).toBe(
+    expect($(el, OPEN_IN_STUDIO)!.getAttribute("href")).toBe(
       "http://studio.test/studio/runs/s_01-t2?step=0&view=story"
     )
     key(d(), { key: "J" })
     await settle()
-    expect($(el, ".weft-head a")!.getAttribute("href")).toContain("step=1")
+    expect($(el, OPEN_IN_STUDIO)!.getAttribute("href")).toContain("step=1")
     key(d(), { key: "K" })
     await settle()
-    expect($(el, ".weft-head a")!.getAttribute("href")).toContain("step=0")
+    expect($(el, OPEN_IN_STUDIO)!.getAttribute("href")).toContain("step=0")
     key(d(), { key: "j" })
     await settle()
     expect(
@@ -894,10 +895,10 @@ describe("the keyboard (only inside the panel, except Alt+W)", () => {
     await settle()
     key(d(), { key: "]" })
     await settle()
-    expect($(el, ".weft-head a")!.getAttribute("href")).toContain("step=1")
+    expect($(el, OPEN_IN_STUDIO)!.getAttribute("href")).toContain("step=1")
     key(d(), { key: "[" })
     await settle()
-    expect($(el, ".weft-head a")!.getAttribute("href")).toContain("step=0")
+    expect($(el, OPEN_IN_STUDIO)!.getAttribute("href")).toContain("step=0")
     key(d(), { key: "o" })
     expect(opened).toHaveBeenCalledWith(
       "http://studio.test/studio/runs/s_01-t2?step=0&view=story",

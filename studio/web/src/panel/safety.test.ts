@@ -778,8 +778,9 @@ describe("the token goes to data-endpoint and nowhere else (§6)", () => {
     // lands on (P8-fix-a: step 0 when nothing failed) — no save as test:
     // the refused run has no id to save (UX-C-29) — and the loop line's
     // graph ⤢ (U34) — and the header's session session ⤢ (U16) — and
-    // the drawer's Runs in line's runtimes ⤢ (U20.1)
-    expect(links.length).toBe(8)
+    // the drawer's Runs in line's runtimes ⤢ (U20.1) — and the header's
+    // agent, its card in Studio (U28)
+    expect(links.length).toBe(9)
     for (const href of links) {
       expect(href.startsWith("http://studio.test/studio/")).toBe(true)
       expect(href).not.toContain("secret")

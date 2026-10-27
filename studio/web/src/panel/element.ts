@@ -31,6 +31,10 @@ import {
   sessionLink,
   runtimesLink,
   settingsLink,
+  agentsLink,
+  liveLink,
+  runsLink,
+  HANDOFF,
   tracePage,
   VIEWS,
 } from "../lib/links"
@@ -344,7 +348,7 @@ import {
 import { newTree, stopTree, treeView } from "./tree"
 import type { TreeState } from "./tree"
 import type { Geometry, Layout } from "./layout"
-import type { PlaygroundHandoff } from "../lib/links"
+import type { PlaygroundHandoff, RunsSearch } from "../lib/links"
 import { isHoleRef } from "../lib/api"
 import { renderRequestTab, stepsOf } from "./request"
 import { DRAWER_TAB_LABEL } from "../lib/run-tree"
@@ -2610,34 +2614,12 @@ export class WeftDevtools extends HTMLElement {
     const next: Node[] = []
     if (this.dormant) {
       // Studio did not answer a mount the host made: one quiet line.
-      if (this.unreachable !== null) {
-        const line = el("div", "weft-unreachable", "", {
-          role: "status",
-        })
-        line.append(
-          this.walled
-            ? "Studio needs a token at "
-            : this.unreachable
-              ? "Studio not reachable at "
-              : "Studio not reachable: no http(s) endpoint",
-          ...(this.unreachable
-            ? [el("span", "weft-unreachable-at", this.unreachable)]
-            : []),
-          this.walled
-            ? " — add data-token (the dev token) or a panel token (POST /api/panel-tokens) · "
-            : " · "
+      if (this.unreachable !== null)
+        next.push(
+          this.reachLine(this.unreachable, this.walled, this.checking, () =>
+            this.retry()
+          )
         )
-        if (this.checking) line.append(el("span", "weft-checking", "checking…"))
-        else {
-          const again = el("button", "weft-retry", "retry", {
-            type: "button",
-            title: "ask Studio again",
-          })
-          on(again, "click", () => this.retry())
-          line.append(again)
-        }
-        next.push(line)
-      }
     } else if (this.lay.hidden) {
       // hidden (D1): nothing drawn; the element, its API and its
       // events stay, and Alt+W or open() bring the dock back.
@@ -2753,6 +2735,18 @@ export class WeftDevtools extends HTMLElement {
       })
     }
     dock.append(head)
+    // Studio stopped answering after boot (UX-F-09): said under the
+    // header, the list kept, dimmed.
+    if (s.down) {
+      dock.classList.add("weft-down")
+      dock.append(
+        el("div", "weft-howto", [
+          this.reachLine(this.base, !!s.walled, false, () =>
+            this.model?.reach()
+          ),
+        ])
+      )
+    }
     if (this.howTo && !this.model?.publicId) dock.append(this.howToBox())
     const cols = el("div", "weft-cols")
     if (g.width < NARROW_W) {
@@ -2944,6 +2938,40 @@ export class WeftDevtools extends HTMLElement {
     dock.classList.toggle("weft-narrow", g.width < NARROW_W)
   }
 
+  /** reachLine is the one line a Studio that does not answer gets (C2,
+   * UX-S5a-03): at boot in place of the dock, after boot under the
+   * header (UX-F-09) — "Studio not reachable at … · retry", or the
+   * token it wants. */
+  private reachLine(
+    at: string,
+    walled: boolean,
+    checking: boolean,
+    retry: () => void
+  ): HTMLElement {
+    const line = el("div", "weft-unreachable", "", { role: "status" })
+    line.append(
+      walled
+        ? "Studio needs a token at "
+        : at
+          ? "Studio not reachable at "
+          : "Studio not reachable: no http(s) endpoint",
+      ...(at ? [el("span", "weft-unreachable-at", at)] : []),
+      walled
+        ? " — add data-token (the dev token) or a panel token (POST /api/panel-tokens) · "
+        : " · "
+    )
+    if (checking) line.append(el("span", "weft-checking", "checking…"))
+    else {
+      const again = el("button", "weft-retry", "retry", {
+        type: "button",
+        title: "ask Studio again",
+      })
+      on(again, "click", retry)
+      line.append(again)
+    }
+    return line
+  }
+
   /** studioA is a link into Studio that opens through the hand-off (a
    * Studio tab already open takes it, G3.2), else in a new tab. */
   private studioA(
@@ -3059,17 +3087,16 @@ export class WeftDevtools extends HTMLElement {
   private header(s: PanelState): HTMLElement {
     const h = el("div", "weft-head")
     const running = s.turns.some((r) => r.status === "running")
-    h.append(
-      el(
-        "span",
-        `weft-dot${s.live ? (running ? " weft-run" : " weft-on") : ""}`,
-        "",
-        {
-          title: s.live ? "live" : "history",
-        }
-      )
-    )
     const agent = s.session?.agent ?? s.turns.at(0)?.agent ?? ""
+    const dot = `weft-dot${s.live ? (running ? " weft-run" : " weft-on") : ""}`
+    // Running: the dot is Studio's live page on the agent (UX-F-03).
+    h.append(
+      running && agent
+        ? this.studioA(dot, "", href(this.base, liveLink({ agent })), {
+            "aria-label": HANDOFF.live,
+          })
+        : el("span", dot, "", { title: s.live ? "live" : "history" })
+    )
     const scope = this.model?.publicId || s.session?.public_id || ""
     // A page of runs (U22): its first tag by the key's last segment
     // ("batch cli-…"), else its agent, else its flow.
@@ -3084,9 +3111,18 @@ export class WeftDevtools extends HTMLElement {
       ? `${agent ? agent + " · " : ""}${scope}`
       : q || NO_SCOPE_LABEL
     h.append(
-      el("span", "weft-title", title, {
-        title: scope || q ? title : `${title}: the newest runs are shown`,
-      })
+      el(
+        "span",
+        "weft-title",
+        // The agent's card in Studio (UX-F-03).
+        scope && agent
+          ? [
+              this.studioA("", agent, href(this.base, agentsLink(agent))),
+              ` · ${scope}`,
+            ]
+          : title,
+        { title: scope || q ? title : `${title}: the newest runs are shown` }
+      )
     )
     if (!scope && !q) {
       // The fallback (C3.4): never an unexplained list — the fixes are
@@ -3488,14 +3524,34 @@ export class WeftDevtools extends HTMLElement {
       turns.sort((a, b) => at.get(a.agent)! - at.get(b.agent)!)
     }
     const filtered = this.filtering()
-    if (filtered)
+    if (filtered) {
+      const f = this.tq
       list.append(
         el(
           "div",
           "weft-tq-n",
           `${turns.length} of ${s.turns.length} ${s.turnsCapped ? "loaded" : `${noun}s`}${s.turnsCapped ? ` · the filter applies to the loaded ${noun}s` : ""}`
+        ),
+        // The runs list with the filter carried over (UX-F-03): its
+        // other filters are Studio's.
+        this.studioA(
+          "weft-tq-n",
+          HANDOFF.filters,
+          href(
+            this.base,
+            runsLink({
+              public_id: this.model?.publicId,
+              session,
+              q: f.text,
+              status:
+                f.status == "resumed"
+                  ? undefined
+                  : (f.status as RunsSearch["status"]),
+            })
+          )
         )
       )
+    }
     // One list (D3): a listitem per run, keyed by its id; one row
     // tabbable (the roving tabindex — the row last focused, else the
     // selected one, else the first), arrow keys move it.
@@ -3514,14 +3570,34 @@ export class WeftDevtools extends HTMLElement {
     const row = (r: RunRow) => this.turnRow(r, s.selected, tab, s.turns)
     const shown = new Set<string>(s.turns.map((r) => r.id))
     for (const r of turns) {
-      items.append(row(r))
+      const li = row(r)
+      items.append(li)
       // The experiment slot (§2): runs that forked from this turn nest
       // under it; empty without the playground capability.
       const expts = s.experiments.get(r.id) ?? []
-      if (expts.length)
+      if (expts.length) {
+        // Its replays in Studio's runs list (UX-F-03): their
+        // experiment's runs when they share one, else the
+        // conversation's experiments.
+        const x = new Set(expts.map((e) => e.experiment_id))
+        li.append(
+          this.studioA(
+            "weft-btn weft-src",
+            HANDOFF.replays(expts.length),
+            href(
+              this.base,
+              runsLink({
+                public_id: this.model?.publicId,
+                experiments: "on",
+                experiment_id: x.size == 1 ? [...x][0] : "",
+              })
+            )
+          )
+        )
         items.append(
           el("div", "weft-expts", expts.map(row), { "data-key": `x:${r.id}` })
         )
+      }
     }
     // Experiments whose source turn is not in the list (older than the
     // page, or a run of another experiment) are still runs of this
@@ -6055,8 +6131,15 @@ export class WeftDevtools extends HTMLElement {
           el(
             "div",
             "weft-res",
+            // The refusal is said once, under the calls (UX-D-17, as
+            // Studio's UX-A-36): each verb points there.
             Object.values(VERB).map((v) =>
-              refusedVerb(v, "button", line, "app-owned")
+              el("button", "weft-btn", v, {
+                type: "button",
+                disabled: "",
+                "aria-describedby": "weft-why" + runID,
+                "data-weft-refused": "app-owned",
+              })
             )
           )
         )
@@ -6088,12 +6171,18 @@ export class WeftDevtools extends HTMLElement {
     else if (kind !== "experiment")
       body.append(
         el("div", "weft-note weft-warn", line, {
+          id: "weft-why" + runID,
           "data-weft-app-owned": unread
             ? "unread"
             : kind === "decide"
               ? "read-only"
               : kind,
-        })
+        }),
+        // A refusal that names a runtime: Studio's runtimes page
+        // (UX-F-03), beside the line, not in it.
+        /runtime/.test(line)
+          ? this.studioA("", RUNS_IN.manage, href(this.base, runtimesLink()))
+          : ""
       )
     box.append(body)
     return box

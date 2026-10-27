@@ -67,9 +67,14 @@ func (s *Server) appTurnRuntime(w http.ResponseWriter, r *http.Request, rs *link
 		return "", false
 	}
 	if row.SessionID == "" || row.PublicID == "" {
+		// A plain Generate's park (no session) is the app's to resume;
+		// a session turn without a public id needs one (UX-D-17).
+		fix := "run the agent through weft/thread with thread.PublicID(...): runtime.Sessions resolves a session by its public id"
+		if row.SessionID == "" {
+			fix = "resume it in your app; to decide here, run it as a session turn (weft/thread)"
+		}
 		refuseAppOwned(w, r,
-			appOwned+" · read-only: run "+row.ID+" is not a turn of a session with a public id",
-			"run the agent through weft/thread with thread.PublicID(...): runtime.Sessions resolves a session by its public id")
+			appOwned+" · read-only: run "+row.ID+" is not a turn of a session with a public id", fix)
 		return "", false
 	}
 	return runtimeID, true

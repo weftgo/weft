@@ -37,6 +37,7 @@ import {
   teardown,
   transcript,
   user,
+  OPEN_IN_STUDIO,
 } from "./testkit"
 
 import type { WeftDevtools } from "./element"
@@ -633,7 +634,7 @@ describe("the tab's blocks", () => {
     const dock = $(el, ".weft-dock")!
     expect(shown(el)).toBe(0)
     // The step on screen is the one ⤢ carries, before any key.
-    expect($(el, ".weft-head a")?.getAttribute("href")).toMatch(
+    expect($(el, OPEN_IN_STUDIO)?.getAttribute("href")).toMatch(
       /[?&]step=0(&|$)/
     )
     key(dock, { key: "J" })
@@ -646,7 +647,7 @@ describe("the tab's blocks", () => {
     await settle()
     expect(shown(el)).toBe(1)
     await pickStep(el, 2)
-    expect($(el, ".weft-head a")?.getAttribute("href")).toMatch(
+    expect($(el, OPEN_IN_STUDIO)?.getAttribute("href")).toMatch(
       /[?&]step=2(&|$)/
     )
   })

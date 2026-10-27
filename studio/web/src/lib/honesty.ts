@@ -515,6 +515,9 @@ export const APP_ELSEWHERE_FIX =
 export const APP_RUN =
   "parked · app-owned run · the app resumes it (weft.Approve)"
 export const APP_RUN_FIX =
+  "resume it in your app; to decide here, run it as a session turn (weft/thread)"
+/** A session turn without a public id: appturn.go's fix for it. */
+export const APP_PUBLIC_ID_FIX =
   "run the agent through weft/thread with thread.PublicID(...): runtime.Sessions resolves a session by its public id"
 /** auth.go's mayAct: a read-scoped panel token never acts. */
 export const READ_TOKEN =
@@ -541,7 +544,7 @@ export const PLAYGROUND_OFF = "the playground is off on this Studio"
 export const PLAYGROUND_OFF_FIX =
   "turn it on with studio.Playground(true); weft studio --no-playground turns it off"
 /** A session turn of a thread session created without thread.PublicID:
- * appturn.go's 403 words (its fix is APP_RUN_FIX, which names it). */
+ * appturn.go's 403 words (its fix is APP_PUBLIC_ID_FIX, which names it). */
 export const noPublicIDWords = (runID: string) =>
   `${APP_OWNED}: run ${runID} is not a turn of a session with a public id`
 /** A subagent's child run (`<parent>/<step>/<call>`, its session and
@@ -816,7 +819,7 @@ export function refusalWords(
     }
   if (kind === "pool-child") return { words: poolChildWords(row), fix: "" }
   if (kind === "no-public-id")
-    return { words: noPublicIDWords(row.id), fix: APP_RUN_FIX }
+    return { words: noPublicIDWords(row.id), fix: APP_PUBLIC_ID_FIX }
   if (readToken) return { words: READ_TOKEN, fix: "" }
   // A failed read is no verdict: the server never said the link is closed.
   if (facts?.metaError)

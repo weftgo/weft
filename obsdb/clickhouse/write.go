@@ -96,9 +96,10 @@ func (d *DB) deriveStock(ctx context.Context, spans []obsdb.Span) error {
 }
 
 // rederiveTraces re-derives each trace's runs from its stored spans
-// (deriveStock's body, and migration 0031's Go step). Per trace, in this
-// order — so the last writer of a trace sees everything (two batches, or
-// two Studios over one database, racing on it):
+// (deriveStock's body; migration 0031's step runs the same order in
+// chunks, rederiveChunk). Per trace, in this order — so the last writer
+// of a trace sees everything (two batches, or two Studios over one
+// database, racing on it):
 //
 //  1. read the spans, derive, insert every run's row (MessageCount into
 //     DerivedMessages);
@@ -216,6 +217,37 @@ const reconcileSelect = `SELECT RunId, max(ParentRunID), max(Agent), max(Session
 // a read between an asynchronous delete and its completion would fold
 // the old row into the new one's max. The stale rows come back Removed.
 func (d *DB) reconcileDerived(ctx context.Context, trace string, spans []obsdb.Span, runs []obsdb.StockRun) ([]obsdb.RunRow, error) {
+	stored, err := d.storedDerived(ctx, reconcileSelect, obsdb.StockRunPrefix(trace))
+	if err != nil {
+		return nil, err
+	}
+	return d.reconcileRows(ctx, trace, spans, runs, stored)
+}
+
+// derivedRow is one stored derived row as a reconcile reads it.
+type derivedRow struct{ id, parent, agent, session string }
+
+// storedDerived reads derived rows by query (reconcileSelect's columns).
+func (d *DB) storedDerived(ctx context.Context, query string, args ...any) ([]derivedRow, error) {
+	rs, err := d.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	var out []derivedRow
+	for rs.Next() {
+		var r derivedRow
+		if err := rs.Scan(&r.id, &r.parent, &r.agent, &r.session); err != nil {
+			_ = rs.Close()
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rs.Close()
+}
+
+// reconcileRows is reconcileDerived against the trace's stored derived
+// rows, already read.
+func (d *DB) reconcileRows(ctx context.Context, trace string, spans []obsdb.Span, runs []obsdb.StockRun, stored []derivedRow) ([]obsdb.RunRow, error) {
 	want := make(map[string]obsdb.RunRow, len(runs))
 	for _, r := range runs {
 		want[r.Row.ID] = r.Row
@@ -231,18 +263,10 @@ func (d *DB) reconcileDerived(ctx context.Context, trace string, spans []obsdb.S
 		_, made := want[id]
 		return ok && seen[root] && !made
 	}
-	rs, err := d.conn.Query(ctx, reconcileSelect, obsdb.StockRunPrefix(trace))
-	if err != nil {
-		return nil, err
-	}
 	var drop []string
 	var gone, rewrite []obsdb.RunRow
-	for rs.Next() {
-		var id, parent, agent, session string
-		if err := rs.Scan(&id, &parent, &agent, &session); err != nil {
-			_ = rs.Close()
-			return nil, err
-		}
+	for _, st := range stored {
+		id, parent, agent, session := st.id, st.parent, st.agent, st.session
 		r, ok := want[id]
 		_, root, _ := obsdb.ParseStockRunID(id)
 		switch {
@@ -260,9 +284,6 @@ func (d *DB) reconcileDerived(ctx context.Context, trace string, spans []obsdb.S
 			drop = append(drop, id)
 			rewrite = append(rewrite, r)
 		}
-	}
-	if err := rs.Close(); err != nil {
-		return nil, err
 	}
 	if len(drop) == 0 {
 		return nil, nil

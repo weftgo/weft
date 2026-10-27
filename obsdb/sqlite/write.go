@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 	"strings"
@@ -246,13 +247,29 @@ func deriveStock(ctx context.Context, tx *sql.Tx, traces []string) (ids []string
 	return ids, removed, nil
 }
 
-// rederiveStock is migration 0026's Go step: every trace holding a span
-// that StockCandidate would re-derive — no weft.run.id, a GenAI
-// operation by attribute or name — re-derived through deriveStock, in
-// the migration's transaction.
-func rederiveStock(tx *sql.Tx) error {
+// rederiveStock is migration 0026's Go step: the traces whose
+// derivation the 0026 rule changes re-derived through deriveStock, in
+// the migration's transaction (Open waits: one INFO line before, with
+// the count, and one after, with the time — never a silent wait).
+//
+// The selection is sqlRederive0026: a trace holding a span no older
+// writer derived the way this one does — a non-weft invoke_agent span
+// without a string gen_ai.conversation.id (a top-level one is now a
+// run of its own; a nested one may now parent a conversation-rooted
+// run), or a non-weft chat span carrying the conventions' message
+// content (the row's message count). Every other stock trace derives
+// exactly as the 0.19 writer derived it, its rows already right. A file
+// older than migration 0008 (from < derivedRunsMigration) never had
+// derived runs written at all: every stock candidate trace is
+// re-derived (sqlStockOp). Re-deriving is idempotent: an interrupted
+// run rolls back whole and the next Open starts it again.
+func rederiveStock(tx *sql.Tx, from int) error {
 	ctx := context.Background()
-	rs, err := tx.QueryContext(ctx, `SELECT DISTINCT trace_id FROM spans WHERE `+sqlStockOp)
+	where := sqlRederive0026
+	if from < derivedRunsMigration {
+		where = sqlStockOp
+	}
+	rs, err := tx.QueryContext(ctx, `SELECT DISTINCT trace_id FROM spans WHERE `+where)
 	if err != nil {
 		return err
 	}
@@ -268,9 +285,48 @@ func rederiveStock(tx *sql.Tx) error {
 	if err := rs.Close(); err != nil {
 		return err
 	}
-	_, _, err = deriveStock(ctx, tx, traces)
-	return err
+	if len(traces) == 0 {
+		return nil
+	}
+	slog.Default().InfoContext(ctx, fmt.Sprintf("weft/obsdb/sqlite: migrating: re-deriving %d stock traces (SQLite 0026); Open waits for it", len(traces)),
+		"traces", len(traces))
+	began := time.Now()
+	if _, _, err := deriveStock(ctx, tx, traces); err != nil {
+		return err
+	}
+	slog.Default().InfoContext(ctx, "weft/obsdb/sqlite: migration 0026 re-derive done",
+		"traces", len(traces), "duration", time.Since(began).Round(time.Millisecond).String())
+	return nil
 }
+
+// derivedRunsMigration is the migration that first wrote derived runs
+// (0008): a file opened below it holds stock spans no writer derived.
+const derivedRunsMigration = 8
+
+// sqlRederive0026 is rederiveStock's selection over a spans row: no
+// weft.run.id, and either an invoke_agent span (sqlStockOp's operation
+// rule) whose gen_ai.conversation.id is not a non-empty string
+// (obsdb's attr reads only a string), or a chat span carrying a key
+// obsdb.StockHasMessages reads — gen_ai.system_instructions,
+// gen_ai.input.messages, gen_ai.output.messages, gen_ai.prompt,
+// gen_ai.completion, gen_ai.content.prompt, gen_ai.content.completion
+// (present, whatever the value) or a key starting gen_ai.prompt. or
+// gen_ai.completion.
+const sqlRederive0026 = `(run_id = '' AND (
+	((COALESCE(json_extract(attrs, '$."gen_ai.operation.name"'), '') = 'invoke_agent'
+		OR (COALESCE(json_extract(attrs, '$."gen_ai.operation.name"'), '') = '' AND name LIKE 'invoke\_agent%' ESCAPE '\'))
+	AND COALESCE(json_type(attrs, '$."gen_ai.conversation.id"') = 'text' AND json_extract(attrs, '$."gen_ai.conversation.id"') <> '', 0) = 0)
+	OR ((COALESCE(json_extract(attrs, '$."gen_ai.operation.name"'), '') = 'chat'
+		OR (COALESCE(json_extract(attrs, '$."gen_ai.operation.name"'), '') = '' AND (name = 'chat' OR name LIKE 'chat %')))
+	AND (json_type(attrs, '$."gen_ai.system_instructions"') IS NOT NULL
+		OR json_type(attrs, '$."gen_ai.input.messages"') IS NOT NULL
+		OR json_type(attrs, '$."gen_ai.output.messages"') IS NOT NULL
+		OR json_type(attrs, '$."gen_ai.prompt"') IS NOT NULL
+		OR json_type(attrs, '$."gen_ai.completion"') IS NOT NULL
+		OR json_type(attrs, '$."gen_ai.content.prompt"') IS NOT NULL
+		OR json_type(attrs, '$."gen_ai.content.completion"') IS NOT NULL
+		OR EXISTS (SELECT 1 FROM json_each(attrs) AS a
+			WHERE a.key LIKE 'gen\_ai.prompt.%' ESCAPE '\' OR a.key LIKE 'gen\_ai.completion.%' ESCAPE '\')))))`
 
 // dropStaleDerived deletes the trace's derived rows the latest
 // derivation no longer makes (§9) and answers them as Removed rows (the

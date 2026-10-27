@@ -711,6 +711,9 @@ func TestAuthMatrix(t *testing.T) {
 		// id), a foreign public_id 403 before any parameter is read.
 		{name: "GET /api/traces", method: "GET", path: fixed("/api/traces"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/traces?id_prefix=", method: "GET", path: fixed("/api/traces?id_prefix=0123abcd"), resources: one, want: anyValid(ok)},
+		// The not-run filter (U21.3): a narrowing like id_prefix, under
+		// the same forced public id.
+		{name: "GET /api/traces?not_run=1", method: "GET", path: fixed("/api/traces?not_run=1"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/traces?service=svc&limit=500", method: "GET", path: fixed("/api/traces?service=svc&limit=500"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/traces?public_id=", method: "GET", path: func(res string) string { return "/api/traces?public_id=" + public[res] },
 			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
@@ -1036,6 +1039,11 @@ func TestAuthMatrix(t *testing.T) {
 			body:      fixed(`{"id":"exp_2","name":"n","agent":"a","variants":[{"key":"A","overrides":{}}],"inputs":[{"key":"1","text":"x"}]}`),
 			resources: one, want: serverOnly(ok)},
 		{name: "PUT /api/runtimes/{id}/breakpoints", method: "PUT", path: fixed("/api/runtimes/rt_test/breakpoints"), body: fixed(`{"tools":["refund"]}`), resources: one, want: serverOnly(ok)},
+		// The surface that set them (U30.2): the server token's alone like
+		// the tools, a panel token refused before the body is read — a
+		// bad surface is a 400 for the server token only.
+		{name: "PUT /api/runtimes/{id}/breakpoints (surface)", method: "PUT", path: fixed("/api/runtimes/rt_test/breakpoints"), body: fixed(`{"tools":["refund"],"surface":"runtimes"}`), resources: one, want: serverOnly(ok)},
+		{name: "PUT /api/runtimes/{id}/breakpoints (a bad surface)", method: "PUT", path: fixed("/api/runtimes/rt_test/breakpoints"), body: fixed(`{"tools":[],"surface":"Runtimes Page"}`), resources: one, want: serverOnly(http.StatusBadRequest)},
 		// Forget (U20.1): runtime-wide like the breakpoints — the server
 		// token's alone; rt_test holds a stream, so the server token's
 		// answer is the 409 a connected runtime gets (204 is

@@ -1141,3 +1141,25 @@ func TestTallyDerivedNeverAndPartial(t *testing.T) {
 		t.Errorf("all priced: %+v, want known and no partial", f)
 	}
 }
+
+// TestAddModelsSorted (the gate's LOW): a model list is deduped and
+// sorted whatever order the runs were summed in, so
+// delegated_unpriced_models (and unpriced_models, and a reason's list)
+// read the same for one set of runs, and a cap keeps the same five.
+func TestAddModelsSorted(t *testing.T) {
+	a := addModels(nil, "zeta/z", "acme/b")
+	a = addModels(a, "acme/a", "zeta/z", "mid/m")
+	b := addModels(nil, "mid/m")
+	b = addModels(b, "acme/a", "acme/b", "zeta/z", "acme/a")
+	want := []string{"acme/a", "acme/b", "mid/m", "zeta/z"}
+	if !slices.Equal(a, want) || !slices.Equal(b, want) {
+		t.Errorf("addModels = %v and %v, want both %v", a, b, want)
+	}
+	var c, d cost
+	c.models = addModels(addModels(c.models, "p/7", "p/6", "p/5"), "p/4", "p/3", "p/2", "p/1")
+	d.models = addModels(addModels(d.models, "p/1", "p/2", "p/3"), "p/4", "p/5", "p/6", "p/7")
+	if got, other := c.delegatedFields().DelegatedUnpricedModels, d.delegatedFields().DelegatedUnpricedModels; !slices.Equal(got, other) ||
+		!slices.Equal(got, []string{"p/1", "p/2", "p/3", "p/4", "p/5", "(+2)"}) {
+		t.Errorf("delegated_unpriced_models = %v and %v, want the same sorted five and (+2)", got, other)
+	}
+}

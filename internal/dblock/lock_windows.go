@@ -15,6 +15,10 @@ import (
 // on the bytes it covers).
 func lockRange() *windows.Overlapped { return &windows.Overlapped{OffsetHigh: 0x40000000} }
 
+// openNoFollow: no such open flag here; Acquire's check after the open
+// is the guard.
+const openNoFollow = 0
+
 func lockFile(f *os.File) error {
 	ol := lockRange()
 	err := windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, ol)

@@ -431,6 +431,7 @@ func TestAuthMatrixTagToken(t *testing.T) {
 		{"GET", "/api/runs/%s/logs", "", 403, 403},     // a read token never reads app logs
 		{"GET", "/api/runs/%s/requests", "", 403, 403}, // nor prompts
 		{"GET", "/api/runs/%s/commands", "", 403, 403}, // commands are a public id's (I4-fix)
+		{"GET", "/api/runs/%s/tools", "", 403, 403},    // nor tool calls (they may carry prompts)
 		{"GET", "/api/runs/%s/steps/0", "", 404, 403},  // r_b1b has no step: 404 inside the scope
 		{"GET", "/api/diff?a=r_b1a&b=%s", "", 200, 403},
 		{"GET", "/api/sessions/%s", "", 200, 403},
@@ -481,6 +482,14 @@ func TestAuthMatrixTagToken(t *testing.T) {
 		{"/api/search?tag.arena.batch=b1", 200}, {"/api/search?tag.arena.batch=b2", 403},
 		{"/api/sessions?tag.arena.batch=b1", 200}, {"/api/sessions?tag.arena.batch=b2", 403},
 		{"/api/traces?tag.arena.batch=b1", 200}, {"/api/traces?tag.arena.batch=b2", 403},
+		{"/api/stats?by=agent", 200}, {"/api/stats?by=model", 200}, {"/api/stats?by=tool", 200},
+		{"/api/stats?by=error_type", 200}, {"/api/stats?by=step&agent=director", 200},
+		{"/api/stats?by=agent&tag.arena.batch=b2", 403},
+		{"/api/sessions?id_prefix=s_", 200}, {"/api/sessions?id_prefix=s_&tag.arena.batch=b2", 403},
+		{"/api/traces?id_prefix=0", 200}, {"/api/traces?not_run=1", 200},
+		{"/api/traces?not_run=1&tag.arena.batch=b2", 403},
+		{"/api/runtimes", 200},    // the picker: every valid identity (TestAuthMatrix)
+		{"/api/experiments", 403}, // not public-id-shaped: the server token's alone
 		{"/api/meta", 200},
 		{"/api/public/pub_mix", 403}, // a tag-only token resolves no public id
 		{"/api/runs/r_nobody", 404}, {"/api/sessions/s_nobody", 403},
@@ -488,6 +497,21 @@ func TestAuthMatrixTagToken(t *testing.T) {
 		if got, body := tcall(t, ts, http.MethodGet, c.path, tok, ""); got != c.want {
 			t.Errorf("GET %s: %d, want %d (%s)", c.path, got, c.want, body)
 		}
+	}
+	// The prefix lists narrow inside the token's tags: a session or a
+	// trace without them is not listed.
+	if _, body := tcall(t, ts, http.MethodGet, "/api/sessions?id_prefix=s_", tok, ""); !strings.Contains(body, `"s_mix"`) || strings.Contains(body, "s_plain") {
+		t.Errorf("GET /api/sessions?id_prefix=s_ as the tag token lists %s, want s_mix alone", body)
+	}
+	_, all := tcall(t, ts, http.MethodGet, "/api/traces?id_prefix=0", "srv", "")
+	_, own := tcall(t, ts, http.MethodGet, "/api/traces?id_prefix=0", tok, "")
+	for _, id := range []string{"r_b2", "r_none", "s_plain-t1", "s_mix-t2"} {
+		if strings.Contains(own, `"`+id+`"`) {
+			t.Errorf("GET /api/traces?id_prefix=0 as the tag token names %s (untagged): %s", id, own)
+		}
+	}
+	if !strings.Contains(own, `"r_b1a"`) || !strings.Contains(all, `"r_b2"`) {
+		t.Errorf("GET /api/traces?id_prefix=0: the tag token's list %s lacks r_b1a, or the server's %s lacks r_b2 (the fixture's trace ids moved)", own, all)
 	}
 }
 

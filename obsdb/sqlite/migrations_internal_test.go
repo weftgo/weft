@@ -236,7 +236,7 @@ func TestUpgradeFrom0006AddsCommandStore(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatalf("migration %d: %v", v, err)
 			}
 		}
@@ -334,7 +334,7 @@ func TestUpgradeTo0009BackfillsRootEnded(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -428,7 +428,7 @@ func TestUpgradeTo0010BackfillsStoppedBy(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -517,7 +517,7 @@ func TestUpgradeTo0011DerivedRootEnded(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -579,7 +579,7 @@ func TestUpgradeTo0012BackfillsEmitted(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -671,7 +671,7 @@ func TestMigration0013BackfillsProblems(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -849,7 +849,7 @@ func TestMigration0016RederivesProblems(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -948,7 +948,7 @@ func TestUpgradeTo0015AddsFailedAllIndex(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1034,7 +1034,7 @@ func TestMigration0017BackfillsMetadataDropped(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1136,7 +1136,7 @@ func TestUpgradeTo0018LinksResumes(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1231,7 +1231,7 @@ func TestUpgradeTo0020ReadsRunTrees(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1310,7 +1310,7 @@ func TestMigration0026RederivesStock(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}

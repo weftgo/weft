@@ -119,10 +119,14 @@ func statsSpans(runs string) string {
 // an intermediate started before the window still hides its subtree, as
 // SQLite's unbounded read does (U23.2-fix2), and another tenant's
 // children on a shared database are never gathered — whose ids none of
-// dAnc's intermediates (longer than the group's run) may be. Binds: the
-// window's start, the public id when pub is set, runs', the meta pairs
-// (key, key, value each, in key order), then under a scope runs' again,
-// the public id and the meta pairs again (statsBelowArgs).
+// dAnc's intermediates (longer than the group's run) may be. Every read
+// is bounded to the group runs' root prefixes (a descendant's id starts
+// with its root's, then '/'): the spans d reads, the child rows c
+// groups and the intermediates between reads — never every child run
+// of the database. Binds: the window's start, the public id when pub
+// is set, runs' three times (d's roots, the r join, c's roots), the meta
+// pairs (key, key, value each, in key order), then under a scope runs'
+// again, the public id and the meta pairs again (statsBelowArgs).
 func statsBelow(runs, pub string, meta map[string]string) string {
 	scope := ""
 	if pub != "" {
@@ -163,9 +167,12 @@ func statsBelow(runs, pub string, meta map[string]string) string {
 		FROM otel_traces
 		WHERE position(RunId, '/') > 0 AND (` + statsOp + `) = 'chat' AND SpanAttributes['weft.chat.role'] = ''
 			AND Timestamp >= fromUnixTimestamp64Nano(?)` + scope + `
+			AND splitByChar('/', RunId)[1] IN (SELECT splitByChar('/', rid)[1] FROM (` + runs + `))
 		LIMIT 1 BY TraceId, SpanId) ARRAY JOIN dAnc AS dParent) AS d
 	INNER JOIN (` + runs + `) AS r ON d.dParent = r.rid
-	INNER JOIN (SELECT RunId AS cid, max(Agent) AS cagent` + cmeta + ` FROM weft_runs WHERE position(RunId, '/') > 0 GROUP BY RunId) AS c
+	INNER JOIN (SELECT RunId AS cid, max(Agent) AS cagent` + cmeta + ` FROM weft_runs WHERE position(RunId, '/') > 0
+			AND splitByChar('/', RunId)[1] IN (SELECT splitByChar('/', rid)[1] FROM (` + runs + `))
+		GROUP BY RunId) AS c
 		ON c.cid = d.dRun
 	WHERE c.cagent != r.ragent` + ccond + between
 }
@@ -328,7 +335,9 @@ func (d *DB) Stats(ctx context.Context, q obsdb.StatsQuery) (_ obsdb.StatsPage, 
 		if q.PublicID != "" {
 			bargs = append(bargs, q.PublicID)
 		}
-		bargs = append(bargs, rargs...)
+		for range 3 { // d's roots, the r join, c's roots
+			bargs = append(bargs, rargs...)
+		}
 		bargs = append(bargs, statsBelowArgs(rargs, q.PublicID, q.Meta)...)
 		if err := query(`SELECT k, dProvider, dModel, toInt64(sum(dIn)), toInt64(sum(dOut)), toInt64(sum(dCached)),
 			toInt64(sum(dCacheWrite)), toInt64(sum(dReasoning)) FROM (`+below+`) GROUP BY k, dProvider, dModel`, bargs,

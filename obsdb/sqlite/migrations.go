@@ -45,12 +45,20 @@ var migrations = func() map[int]string {
 // postMigrations are Go steps a migration runs after its SQL, in the
 // same transaction: what SQL alone cannot derive (0004's search index
 // over the runs already stored reads message bodies the way the writer
-// does).
-var postMigrations = map[int]func(*sql.Tx) error{
-	4:  backfillSearch,
-	22: backfillRunlessSessionEvents,
-	23: backfillSpanStats,
+// does). from is the version the file held when this Open began (0 for
+// a new file): a step whose work depends on what an older writer left
+// (0026's) reads it.
+var postMigrations = map[int]func(tx *sql.Tx, from int) error{
+	4:  anyFrom(backfillSearch),
+	22: anyFrom(backfillRunlessSessionEvents),
+	23: anyFrom(backfillSpanStats),
 	26: rederiveStock,
+}
+
+// anyFrom is a post-migration step whose work does not depend on the
+// version the file was opened at.
+func anyFrom(step func(*sql.Tx) error) func(*sql.Tx, int) error {
+	return func(tx *sql.Tx, _ int) error { return step(tx) }
 }
 
 func highestMigration() int {
@@ -123,7 +131,11 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("sqlite: migration %s: %w", migrations[v], err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			from := 0
+			if current.Valid {
+				from = int(current.Int64)
+			}
+			if err := post(tx, from); err != nil {
 				_ = tx.Rollback()
 				return fmt.Errorf("sqlite: migration %s: %w", migrations[v], err)
 			}

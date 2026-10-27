@@ -197,7 +197,7 @@ digest:
   child …/0/h1 (hr-reviewer) ← review_hr: succeeded
   child …/0/i1 (ip-reviewer) ← review_ip: failed (model_error) "weft: run failed at step 0: model stream: provider maintenance window"
   child …/0/t1 (tax-reviewer) ← review_tax: failed (cancelled) "weft: run failed at step 0: model stream: context deadline exceeded"
-  child …/0/s1 (nda-signer) ← sign_nda: succeeded; parked: 1 calls awaiting a decision
+  child …/0/s1 (nda-signer) ← sign_nda: succeeded; parked: 1 call awaiting a decision
   child …/0/l1 (litigation-reviewer) ← review_litigation: succeeded; its first error: step 0 ocr_exhibit: tool "ocr_exhibit" panicked: ocr engine: nil page
 ```
 
@@ -221,7 +221,7 @@ A parked run is not a failure, and says so:
 
 ```text
 > explain_failure {"id":"a1100002000000000000000000000001"}
-run a1100002000000000000000000000001 (support): succeeded, last step 0; stop_reason tool_calls; parked: 1 calls awaiting a decision (refund_order); tool calls: refund_order pending; digest: 1 of 1 lines report an error, a park or a failed child; no assistant text this run — http://127.0.0.1:33933/runs/a1100002000000000000000000000001
+run a1100002000000000000000000000001 (support): succeeded, last step 0; stop_reason tool_calls; parked: 1 call awaiting a decision (refund_order); tool calls: refund_order pending; digest: 1 of 1 lines report an error, a park or a failed child; no assistant text this run — http://127.0.0.1:33933/runs/a1100002000000000000000000000001
 ```
 
 Once a resume decided it, it reads decided — the outcome, who and why,

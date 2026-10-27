@@ -1455,8 +1455,13 @@ consulted, U23.1-fix, U23.2-fix); a tool's own `WrapTools` as that tool's
 `middleware`; `hooks` — `prepare_step`, `tap`, `on_run_end` (lists) and
 `tool_source`, each named the same way. Entries are `{name, params?,
 source?, opaque?}`: configuration only, never a secret or a closure's
-captured value. Static: zero per-run cost, covered by
-`weft.manifest.hash` (an agent's hash changes when its chain does).
+captured value. Each agent also carries `params` — its configured
+sampling knobs (`core.Params`: `temperature`, `top_p`, `max_tokens`,
+`stop`, `seed`, by the request record's names; omitted when it sets
+none), what a run option overrides, so a reader can say "override
+(agent: 0.7)". Static: zero per-run cost, covered by
+`weft.manifest.hash` (an agent's hash changes when its chain or its
+params do).
 
 **What the record attributes to user code today** (UX-S1-09). The
 seams where an app's own code runs — `PrepareStep`, `WrapModel`,

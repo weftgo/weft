@@ -54,13 +54,37 @@ type Lock struct {
 // Path is the lock file beside dbPath.
 func Path(dbPath string) string { return dbPath + ".lock" }
 
+// ErrNotRegular is Acquire's error when <db>.lock is not a regular file
+// — a symlink planted there, a FIFO, a directory: never followed,
+// truncated or chmodded.
+var ErrNotRegular = errors.New("dblock: the lock file is not a regular file")
+
 // Acquire takes the lock beside dbPath without waiting: ErrHeld when it
-// is held, another error when the file cannot be opened.
+// is held, ErrNotRegular when <db>.lock is not a regular file, another
+// error when the file cannot be opened.
+//
+// A planted symlink is never followed: unix opens with O_NOFOLLOW (the
+// open fails on a symlink), and on every platform the opened handle is
+// then checked against the path's own Lstat — a regular file, the same
+// one — before it is truncated or chmodded. Windows has no O_NOFOLLOW;
+// the check after the open is its guard: a symlink there when the
+// handle was taken fails it, and one swapped in after it changes
+// nothing, since Truncate and Chmod act on the handle (the regular file
+// checked), never on the name.
 func Acquire(dbPath string) (*Lock, error) {
 	p := Path(dbPath)
-	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE, 0o600)
+	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|openNoFollow, 0o600)
 	if err != nil {
+		if isSymlinkRefusal(p) {
+			return nil, ErrNotRegular
+		}
 		return nil, err
+	}
+	lfi, lerr := os.Lstat(p)
+	ffi, ferr := f.Stat()
+	if lerr != nil || ferr != nil || !lfi.Mode().IsRegular() || !ffi.Mode().IsRegular() || !os.SameFile(lfi, ffi) {
+		_ = f.Close()
+		return nil, ErrNotRegular
 	}
 	if err := lockFile(f); err != nil {
 		_ = f.Close()
@@ -136,4 +160,12 @@ func loopbackIP(raw string) bool {
 	}
 	ip := net.ParseIP(u.Hostname())
 	return ip != nil && ip.IsLoopback()
+}
+
+// isSymlinkRefusal reports whether the open failed because p is a
+// symlink (O_NOFOLLOW's ELOOP, or the like): the path itself, not
+// followed, is one.
+func isSymlinkRefusal(p string) bool {
+	fi, err := os.Lstat(p)
+	return err == nil && fi.Mode()&os.ModeSymlink != 0
 }

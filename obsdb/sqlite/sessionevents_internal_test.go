@@ -44,7 +44,7 @@ func TestUpgradeTo0022IndexesSessionEvents(t *testing.T) {
 			t.Fatalf("migration %d: %v", v, err)
 		}
 		if post := postMigrations[v]; post != nil {
-			if err := post(tx); err != nil {
+			if err := post(tx, v-1); err != nil {
 				t.Fatal(err)
 			}
 		}

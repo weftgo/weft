@@ -2509,8 +2509,8 @@ var contractKeys = []string{
 	// (migration 0032's restatement of both views).
 	"weft.caller.remote",
 	// U30.3 (UX-S2-02, UX-S1-06): an attempt's give-up reason and an
-	// Output run's type name (migration 0033's restatement of the traces
-	// view).
+	// Output run's type name (migration 0033's restatement of both
+	// views).
 	"weft.attempt.giveup_reason", "weft.output.type",
 }
 

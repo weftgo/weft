@@ -453,8 +453,8 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // keys (u23Keys) appended; 0030 (U23.2) the traces view with the whole
 // set, weft.tool.origin (u232Keys) appended; 0032 (U33.1-fix) both
 // views with the whole set, weft.caller.remote (u331Keys) appended — the
-// logs view catching up from 0023's; 0033 (U30.3) the traces view with
-// the whole set, the attempt's give-up and the output's type (u303Keys)
+// logs view catching up from 0023's; 0033 (U30.3) both views with the
+// whole set, the attempt's give-up and the output's type (u303Keys)
 // appended.
 const (
 	adr0028Keys   = 12 + 4 + 1 + 10
@@ -497,7 +497,7 @@ func TestMigrationContractTuple(t *testing.T) {
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, at0015}, {17, 1, at0017}, {18, 2, at0018}, {19, 2, at0019}, {21, 2, at0021}, {22, 2, at0022}, {23, 2, at0023}, {24, 1, at0027}, {27, 1, at0027}, {29, 1, at0029}, {30, 1, at0030}, {32, 2, at0032}, {33, 1, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, at0015}, {17, 1, at0017}, {18, 2, at0018}, {19, 2, at0019}, {21, 2, at0021}, {22, 2, at0022}, {23, 2, at0023}, {24, 1, at0027}, {27, 1, at0027}, {29, 1, at0029}, {30, 1, at0030}, {32, 2, at0032}, {33, 2, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)

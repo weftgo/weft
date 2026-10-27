@@ -179,5 +179,10 @@ as another version until weft.json is regenerated. weft's own
 middleware are named without a source, so a weft upgrade that moves
 them does not. An agent whose chain or hooks change now hashes
 differently (`weft.manifest.hash`), which is the point: which onion ran
-is part of which version of the agent ran. The record contract's "The
-onion in the manifest" paragraph is the reader's spec.
+is part of which version of the agent ran. Each agent also carries
+`params` — its configured `core.Params` (`temperature`, `top_p`,
+`max_tokens`, `stop`, `seed`, the request record's names), omitted when
+it sets none, so an agent whose sampling knobs change hashes
+differently and a reader can show a run option's override against the
+agent's value. The record contract's "The onion in the manifest"
+paragraph is the reader's spec.

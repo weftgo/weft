@@ -83,7 +83,7 @@ import (
 // cost_reason naming why in one short line ("openai/x has no price";
 // a set's "2 of 9 turns unpriced: no price for openai/x, acme/y" — never
 // one clause per run), and unpriced_models: the provider/model pairs
-// without a price behind the figure, deduped (a run row's
+// without a price behind the figure, deduped and sorted (a run row's
 // delegated_unpriced_models the same for its subagents), so a page can
 // say it once over its rows. Both lists, and the reason's, stop at five
 // models: a sixth and more read as one last element "(+n)".
@@ -501,11 +501,15 @@ type cost struct {
 	priced, never int
 }
 
-// addModels appends ms to the deduped list.
+// addModels adds ms to the deduped list, kept sorted: a set's (or a
+// run's subagents') models read in one order whatever order the runs
+// were summed in (a children read's order is not the page's), so
+// unpriced_models, delegated_unpriced_models and a reason's list are
+// stable — and the five a cap keeps are the same five.
 func addModels(list []string, ms ...string) []string {
 	for _, m := range ms {
-		if !slices.Contains(list, m) {
-			list = append(list, m)
+		if i, found := slices.BinarySearch(list, m); !found {
+			list = slices.Insert(list, i, m)
 		}
 	}
 	return list

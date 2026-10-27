@@ -12,6 +12,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// openNoFollow refuses a symlink at the lock path at open time.
+const openNoFollow = unix.O_NOFOLLOW
+
 func lockFile(f *os.File) error {
 	for {
 		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)

@@ -152,3 +152,59 @@ describe("Waterfall on a cyclic parent chain", () => {
     expect(document.querySelector("[data-offset]")).toBeNull()
   })
 })
+
+describe("Waterfall fit (P020.1)", () => {
+  const row = (id: string, from: number, to: number, badge?: string): Span => ({
+    id,
+    key: id,
+    depth: 3,
+    kind: "attempt",
+    label: `${id} · script`,
+    tone: "error",
+    from,
+    to,
+    runId: "",
+    badge,
+  })
+
+  it("the time axis draws only the ticks its measured width holds, each on one line", () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({ width: 200 } as DOMRect)
+    try {
+      render(
+        <Waterfall
+          spans={[row("a", 0, 301)]}
+          domain={[0, 301]}
+          playhead={null}
+          unit="ms"
+        />
+      )
+      const ticks = [...document.querySelectorAll("[data-tick]")]
+      expect(ticks.length).toBeGreaterThan(1)
+      expect(ticks.length).toBeLessThan(5)
+      expect(ticks.at(-1)!.textContent).toBe("301 ms")
+      for (const t of ticks) expect(t.className).toContain("whitespace-nowrap")
+    } finally {
+      rect.mockRestore()
+    }
+  })
+
+  it("an attempt's error chip stays whole in the name cell: the cell clips, the label gives way first", () => {
+    render(
+      <Waterfall
+        spans={[row("attempt 1", 0, 1, "model_error")]}
+        domain={[0, 10]}
+        playhead={null}
+        unit="ms"
+      />
+    )
+    const chip = screen.getByText("model_error")
+    expect(chip.className).toContain("shrink-0")
+    const cell = chip.parentElement!
+    expect(cell.className).toContain("overflow-hidden")
+    const label = screen.getByText("attempt 1 · script")
+    expect(label.className).not.toContain("shrink-0")
+    expect(label.className).toContain("truncate")
+  })
+})

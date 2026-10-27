@@ -17,6 +17,7 @@ import { useMediaQuery } from "@/hooks/use-media-query"
 import { BARRIER, BARRIER_HINT } from "@/lib/concurrency"
 import type { Span, SpanTone } from "@/lib/trace"
 import {
+  axisTicks,
   KIND_ICON,
   OFFSET_HEAD,
   OFFSET_HINT,
@@ -183,13 +184,25 @@ export function Waterfall({
   const cols = time ? COLS_TIME : COLS
   const span = time ? "col-span-4" : "col-span-3"
   const at = playhead ?? hi + 1
-  const ticks = useMemo(() => {
-    const n = Math.min(4, Math.max(1, total - 1))
-    const out: number[] = []
-    for (let i = 0; i <= n; i++)
-      out.push(lo + Math.round((i * (total - 1)) / n))
-    return [...new Set(out)]
-  }, [lo, total])
+  // The axis thins its ticks to what its width holds (never two labels
+  // over each other): the track's width, measured.
+  const axisRef = useRef<HTMLDivElement>(null)
+  const [axisW, setAxisW] = useState(0)
+  useEffect(() => {
+    const n = axisRef.current
+    if (!n) return
+    setAxisW(n.getBoundingClientRect().width)
+    if (typeof ResizeObserver !== "function") return
+    const ro = new ResizeObserver((es) =>
+      setAxisW(es[0]?.contentRect.width ?? 0)
+    )
+    ro.observe(n)
+    return () => ro.disconnect()
+  }, [])
+  const ticks = useMemo(
+    () => axisTicks(lo, hi, axisW, (t) => (time && t ? took(t) : String(t))),
+    [lo, hi, axisW, time]
+  )
 
   const seekAt = (e: React.MouseEvent<HTMLElement>) => {
     if (!onSeek) return
@@ -350,17 +363,17 @@ export function Waterfall({
           onClick={seekAt}
           title={`${unit} position — click to seek`}
         >
-          <div className="relative h-full">
+          <div className="relative h-full" ref={axisRef}>
             {ticks.map((t, i) => (
               <span
                 key={t}
                 // Two ticks under 480 px, the first and the last (UX-F-35).
                 data-tick={i === 0 || i === ticks.length - 1 ? "end" : "mid"}
-                className={`absolute top-1 text-[10px] text-faint tabular-nums ${
-                  i === 0
-                    ? "translate-x-1"
-                    : i === ticks.length - 1
-                      ? "-translate-x-full pr-1"
+                className={`absolute top-1 text-[10px] whitespace-nowrap text-faint tabular-nums ${
+                  i === ticks.length - 1
+                    ? "-translate-x-full pr-1"
+                    : i === 0
+                      ? "translate-x-1"
                       : "-translate-x-1/2 max-[480px]:hidden"
                 }`}
                 style={{
@@ -432,7 +445,12 @@ export function Waterfall({
               >
                 <div
                   ref={selected ? selRef : undefined}
-                  className={`flex min-w-0 cursor-pointer items-center gap-1 border-b border-border/60 py-0.5 pr-2 max-[480px]:h-6 max-[480px]:border-b-0 ${cell(selected)} ${
+                  // overflow-hidden: nothing in the name cell runs into
+                  // the track beside it (an attempt's error chip under
+                  // its bar's marker, P020.1); the gist gives way first
+                  // (all but entirely: a sub-pixel share would cut the
+                  // label to an ellipsis), then the label — never the chip.
+                  className={`flex min-w-0 cursor-pointer items-center gap-1 overflow-hidden border-b border-border/60 py-0.5 pr-2 max-[480px]:h-6 max-[480px]:border-b-0 ${cell(selected)} ${
                     selected ? "shadow-[inset_2px_0_0_var(--thread)]" : ""
                   } ${revealed && !dim ? "" : "opacity-40"}`}
                   style={{ paddingLeft: `${0.4 + sp.depth * 0.8}rem` }}
@@ -465,7 +483,7 @@ export function Waterfall({
                     {KIND_ICON[sp.kind]}
                   </span>
                   {(() => {
-                    const cls = `shrink-0 truncate ${selectedInk(sp.tone, selected) ? "text-foreground" : toneText[sp.tone]} ${
+                    const cls = `min-w-[3ch] truncate ${selectedInk(sp.tone, selected) ? "text-foreground" : toneText[sp.tone]} ${
                       sp.kind === "run" || sp.kind === "step"
                         ? "font-medium"
                         : ""
@@ -522,7 +540,7 @@ export function Waterfall({
                     </span>
                   ) : null}
                   {sp.sub ? (
-                    <span className="min-w-0 truncate text-faint">
+                    <span className="min-w-0 shrink-[100000] truncate text-faint">
                       {sp.sub}
                     </span>
                   ) : null}

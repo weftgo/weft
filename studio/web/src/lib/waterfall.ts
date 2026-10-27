@@ -187,6 +187,54 @@ export const offsetText = (ms: number) => `+${took(ms)}`
 /** An attempt's wait as the hatch says it (UX-S2-02). */
 export const waitWords = (ms: number) =>
   `waited ${took(ms)} before this attempt`
+/** The axis labels' width per character (10px tabular mono) and the
+ * least gap between two labels, in px. */
+const TICK_CHAR_PX = 6.5
+const TICK_GAP_PX = 8
+
+/** axisTicks is the time axis' tick values over [lo, hi] for a track
+ * `width` px wide: up to five, evenly spaced, as many as fit with
+ * their labels apart — the first label starts at the left edge, the
+ * last ends at the right, the rest are centred on their tick. Never
+ * an overlap: too narrow for two, the end alone. An unmeasured track
+ * (width 0) draws the two ends. */
+export function axisTicks(
+  lo: number,
+  hi: number,
+  width: number,
+  label: (v: number) => string
+): number[] {
+  const total = hi - lo + 1
+  const w = (v: number) => label(v).length * TICK_CHAR_PX
+  for (
+    let n = width > 0 ? Math.min(4, Math.max(1, total - 1)) : 1;
+    n >= 1;
+    n--
+  ) {
+    const ticks = [
+      ...new Set(
+        Array.from(
+          { length: n + 1 },
+          (_, i) => lo + Math.round((i * (total - 1)) / n)
+        )
+      ),
+    ]
+    if (width <= 0) return ticks
+    // Each label's [left, right] on the track.
+    const box = ticks.map((t, i) => {
+      const x = ((t - lo) / Math.max(1, total)) * width
+      return i === 0
+        ? [0, w(t)]
+        : i === ticks.length - 1
+          ? [width - w(t), width]
+          : [x - w(t) / 2, x + w(t) / 2]
+    })
+    if (box.every((b, i) => i === 0 || b[0] >= box[i - 1][1] + TICK_GAP_PX))
+      return ticks
+  }
+  return [hi]
+}
+
 /** The offset column's head and hover. */
 export const OFFSET_HEAD = "start"
 export const OFFSET_HINT = "when the row started, from the run's start"
@@ -733,7 +781,15 @@ function timeRows(input: WaterfallInput): WaterfallModel {
       str(ia["gen_ai.agent.name"]) ??
         inv?.span.name.replace(/^invoke_agent\s*/, "") ??
         (fold?.agent || input.agents?.get(run) || at?.label),
-      int(ia["weft.run.steps"]) ?? fold?.steps.length,
+      // The steps: weft's count, else the fold's — and a run no event
+      // folded (derived from stock OTel spans) counts its chat spans,
+      // one model call a step, as Studio's run row does (obsdb/stock.go
+      // row.Steps = len(chats)): the header and the root row say one
+      // number (P020.1).
+      int(ia["weft.run.steps"]) ??
+        (fold &&
+          (fold.steps.length ||
+            own.filter((p) => opOf(p.span) == "chat").length)),
       inv?.start ?? (lo < Infinity ? lo : (at?.start ?? 0)),
       inv
         ? inv.took

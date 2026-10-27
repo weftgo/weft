@@ -24,6 +24,7 @@ import {
 } from "@/test/director-fixture"
 import type { FoldedRun } from "./events"
 import {
+  axisTicks,
   dimRows,
   extent,
   UNTIMED_HOLE,
@@ -270,6 +271,31 @@ describe("a derived run (stock GenAI spans, no weft.run.id)", () => {
       "1 step step 1",
       "2 model model · gpt-5-2025-08-07", // the model that answered
     ])
+  })
+
+  it("its root row counts the steps the header does: two model calls, 2 steps — with or without Studio's step index (P020.1)", () => {
+    const spans = (
+      JSON.parse(
+        readFileSync(
+          resolve(process.cwd(), "src/test/derived/spans.json"),
+          "utf8"
+        )
+      ) as { spans: Span[] }
+    ).spans
+    // No events: the fold is empty, as the run page's is for a derived run.
+    const empty = { steps: [] } as unknown as FoldedRun
+    const root = (s: Span[]) =>
+      waterfallRows({ runId: "otel-x", spans: s, fold: empty }).rows[0]
+    expect(root(spans).gist).toBe("2 steps")
+    const bare = spans.map((s) => {
+      const {
+        ["weft.step.index"]: _,
+        ["weft.tool.seq"]: __,
+        ...attrs
+      } = s.attrs
+      return { ...s, attrs }
+    })
+    expect(root(bare).gist).toBe("2 steps")
   })
 })
 
@@ -798,5 +824,44 @@ describe("the run tree's descendant half is split out (P8-fix-a)", () => {
     const bare = ownRows({ runId: DIR, spans: SPANS, fold: FOLD })
     expect(tree.rows.filter((r) => r.runId === OPS)).toHaveLength(1)
     expect(bare.rows.filter((r) => r.runId === OPS).length).toBeGreaterThan(1)
+  })
+})
+
+describe("axisTicks (P020.1: the time axis never overlaps)", () => {
+  const label = (t: number) => (t ? took(t) : "0")
+  // Each label's box as the waterfall draws it: the first from the left
+  // edge, the last to the right edge, the rest centred.
+  const boxes = (ticks: number[], lo: number, hi: number, w: number) =>
+    ticks.map((t, i) => {
+      const lw = label(t).length * 6.5
+      const x = ((t - lo) / (hi - lo + 1)) * w
+      return i === ticks.length - 1
+        ? [w - lw, w]
+        : i === 0
+          ? [0, lw]
+          : [x - lw / 2, x + lw / 2]
+    })
+  it("a wide track keeps five ticks", () => {
+    expect(axisTicks(0, 301, 600, label)).toHaveLength(5)
+  })
+  it("the run page's default track (~200 px) thins them until none overlaps", () => {
+    for (const [hi, w] of [
+      [301, 204],
+      [3200, 204],
+      [10, 204],
+      [25, 170],
+      [301, 120],
+    ]) {
+      const t = axisTicks(0, hi, w, label)
+      expect(t.length).toBeLessThan(5)
+      expect(t.at(-1)).toBe(hi)
+      const b = boxes(t, 0, hi, w)
+      for (let i = 1; i < b.length; i++)
+        expect(b[i][0]).toBeGreaterThanOrEqual(b[i - 1][1])
+    }
+  })
+  it("too narrow for two labels: the end alone; unmeasured: the two ends", () => {
+    expect(axisTicks(0, 3200, 40, label)).toEqual([3200])
+    expect(axisTicks(0, 301, 0, label)).toEqual([0, 301])
   })
 })

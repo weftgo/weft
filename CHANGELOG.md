@@ -6,6 +6,12 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Fixed
+
+- Studio (P020.1): the run page's waterfall draws only the time-axis ticks its track's width holds — a short run's or a narrow track's labels no longer print over each other ("0 75.0 ms 151 ms…" read "Ø75.0 m̶s̶50 m226301 ms ms"); a derived run's root row counts its steps as its header does ("2 steps", it read "0 steps"); an attempt's error chip (`model_error`, `stream_idle`) stays whole beside its name instead of under its bar's marker.
+
 ## 0.20.0 — 2026-10-27
 
 ### Added

@@ -14,12 +14,14 @@ package studio
 // fact. The Go half pins what the record says.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +72,11 @@ var cardShapes = []struct{ name, run string }{
 	{"conc.parallelism", "r_par"},
 }
 
-func recordCardRuns(t *testing.T, url string) {
+// recordCardRuns records every shape. skew forces conc.parallelism's
+// other completion order (a, b, c: c returns only after b has), so
+// TestRunCardsGoldenSkewed proves the golden does not depend on how the
+// parallel calls interleave.
+func recordCardRuns(t *testing.T, url string, skew bool) {
 	t.Helper()
 	ctx := context.Background()
 	type echoIn struct {
@@ -130,11 +136,13 @@ func recordCardRuns(t *testing.T, url string) {
 		}
 
 		// conc.parallelism: three calls under Parallelism(2), then a
-		// Sequential barrier tool. The completion order is fixed (a, c,
-		// b): c starts once a returned, b returns once c did, each
-		// 20 ms after its signal.
-		aDone, cDone := make(chan struct{}), make(chan struct{})
-		nap := func(name string, wait <-chan struct{}, done chan struct{}, opts ...core.ToolOption) *core.ToolDef {
+		// Sequential barrier tool. The handlers return in the order a,
+		// c, b (skew: a, b, c): c starts once a returned, b returns once
+		// c closed its signal, each 20 ms after it. How the events
+		// interleave still moves with the scheduler, so the golden puts
+		// a parallel step's calls in call order (normParallel).
+		aDone, bDone, cDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		nap := func(name string, wait <-chan struct{}, done chan struct{}, after <-chan struct{}, opts ...core.ToolOption) *core.ToolDef {
 			return core.Tool(name, "Nap.", func(context.Context, struct{}) (string, error) {
 				if wait != nil {
 					<-wait
@@ -143,15 +151,23 @@ func recordCardRuns(t *testing.T, url string) {
 				if done != nil {
 					close(done)
 				}
+				if after != nil {
+					<-after
+					time.Sleep(20 * time.Millisecond)
+				}
 				return name + " done", nil
 			}, opts...)
+		}
+		var cAfter <-chan struct{}
+		if skew {
+			cAfter = bDone
 		}
 		run(agent("fanout", wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{ID: "p1", Name: "a"}, wefttest.Call{ID: "p2", Name: "b"},
 				wefttest.Call{ID: "p3", Name: "c"}, wefttest.Call{ID: "p4", Name: "barrier"}),
 			wefttest.Say("all done")),
-			core.Parallelism(2), nap("a", nil, aDone), nap("b", cDone, nil),
-			nap("c", aDone, cDone), nap("barrier", nil, nil, core.Sequential())),
+			core.Parallelism(2), nap("a", nil, aDone, nil), nap("b", cDone, bDone, nil),
+			nap("c", aDone, cDone, cAfter), nap("barrier", nil, nil, nil, core.Sequential())),
 			"r_par", core.Prompt("fan out"))
 
 		// tools.timeout: a tool cut at its 50 ms limit.
@@ -372,26 +388,35 @@ func normCards(s string) string {
 	})
 }
 
+// shapeDoc is one shape in the golden: the routes it is read through.
+type shapeDoc struct {
+	Run        json.RawMessage            `json:"run"`
+	Events     json.RawMessage            `json:"events"`
+	Transcript json.RawMessage            `json:"transcript"`
+	Spans      json.RawMessage            `json:"spans"`
+	Requests   json.RawMessage            `json:"requests"`
+	Tools      json.RawMessage            `json:"tools"`
+	Steps      []json.RawMessage          `json:"steps"`
+	Children   map[string]json.RawMessage `json:"children,omitempty"`
+}
+
 // TestRunCardsGolden records the shapes and writes the golden the web
 // tests read; it pins the facts on the Go side as it goes.
-func TestRunCardsGolden(t *testing.T) {
+func TestRunCardsGolden(t *testing.T) { runCardsGolden(t, false) }
+
+// TestRunCardsGoldenSkewed records conc.parallelism with its calls
+// returning in the other order and must match the same golden: the
+// interleaving of parallel calls is not a fact the golden pins.
+func TestRunCardsGoldenSkewed(t *testing.T) { runCardsGolden(t, true) }
+
+func runCardsGolden(t *testing.T, skew bool) {
 	t.Setenv("WEFT_MODEL_REQUESTS", "deny")
 	ts, _ := requestsServer(t)
-	recordCardRuns(t, ts.URL)
+	recordCardRuns(t, ts.URL, skew)
 	finished := func(b string) bool {
 		return strings.Contains(b, `"status":"succeeded"`) || strings.Contains(b, `"status":"failed"`)
 	}
 
-	type shapeDoc struct {
-		Run        json.RawMessage            `json:"run"`
-		Events     json.RawMessage            `json:"events"`
-		Transcript json.RawMessage            `json:"transcript"`
-		Spans      json.RawMessage            `json:"spans"`
-		Requests   json.RawMessage            `json:"requests"`
-		Tools      json.RawMessage            `json:"tools"`
-		Steps      []json.RawMessage          `json:"steps"`
-		Children   map[string]json.RawMessage `json:"children,omitempty"`
-	}
 	out := map[string]shapeDoc{}
 	read := func(id string) shapeDoc {
 		run := fetchJSON(t, ts, "/api/runs/"+id, finished)
@@ -425,23 +450,10 @@ func TestRunCardsGolden(t *testing.T) {
 		return d
 	}
 	for _, s := range cardShapes {
-		out[s.name] = read(s.run)
-	}
-	// conc.parallelism's calls start two at a time: the spans route
-	// orders a tie by span id (random), so the golden takes them by name.
-	{
-		d := out["conc.parallelism"]
-		var doc map[string]any
-		decode(t, string(d.Spans), &doc)
-		spans, _ := doc["spans"].([]any)
-		name := func(i int) string { n, _ := spans[i].(map[string]any)["name"].(string); return n }
-		sort.SliceStable(spans, func(i, j int) bool { return name(i) < name(j) })
-		b, err := json.Marshal(doc)
-		if err != nil {
-			t.Fatal(err)
-		}
-		d.Spans = b
-		out["conc.parallelism"] = d
+		// A step whose calls ran in parallel: its events, seqs, step
+		// rows and spans in call order (normParallel); every other run
+		// keeps its exact order.
+		out[s.name] = normParallel(t, s.name, read(s.run))
 	}
 
 	// The Go half of the facts, on what the routes serve.
@@ -534,4 +546,334 @@ func TestRunCardsGolden(t *testing.T) {
 	}
 	stable := normCards(pretty(t, string(b)))
 	wefttest.Golden(t, "testdata/api/cards.golden.json", []byte(stable))
+}
+
+// normParallel makes a shape's record independent of how its parallel
+// calls interleaved. A step runs its calls concurrently when its
+// request says so (parallelism other than 1, sequential_tools off) and
+// it made two or more: their tool events interleave as the scheduler
+// runs them, and the run's pos and seq numbers, the step's tool rows
+// and the spans route's tie order (by span id) follow. The golden
+// takes such a step's call events grouped in call order — each call's
+// own events in the order they came — on the same pos and seq slots,
+// and the seq a call's row and execute_tool span carry moves with its
+// tool_start. Before that it checks what the scheduler does guarantee
+// (checkParallel), so a real ordering bug still fails. A run with no
+// such step is returned as read: a sequential run keeps its exact
+// order.
+func normParallel(t *testing.T, shape string, d shapeDoc) shapeDoc {
+	t.Helper()
+	var reqs struct {
+		Requests []struct {
+			Step int `json:"step"`
+			Body struct {
+				SequentialTools bool `json:"sequential_tools"`
+				Parallelism     int  `json:"parallelism"`
+			} `json:"body"`
+			Tools struct {
+				Tools []struct {
+					Name       string `json:"name"`
+					Sequential bool   `json:"sequential"`
+				} `json:"tools"`
+			} `json:"tools"`
+		} `json:"requests"`
+	}
+	decode(t, string(d.Requests), &reqs)
+	limit := map[int]int{}               // a step that may run calls at once → its parallelism
+	barrier := map[int]map[string]bool{} // its Sequential tools
+	for _, r := range reqs.Requests {
+		if r.Body.Parallelism == 1 || r.Body.SequentialTools {
+			continue
+		}
+		limit[r.Step] = r.Body.Parallelism
+		barrier[r.Step] = map[string]bool{}
+		for _, td := range r.Tools.Tools {
+			barrier[r.Step][td.Name] = td.Sequential
+		}
+	}
+	var tr struct {
+		Batches []struct {
+			Step     int `json:"step"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content []struct {
+					Type string `json:"type"`
+					ID   string `json:"id"`
+					Name string `json:"name"`
+				} `json:"content"`
+			} `json:"messages"`
+		} `json:"batches"`
+	}
+	decode(t, string(d.Transcript), &tr)
+	calls := map[int][]parCall{} // step → its calls, in call order
+	for _, b := range tr.Batches {
+		if _, ok := limit[b.Step]; !ok {
+			continue
+		}
+		for _, m := range b.Messages {
+			for _, p := range m.Content {
+				if m.Role == "assistant" && p.Type == "tool_call" {
+					calls[b.Step] = append(calls[b.Step], parCall{p.ID, barrier[b.Step][p.Name]})
+				}
+			}
+		}
+	}
+	for st, cs := range calls {
+		if len(cs) < 2 {
+			delete(calls, st)
+		}
+	}
+	if len(calls) == 0 {
+		return d
+	}
+
+	// The events: each parallel step's call events, regrouped.
+	var evDoc map[string]json.RawMessage
+	decode(t, string(d.Events), &evDoc)
+	var entries []json.RawMessage
+	decode(t, string(evDoc["events"]), &entries)
+	heads := make([]evHead, len(entries))
+	window := map[int][]int{} // step → indexes of its call events
+	step := -1
+	for i, e := range entries {
+		decode(t, string(e), &heads[i])
+		ev := heads[i].Event
+		if ev.Type == "step_start" {
+			step = ev.Index
+		}
+		if _, ok := calls[step]; ok && ev.CallID != "" {
+			window[step] = append(window[step], i)
+		}
+	}
+	posMap, seqMap := map[int64]int64{}, map[int64]int64{}
+	from := make([]int, len(entries)) // the entry each slot takes
+	for i := range from {
+		from[i] = i
+	}
+	for st, idx := range window {
+		checkParallel(t, shape, st, heads, idx, calls[st], limit[st])
+		rank := map[string]int{}
+		for r, c := range calls[st] {
+			rank[c.id] = r
+		}
+		sorted := append([]int(nil), idx...)
+		sort.SliceStable(sorted, func(i, j int) bool {
+			return rank[heads[sorted[i]].Event.CallID] < rank[heads[sorted[j]].Event.CallID]
+		})
+		for k, slot := range idx {
+			src := sorted[k]
+			from[slot] = src
+			posMap[heads[src].Pos] = heads[slot].Pos
+			seqMap[heads[src].Event.Seq] = heads[slot].Event.Seq
+		}
+	}
+	moved := make([]json.RawMessage, len(entries))
+	for slot, src := range from {
+		moved[slot] = renum(t, entries[src], posMap, seqMap, heads[src])
+	}
+	d.Events = replaceRaw(t, d.Events, evDoc["events"], joinRaw(moved))
+
+	// Each parallel step's own events and tool rows.
+	steps := make([]json.RawMessage, len(d.Steps))
+	for i, sd := range d.Steps {
+		steps[i] = sd
+		var doc map[string]json.RawMessage
+		decode(t, string(sd), &doc)
+		var n int
+		decode(t, string(doc["step"]), &n)
+		if _, ok := window[n]; !ok {
+			continue
+		}
+		var evs []json.RawMessage
+		decode(t, string(doc["events"]), &evs)
+		hs := make([]evHead, len(evs))
+		for k, e := range evs {
+			decode(t, string(e), &hs[k])
+			evs[k] = renum(t, e, posMap, seqMap, hs[k])
+			if p, ok := posMap[hs[k].Pos]; ok {
+				hs[k].Pos = p
+			}
+		}
+		order := make([]int, len(evs))
+		for k := range order {
+			order[k] = k
+		}
+		sort.SliceStable(order, func(a, b int) bool { return hs[order[a]].Pos < hs[order[b]].Pos })
+		sortedEvs := make([]json.RawMessage, len(evs))
+		for k, o := range order {
+			sortedEvs[k] = evs[o]
+		}
+		sd = replaceRaw(t, sd, doc["events"], joinRaw(sortedEvs))
+
+		var rows []json.RawMessage
+		decode(t, string(doc["tool_calls"]), &rows)
+		seqs := make([]int64, len(rows))
+		for k, r := range rows {
+			var h struct {
+				Seq int64 `json:"seq"`
+			}
+			decode(t, string(r), &h)
+			seqs[k] = h.Seq
+			if s, ok := seqMap[h.Seq]; ok {
+				rows[k] = swapNum(t, r, seqKeyRe, h.Seq, s)
+				seqs[k] = s
+			}
+		}
+		idx := make([]int, len(rows))
+		for k := range idx {
+			idx[k] = k
+		}
+		sort.SliceStable(idx, func(a, b int) bool { return seqs[idx[a]] < seqs[idx[b]] })
+		sortedRows := make([]json.RawMessage, len(rows))
+		for k, o := range idx {
+			sortedRows[k] = rows[o]
+		}
+		steps[i] = replaceRaw(t, sd, doc["tool_calls"], joinRaw(sortedRows))
+	}
+	d.Steps = steps
+
+	// The spans: a tie in start time is ordered by span id (random), so
+	// they go by name, then call id; weft.tool.seq follows its start.
+	var doc map[string]any
+	decode(t, string(d.Spans), &doc)
+	spans, _ := doc["spans"].([]any)
+	key := func(i int) string {
+		sp, _ := spans[i].(map[string]any)
+		n, _ := sp["name"].(string)
+		a, _ := sp["attrs"].(map[string]any)
+		id, _ := a["gen_ai.tool.call.id"].(string)
+		return n + "\x00" + id
+	}
+	sort.SliceStable(spans, func(i, j int) bool { return key(i) < key(j) })
+	for _, s := range spans {
+		a, _ := s.(map[string]any)["attrs"].(map[string]any)
+		if v, ok := a["weft.tool.seq"].(float64); ok {
+			if n, ok := seqMap[int64(v)]; ok {
+				a["weft.tool.seq"] = n
+			}
+		}
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Spans = b
+	return d
+}
+
+// parCall is one call of a parallel step: its id, and whether its tool
+// is Sequential (a barrier).
+type parCall struct {
+	id         string
+	sequential bool
+}
+
+// evHead is what normParallel reads of an event entry.
+type evHead struct {
+	Pos   int64 `json:"pos"`
+	Event struct {
+		Type   string `json:"type"`
+		Index  int    `json:"index"`
+		Seq    int64  `json:"seq"`
+		CallID string `json:"call_id"`
+	} `json:"event"`
+}
+
+// checkParallel pins what the scheduler guarantees for a parallel
+// step's call events, as they came: pos and seq rise together, every
+// call's events carry a seq, starts are in call order (they are
+// emitted on the dispatching goroutine), no more than parallelism
+// calls are open at once, and a Sequential call runs alone.
+func checkParallel(t *testing.T, shape string, step int, heads []evHead, idx []int, calls []parCall, limit int) {
+	t.Helper()
+	rank, barrier := map[string]int{}, map[string]bool{}
+	for r, c := range calls {
+		rank[c.id], barrier[c.id] = r, c.sequential
+	}
+	open := map[string]bool{}
+	lastStart, lastPos, lastSeq := -1, int64(-1), int64(0)
+	for _, i := range idx {
+		h := heads[i]
+		ev := h.Event
+		r, ok := rank[ev.CallID]
+		switch {
+		case !ok:
+			t.Fatalf("%s step %d: event %s for call %q the step did not make", shape, step, ev.Type, ev.CallID)
+		case ev.Seq <= lastSeq || h.Pos <= lastPos:
+			t.Fatalf("%s step %d: %s %s at pos %d seq %d after pos %d seq %d", shape, step, ev.Type, ev.CallID, h.Pos, ev.Seq, lastPos, lastSeq)
+		}
+		lastPos, lastSeq = h.Pos, ev.Seq
+		switch ev.Type {
+		case "tool_start":
+			if r <= lastStart {
+				t.Errorf("%s step %d: %s started out of call order", shape, step, ev.CallID)
+			}
+			lastStart = r
+			for o := range open {
+				if barrier[o] || barrier[ev.CallID] {
+					t.Errorf("%s step %d: %s started while %s was open; a Sequential call runs alone", shape, step, ev.CallID, o)
+				}
+			}
+			open[ev.CallID] = true
+			if limit > 0 && len(open) > limit {
+				t.Errorf("%s step %d: %d calls open at once under parallelism %d", shape, step, len(open), limit)
+			}
+		case "tool_finish":
+			if !open[ev.CallID] {
+				t.Errorf("%s step %d: %s finished before it started", shape, step, ev.CallID)
+			}
+			delete(open, ev.CallID)
+		}
+	}
+}
+
+var (
+	posKeyRe = regexp.MustCompile(`^\{"pos":(\d+)`)
+	seqKeyRe = regexp.MustCompile(`"seq":(\d+)`)
+)
+
+// renum gives an event entry its new pos and seq, when they moved.
+func renum(t *testing.T, e json.RawMessage, posMap, seqMap map[int64]int64, h evHead) json.RawMessage {
+	t.Helper()
+	if p, ok := posMap[h.Pos]; ok {
+		e = swapNum(t, e, posKeyRe, h.Pos, p)
+	}
+	if s, ok := seqMap[h.Event.Seq]; ok && h.Event.Seq != 0 {
+		e = swapNum(t, e, seqKeyRe, h.Event.Seq, s)
+	}
+	return e
+}
+
+// swapNum rewrites the first number re matches in b — which must be
+// was — to now, leaving every other byte as it was.
+func swapNum(t *testing.T, b []byte, re *regexp.Regexp, was, now int64) json.RawMessage {
+	t.Helper()
+	m := re.FindSubmatchIndex(b)
+	if m == nil || string(b[m[2]:m[3]]) != strconv.FormatInt(was, 10) {
+		t.Fatalf("renumber %d → %d: %s does not lead with it in %s", was, now, re, b)
+	}
+	out := append([]byte(nil), b[:m[2]]...)
+	out = strconv.AppendInt(out, now, 10)
+	return append(out, b[m[3]:]...)
+}
+
+// joinRaw is a JSON array of entries.
+func joinRaw(entries []json.RawMessage) json.RawMessage {
+	out := []byte{'['}
+	for i, e := range entries {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = append(out, e...)
+	}
+	return append(out, ']')
+}
+
+// replaceRaw swaps the one occurrence of was in doc for now.
+func replaceRaw(t *testing.T, doc, was, now json.RawMessage) json.RawMessage {
+	t.Helper()
+	if n := bytes.Count(doc, was); n != 1 {
+		t.Fatalf("replace: %d occurrences of %.80s", n, was)
+	}
+	return bytes.Replace(doc, was, now, 1)
 }

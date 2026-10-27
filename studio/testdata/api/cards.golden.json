@@ -1589,21 +1589,9 @@
           "pos": 3,
           "time": "2026-10-01T09:00:00Z",
           "event": {
-            "type": "tool_start",
-            "run_id": "r_par",
-            "seq": 2,
-            "call_id": "p2",
-            "name": "b",
-            "args": {}
-          }
-        },
-        {
-          "pos": 4,
-          "time": "2026-10-01T09:00:00Z",
-          "event": {
             "type": "tool_finish",
             "run_id": "r_par",
-            "seq": 3,
+            "seq": 2,
             "call_id": "p1",
             "name": "a",
             "content": "a done",
@@ -1611,28 +1599,40 @@
           }
         },
         {
-          "pos": 5,
+          "pos": 4,
           "time": "2026-10-01T09:00:00Z",
           "event": {
             "type": "tool_start",
             "run_id": "r_par",
-            "seq": 4,
-            "call_id": "p3",
-            "name": "c",
+            "seq": 3,
+            "call_id": "p2",
+            "name": "b",
             "args": {}
+          }
+        },
+        {
+          "pos": 5,
+          "time": "2026-10-01T09:00:00Z",
+          "event": {
+            "type": "tool_finish",
+            "run_id": "r_par",
+            "seq": 4,
+            "call_id": "p2",
+            "name": "b",
+            "content": "b done",
+            "is_error": false
           }
         },
         {
           "pos": 6,
           "time": "2026-10-01T09:00:00Z",
           "event": {
-            "type": "tool_finish",
+            "type": "tool_start",
             "run_id": "r_par",
             "seq": 5,
             "call_id": "p3",
             "name": "c",
-            "content": "c done",
-            "is_error": false
+            "args": {}
           }
         },
         {
@@ -1642,9 +1642,9 @@
             "type": "tool_finish",
             "run_id": "r_par",
             "seq": 6,
-            "call_id": "p2",
-            "name": "b",
-            "content": "b done",
+            "call_id": "p3",
+            "name": "c",
+            "content": "c done",
             "is_error": false
           }
         },
@@ -1936,7 +1936,7 @@
             "weft.run.id": "r_par",
             "weft.step.index": 0,
             "weft.tool.result_bytes": 6,
-            "weft.tool.seq": 2
+            "weft.tool.seq": 3
           },
           "end": "2026-10-01T09:00:00Z",
           "events": [],
@@ -1982,7 +1982,7 @@
             "weft.run.id": "r_par",
             "weft.step.index": 0,
             "weft.tool.result_bytes": 6,
-            "weft.tool.seq": 4
+            "weft.tool.seq": 5
           },
           "end": "2026-10-01T09:00:00Z",
           "events": [],
@@ -2446,21 +2446,9 @@
             "pos": 3,
             "time": "2026-10-01T09:00:00Z",
             "event": {
-              "type": "tool_start",
-              "run_id": "r_par",
-              "seq": 2,
-              "call_id": "p2",
-              "name": "b",
-              "args": {}
-            }
-          },
-          {
-            "pos": 4,
-            "time": "2026-10-01T09:00:00Z",
-            "event": {
               "type": "tool_finish",
               "run_id": "r_par",
-              "seq": 3,
+              "seq": 2,
               "call_id": "p1",
               "name": "a",
               "content": "a done",
@@ -2468,28 +2456,40 @@
             }
           },
           {
-            "pos": 5,
+            "pos": 4,
             "time": "2026-10-01T09:00:00Z",
             "event": {
               "type": "tool_start",
               "run_id": "r_par",
-              "seq": 4,
-              "call_id": "p3",
-              "name": "c",
+              "seq": 3,
+              "call_id": "p2",
+              "name": "b",
               "args": {}
+            }
+          },
+          {
+            "pos": 5,
+            "time": "2026-10-01T09:00:00Z",
+            "event": {
+              "type": "tool_finish",
+              "run_id": "r_par",
+              "seq": 4,
+              "call_id": "p2",
+              "name": "b",
+              "content": "b done",
+              "is_error": false
             }
           },
           {
             "pos": 6,
             "time": "2026-10-01T09:00:00Z",
             "event": {
-              "type": "tool_finish",
+              "type": "tool_start",
               "run_id": "r_par",
               "seq": 5,
               "call_id": "p3",
               "name": "c",
-              "content": "c done",
-              "is_error": false
+              "args": {}
             }
           },
           {
@@ -2499,9 +2499,9 @@
               "type": "tool_finish",
               "run_id": "r_par",
               "seq": 6,
-              "call_id": "p2",
-              "name": "b",
-              "content": "b done",
+              "call_id": "p3",
+              "name": "c",
+              "content": "c done",
               "is_error": false
             }
           },
@@ -2567,7 +2567,7 @@
           {
             "call_id": "p2",
             "name": "b",
-            "seq": 2,
+            "seq": 3,
             "args": {},
             "result": {
               "content": "b done",
@@ -2584,7 +2584,7 @@
           {
             "call_id": "p3",
             "name": "c",
-            "seq": 4,
+            "seq": 5,
             "args": {},
             "result": {
               "content": "c done",

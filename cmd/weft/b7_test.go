@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -67,8 +68,12 @@ func TestBareDoctorFindsAddrStudio(t *testing.T) {
 	if code != 0 || errb != from {
 		t.Errorf("bare weft doctor = exit %d, stderr %q, want %q\n%s", code, errb, from, out)
 	}
+	// The source is said once, on stderr (B7-fix).
+	if strings.Contains(out, "(discovery file") {
+		t.Errorf("doctor's stdout repeats the source:\n%s", out)
+	}
 	for _, want := range []string{
-		"ok   studio    reachable at " + url + " (discovery file " + file + ")",
+		"ok   studio    reachable at " + url + " (weft ",
 		"ok   token     accepted",
 		"ok   discovery " + file + " -> " + url + " (this Studio)",
 	} {
@@ -177,5 +182,122 @@ func TestOpenIDKinds(t *testing.T) {
 	}
 	if _, err := pageOf(context.Background(), c, "locked"); err == nil || !strings.Contains(err.Error(), "403") {
 		t.Errorf("a 403 = %v, want it as the error", err)
+	}
+}
+
+// metaDB is the db.path the Studio at addr serves, read with db's
+// stable token ("" when nothing answers as that database's Studio).
+func metaDB(addr, db string) string {
+	tok, _ := os.ReadFile(db + ".token")
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/meta", nil)
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tok)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var m struct {
+		DB struct {
+			Path string `json:"path"`
+		} `json:"db"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&m) != nil {
+		return ""
+	}
+	return m.DB.Path
+}
+
+// TestConcurrentStartsOneServes (B7-fix, review finding 1): two bare
+// `weft studio` starts on one database at the same moment — the
+// second's probe of the busy port would go out bare, get a 401 and
+// move on — exactly one serves; the other is refused by the lock.
+func TestConcurrentStartsOneServes(t *testing.T) {
+	skipWithoutSelfSignal(t)
+	discoveryDir(t)
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	base := freeBase(t, 3)
+	db := filepath.Join(t.TempDir(), "weft.db")
+	type result struct {
+		err error
+		out *syncBuffer
+	}
+	results := make(chan result, 2)
+	start := make(chan struct{})
+	for range 2 {
+		go func() {
+			out := &syncBuffer{}
+			<-start
+			results <- result{serveWith("sqlite://"+db, want{addr: loop(base), span: 3}, "", out, afterBoot{}), out}
+		}()
+	}
+	close(start)
+	var refused result
+	select {
+	case refused = <-results:
+	case <-time.After(15 * time.Second):
+		t.Fatal("neither start was refused: both serve the database")
+	}
+	named := refused.err != nil && (strings.HasPrefix(refused.err.Error(), "studio already running at ") || strings.HasPrefix(refused.err.Error(), "another Studio holds "))
+	if !named || !strings.Contains(refused.err.Error(), db) {
+		t.Fatalf("the refused start = %v (stdout %q), want refused naming %s", refused.err, refused.out.String(), db)
+	}
+	serving := 0
+	for deadline := time.Now().Add(10 * time.Second); serving == 0 && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		for p := base; p < base+3; p++ {
+			if metaDB(loop(p), db) == db {
+				serving++
+			}
+		}
+	}
+	if serving != 1 {
+		t.Fatalf("%d Studios serve %s, want exactly 1", serving, db)
+	}
+	signalSelf(t, syscall.SIGTERM)
+	select {
+	case r := <-results:
+		if r.err != nil {
+			t.Errorf("the serving start after SIGTERM: %v", r.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the serving start never returned")
+	}
+}
+
+// TestOtherDirectoryRefusedAndRestart (B7-fix, review finding 2): a
+// start whose discovery lookup finds another file (another directory)
+// on a database a Studio serves is refused naming it (the lock file
+// says who holds it), on another port and never bound; weft dev from
+// there reuses it instead; and once the first stops, its lock is gone —
+// a restart serves.
+func TestOtherDirectoryRefusedAndRestart(t *testing.T) {
+	discoveryDir(t)
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	base := freeBase(t, 3)
+	db := filepath.Join(t.TempDir(), "weft.db")
+	var first syncBuffer
+	stop := bareStudio(t, "sqlite://"+db, base, 1, loop(base), "", false, &first)
+
+	// Another directory: its discovery locations hold nothing.
+	discoveryDir(t)
+	var second syncBuffer
+	wantRefused(t, serveWith("sqlite://"+db, want{addr: loop(base + 1), pinned: true}, "", &second, afterBoot{}), &second, loop(base))
+	if metaDB(loop(base+1), db) != "" {
+		t.Error("the refused start serves")
+	}
+	var dev syncBuffer
+	r, err := devStudio("sqlite://"+db, want{addr: loop(base + 2), pinned: true}, "", false, &dev)
+	if err != nil || r.url != "http://"+loop(base) || !strings.Contains(dev.String(), "reusing") {
+		t.Fatalf("weft dev from another directory = %+v %v %q, want the running Studio reused", r, err, dev.String())
+	}
+	tok, _ := os.ReadFile(db + ".token")
+	if r.token != strings.TrimSpace(string(tok)) || metaStatus(t, loop(base), r.token) != http.StatusOK {
+		t.Errorf("weft dev's reuse token does not open the running Studio")
+	}
+
+	stop()
+	var again syncBuffer
+	bareStudio(t, "sqlite://"+db, base, 1, loop(base), "", false, &again)
+	if metaDB(loop(base), db) != db {
+		t.Error("a restart on the released database does not serve")
 	}
 }

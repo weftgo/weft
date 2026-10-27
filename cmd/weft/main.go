@@ -83,11 +83,18 @@
 // database's stable token — only to an address this user's discovery
 // file names — to loopback only). Before that, the Studio this
 // user's discovery file names, on whatever port, is asked the same
-// question. One Studio per database file: a Studio found serving the
-// same file either way refuses the start — "studio already running at
-// http://127.0.0.1:7347 (pid 1234) on …/weft.db", exit 1, no database or
-// listener opened (`weft dev` reuses it instead) — and anything
-// else on the wanted port (another program, a Studio on another
+// question. One Studio per SQLite file (internal/dblock): before any
+// probe, the start takes <db>.lock — an exclusive OS lock (flock,
+// LockFileEx on Windows) held while it serves and released by the
+// kernel when the process ends, however it ends — so two starts at the
+// same moment, or from directories whose discovery files differ,
+// cannot both serve the file. A start that cannot take it, or that
+// finds a Studio on the file anyway, is refused — "studio already
+// running at http://127.0.0.1:7347 (pid 1234) on …/weft.db" (the lock
+// file and the discovery file name the holder; else "another Studio
+// holds <db>"), exit 1, no database or listener opened (`weft dev`
+// reuses it instead). A ClickHouse database is a shared server and
+// takes no lock. Anything else on the wanted port (another program, a Studio on another
 // database, a Studio whose meta this token cannot read) moves Studio to
 // the next free port in 7331–7340, said in one line before the banner,
 // which prints the real address. All ten busy is exit 1 naming the
@@ -251,6 +258,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/weftgo/weft/internal/dblock"
 	"github.com/weftgo/weft/internal/doctor"
 	"github.com/weftgo/weft/internal/listen"
 	"github.com/weftgo/weft/obsdb/clickhouse"
@@ -394,7 +402,7 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 	db := fs.String("db", "",
 		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFT_DB or ./.weft/weft.db)")
 	addr := fs.String("addr", "",
-		"listen `address` (default: $WEFT_STUDIO_ADDR, else "+defaultAddr+"); --addr pins; without it Studio takes the next free port in 7331–7340; a Studio already serving the same DB (on any port its discovery file names) refuses the start")
+		"listen `address` (default: $WEFT_STUDIO_ADDR, else "+defaultAddr+"); --addr pins; without it Studio takes the next free port in 7331–7340; a Studio already holding the same SQLite file (<db>.lock) refuses the start")
 	token := fs.String("token", "",
 		"API token (default: $WEFT_STUDIO_TOKEN, else the database's stable token, <db>.token, never printed; a generated one, printed, for a database with no file)")
 	manifest := fs.String("manifest", "",
@@ -436,6 +444,9 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	opts = append(opts, studio.Playground(!*noPlayground))
+	if *noPlayground {
+		opts = append(opts, studio.OffReason("playground", noPlaygroundReason("weft studio")))
+	}
 	opts = append(opts, retainOpts...)
 	opts = append(opts, pricingOpts...)
 	return serveWith(*db, wantAddr(*addr, defaultAddr), *token, stdout,
@@ -548,8 +559,6 @@ func runDoctor(args []string, stdout, stderr io.Writer) error {
 	return doctor.Run(context.Background(), stdout, doctor.Target{
 		URL:       t.base,
 		Token:     t.token,
-		Explicit:  t.explicit(),
-		Source:    t.source(),
 		Discovery: t.discovery(),
 	}, os.Getenv)
 }
@@ -585,6 +594,17 @@ func serveWith(dbFlag string, w want, tokenFlag string, stdout io.Writer, after 
 	if err != nil {
 		return err
 	}
+	// One Studio per database file: the lock first, before any port is
+	// probed or bound — two starts at the same moment, or from two
+	// directories whose discovery files disagree, cannot both pass it.
+	lock, err := lockDB(dbPath)
+	if errors.Is(err, errHeld) {
+		return heldError(dbPath)
+	}
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
 	// The probe carries the token this command was given, else the
 	// database's stable token (plan B3) — only to an address this
 	// user's discovery file names. A token it would generate is nobody
@@ -602,15 +622,14 @@ func serveWith(dbFlag string, w want, tokenFlag string, stdout io.Writer, after 
 		return err
 	}
 	if choice.Reuse {
-		// One Studio per database file (UX-S5a-13): a second one would
-		// serve the same file with its own live stream and take over the
-		// discovery file. Found on the wanted port, or wherever the
-		// discovery file says — refused, naming the running one.
-		return refusedSecond(choice, dbPath)
+		// A Studio serving the file without its lock (a weft before
+		// the lock, an app's embedded Studio): refused the same way.
+		return alreadyRunning(choice.Addr, choice.PID, dbPath)
 	}
 	if choice.Note != "" {
 		_, _ = fmt.Fprintln(stdout, "studio: "+choice.Note)
 	}
+	lock.SetHolder(dblock.Holder{URL: "http://" + loopbackAddr(choice.Addr), PID: os.Getpid()})
 	srv, err := serveBootWith(dbFlag, choice.Addr, tokenFlag, after.rotate, stdout, append(discoveryOption(), extra...)...)
 	if err != nil {
 		_ = choice.Listener.Close()
@@ -639,20 +658,15 @@ func serveWith(dbFlag string, w want, tokenFlag string, stdout io.Writer, after 
 	return err
 }
 
+// noPlaygroundReason is meta.capabilities_off's words for the
+// playground when the command's --no-playground turned it off.
+func noPlaygroundReason(cmd string) string {
+	return cmd + " was started with --no-playground: drop the flag to turn the playground on"
+}
+
 // signInLine is the banner's last line when the browser is not opened
 // and the token is not printed.
 const signInLine = "studio: sign in with `weft open --with-token` (prints this Studio's link, the token in its fragment)"
-
-// refusedSecond is the error a second `weft studio` on a database file
-// a running Studio serves exits with: that Studio's URL and pid.
-func refusedSecond(choice listen.Choice, dbPath string) error {
-	pid := "pid unknown"
-	if choice.PID > 0 {
-		pid = fmt.Sprintf("pid %d", choice.PID)
-	}
-	return fmt.Errorf("studio already running at http://%s (%s) on %s: one Studio per database file — sign in to it with `weft open --with-token`, or stop it first",
-		loopbackAddr(choice.Addr), pid, dbPath)
-}
 
 // uiLink is the UI's address, the token in the fragment when there is
 // one: the UI adopts it, and a fragment never reaches a server.

@@ -38,10 +38,11 @@ type config struct {
 	manifest     []byte
 	capabilities []string
 	playground   bool
-	retain       time.Duration // Retain: 0 = off
-	sweepEvery   time.Duration // the sweeper's interval in tests; 0 = sweepInterval(retain)
-	pricing      *PricingTable // Pricing; New resolves it (resolvePricing), never nil after
-	discovery    string        // DiscoveryFile: the file the hosting command writes for this server
+	retain       time.Duration     // Retain: 0 = off
+	sweepEvery   time.Duration     // the sweeper's interval in tests; 0 = sweepInterval(retain)
+	pricing      *PricingTable     // Pricing; New resolves it (resolvePricing), never nil after
+	discovery    string            // DiscoveryFile: the file the hosting command writes for this server
+	offReasons   map[string]string // OffReason: capability → the host's own words
 }
 
 // DB serves Studio over db (setup A: DB(otel.LocalDB()) — the same
@@ -168,6 +169,21 @@ func Playground(on bool) Option {
 // such file and leaves it unset.
 func DiscoveryFile(path string) Option {
 	return func(c *config) { c.discovery = path }
+}
+
+// OffReason replaces why meta.capabilities_off says capability is off
+// — and every capability off for the same cause (the playground's
+// eight) — with the host's own words: `weft studio --no-playground`
+// says "weft studio was started with --no-playground", not the Go
+// option an embedding app would set. It changes words only, never
+// which capabilities are on.
+func OffReason(capability, why string) Option {
+	return func(c *config) {
+		if c.offReasons == nil {
+			c.offReasons = map[string]string{}
+		}
+		c.offReasons[capability] = why
+	}
 }
 
 // Server is one Studio: the embedded UI, the JSON API, the live

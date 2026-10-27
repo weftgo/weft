@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/weftgo/weft/internal/dblock"
 	"github.com/weftgo/weft/internal/discovery"
 	"github.com/weftgo/weft/internal/listen"
 	"github.com/weftgo/weft/studio"
@@ -127,6 +128,9 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	opts = append(opts, studio.Playground(!*noPlayground))
+	if *noPlayground {
+		opts = append(opts, studio.OffReason("playground", noPlaygroundReason("weft dev")))
+	}
 	retainOpts, _, err := retainOptions(*retain)
 	if err != nil {
 		return err
@@ -267,6 +271,33 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 		r.token, r.link = probeToken(dbPath, tokenFlag, dial), uiLink(dial, "")
 		return r, nil
 	}
+	// No Studio found on the ports: take the database's lock before
+	// serving. Held — another Studio serves the file where neither the
+	// probe nor this directory's discovery file looked — reuse it when
+	// its lock file or a discovery file names it.
+	lock, err := lockDB(dbPath)
+	if errors.Is(err, errHeld) {
+		_ = choice.Listener.Close()
+		addr, pid, ok := dbHolder(dbPath)
+		if !ok {
+			return nil, heldError(dbPath)
+		}
+		dial = loopbackAddr(addr)
+		_, _ = fmt.Fprintln(out, listen.Choice{Addr: dial, Reuse: true, PID: pid}.ReuseLine())
+		reuseNotes(out, dial, rotate)
+		// The lock proves the holder serves this database: its stable
+		// token (or the fixed one) is the one it serves.
+		tok := fixedToken(tokenFlag)
+		if tok == "" {
+			tok = readTokenFile(tokenPath(dbPath))
+		}
+		return &devStudioRun{addr: dial, url: "http://" + dial, dbPath: dbPath, token: tok, link: uiLink(dial, ""), stop: func(os.Signal) {}}, nil
+	}
+	if err != nil {
+		_ = choice.Listener.Close()
+		return nil, err
+	}
+	lock.SetHolder(dblock.Holder{URL: r.url, PID: os.Getpid()})
 	if choice.Note != "" {
 		_, _ = fmt.Fprintln(out, "studio: "+choice.Note)
 	}
@@ -274,6 +305,7 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	srv, err := serveBootWith(dbFlag, choice.Addr, tokenFlag, rotate, io.Discard, append(discoveryOption(), opts...)...)
 	if err != nil {
 		_ = choice.Listener.Close()
+		lock.Release()
 		return nil, err
 	}
 	r.token = srv.token
@@ -303,6 +335,7 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	go func() { done <- serveUntil(httpServer(choice.Addr, srv.Handler()), choice.Listener, out, stopCh) }()
 	stopFresh := keepFresh(disc)
 	r.stop = func(sig os.Signal) {
+		defer lock.Release()
 		defer disc.Remove()
 		defer stopFresh()
 		stopCh <- sig

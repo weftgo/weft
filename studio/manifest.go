@@ -283,6 +283,11 @@ func (s *Server) capabilitiesOff() map[string]string {
 	for c, why := range optionalCapabilities {
 		if !on[c] {
 			off[c] = why
+			for host, words := range s.offReasons {
+				if optionalCapabilities[host] == why {
+					off[c] = words
+				}
+			}
 		}
 	}
 	if len(off) == 0 {

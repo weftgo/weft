@@ -256,7 +256,7 @@ func probe(ctx context.Context, addr string, r Request) verdict {
 			return verdict{why: "a Studio that requires a token, which goes to loopback only"}
 		}
 		if r.Token == "" {
-			return verdict{why: "a Studio that requires a token: set WEFT_STUDIO_TOKEN to its token to reuse it"}
+			return verdict{why: "a Studio that requires a token: set WEFT_STUDIO_TOKEN to its token to compare its database"}
 		}
 		return verdict{why: "a Studio with another token"}
 	default:

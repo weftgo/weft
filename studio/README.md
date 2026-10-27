@@ -77,13 +77,16 @@ the user cache directory; `WEFT_STUDIO_URL` always wins,
 `otel.Studio` never reads it — the root README's "When weft/otel reads
 the file"); ingest is open on loopback;
 `127.0.0.1:7331` is the one default port: started again on the same
-database, the binary finds the running Studio through `/api/meta`
-(`db.path`, `pid`, read with the stable token — sent only to an
-address a trusted discovery file names) — on the wanted port, or
-wherever the discovery file says (a Studio started with `--addr`, or
-moved to 7332–7340) — and refuses the start: one Studio per database
-file (`studio already running at http://127.0.0.1:7347 (pid n) on
-…/weft.db`, exit 1; `weft dev` reuses it instead); anything else on the port
+SQLite file, the binary is refused: one Studio per database file,
+held by `<db>.lock` beside a SQLite file — an exclusive OS lock (flock; LockFileEx on Windows) held while it serves, taken before any port is probed or bound, and released by the kernel when the process ends, a crash or `kill -9` included. Two starts at the same moment, or from
+directories whose discovery files differ, cannot both serve it; the
+refusal names the holder (`studio already running at
+http://127.0.0.1:7347 (pid n) on …/weft.db`, from the lock file or the
+discovery file, else `another Studio holds <db>`), exit 1; `weft dev`
+reuses it instead. A ClickHouse database is a shared server and takes
+no lock. The port probe still asks `/api/meta` (`db.path`, `pid`, read
+with the stable token — sent only to an address a trusted discovery
+file names), the discovery file's Studio first; anything else on the port
 moves it to the next free one in 7331–7340 with one line saying so.
 `--addr` (or `WEFT_STUDIO_ADDR`) pins: a busy pinned address is an
 error, never a fallback; `--db sqlite://path` picks the

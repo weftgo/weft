@@ -450,7 +450,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    on a .go save (300 ms debounce; its process group stopped: SIGTERM, 5 s, SIGKILL);
 //    //    one line per start: studio <url> (bare; #token= only for a fileless DB's generated
 //    //    token) · app pid n · runtime rt_… registered.
-//    //    Port policy (internal/listen): a Studio on the same DB (busy 7331, or
+//    //    One Studio per SQLite file: <db>.lock (internal/dblock, flock/LockFileEx, held while serving,
+//    //    released on process death) taken before the port policy; ClickHouse takes none.
+//    //    Port policy (internal/listen): a Studio on the same DB (lock held, busy 7331, or
 //    //    the discovery file's) — a weft studio is refused ("studio already running at … (pid n) on <db>", exit 1; weft dev reuses it),
 //    //    the discovery file's Studio probed first whatever its port (listen.Request.Known); anything else → the
 //    //    next free port in 7331–7340, said in one line; --addr / WEFT_STUDIO_ADDR pins

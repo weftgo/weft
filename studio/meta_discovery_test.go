@@ -77,3 +77,27 @@ func TestMetaDiscoveryFile(t *testing.T) {
 		t.Errorf("a removed file is served: %s", body)
 	}
 }
+
+// TestOffReason (B7-fix): the host's words replace the reason for the
+// capability it names and every capability off for the same cause —
+// the playground's family — and nothing else; nothing turns on.
+func TestOffReason(t *testing.T) {
+	words := "weft studio was started with --no-playground: drop the flag to turn the playground on"
+	srv := New(DB(fixtureDB(t)), OffReason("playground", words))
+	t.Cleanup(func() { _ = srv.Close() })
+	off := srv.capabilitiesOff()
+	for c, why := range optionalCapabilities {
+		_, isOff := off[c]
+		switch {
+		case why == offPlayground && (!isOff || off[c] != words):
+			t.Errorf("%s: %q, want the host's words", c, off[c])
+		case why != offPlayground && isOff && off[c] != why:
+			t.Errorf("%s: %q, want its own reason %q", c, off[c], why)
+		}
+	}
+	for _, c := range srv.capabilityList() {
+		if c == "playground" {
+			t.Error("OffReason turned the playground on")
+		}
+	}
+}

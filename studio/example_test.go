@@ -193,3 +193,36 @@ func ExampleDiscoveryFile() {
 	fmt.Println(meta.DiscoveryFile == path)
 	// Output: true
 }
+
+// ExampleOffReason is how `weft studio --no-playground` words the
+// playground's absence for a user who never wrote Go: meta's
+// capabilities_off (and `weft doctor`) say the flag.
+func ExampleOffReason() {
+	dir, err := os.MkdirTemp("", "weft-studio-offreason-")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	srv := studio.New(studio.Open(dir+"/weft.db"), studio.Playground(false),
+		studio.OffReason("playground", "weft studio was started with --no-playground"))
+	defer func() { _ = srv.Close() }()
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/meta")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var meta struct {
+		Off map[string]string `json:"capabilities_off"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(meta.Off["runtimes"])
+	// Output: weft studio was started with --no-playground
+}

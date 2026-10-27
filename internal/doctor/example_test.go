@@ -27,7 +27,7 @@ func ExampleRun() {
 	defer ts.Close()
 
 	var out strings.Builder
-	err := doctor.Run(context.Background(), &out, doctor.Target{URL: ts.URL, Explicit: true}, func(string) string { return "" })
+	err := doctor.Run(context.Background(), &out, doctor.Target{URL: ts.URL}, func(string) string { return "" })
 	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
 		if f := strings.Fields(line); !strings.HasPrefix(line, " ") {
 			fmt.Println(f[0], f[1])

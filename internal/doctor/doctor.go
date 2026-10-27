@@ -67,6 +67,8 @@ type meta struct {
 	CapabilitiesOff map[string]string `json:"capabilities_off"`
 	IngestOpen      bool              `json:"ingest_open"`
 	AuthRequired    bool              `json:"auth_required"`
+	// PID is the Studio's process id (db.path's rule).
+	PID int `json:"pid"`
 	// DiscoveryFile is the discovery file this Studio wrote (served
 	// under db.path's rule while it names the Studio's process).
 	DiscoveryFile string `json:"discovery_file"`
@@ -113,19 +115,15 @@ type meta struct {
 	} `json:"manifest_check"`
 }
 
-// Target is the Studio the doctor checks and how the command found it
-// (cmd/weft's one resolver: --url, WEFT_STUDIO_URL, the discovery
-// file, the default address).
+// Target is the Studio the doctor checks, found by cmd/weft's one
+// resolver (--url, WEFT_STUDIO_URL, the discovery file, the default
+// address), which names the source on stderr itself: the doctor's own
+// lines do not repeat it.
 type Target struct {
 	// URL is the Studio's root URL.
 	URL string
 	// Token is the bearer to send, "" for none.
 	Token string
-	// Explicit is whether --url or WEFT_STUDIO_URL named the Studio.
-	Explicit bool
-	// Source is where URL came from in words ("--url", "discovery file
-	// <path>", "the default address; no discovery file").
-	Source string
 	// Discovery is the discovery file this shell reads.
 	Discovery Discovery
 }
@@ -156,9 +154,6 @@ func Run(ctx context.Context, w io.Writer, t Target, getenv func(string) string)
 	url, token := strings.TrimRight(t.URL, "/"), t.Token
 	p := printer{w: w}
 	where := url
-	if !t.Explicit && t.Source != "" {
-		where = url + " (" + t.Source + ")"
-	}
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/meta", nil)
@@ -194,7 +189,7 @@ func Run(ctx context.Context, w io.Writer, t Target, getenv func(string) string)
 		p.line(ok, "studio", "reachable at %s", url)
 		if token == "" {
 			p.line(fail, "token", "studio requires one: it is in <db>.token beside the database (the start banner names the file); set WEFT_STUDIO_TOKEN or --token to it")
-			p.sub("`weft open --with-token` prints this Studio's link signed in (the token in its #token= fragment)")
+			p.sub("or run `weft open --with-token` from the directory the Studio started in (where its discovery file is found), or pass --token \"$(cat <db>.token)\"")
 		} else {
 			p.line(fail, "token", "refused: it is not this studio's token (WEFT_STUDIO_TOKEN / --token)")
 		}
@@ -387,7 +382,7 @@ func (p *printer) runtimes(m meta, url string, getenv func(string) string) {
 		// No runtime link at all: the shell's variables do not apply.
 		why := m.CapabilitiesOff["runtimes"]
 		if why == "" {
-			why = "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+			why = "the playground is off (weft studio --no-playground, or an app's studio.Playground(false))"
 		}
 		p.line(ok, "runtimes", "none: studio has no runtime link (%s)", why)
 		return
@@ -487,8 +482,10 @@ func (p *printer) discovery(m meta, url string, d Discovery) {
 		p.sub("./.weft is read from the working directory: run from the directory the Studio started in")
 	case d.Path == "":
 		p.line(warn, "discovery", "no discovery file: an app that sets no WEFT_STUDIO_URL finds no Studio (weft studio and weft dev write one; WEFT_DISCOVERY=off writes none)")
-	case strings.TrimRight(d.URL, "/") == url:
-		p.line(ok, "discovery", "%s -> %s (this Studio)", d.Path, url)
+	case strings.TrimRight(d.URL, "/") == url || m.DiscoveryFile != "" && m.DiscoveryFile == d.Path || m.PID > 0 && m.PID == d.PID:
+		// This Studio, however its host is spelled (localhost,
+		// 127.0.0.1): the file it wrote, or its pid.
+		p.line(ok, "discovery", "%s -> %s (this Studio)", d.Path, d.URL)
 	default:
 		p.line(warn, "discovery", "%s -> %s, ANOTHER Studio (pid %d, db %s): an app that sets no WEFT_STUDIO_URL sends there, not to %s", d.Path, d.URL, d.PID, orNone(d.DB), url)
 		if dbPath != "" && d.DB != "" && filepath.Clean(d.DB) == filepath.Clean(dbPath) {
@@ -534,7 +531,7 @@ func (p *printer) data(m meta) {
 	case l.WeftVersion == "":
 		p.line(ok, "data", "newest run %s ago%s carries no weft version: a non-weft exporter", ago, svc)
 	case l.WeftVersion != m.WeftVersion:
-		p.line(warn, "data", "newest run %s ago by weft %s%s, this Studio is weft %s: what the newer one records is missing from it (badged on the run)", ago, l.WeftVersion, svc, m.WeftVersion)
+		p.line(warn, "data", "newest run %s ago by weft %s%s, this Studio is weft %s: the versions differ — what one records and the other does not read is badged on the run", ago, l.WeftVersion, svc, m.WeftVersion)
 	default:
 		p.line(ok, "data", "newest run %s ago by weft %s%s", ago, l.WeftVersion, svc)
 	}

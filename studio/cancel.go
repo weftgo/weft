@@ -52,6 +52,11 @@ const cancelling = "cancelling"
 // a frame lost to a stream reconnect is not retried — cancel again. A
 // parked run (pending calls, the approval boundary) is not cancelled:
 // it is over until decided, so the 409 says to approve or deny instead.
+// appCancelRefused is the runtime's refusal of a cancel on an app turn
+// (runtime/sessions.go), word for word — Studio answers it before a
+// command is queued.
+const appCancelRefused = "cancel is not supported on an app turn"
+
 func (s *Server) serveCancel(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := r.PathValue("id")
@@ -86,16 +91,22 @@ func (s *Server) serveCancel(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 		}
 		if !started {
 			// The app's own run (stored: !started && !stored is the 404
-			// above): through a runtime installed with runtime.Sessions,
-			// else 403 "app-owned turn" — the steer and approvals answer
-			// (plan F4, appturn.go). The runtime refuses it today, "cancel
-			// is not supported on an app turn" (thread has no per-turn
-			// cancel), on the command's row.
-			target, ok := s.appTurnRuntime(w, r, rs, row.RunRow)
-			if !ok {
+			// above). Without a runtime that registered runtime.Sessions,
+			// 403 "app-owned turn" as for steer and the approvals (plan
+			// F4.3: the three verbs answer alike). With one, still never
+			// cancelled from here — thread has no per-turn cancel, and the
+			// runtime refuses it in these words — so refused now, 409, not
+			// accepted and then rejected on a command's row (UX-H-19); a
+			// parked one is decided instead, as below.
+			if _, ok := s.appTurnRuntime(w, r, rs, row.RunRow); !ok {
 				return
 			}
-			enqueueAppTurn(w, r, rs, target, appSessionCommand(r, linkruntime.VerbCancel, row.RunRow))
+			if row.Pending > 0 {
+				writeError(w, r, http.StatusConflict, "conflict",
+					"run "+runID+" is parked: decide its pending calls (approve/deny) instead")
+				return
+			}
+			writeError(w, r, http.StatusConflict, "conflict", appCancelRefused+": run "+runID+" is the app's own turn")
 			return
 		}
 		if stored && row.Pending > 0 {

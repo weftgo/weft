@@ -1077,3 +1077,36 @@ func TestRunsJSONCarriesProblems(t *testing.T) {
 		}
 	}
 }
+
+// TestUsageWords (UX-S5a-11): a usage error names what it was given in
+// words — "none", or the arguments quoted — never a Go slice, and -h
+// spells every flag --name, as the usage lines and the docs do.
+func TestUsageWords(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"export"}, "export needs exactly one run id (got none)"},
+		{[]string{"export", "a", "b"}, `export needs exactly one run id (got "a" "b")`},
+		{[]string{"open", "a", "b"}, `(got "a" "b")`},
+		{[]string{"runs", "x"}, `runs takes no arguments (got "x")`},
+		{[]string{"vacuum", "x"}, `vacuum takes no arguments (got "x")`},
+		{[]string{"doctor", "x"}, `doctor takes no arguments (got "x")`},
+	} {
+		_, errb, code := weft(c.args...)
+		if code != 2 || !strings.Contains(errb, c.want) || strings.Contains(errb, "[]") {
+			t.Errorf("weft %v = %d %q, want %q", c.args, code, errb, c.want)
+		}
+	}
+	for _, cmd := range []string{"open", "runs", "export", "studio", "doctor", "vacuum", "mcp", "dev"} {
+		_, errb, _ := weft(cmd, "-h")
+		for _, l := range strings.Split(errb, "\n") {
+			if strings.HasPrefix(l, "  -") && !strings.HasPrefix(l, "  --") {
+				t.Errorf("weft %s -h: %q spells a flag with one dash", cmd, l)
+			}
+		}
+		if !strings.Contains(errb, "  --") {
+			t.Errorf("weft %s -h lists no --flag:\n%s", cmd, errb)
+		}
+	}
+}

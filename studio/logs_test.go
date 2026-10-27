@@ -105,6 +105,40 @@ func TestLogsRoute(t *testing.T) {
 	}
 }
 
+// TestLogsEventName (UX-H-10): a GenAI log event — an OTLP record with
+// an EventName, its body the event's JSON — keeps its name on the logs
+// route as event_name; a plain line carries none.
+func TestLogsEventName(t *testing.T) {
+	db := fixtureDB(t)
+	at := fixtureT0.Add(2 * time.Hour)
+	run := fxSpanRec("r_genai", at, at.Add(time.Second), 1, "", 1, 1)
+	run.TraceID, run.SpanID = "1f0e0d0c0b0a09080706050403020100", "1f0e0d0c0b0a0908"
+	run.Attrs["weft.logs.bridged"] = int64(1)
+	if err := db.Write(context.Background(), obsdb.Batch{
+		Spans: []obsdb.Span{run},
+		Records: []obsdb.Record{
+			{Time: at.Add(100 * time.Millisecond), TraceID: run.TraceID, SpanID: run.SpanID, Severity: 9,
+				EventName: "gen_ai.user.message", Body: `{"content":"where is my order?"}`},
+			{Time: at.Add(200 * time.Millisecond), TraceID: run.TraceID, SpanID: run.SpanID, Severity: 9, Body: "plain line"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, _, body := get(t, Handler(DB(db)), "/studio/api/runs/r_genai/logs")
+	var page struct {
+		Logs []map[string]any `json:"logs"`
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &page) != nil || len(page.Logs) != 2 {
+		t.Fatalf("logs = %d %s", code, body)
+	}
+	if page.Logs[0]["event_name"] != "gen_ai.user.message" || page.Logs[0]["body"] != `{"content":"where is my order?"}` {
+		t.Errorf("the GenAI event = %v, want its event_name and its JSON body", page.Logs[0])
+	}
+	if _, ok := page.Logs[1]["event_name"]; ok {
+		t.Errorf("a plain line = %v, want no event_name", page.Logs[1])
+	}
+}
+
 // TestRunRowDeltaCount: the run row carries delta_count, the deltas
 // obsdb counted and never stored.
 func TestRunRowDeltaCount(t *testing.T) {

@@ -394,15 +394,29 @@ func TestAppSessionSteerAndCancel(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// Cancel: refused on the command's row, nothing changes.
+	// Cancel: refused at once, 409 in the runtime's words (UX-H-19) —
+	// no command is queued, nothing changes.
 	code, body := e.api(t, http.MethodPost, "/api/runs/"+turn.RunID()+"/cancel", "")
+	if code != http.StatusConflict || !strings.Contains(body, "cancel is not supported on an app turn") {
+		t.Fatalf("cancel = %d %s, want 409 cancel is not supported on an app turn", code, body)
+	}
+
+	// A public id the resolver does not answer, while the turn runs:
+	// the runtime's refusal on the command's row.
+	liveMu.Lock()
+	live = nil
+	liveMu.Unlock()
+	code, body = e.api(t, http.MethodPost, "/api/runs/"+turn.RunID()+"/steer", `{"message":"anyone?"}`)
 	if code != http.StatusAccepted {
-		t.Fatalf("cancel = %d %s", code, body)
+		t.Fatalf("steer = %d %s", code, body)
 	}
 	row := e.waitCommand(t, commandOf(t, body), "rejected")
-	if !strings.Contains(row, `"error":"cancel is not supported on an app turn"`) {
-		t.Errorf("cancel's command = %s", row)
+	if !strings.Contains(row, `"error":"no session for this public id"`) {
+		t.Errorf("unknown public id's command = %s", row)
 	}
+	liveMu.Lock()
+	live = s
+	liveMu.Unlock()
 
 	// Steer the running turn: delivered at its next drain point.
 	code, body = e.api(t, http.MethodPost, "/api/runs/"+turn.RunID()+"/steer", `{"message":"also check the refund"}`)
@@ -427,35 +441,20 @@ func TestAppSessionSteerAndCancel(t *testing.T) {
 		t.Errorf("the turn never saw the steer: %s", got)
 	}
 
-	// The turn is over: a second steer has nothing to steer into.
-	// Session.Steer decides it under the session's lock, after the ack:
-	// the command finishes failed, and nothing was written.
+	// The turn is over and its row says so: a second steer has nothing
+	// to steer into — refused at once, 409 in the runtime's words
+	// (UX-H-19), no command queued, nothing written. (A row that still
+	// reads running goes to the runtime, whose Session.Steer decides it
+	// under the session's lock — sessions_internal_test.go's late steer.)
 	e.waitStored(t, turn.RunID())
 	entries := len(s.Entries())
 	code, body = e.api(t, http.MethodPost, "/api/runs/"+turn.RunID()+"/steer", `{"message":"too late"}`)
-	if code != http.StatusAccepted {
-		t.Fatalf("late steer = %d %s", code, body)
-	}
-	row = e.waitCommand(t, commandOf(t, body), "finished")
-	if !strings.Contains(row, `"status":"failed"`) || !strings.Contains(row, "no running turn to steer") {
-		t.Errorf("late steer's command = %s", row)
+	if code != http.StatusConflict || !strings.Contains(body, "no running turn to steer") || !strings.Contains(body, "already finished (succeeded)") {
+		t.Fatalf("late steer = %d %s, want 409 no running turn to steer", code, body)
 	}
 	time.Sleep(20 * time.Millisecond)
 	if len(s.Entries()) != entries {
 		t.Error("a refused steer wrote to the session")
-	}
-
-	// A public id the resolver does not answer.
-	liveMu.Lock()
-	live = nil
-	liveMu.Unlock()
-	code, body = e.api(t, http.MethodPost, "/api/runs/"+turn.RunID()+"/steer", `{"message":"anyone?"}`)
-	if code != http.StatusAccepted {
-		t.Fatalf("steer = %d %s", code, body)
-	}
-	row = e.waitCommand(t, commandOf(t, body), "rejected")
-	if !strings.Contains(row, `"error":"no session for this public id"`) {
-		t.Errorf("unknown public id's command = %s", row)
 	}
 }
 

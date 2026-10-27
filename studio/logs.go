@@ -30,12 +30,15 @@ const maxLogsLimit = 1000
 // logRow is one app log record. severity is the OTLP short name
 // ("INFO", "WARN2"; "" when unspecified) and severity_number the
 // number it names; attrs are the record's attributes (strings on a
-// ClickHouse backend); span_id is absent for none.
+// ClickHouse backend); span_id is absent for none. event_name is the
+// OTLP record's EventName (gen_ai.user.message, a GenAI event: its body
+// is the event's JSON), absent for a plain log line (UX-H-10).
 type logRow struct {
 	Index          int64          `json:"index"`
 	Time           time.Time      `json:"time"`
 	Severity       string         `json:"severity"`
 	SeverityNumber int            `json:"severity_number"`
+	EventName      string         `json:"event_name,omitempty"`
 	Body           string         `json:"body"`
 	Attrs          map[string]any `json:"attrs"`
 	SpanID         string         `json:"span_id,omitempty"`
@@ -185,7 +188,7 @@ func (s *Server) serveRunLogs(w http.ResponseWriter, r *http.Request, id string)
 		}
 		out.Logs = append(out.Logs, logRow{
 			Index: l.Index, Time: l.Time, Severity: obsdb.SeverityText(l.Severity), SeverityNumber: l.Severity,
-			Body: l.Body, Attrs: attrs, SpanID: l.SpanID,
+			EventName: l.EventName, Body: l.Body, Attrs: attrs, SpanID: l.SpanID,
 		})
 	}
 	if n := len(logs); n > 0 && n >= query.PageLimit() {

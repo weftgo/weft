@@ -48,12 +48,13 @@ const (
 const mcpInstructions = `weft mcp is READ-ONLY: it reads a weft Studio's recorded agent runs ` +
 	`(the Studio JSON API, GET only); it never approves, denies, steers, cancels, deletes, ` +
 	`replays or starts anything. Start with explain_failure <run id> for "why did run X fail"; ` +
-	`find runs with runs (newest first, filters) or search (text and filters); ` +
+	`find runs with runs (newest first, filters) or search (text and filters; its error_class facet groups the failures); ` +
+	`measure with stats (runs, failures, tokens, cost, latency by agent, model, tool, error type or step); ` +
 	`drill in with run (the row), step (one step assembled), request (the exact model input), ` +
 	`events, tools, transcript, diff (two runs step by step), export (the whole run); ` +
 	`investigate with logs (the app's log lines), spans (timing; tree=true with the child runs), trace (by trace id), ` +
 	`live (running now), agents (manifests), experiments, runtimes. ` +
-	`Outputs are the route's JSON; list tools (runs, search, sessions, session, live) answer compact rows — ` +
+	`Outputs are the route's JSON; list tools (runs, search, sessions, session, live, stats) answer compact rows — ` +
 	`empty, zero, false and null fields omitted, hashes cut to 12 characters, cost reasons said once in cost_reasons — ` +
 	`full=true gives the route's JSON as served. A cut output says so in a final note (raise max_bytes or narrow the query). ` +
 	`Badges and holes ("not_recorded", "stripped", "hidden", "gap", ...) mean the data is absent for that reason — never empty. ` +
@@ -68,8 +69,9 @@ type mcpTool struct {
 // mcpTools is the tool table, in the order --help and the docs list it.
 var mcpTools = []mcpTool{
 	{"explain_failure", "run + steps + children + transcript", "why a run failed (or how it ended): status, error, the first error anywhere in the run (its steps, its child runs), every step and child in a digest, decisions, holes, this run's last assistant text"},
-	{"runs", "GET /api/runs", "list runs, newest first (agent, status, session, public_id, experiment_id, all, parent, limit, before cursor)"},
-	{"search", "GET /api/search", "find runs by text (prompt, answer, error, tool names) and filters (since/until, model, min_tokens, min_cost, sort)"},
+	{"runs", "GET /api/runs", "list runs, newest first (agent, status, session, public_id, experiment_id, error_class, all, parent, limit, before cursor)"},
+	{"search", "GET /api/search", "find runs by text (prompt, answer, error, tool names) and filters (since/until, model, min_tokens, min_cost, error_class, sort); the error_class facet"},
+	{"stats", "GET /api/stats", "numbers across runs grouped by agent, model, tool, error_type or step: runs, failures, tokens, cost, latency, retries, denials (since, agent, tag, public_id)"},
 	{"run", "GET /api/runs/{id}", "one run's row: status, error, steps, usage, cost, children, holes"},
 	{"step", "GET /api/runs/{id}/steps/{n}", "one step assembled: request, attempts, events, tool calls and results, children, holes"},
 	{"request", "GET /api/runs/{id}/requests", "the exact model input per step (prompt, catalog, params); transcript=true adds the step's messages"},
@@ -136,14 +138,14 @@ spans/trace, full=true as served — cut at max_bytes, default 64 KiB, with a no
 `+mcpToolTable()+`
 Flags:
 `)
-		fs.PrintDefaults()
+		printDefaults(fs)
 	}
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(pos) > 0 {
-		return usageError("mcp takes no arguments, got %q", pos)
+		return usageError("mcp takes no arguments (got %s)", gotArgs(pos))
 	}
 	if !*readOnly {
 		return usageError("--read-only=false: weft mcp has no write mode (write verbs stay out until the approval story for agents exists)")
@@ -393,13 +395,22 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 		m.explainFailure)
 	addTool(srv, "runs", `List runs, newest first (GET /api/runs): one compact row per run with status, error, steps, usage, cost (full=true: the route's rows). `+
 		`Top-level runs only unless all=true or parent=<run id>. Filter by agent, status (running|succeeded|failed|interrupted), `+
-		`session, public_id, experiment_id. Page with before + before_id from the answer's next_before/next_before_id. `+
-		`For text or a time window use search.`,
+		`session, public_id, experiment_id, error_class (a class string from search's error_class facet). Page with before + before_id `+
+		`from the answer's next_before/next_before_id. For text or a time window use search.`,
 		m.runs)
 	addTool(srv, "search", `Find runs by text and filters (GET /api/search): q terms are case-insensitive substrings of the prompt, `+
 		`answer, error or a called tool's name, all required ("quoted phrase" = one term). Filters: agent, tool, status, model, `+
-		`error, since/until (RFC 3339), min_tokens, min_cost (USD), sort=started|duration|tokens|cost, limit, offset.`,
+		`error, error_class (exact, a class from the facet), since/until (RFC 3339), min_tokens, min_cost (USD), `+
+		`sort=started|duration|tokens|cost, limit, offset. The answer's facets.error_class groups the match's failures by their `+
+		`normalised error text (numbers N, ids <id>), most runs first — the classes error_class takes (capability stats; see meta).`,
 		m.search)
+	addTool(srv, "stats", `Numbers across runs (GET /api/stats): by=agent|model|tool|error_type|step, one row per group with runs, failed, `+
+		`failure_rate, calls, tokens, cost, duration_ms and ttft_ms {p50, p95, n}, retry_rate, denials (agent groups: delegated, what `+
+		`their subagents spent; runs_query, the search query listing the group's runs). Window: since (RFC 3339 or 90m/24h/7d back, `+
+		`default 24h), until. Filters: agent, tag {k: v}, public_id, parent (* default: every run; "" top-level), playground, `+
+		`experiment_id, status. Compact rows: each group's 24-bucket series left out (full=true: as served). 404 when the database `+
+		`cannot aggregate (see meta).`,
+		m.stats)
 	addTool(srv, "run", `One run's row (GET /api/runs/{id}): status, err, steps, stop_reason, usage, cost, its subagent children, `+
 		`its holes (why something is absent) and compactions. Use after runs/search to look at one run.`,
 		m.run)
@@ -413,7 +424,8 @@ func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 		`Refused (403) to a read-only panel token.`,
 		m.request)
 	addTool(srv, "events", `The run's durable event stream (GET /api/runs/{id}/events): run_start, step_start, tool_start/finish, `+
-		`step_finish, run_finish, … in order. Paged: pass after=<next_after> from the previous answer.`,
+		`step_finish, run_finish, … in order. Paged: pass after=<next_after> from the previous answer until next_after is absent. `+
+		`run_terminal (the route's done) says the run has ended, not that this is the last page.`,
 		m.events)
 	addTool(srv, "tools", `The tool catalogs the run offered the model, by hash (GET /api/runs/{id}/tools): names, descriptions, `+
 		`input schemas. Refused (403) to a read-only panel token.`,
@@ -504,27 +516,29 @@ type mcpRunsIn struct {
 	Limit        int    `json:"limit,omitempty" jsonschema:"page size (Studio's default when 0)"`
 	Before       string `json:"before,omitempty" jsonschema:"the previous answer's next_before (RFC 3339): the next page"`
 	BeforeID     string `json:"before_id,omitempty" jsonschema:"the previous answer's next_before_id, with before"`
+	ErrorClass   string `json:"error_class,omitempty" jsonschema:"only failures of this class (exact: a class string from search's facets.error_class)"`
 	mcpFull
 	mcpBound
 }
 
 type mcpSearchIn struct {
-	Q         string  `json:"q,omitempty" jsonschema:"terms: case-insensitive substrings of prompt, answer, error or a tool name, all required"`
-	Agent     string  `json:"agent,omitempty" jsonschema:"exact agent name"`
-	Tool      string  `json:"tool,omitempty" jsonschema:"runs that called this tool (exact name)"`
-	Status    string  `json:"status,omitempty" jsonschema:"running, succeeded, failed, interrupted, parked (an open park: pending calls, no resume) or cancelled (a failed run whose context ended); any other word is a 400"`
-	Model     string  `json:"model,omitempty" jsonschema:"exact model name"`
-	Error     string  `json:"error,omitempty" jsonschema:"substring of the run's error"`
-	Since     string  `json:"since,omitempty" jsonschema:"started at or after (RFC 3339)"`
-	Until     string  `json:"until,omitempty" jsonschema:"started before (RFC 3339)"`
-	MinTokens int64   `json:"min_tokens,omitempty" jsonschema:"input + output tokens at least"`
-	MinCost   float64 `json:"min_cost,omitempty" jsonschema:"USD at least, own + delegated (unpriced runs never match)"`
-	Sort      string  `json:"sort,omitempty" jsonschema:"started (default, newest first), duration, tokens or cost (most first)"`
-	Session   string  `json:"session,omitempty" jsonschema:"only this thread session's runs"`
-	PublicID  string  `json:"public_id,omitempty" jsonschema:"only this public id's runs"`
-	All       bool    `json:"all,omitempty" jsonschema:"subagent children too"`
-	Limit     int     `json:"limit,omitempty" jsonschema:"page size"`
-	Offset    int     `json:"offset,omitempty" jsonschema:"the previous answer's next_offset"`
+	Q          string  `json:"q,omitempty" jsonschema:"terms: case-insensitive substrings of prompt, answer, error or a tool name, all required"`
+	Agent      string  `json:"agent,omitempty" jsonschema:"exact agent name"`
+	Tool       string  `json:"tool,omitempty" jsonschema:"runs that called this tool (exact name)"`
+	Status     string  `json:"status,omitempty" jsonschema:"running, succeeded, failed, interrupted, parked (an open park: pending calls, no resume) or cancelled (a failed run whose context ended); any other word is a 400"`
+	Model      string  `json:"model,omitempty" jsonschema:"exact model name"`
+	Error      string  `json:"error,omitempty" jsonschema:"substring of the run's error"`
+	ErrorClass string  `json:"error_class,omitempty" jsonschema:"a failure class, exact (a class string from facets.error_class)"`
+	Since      string  `json:"since,omitempty" jsonschema:"started at or after (RFC 3339)"`
+	Until      string  `json:"until,omitempty" jsonschema:"started before (RFC 3339)"`
+	MinTokens  int64   `json:"min_tokens,omitempty" jsonschema:"input + output tokens at least"`
+	MinCost    float64 `json:"min_cost,omitempty" jsonschema:"USD at least, own + delegated (unpriced runs never match)"`
+	Sort       string  `json:"sort,omitempty" jsonschema:"started (default, newest first), duration, tokens or cost (most first)"`
+	Session    string  `json:"session,omitempty" jsonschema:"only this thread session's runs"`
+	PublicID   string  `json:"public_id,omitempty" jsonschema:"only this public id's runs"`
+	All        bool    `json:"all,omitempty" jsonschema:"subagent children too"`
+	Limit      int     `json:"limit,omitempty" jsonschema:"page size"`
+	Offset     int     `json:"offset,omitempty" jsonschema:"the previous answer's next_offset"`
 	mcpFull
 	mcpBound
 }
@@ -593,6 +607,9 @@ const mcpErrBytes = 2048
 // any badge, reason and fix), bounded with the same visible note.
 func (m *mcpReader) fetch(ctx context.Context, path string, q url.Values) (int, []byte, error) {
 	status, body, err := m.s.get(ctx, path, q)
+	if err != nil && status == http.StatusNotFound {
+		err = fmt.Errorf("%w%s", err, notFoundHint(path))
+	}
 	if err != nil {
 		if len(body) > 0 {
 			b := compact(body)
@@ -604,6 +621,22 @@ func (m *mcpReader) fetch(ctx context.Context, path string, q url.Values) (int, 
 		return status, nil, err
 	}
 	return status, body, nil
+}
+
+// notFoundHint is what a 404 on an id adds: where ids come from
+// (UX-H-29). A route that is not there at all says so through meta.
+func notFoundHint(path string) string {
+	switch {
+	case strings.HasPrefix(path, "/api/runs/"):
+		return " — find run ids with runs or search {q}"
+	case strings.HasPrefix(path, "/api/sessions/"):
+		return " — find session ids with sessions"
+	case strings.HasPrefix(path, "/api/traces/"):
+		return " — a run row's trace_id (the run tool) names its trace"
+	case strings.HasPrefix(path, "/api/experiments/"):
+		return " — find experiment ids with experiments"
+	}
+	return " — meta says whether this Studio serves the route"
 }
 
 // get is fetch without the status.
@@ -704,7 +737,7 @@ func pageSummary(what string, b []byte, list string) string {
 	}
 	var rows []json.RawMessage
 	_ = json.Unmarshal(p[list], &rows)
-	s := fmt.Sprintf("%s: %d %s", what, len(rows), list)
+	s := fmt.Sprintf("%s: %s", what, count(len(rows), strings.TrimSuffix(list, "s"), list))
 	if t, ok := p["total"]; ok {
 		s += " of " + string(t)
 	}
@@ -730,6 +763,7 @@ func (m *mcpReader) runs(ctx context.Context, _ *sdk.CallToolRequest, in mcpRuns
 	setInt(q, "limit", int64(in.Limit))
 	setStr(q, "before", in.Before)
 	setStr(q, "before_id", in.BeforeID)
+	setStr(q, "error_class", in.ErrorClass)
 	b, err := m.get(ctx, "/api/runs", q)
 	if err != nil {
 		return nil, nil, err
@@ -740,7 +774,7 @@ func (m *mcpReader) runs(ctx context.Context, _ *sdk.CallToolRequest, in mcpRuns
 func (m *mcpReader) search(ctx context.Context, _ *sdk.CallToolRequest, in mcpSearchIn) (*sdk.CallToolResult, any, error) {
 	q := url.Values{}
 	for k, v := range map[string]string{"q": in.Q, "agent": in.Agent, "tool": in.Tool, "status": in.Status, "model": in.Model,
-		"error": in.Error, "since": in.Since, "until": in.Until, "sort": in.Sort, "session": in.Session, "public_id": in.PublicID} {
+		"error": in.Error, "error_class": in.ErrorClass, "since": in.Since, "until": in.Until, "sort": in.Sort, "session": in.Session, "public_id": in.PublicID} {
 		setStr(q, k, v)
 	}
 	setInt(q, "min_tokens", in.MinTokens)
@@ -756,7 +790,7 @@ func (m *mcpReader) search(ctx context.Context, _ *sdk.CallToolRequest, in mcpSe
 	if err != nil {
 		return nil, nil, err
 	}
-	return out(in.MaxBytes, pageSummary("search", b, "runs"), in.rows(b, "runs", nil))
+	return out(in.MaxBytes, pageSummary("search", b, "runs")+errorClassSuffix(b), in.rows(b, "runs", nil))
 }
 
 // runHead is the part of a run row a summary names.
@@ -776,7 +810,7 @@ type runHead struct {
 }
 
 func (h runHead) line(link string) string {
-	s := fmt.Sprintf("run %s (%s): %s, %d steps", h.ID, orDash(h.Agent), h.Status, h.Steps)
+	s := fmt.Sprintf("run %s (%s): %s, %s", h.ID, agentLabel(h.Agent), h.Status, count(h.Steps, "step", "steps"))
 	if h.Err != "" {
 		s += ": " + h.Err
 	}
@@ -785,9 +819,9 @@ func (h runHead) line(link string) string {
 	}
 	switch {
 	case h.Pending > 0 && h.ResumedBy != "":
-		s += fmt.Sprintf("; parked (%d calls), decided → resumed as %s", h.Pending, h.ResumedBy)
+		s += fmt.Sprintf("; parked (%s), decided → resumed as %s", count(h.Pending, "call", "calls"), h.ResumedBy)
 	case h.Pending > 0:
-		s += fmt.Sprintf("; %d calls awaiting a decision", h.Pending)
+		s += fmt.Sprintf("; %s awaiting a decision", count(h.Pending, "call", "calls"))
 	}
 	if h.ResumedFrom != "" {
 		s += "; resumes " + h.ResumedFrom
@@ -800,6 +834,23 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// agentLabel is a summary's agent: its name, or "unnamed agent" for a
+// run whose agent has none (UX-H-29).
+func agentLabel(s string) string {
+	if s == "" {
+		return "unnamed agent"
+	}
+	return s
+}
+
+// count is n with its noun in agreement: "1 step", "3 steps", "0 steps".
+func count(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(n) + " " + many
 }
 
 func (m *mcpReader) run(ctx context.Context, _ *sdk.CallToolRequest, in mcpRunIn) (*sdk.CallToolResult, any, error) {
@@ -930,7 +981,57 @@ func (m *mcpReader) events(ctx context.Context, _ *sdk.CallToolRequest, in mcpEv
 	if err != nil {
 		return nil, nil, err
 	}
-	return out(in.MaxBytes, pageSummary("run "+in.ID+" events", b, "events"), b)
+	return out(in.MaxBytes, eventsSummary(in.ID, b), eventsProjection(b))
+}
+
+// eventsSummary is an events page's line (UX-H-36): the positions it
+// holds, the cursor to the next page, and whether the run is terminal
+// — said apart, because a terminal run's first page is not its last.
+func eventsSummary(id string, b []byte) string {
+	var p struct {
+		Events []struct {
+			Pos int64 `json:"pos"`
+		} `json:"events"`
+		NextAfter *int64 `json:"next_after"`
+		Done      bool   `json:"done"`
+	}
+	if json.Unmarshal(b, &p) != nil {
+		return "run " + id + " events"
+	}
+	s := "run " + id + " events: " + count(len(p.Events), "event", "events")
+	if n := len(p.Events); n > 0 {
+		s += fmt.Sprintf(" (pos %d–%d)", p.Events[0].Pos, p.Events[n-1].Pos)
+	}
+	if p.NextAfter != nil {
+		s += fmt.Sprintf("; more: after=%d", *p.NextAfter)
+	} else {
+		s += "; no more recorded"
+	}
+	if p.Done {
+		s += "; the run is terminal"
+	} else {
+		s += "; the run may still record events"
+	}
+	return s
+}
+
+// eventsProjection is the events page as the tool answers it: the
+// route's body with done renamed run_terminal (UX-H-36) — the route's
+// done says the run ended, not that the stream is exhausted (next_after
+// says that). Everything else as served; a body that does not decode
+// as it came.
+func eventsProjection(b []byte) []byte {
+	var doc map[string]json.RawMessage
+	if json.Unmarshal(b, &doc) != nil {
+		return b
+	}
+	v, ok := doc["done"]
+	if !ok {
+		return b
+	}
+	delete(doc, "done")
+	doc["run_terminal"] = v
+	return marshalCompact(doc)
 }
 
 func (m *mcpReader) tools(ctx context.Context, _ *sdk.CallToolRequest, in mcpRunIn) (*sdk.CallToolResult, any, error) {
@@ -966,7 +1067,7 @@ func (m *mcpReader) diff(ctx context.Context, _ *sdk.CallToolRequest, in mcpDiff
 	}
 	s := fmt.Sprintf("diff %s → %s", in.A, in.B)
 	if err := json.Unmarshal(b, &d); err == nil {
-		s += fmt.Sprintf(": %d changed steps", len(d.Summary.ChangedSteps))
+		s += ": " + count(len(d.Summary.ChangedSteps), "changed step", "changed steps")
 		if d.Summary.FirstChanged != nil {
 			s += fmt.Sprintf(", first at step %d", *d.Summary.FirstChanged)
 		}
@@ -1039,5 +1140,5 @@ func sessionSummary(id string, b []byte) string {
 	if json.Unmarshal(b, &d) != nil {
 		return "session " + id
 	}
-	return fmt.Sprintf("session %s (%s): %s, %d turns", id, orDash(d.Agent), orDash(d.Status), len(d.Runs))
+	return fmt.Sprintf("session %s (%s): %s, %s", id, agentLabel(d.Agent), orDash(d.Status), count(len(d.Runs), "turn", "turns"))
 }

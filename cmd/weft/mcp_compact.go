@@ -40,9 +40,11 @@ import (
 //   - in a session answer, a turn's agent, session_id and public_id
 //     are omitted when they are the session's, its prompt_preview is
 //     cut to 80 runes, and its model, cost_badge, stop_reason and
-//     stopped_by are omitted when equal to turn_defaults (the first
-//     turn's, said once at the top; a turn that has none while the
-//     default has one reads "none").
+//     stopped_by are omitted when equal to turn_defaults (said once at
+//     the top: per key the value most turns share, a tie to the
+//     earlier turn's, and only a value two turns or more share — a key
+//     no two turns agree on stays on each turn; a turn that has none
+//     while the default has one reads "none").
 
 // rowDrop is the run-row fields a compact row leaves out.
 var rowDrop = map[string]bool{
@@ -86,6 +88,7 @@ func compactList(b []byte, list string, sameAs map[string]string) []byte {
 	}
 	var defaults map[string]any
 	if rows, ok := doc[list].([]any); ok {
+		var turns []map[string]any
 		for i, r := range rows {
 			m, ok := r.(map[string]any)
 			if !ok {
@@ -96,26 +99,22 @@ func compactList(b []byte, list string, sameAs map[string]string) []byte {
 				if p, ok := c["prompt_preview"].(string); ok {
 					c["prompt_preview"] = cutRunes(p, promptRunes)
 				}
-				if defaults == nil {
-					defaults = map[string]any{}
-					for _, k := range turnDefaultKeys {
-						if v, ok := c[k]; ok {
-							defaults[k] = v
-						}
-					}
-				}
-				for _, k := range turnDefaultKeys {
-					dv, hasD := defaults[k]
-					v, has := c[k]
-					switch {
-					case has && hasD && fmt.Sprint(v) == fmt.Sprint(dv):
-						delete(c, k)
-					case !has && hasD:
-						c[k] = "none"
-					}
-				}
+				turns = append(turns, c)
 			}
 			rows[i] = c
+		}
+		defaults = turnDefaults(turns)
+		for _, c := range turns {
+			for _, k := range turnDefaultKeys {
+				dv, hasD := defaults[k]
+				v, has := c[k]
+				switch {
+				case has && hasD && fmt.Sprint(v) == fmt.Sprint(dv):
+					delete(c, k)
+				case !has && hasD:
+					c[k] = "none"
+				}
+			}
 		}
 	}
 	compactSessionFields(doc)
@@ -135,6 +134,43 @@ func compactList(b []byte, list string, sameAs map[string]string) []byte {
 		m["cost_reasons"] = reasons.list()
 	}
 	return marshalCompact(m)
+}
+
+// turnDefaults is a session's turn_defaults: per key, the value most
+// of its turns share (by their compact form; a tie goes to the value
+// an earlier turn has), kept only when two turns or more share it — a
+// key no two turns agree on is said on each turn, never as a default
+// the others then contradict (R-I5b). A turn without the key counts for
+// no value.
+func turnDefaults(turns []map[string]any) map[string]any {
+	defaults := map[string]any{}
+	for _, k := range turnDefaultKeys {
+		counts := map[string]int{}
+		var order []string
+		vals := map[string]any{}
+		for _, t := range turns {
+			v, ok := t[k]
+			if !ok {
+				continue
+			}
+			key := fmt.Sprint(v)
+			if _, seen := counts[key]; !seen {
+				order = append(order, key)
+				vals[key] = v
+			}
+			counts[key]++
+		}
+		best := ""
+		for _, key := range order {
+			if counts[key] > counts[best] {
+				best = key
+			}
+		}
+		if counts[best] >= 2 {
+			defaults[k] = vals[best]
+		}
+	}
+	return defaults
 }
 
 // compactRow is one run (or session) row compacted (see the top of

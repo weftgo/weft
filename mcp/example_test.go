@@ -74,6 +74,37 @@ func ExampleServe() {
 	// Output: research complete
 }
 
+// A caller not built on weft links its call to the served run by
+// params._meta: the W3C traceparent of its own span (the served run
+// joins that trace) and MetaCaller, the run and call it acts for (the
+// run records them as weft.caller.run.id / weft.caller.call.id).
+// Tools sends both on every call by itself.
+func ExampleServe_callerLink() {
+	agt := weft.New(wefttest.Script(wefttest.Say("linked")), weft.Name("research"))
+	srv := sdk.NewServer(&sdk.Implementation{Name: "demo", Version: "0"}, nil)
+	mcp.Serve(srv, agt, "Research a topic in depth.")
+	serverTransport, clientTransport := sdk.NewInMemoryTransports()
+	go func() { _ = srv.Run(context.Background(), serverTransport) }()
+	sess, err := sdk.NewClient(&sdk.Implementation{Name: "demo-client", Version: "0"}, nil).
+		Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		panic(err)
+	}
+	res, err := sess.CallTool(context.Background(), &sdk.CallToolParams{
+		Meta: sdk.Meta{
+			"traceparent":  "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+			mcp.MetaCaller: map[string]string{"run_id": "orchestrator-run-1", "call_id": "call_7"},
+		},
+		Name:      "research",
+		Arguments: map[string]any{"prompt": "the history of denim"},
+	})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(res.Content[0].(*sdk.TextContent).Text)
+	// Output: linked
+}
+
 // Tools imports a server's tools as ordinary weft tools: the server's
 // schema bytes kept whole, its annotations mapped to per-tool policy,
 // and the calls forwarded verbatim.

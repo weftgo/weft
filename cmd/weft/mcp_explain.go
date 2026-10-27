@@ -133,7 +133,7 @@ func (f *firstError) words(root string) string {
 		b.WriteString(f.Via + " → ")
 	}
 	if f.Run != root {
-		fmt.Fprintf(&b, "child %s (%s) ", f.Run, orDash(f.Agent))
+		fmt.Fprintf(&b, "child %s (%s) ", f.Run, agentLabel(f.Agent))
 	}
 	if f.Step != nil {
 		fmt.Fprintf(&b, "step %d ", *f.Step)
@@ -511,7 +511,7 @@ func (w *walker) childFirst(ctx context.Context, c childBrief, via string, depth
 // childLine is one child run in a phrase, with its first error when it
 // has one; a child the budget left unread says so, naming the read.
 func (w *walker) childLine(ctx context.Context, c childBrief, tool string, depth int) string {
-	s := fmt.Sprintf("child %s (%s)", c.ID, orDash(c.Agent))
+	s := fmt.Sprintf("child %s (%s)", c.ID, agentLabel(c.Agent))
 	if tool != "" {
 		s += " ← " + tool
 	}
@@ -524,9 +524,9 @@ func (w *walker) childLine(ctx context.Context, c childBrief, tool string, depth
 	}
 	switch {
 	case c.Pending > 0 && c.ResumedBy != "":
-		s += fmt.Sprintf("; parked (%d calls), decided → resumed as %s", c.Pending, c.ResumedBy)
+		s += fmt.Sprintf("; parked (%s), decided → resumed as %s", count(c.Pending, "call", "calls"), c.ResumedBy)
 	case c.Pending > 0:
-		s += fmt.Sprintf("; parked: %d calls awaiting a decision", c.Pending)
+		s += fmt.Sprintf("; parked: %s awaiting a decision", count(c.Pending, "call", "calls"))
 	}
 	if c.Status == "succeeded" && (c.ToolErrors > 0 || c.ChildrenFailed > 0) && depth < explainChildDeep {
 		f, walked := w.childFirst(ctx, c, "", depth+1)
@@ -665,8 +665,8 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 			for _, x := range h.Children[i:] {
 				ids = append(ids, x.ID)
 			}
-			w.notes = append(w.notes, fmt.Sprintf("%d more children not listed (at most %d): %s — runs {parent:%q}",
-				len(ids), explainChildCap, cutRunes(strings.Join(ids, ", "), 600), in.ID))
+			w.notes = append(w.notes, fmt.Sprintf("%s not listed (at most %d): %s — runs {parent:%q}",
+				count(len(ids), "more child", "more children"), explainChildCap, cutRunes(strings.Join(ids, ", "), 600), in.ID))
 			break
 		}
 		lines = append(lines, w.childLine(ctx, c, w.callOf[c.ID].tool, 0))
@@ -708,7 +708,7 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 
 // explainLine is the answer in one sentence an agent can quote.
 func explainLine(ex explanation, sh stepHead, decided map[string]string) string {
-	s := fmt.Sprintf("run %s (%s): %s", ex.RunID, orDash(ex.Agent), ex.Status)
+	s := fmt.Sprintf("run %s (%s): %s", ex.RunID, agentLabel(ex.Agent), ex.Status)
 	if ex.Step != nil {
 		switch {
 		case ex.StepRole == "in_flight" || ex.StepStatus == "error":
@@ -740,7 +740,7 @@ func explainLine(ex explanation, sh stepHead, decided map[string]string) string 
 				names = append(names, c.Name)
 			}
 		}
-		s += fmt.Sprintf("; parked: %d calls awaiting a decision (%s)", ex.Pending, strings.Join(names, ", "))
+		s += fmt.Sprintf("; parked: %s awaiting a decision (%s)", count(ex.Pending, "call", "calls"), strings.Join(names, ", "))
 	case ex.ResumedFrom != "" && len(ex.Decisions) > 0:
 		s += "; " + strings.Join(ex.Decisions, "; ")
 	case ex.ResumedFrom != "":

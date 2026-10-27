@@ -36,7 +36,7 @@ func regBody(id string) Registration {
 		Threads:     true,
 		Agents: []AgentRegistration{{
 			Name:        "acme-support",
-			Manifest:    `{"weft":1,"agents":[{"name":"acme-support","model":{"provider":"wefttest","name":"script"},"policy":{"parallelism":4,"max_steps":10,"max_model_retries":3},"tools":[{"name":"lookup_order"},{"name":"refund"}]}]}`,
+			Manifest:    `{"weft":1,"agents":[{"name":"acme-support","model":{"provider":"wefttest","name":"script"},"policy":{"parallelism":4,"max_steps":10,"max_model_retries":3},"tools":[{"name":"lookup_order"},{"name":"refund","require_approval":true}]}]}`,
 			Models:      []string{"glm-5.3-flash"},
 			Limits:      AgentLimits{MaxSteps: 10, Parallelism: 4},
 			SideEffects: map[string]string{"lookup_order": "never", "refund": "never"},
@@ -491,7 +491,7 @@ func TestSnapshotShape(t *testing.T) {
 	}
 	wantTools := []ToolView{
 		{Name: "lookup_order", SideEffects: "never", Allow: true},
-		{Name: "refund", SideEffects: "never", Allow: false},
+		{Name: "refund", SideEffects: "never", Allow: false, Approval: true}, // UX-H-22: gated, said beside "never"
 	}
 	if len(a.Tools) != 2 || a.Tools[0] != wantTools[0] || a.Tools[1] != wantTools[1] {
 		t.Errorf("tools = %+v, want %+v", a.Tools, wantTools)
@@ -505,7 +505,7 @@ func TestSnapshotShape(t *testing.T) {
 	for _, key := range []string{`"id":"rt_view"`, `"host":"wajih-laptop"`, `"pid":4121`,
 		`"service":"acme-api"`, `"env":"dev"`, `"connected_since"`, `"last_seen"`,
 		`"agents":[{`, `"name":"acme-support"`, `"models":["glm-5.3-flash"]`,
-		`"name":"lookup_order"`, `"side_effects":"never"`, `"allow":true`, `"allow":false`} {
+		`"name":"lookup_order"`, `"side_effects":"never"`, `"allow":true`, `"allow":false`, `"allow":false,"approval":true`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("snapshot JSON lacks %s: %s", key, b)
 		}

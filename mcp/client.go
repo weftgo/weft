@@ -347,13 +347,14 @@ func Policy(opts ...core.ToolOption) Option { return policyOption(opts) }
 // trip, the model's argument bytes forwarded verbatim (a
 // json.RawMessage marshals as its own bytes — no map round trip, no
 // key reordering). Empty or null arguments go as {} because
-// tools/call requires an object.
+// tools/call requires an object. params._meta carries the caller: the
+// tool span's trace context and the weft call (meta.go).
 func callHandler(sess *sdk.ClientSession, remoteName string) func(context.Context, json.RawMessage) (string, error) {
 	return func(ctx context.Context, args json.RawMessage) (string, error) {
 		if trimmed := strings.TrimSpace(string(args)); trimmed == "" || trimmed == "null" {
 			args = json.RawMessage("{}")
 		}
-		res, err := sess.CallTool(ctx, &sdk.CallToolParams{Name: remoteName, Arguments: args})
+		res, err := sess.CallTool(ctx, &sdk.CallToolParams{Meta: callerMeta(ctx), Name: remoteName, Arguments: args})
 		if err != nil {
 			// Transport and protocol failures are data too: the tool
 			// failed, the model stops calling it (deep dive ch. 5's

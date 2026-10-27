@@ -126,6 +126,10 @@ type steerRequest struct {
 	Message string `json:"message"`
 }
 
+// appSteerRefused is the runtime's refusal of a steer on an app turn
+// that is not running (runtime/sessions.go), word for word.
+const appSteerRefused = "no running turn to steer"
+
 // serveSteer is the rung-4 verb (capability `steer`). A run a runtime
 // started is steered through that runtime (202 {steered}); an app-owned
 // turn through a runtime that registered runtime.Sessions (202 with the
@@ -167,6 +171,15 @@ func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 			}
 			target, ok := s.appTurnRuntime(w, r, rs, row.RunRow)
 			if !ok {
+				return
+			}
+			// A turn that has ended has nothing to steer into: refused
+			// now, 409, in the runtime's words — not accepted and then
+			// failed on the command's row (UX-H-19). A row still reading
+			// running goes to the runtime, whose session decides.
+			if row.Status == obsdb.StatusSucceeded || row.Status == obsdb.StatusFailed {
+				writeError(w, r, http.StatusConflict, "conflict",
+					appSteerRefused+": run "+runID+" already finished ("+string(row.Status)+")")
 				return
 			}
 			sc := appSessionCommand(r, linkruntime.VerbSteer, row.RunRow)

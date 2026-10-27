@@ -208,7 +208,11 @@ func (d *DB) deleteInBatches(ctx context.Context, stmt string, args ...any) erro
 // the whole file is rewritten, every table's contents unchanged —
 // thread's too, when it shares the file. VACUUM needs the file to
 // itself for its duration; a writer in another process waits on the
-// busy timeout.
+// busy timeout. In WAL mode VACUUM writes the new file through the
+// WAL, so a checkpoint follows (TRUNCATE: the WAL back to zero bytes
+// when no reader holds it): the file's size after a vacuum is its size,
+// not the main file's plus a WAL the size of the database (UX-S5a-12).
+// A checkpoint a reader blocks is not an error — the next one folds it.
 func (d *DB) Vacuum(ctx context.Context) (err error) {
 	if err := d.checkOpen(); err != nil {
 		return err
@@ -217,7 +221,10 @@ func (d *DB) Vacuum(ctx context.Context) (err error) {
 	if _, err := d.writer.ExecContext(ctx, `INSERT INTO runs_fts(runs_fts) VALUES ('optimize')`); err != nil {
 		return err
 	}
-	_, err = d.writer.ExecContext(ctx, `VACUUM`)
+	if _, err = d.writer.ExecContext(ctx, `VACUUM`); err != nil {
+		return err
+	}
+	_, err = d.writer.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
 	return err
 }
 

@@ -49,7 +49,9 @@ That one import does what the script tag does. It defines
 `<weft-devtools>` and mounts the dock. The panel configures itself
 from the same ladder as the script tag, minus the tag itself:
 `mount(opts)`, the element's `data-*` attributes, then
-`<meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto">`. With
+`<meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto|global|mode|push|z-index|theme">`
+(the fields `src/panel/config.ts` reads; each one's meaning: `studio/README.md`,
+"The devtools panel", its attribute table). With
 none of these set, the endpoint is the page's own directory. If Studio
 does not answer, the dock removes itself silently (unless you named a
 loopback endpoint; and when Studio answers 401/403 — "needs a token" — it says

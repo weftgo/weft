@@ -51,7 +51,7 @@ var Lines = []Line{
 	{"ingest", []string{"ingest.dropped", "ingest.accepted", "ingest.refused", "ingest.last_error", "ingest.last_at"}},
 	{"runtimes", []string{"runtimes", "capabilities", "capabilities_off", "env:WEFT_ENV", "env:WEFT_STUDIO_URL"}},
 	{"panel", []string{"panel_version", "studio_version"}},
-	{"weft.json", []string{"has_manifest", "manifest_check.source", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
+	{"manifest", []string{"has_manifest", "manifest_check.source", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
 }
 
 // meta is the slice of GET /api/meta the doctor reads.
@@ -418,34 +418,45 @@ func (p *printer) panel(m meta) {
 }
 
 func (p *printer) manifest(m meta) {
+	// The label is the check, the source is the first words (UX-S5b-09):
+	// "weft.json" when a file was configured, "runtime registrations"
+	// when the manifests are the ones runtimes registered.
 	c := m.ManifestCheck
 	switch {
 	case !m.HasManifest:
-		p.line(ok, "weft.json", "no manifest configured (studio.Manifest, or --manifest / WEFT_MANIFEST), nothing to compare")
+		p.line(ok, "manifest", "none: no weft.json configured (studio.Manifest, or --manifest / WEFT_MANIFEST) and no runtime registered one, nothing to compare")
 	case c == nil:
-		p.line(ok, "weft.json", "a manifest is present (weft.json or a runtime's registration); not checked for this caller")
+		p.line(ok, "manifest", "present (weft.json or a runtime's registration); not checked for this caller")
 	case c.Error != "":
-		p.line(warn, "weft.json", "the check failed: %s", c.Error)
+		p.line(warn, "manifest", "the check failed: %s", c.Error)
 	case c.Source == "runtime" && len(c.Stale) > 0:
-		p.line(warn, "weft.json", "none configured; %s last run from another build than the one a runtime registered%s: redeploy the app, or ignore it if those runs are old", agentsCount(c.Stale), lastRunHash(c.Stale, c.Latest))
+		p.line(warn, "manifest", "runtime registrations (no weft.json): %s from their latest runs (runs from another build)%s: redeploy the app, or ignore it if those runs are old", agentsDiffer(c.Stale), lastRunHash(c.Stale, c.Latest))
 		p.sub("stale: %s", strings.Join(c.Stale, ", "))
 	case c.Source == "runtime":
-		p.line(ok, "weft.json", "none configured; %d agents from a runtime's registration, %d checked against their latest runs", c.Agents, c.Checked)
+		p.line(ok, "manifest", "runtime registrations (no weft.json): %s, %d checked against their latest runs", agentsN(c.Agents), c.Checked)
 	case len(c.Stale) > 0:
-		p.line(warn, "weft.json", "stale for %s: weft.json and the latest runs disagree%s: regenerate weft.json, or redeploy the app if weft.json is newer", strings.Join(c.Stale, ", "), lastRunHash(c.Stale, c.Latest))
+		p.line(warn, "manifest", "weft.json: stale for %s: weft.json and the latest runs disagree%s: regenerate weft.json, or redeploy the app if weft.json is newer", strings.Join(c.Stale, ", "), lastRunHash(c.Stale, c.Latest))
 	case c.Checked == 0:
-		p.line(ok, "weft.json", "%d agents; none has a recorded run to compare yet", c.Agents)
+		p.line(ok, "manifest", "weft.json: %s; none has a recorded run to compare yet", agentsN(c.Agents))
 	default:
-		p.line(ok, "weft.json", "%d agents, %d checked against their latest runs: current", c.Agents, c.Checked)
+		p.line(ok, "manifest", "weft.json: %s, %d checked against their latest runs: current", agentsN(c.Agents), c.Checked)
 	}
 }
 
-// agentsCount is "1 agent was" / "n agents were".
-func agentsCount(names []string) string {
+// agentsDiffer is "1 agent differs" / "n agents differ".
+func agentsDiffer(names []string) string {
 	if len(names) == 1 {
-		return "1 agent was"
+		return "1 agent differs"
 	}
-	return fmt.Sprintf("%d agents were", len(names))
+	return fmt.Sprintf("%d agents differ", len(names))
+}
+
+// agentsN is "1 agent" / "n agents".
+func agentsN(n int) string {
+	if n == 1 {
+		return "1 agent"
+	}
+	return fmt.Sprintf("%d agents", n)
 }
 
 // lastRunHash names the first stale agent's latest run's manifest hash

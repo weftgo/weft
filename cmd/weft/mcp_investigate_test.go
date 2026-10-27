@@ -89,7 +89,7 @@ func TestMCPExplainDecided(t *testing.T) {
 		"/api/runs/p/steps/0":    {200, `{"status":"parked","tool_calls":[{"call_id":"d1","name":"deploy","pending":true}],"holes":[]}`},
 		"/api/runs/p/transcript": {200, `{"batches":[]}`},
 	}, "p")
-	if !strings.Contains(line, "parked: 1 calls awaiting a decision (deploy)") {
+	if !strings.Contains(line, "parked: 1 call awaiting a decision (deploy)") {
 		t.Errorf("undecided line %q", line)
 	}
 }

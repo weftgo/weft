@@ -208,6 +208,11 @@ type runCallKey struct{}
 // child's tap reads its parent call), but no run started inside the
 // run reads it as its caller.
 func enterRun(ctx context.Context) context.Context {
+	if ctx.Value(remoteCallerKey{}) != nil {
+		// WithCaller's link is this run's alone: no run started inside
+		// it (its model chain, its tools' handlers) reads it.
+		ctx = context.WithValue(ctx, remoteCallerKey{}, nil)
+	}
 	c, ok := CallFromContext(ctx)
 	if !ok {
 		if ctx.Value(runCallKey{}) == nil {

@@ -138,7 +138,7 @@ func (m *mcpReader) transcript(ctx context.Context, _ *sdk.CallToolRequest, in m
 				own++
 			}
 		}
-		s += fmt.Sprintf(": %d batches (%d input, %d the run's own)", len(tr.Batches), len(tr.Batches)-own, own)
+		s += fmt.Sprintf(": %s (%d input, %d the run's own)", count(len(tr.Batches), "batch", "batches"), len(tr.Batches)-own, own)
 	}
 	if in.Step != nil {
 		s += fmt.Sprintf("; then what step %d's model call carried", *in.Step)

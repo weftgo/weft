@@ -95,7 +95,7 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	fs.Usage = func() {
 		_, _ = fmt.Fprintln(fs.Output(), "Usage: weft dev [flags] [-- command args…]   (default command: go run .)")
 		_, _ = fmt.Fprintln(fs.Output(), "  Run a package (go run ., go run ./cmd/app) or a module build, never go run main.go:\n  a file list has no build info, so its manifest sources read main/… and its runs read stale against weft.json.")
-		fs.PrintDefaults()
+		printDefaults(fs)
 	}
 	if err := parse(fs, args); err != nil {
 		return err

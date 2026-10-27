@@ -251,11 +251,13 @@ func usageSplits(u Usage) []attribute.KeyValue {
 // itself started on (ownCallOf): a run started from inside that run's
 // model chain, PrepareStep, taps or OnRunEnd was started from no call
 // that run made — a judge under a Subagent's child carries no link,
-// exactly as one under a top-level run.
+// exactly as one under a top-level run. Outside a tool call, a caller
+// another process named (WithCaller: an MCP client's _meta) is the
+// link instead.
 func runLinkAttrs(ctx context.Context) []attribute.KeyValue {
 	c, ok := CallFromContext(ctx)
 	if !ok || ownCallOf(ctx, c) {
-		return nil
+		return remoteCallerAttrs(ctx)
 	}
 	if subagentOf(ctx, c) {
 		return []attribute.KeyValue{attrParentRunID.String(c.RunID), attrParentCallID.String(c.CallID)}

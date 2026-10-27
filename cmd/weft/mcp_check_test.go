@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -218,19 +219,40 @@ func TestMCPLiveCheck(t *testing.T) {
 		t.Errorf("explain_failure %s: %+v", failedID, ex)
 	}
 	fmt.Printf("next: %s\n", strings.Join(ex.Next, " | "))
-	call(cs, "run", map[string]any{"id": failedID}, "run "+failedID+" (support): failed, 1 steps: weft: run failed at step 1")
+	call(cs, "run", map[string]any{"id": failedID}, "run "+failedID+" (support): failed, 1 step: weft: run failed at step 1")
 	call(cs, "step", map[string]any{"id": failedID, "n": 0}, "run "+failedID+" step 0: ok (tool_calls); tool calls: lookup_order ok")
 	call(cs, "request", map[string]any{"id": failedID, "step": 0, "transcript": true},
-		"run "+failedID+" requests: 1 requests; then the transcript of step 0", `"messages"`)
-	call(cs, "events", map[string]any{"id": failedID, "limit": 3}, "run "+failedID+" events: 3 events")
+		"run "+failedID+" requests: 1 request; then the transcript of step 0", `"messages"`)
+	call(cs, "events", map[string]any{"id": failedID, "limit": 3}, "run "+failedID+" events: 3 events (pos 0–2); more: after=3; the run is terminal",
+		`"run_terminal":true`)
 	call(cs, "tools", map[string]any{"id": failedID}, "run "+failedID+": tool catalogs", "lookup_order")
-	call(cs, "search", map[string]any{"q": "exceeded"}, "search: 1 runs of 1", failedID)
-	call(cs, "search", map[string]any{"tool": "lookup_order", "status": "failed"}, "search: 1 runs of 1", failedID)
+	call(cs, "search", map[string]any{"q": "exceeded"}, "search: 1 run of 1", failedID)
+	call(cs, "search", map[string]any{"tool": "lookup_order", "status": "failed"}, "search: 1 run of 1", failedID)
+	// U33.1: the error_class facet names the failures' classes; a class
+	// narrows search and runs; stats answers the groups, compact.
+	got := call(cs, "search", map[string]any{"status": "failed", "all": true}, "; error classes: ", `"error_class":[{"class":"`)
+	var facets struct {
+		Facets struct {
+			ErrorClass []struct {
+				Class string `json:"class"`
+				Count int    `json:"count"`
+			} `json:"error_class"`
+		} `json:"facets"`
+	}
+	if err := json.Unmarshal([]byte(got[1]), &facets); err != nil || len(facets.Facets.ErrorClass) == 0 {
+		t.Fatalf("search's error_class facet: %v %s", err, got[1])
+	}
+	top := facets.Facets.ErrorClass[0]
+	want := count(top.Count, "run", "runs")
+	call(cs, "search", map[string]any{"error_class": top.Class, "all": true}, "search: "+want+" of "+strconv.Itoa(top.Count))
+	call(cs, "runs", map[string]any{"error_class": top.Class, "all": true}, "runs: "+want)
+	call(cs, "stats", map[string]any{"by": "agent", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z"}, "stats by agent, ", `"key":"support"`, `"runs_query":"`)
+	call(cs, "stats", map[string]any{"by": "tool", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z"}, "stats by tool, ", `"key":"lookup_order"`)
 	call(cs, "diff", map[string]any{"a": failedID, "b": toolsID},
-		"diff "+failedID+" → "+toolsID+": 1 changed steps, first at step 1", `"summary"`)
+		"diff "+failedID+" → "+toolsID+": 1 changed step, first at step 1", `"summary"`)
 	call(cs, "export", map[string]any{"id": failedID, "format": "jsonl", "max_bytes": 2048},
 		"run "+failedID+" exported as jsonl", "[truncated: showing 2048 of ")
-	ex = explained(call(cs, "explain_failure", map[string]any{"id": parkedID}, "; parked: 1 calls awaiting a decision (refund_order)"))
+	ex = explained(call(cs, "explain_failure", map[string]any{"id": parkedID}, "; parked: 1 call awaiting a decision (refund_order)"))
 	if ex.Pending != 1 {
 		t.Errorf("explain_failure %s: pending %d, want 1", parkedID, ex.Pending)
 	}
@@ -262,8 +284,8 @@ func TestMCPLiveCheck(t *testing.T) {
 	ex = explained(call(cs, "explain_failure", map[string]any{"id": chkChaos},
 		"run "+chkChaos+" (deal-lead): succeeded", "first error: step 0 review_ip → child ",
 		"SUBAGENT_FAILED", "provider maintenance window", // the IP reviewer's provider is down
-		"timed out",                                               // the tax reviewer ran past its Timeout
-		"SUBAGENT_PENDING", "parked: 1 calls awaiting a decision", // the NDA signer parked inside the delegation
+		"timed out",                                              // the tax reviewer ran past its Timeout
+		"SUBAGENT_PENDING", "parked: 1 call awaiting a decision", // the NDA signer parked inside the delegation
 		"ocr engine: nil page")) // the litigation reviewer's tool panicked, the reviewer recovered
 	fmt.Printf("digest:\n  %s\n", strings.Join(ex.Digest, "\n  "))
 	t1, t2 := chkOpsSess+"-t1", chkOpsSess+"-t2"
@@ -283,7 +305,7 @@ func TestMCPLiveCheck(t *testing.T) {
 	call(cs, "explain_failure", map[string]any{"id": chkChatSess + "-t2"}, `last assistant text "Turn 2: order A-1002`)
 	call(cs, "explain_failure", map[string]any{"id": chkChatSess + "-t3"},
 		"first error: step 0 lookup_order: order service timed out after 5s looking up A-1003", `last assistant text "Turn 3: I could not reach`)
-	got := call(cs, "session", map[string]any{"id": chkChatSess}, "session "+chkChatSess+" (support-desk): succeeded, 9 turns",
+	got = call(cs, "session", map[string]any{"id": chkChatSess}, "session "+chkChatSess+" (support-desk): succeeded, 9 turns",
 		`"cost_reasons":[`, `"turn_defaults":{`, `"tool_errors":1`)
 	size := len(strings.Join(got, "\n"))
 	full := call(cs, "session", map[string]any{"id": chkChatSess, "full": true}, "9 turns")

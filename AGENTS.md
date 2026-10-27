@@ -236,8 +236,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    (db.path's rule), dated, models}, retention (Retain's Go
 //    //    duration string, null when off), ingest {dropped: [{service, records, last_heard}], accepted, refused, last_error?, last_at?} (accepted/refused: the OTLP POSTs this Studio answered 2xx / 4xx–5xx, last_error the last refusal "<status> <code>: <reason>"; U5: dropped is the largest
 //    //    weft.records.dropped each service's heartbeats and run_start/run_finish reported on the OTLP path; in memory;
-//    //    manifest_check's rule: dev token / setup A loopback only, omitted for a panel token) — `weft doctor` prints it
-//    //    line by line; capabilities_off {capability: why} names the option/flag that left one off;
+//    //    manifest_check's rule: dev token / setup A loopback only, omitted for a panel token) — `weft doctor` checks the
+//    //    fields its line table names (internal/doctor.Lines: studio, token, discovery, db, content, data, otlp, ingest,
+//    //    runtimes, panel, manifest), not every field: retention, pricing, live_all, debug_scope, interrupted_after_ms are
+//    //    read with GET /api/meta (or weft mcp's meta tool); capabilities_off {capability: why} names the option/flag that left one off;
 //    //    manifest_sources), agents/{name}/proposal (PUT {instructions} / DELETE, plan F6: proposed prompts in memory, 64, lost
 //    //    on restart; dev token or setup A loopback only; capability proposals), manifest (each agent with `proposed`
 //    //    {instructions, instructions_hash, since} when one is held; the weft.json, else the manifests runtimes registered with —
@@ -428,7 +430,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    composed with its source's kept steps; --fixtures-only the fixtures where wefttest.Replay reads them;
 //    //    --force replaces, never merges); weft mcp [--url --token] (a stdio MCP server over these read routes, read verbs
 //    //    only — runs/search/run/step/request/events/tools/diff/export/sessions/session/meta +
-//    //    logs/spans/trace/transcript/live/agents/experiments/runtimes (I5) +
+//    //    logs/spans/trace/transcript/live/agents/experiments/runtimes (I5) + stats (/api/stats, compact groups)
+//    //    and error_class on runs/search (U33.1) +
 //    //    explain_failure (run + every step + the children + transcript composed: first_error, a digest,
 //    //    decisions — a decided park "denied by <who>", this run's own last text); every tool a GET, outputs the route's
 //    //    JSON cut at max_bytes with a note — the list tools' compact rows (empty fields out, hashes 12 chars,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -271,11 +272,18 @@ func mcpCalls() []mcpCall {
 		{tool: "runs", args: map[string]any{"agent": "orders", "status": "parked"}, route: "/api/runs?agent=orders&status=parked", shape: rowsOf("runs", nil)},
 		{tool: "runs", args: map[string]any{"agent": "orders", "full": true}, route: "/api/runs?agent=orders"},
 		{tool: "search", args: map[string]any{"q": "order", "status": "succeeded"}, route: "/api/search?q=order&status=succeeded", shape: rowsOf("runs", nil)},
+		// U33.1: error_class on search and runs, the route's filter.
+		{tool: "search", args: map[string]any{"error_class": "upstream down", "all": true}, route: "/api/search?all=1&error_class=upstream+down", shape: rowsOf("runs", nil)},
+		{tool: "runs", args: map[string]any{"error_class": "upstream down"}, route: "/api/runs?error_class=upstream+down", shape: rowsOf("runs", nil)},
+		{tool: "stats", args: map[string]any{"by": "agent", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z"},
+			route: "/api/stats?by=agent&since=2000-01-01T00%3A00%3A00Z&until=2100-01-01T00%3A00%3A00Z", shape: compactStats},
+		{tool: "stats", args: map[string]any{"by": "tool", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z", "full": true},
+			route: "/api/stats?by=tool&since=2000-01-01T00%3A00%3A00Z&until=2100-01-01T00%3A00%3A00Z"},
 		{tool: "run", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok"},
 		{tool: "step", args: map[string]any{"id": "r_ok", "n": 0}, route: "/api/runs/r_ok/steps/0"},
 		{tool: "request", args: map[string]any{"id": "r_ok", "step": 1, "transcript": true}, route: "/api/runs/r_ok/requests?step=1",
 			extra: []string{"/api/runs/r_ok/transcript?step=1"}},
-		{tool: "events", args: map[string]any{"id": "r_ok", "limit": 3}, route: "/api/runs/r_ok/events?limit=3"},
+		{tool: "events", args: map[string]any{"id": "r_ok", "limit": 3}, route: "/api/runs/r_ok/events?limit=3", shape: eventsProjection},
 		{tool: "tools", args: map[string]any{"id": "r_ok"}, route: "/api/runs/r_ok/tools"},
 		{tool: "diff", args: map[string]any{"a": "r_ok", "b": "r_max"}, route: "/api/diff?a=r_ok&b=r_max"},
 		{tool: "export", args: map[string]any{"id": "r_ok", "format": "jsonl", "max_bytes": mcpMaxBytes}, route: "/api/runs/r_ok/export?format=jsonl"},
@@ -479,7 +487,7 @@ func TestMCPStdio(t *testing.T) {
 		t.Errorf("explain_failure r_max = %q\n%+v\ncalls %+v", line, ex, calls)
 	}
 	line, ex = explain("r_park")
-	if ex.Pending != 1 || ex.StepStatus != "parked" || !strings.Contains(line, "; parked: 1 calls awaiting a decision (refund)") {
+	if ex.Pending != 1 || ex.StepStatus != "parked" || !strings.Contains(line, "; parked: 1 call awaiting a decision (refund)") {
 		t.Errorf("explain_failure r_park = %q\n%+v", line, ex)
 	}
 	line, ex = explain(derivedFailID)
@@ -801,6 +809,17 @@ func TestMCPPanelToken(t *testing.T) {
 	if isErr, got := call("trace", map[string]any{"trace_id": traceOf("r_fail")}); !isErr || !strings.Contains(got[0], "403") {
 		t.Errorf("trace of another public id's run = %v %q, want the 403", isErr, got)
 	}
+	// stats under the read token (U33.1): the route's scope — its own
+	// public id forced (only r_ok's agent counted), another's a 403.
+	window := map[string]any{"by": "agent", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z"}
+	if isErr, got := call("stats", window); isErr || len(got) < 2 || !strings.Contains(got[1], `"key":"orders"`) ||
+		strings.Contains(got[1], `"key":"triage"`) {
+		t.Errorf("stats under a read token = %v %q, want its own public id's runs only", isErr, got)
+	}
+	window["public_id"] = "pub_other"
+	if isErr, got := call("stats", window); !isErr || !strings.Contains(got[0], "403") {
+		t.Errorf("stats of another public id = %v %q, want the 403", isErr, got)
+	}
 	// explain_failure under the read token: the step's request block is
 	// the hidden badge, so no request hint the token would be refused.
 	isErr, got := call("explain_failure", map[string]any{"id": "r_ok"})
@@ -1094,5 +1113,142 @@ func TestMCPSourceOneClient(t *testing.T) {
 	j := strings.Index(src[i+1:], "\nfunc ")
 	if i < 0 || j < 0 || !strings.Contains(src[i:i+1+j], "newClient(") {
 		t.Error("the one newClient call is not in startMCP")
+	}
+}
+
+// TestMCPErrorClassAndStats (U33.1, carried from P10a-pre-go 9): search
+// answers the error_class facet and names its classes in the summary;
+// a class from it narrows search and runs to its failures (the route's
+// filter); stats answers compact groups — no series, a summary naming
+// the busiest — and full=true the route's body.
+func TestMCPErrorClassAndStats(t *testing.T) {
+	base := mcpSeedStudio(t)
+	cs := inProcess(t, newClient(base, "tok"))
+	ctx := context.Background()
+	call := func(tool string, args map[string]any) []string {
+		t.Helper()
+		res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: tool, Arguments: args})
+		if err != nil || res.IsError {
+			t.Fatalf("%s %v: %v %v", tool, args, err, texts(t, res))
+		}
+		return texts(t, res)
+	}
+	got := call("search", map[string]any{"status": "failed", "all": true})
+	var page struct {
+		Facets struct {
+			ErrorClass []struct {
+				Class string `json:"class"`
+				Count int    `json:"count"`
+			} `json:"error_class"`
+		} `json:"facets"`
+	}
+	if err := json.Unmarshal([]byte(got[1]), &page); err != nil || len(page.Facets.ErrorClass) == 0 {
+		t.Fatalf("search's facets: %v %s", err, got[1])
+	}
+	class := ""
+	for _, c := range page.Facets.ErrorClass {
+		if strings.Contains(c.Class, "upstream down") {
+			class = c.Class
+		}
+	}
+	if class == "" || !strings.Contains(got[0], "; error classes: ") || !strings.Contains(got[0], "upstream down") {
+		t.Fatalf("no upstream-down class: summary %q, facets %+v", got[0], page.Facets.ErrorClass)
+	}
+	for _, tool := range []string{"search", "runs"} {
+		got = call(tool, map[string]any{"error_class": class, "all": true})
+		if !strings.Contains(got[0], ": 1 run") || !strings.Contains(got[1], `"id":"r_fail"`) || strings.Contains(got[1], `"id":"r_max"`) {
+			t.Errorf("%s error_class=%q = %q", tool, class, got)
+		}
+	}
+	window := map[string]any{"by": "agent", "since": "2000-01-01T00:00:00Z", "until": "2100-01-01T00:00:00Z"}
+	got = call("stats", window)
+	if !strings.HasPrefix(got[0], "stats by agent, 2000-01-01T00:00:00Z – 2100-01-01T00:00:00Z: ") || !strings.Contains(got[0], "orders 2 runs, 1 failed") {
+		t.Errorf("stats summary %q", got[0])
+	}
+	if strings.Contains(got[1], `"series"`) || !strings.Contains(got[1], `"key":"orders"`) || !strings.Contains(got[1], `"runs_query":"`) {
+		t.Errorf("stats compact body %s", got[1])
+	}
+	window["full"] = true
+	if full := call("stats", window); !strings.Contains(full[1], `"series":[`) {
+		t.Errorf("stats full=true lacks the series: %.300s", full[1])
+	}
+	res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "stats", Arguments: map[string]any{"by": "colour"}})
+	if err != nil || !res.IsError || !strings.Contains(texts(t, res)[0], "400") {
+		t.Errorf("stats by=colour = %v %v, want the route's 400", err, res)
+	}
+}
+
+// TestMCPWordingAndEvents (UX-H-29, UX-H-36): an unnamed agent reads
+// "unnamed agent", counts agree with their nouns, a 404 on an id says
+// where ids come from, and an events page says its positions, the next
+// cursor and whether the run is terminal — the route's done renamed
+// run_terminal.
+func TestMCPWordingAndEvents(t *testing.T) {
+	if got := (runHead{ID: "r", Status: "succeeded", Steps: 1, Pending: 1}).line("L"); got != "run r (unnamed agent): succeeded, 1 step; 1 call awaiting a decision — L" {
+		t.Errorf("runHead line %q", got)
+	}
+	if got := sessionSummary("s", []byte(`{"agent":"","status":"ok","runs":[{}]}`)); got != "session s (unnamed agent): ok, 1 turn" {
+		t.Errorf("session summary %q", got)
+	}
+	if got := pageSummary("search", []byte(`{"runs":[{}],"total":1}`), "runs"); got != "search: 1 run of 1" {
+		t.Errorf("page summary %q", got)
+	}
+	base := mcpSeedStudio(t)
+	cs := inProcess(t, newClient(base, "tok"))
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "run", Arguments: map[string]any{"id": "does-not-exist"}})
+	if err != nil || !res.IsError || !strings.Contains(texts(t, res)[0], "404") || !strings.Contains(texts(t, res)[0], "find run ids with runs or search {q}") {
+		t.Errorf("run of an unknown id = %v %v", err, texts(t, res))
+	}
+	res, err = cs.CallTool(ctx, &sdk.CallToolParams{Name: "events", Arguments: map[string]any{"id": "r_ok", "limit": 2}})
+	if err != nil || res.IsError {
+		t.Fatal(err, texts(t, res))
+	}
+	got := texts(t, res)
+	if !strings.HasPrefix(got[0], "run r_ok events: 2 events (pos 0–1); more: after=") || !strings.HasSuffix(got[0], "; the run is terminal") {
+		t.Errorf("events summary %q", got[0])
+	}
+	if strings.Contains(got[1], `"done"`) || !strings.Contains(got[1], `"run_terminal":true`) || !strings.Contains(got[1], `"next_after":`) {
+		t.Errorf("events body %.300s", got[1])
+	}
+}
+
+// TestMCPTurnDefaultsMostCommon (R-I5b): turn_defaults takes, per key,
+// the value most turns share — not the first turn's — and leaves out a
+// key no two turns agree on, so an odd first turn is said on itself.
+func TestMCPTurnDefaultsMostCommon(t *testing.T) {
+	doc := `{"id":"s","agent":"a","runs":[
+		{"id":"t1","agent":"a","model":{"provider":"p","name":"m"},"cost_badge":"unpriced","stop_reason":"stop","stopped_by":"x1","started":"2026-01-01T00:00:00Z"},
+		{"id":"t2","agent":"a","model":{"provider":"p","name":"m"},"stop_reason":"tool_calls","stopped_by":"x2","started":"2026-01-01T00:01:00Z"},
+		{"id":"t3","agent":"a","model":{"provider":"p","name":"m"},"stop_reason":"tool_calls","stopped_by":"x3","started":"2026-01-01T00:02:00Z"},
+		{"id":"t4","agent":"a","model":{"provider":"q","name":"n"},"stop_reason":"tool_calls","started":"2026-01-01T00:03:00Z"}]}`
+	var got struct {
+		TurnDefaults map[string]string   `json:"turn_defaults"`
+		Runs         []map[string]string `json:"runs"`
+	}
+	if err := json.Unmarshal(compactList([]byte(doc), "runs", sessionSame), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"model": "p/m", "stop_reason": "tool_calls"}
+	if !maps.Equal(got.TurnDefaults, want) {
+		t.Errorf("turn_defaults %v, want %v (cost_badge and stopped_by: no two turns agree)", got.TurnDefaults, want)
+	}
+	for i, w := range []map[string]string{
+		{"stop_reason": "stop", "cost_badge": "unpriced", "stopped_by": "x1"},
+		{"stopped_by": "x2"},
+		{"stopped_by": "x3"},
+		{"model": "q/n"},
+	} {
+		r := got.Runs[i]
+		for _, k := range turnDefaultKeys {
+			if r[k] != w[k] {
+				t.Errorf("turn %d %s = %q, want %q (%v)", i+1, k, r[k], w[k], r)
+			}
+		}
+	}
+	// One turn: nothing is shared, no turn_defaults.
+	one := `{"id":"s","runs":[{"id":"t1","model":{"provider":"p","name":"m"},"stop_reason":"stop","started":"2026-01-01T00:00:00Z"}]}`
+	if b := compactList([]byte(one), "runs", sessionSame); strings.Contains(string(b), "turn_defaults") || !strings.Contains(string(b), `"model":"p/m"`) {
+		t.Errorf("a one-turn session: %s", b)
 	}
 }

@@ -48,6 +48,6 @@ func ExampleRun() {
 	// warn runtimes
 	//   names WEFT_ENV
 	// ok panel
-	// ok weft.json
+	// ok manifest
 	// err: <nil>
 }

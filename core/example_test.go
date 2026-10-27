@@ -1235,6 +1235,25 @@ func ExampleWithMetadata() {
 	// page = https://app.example/chat tenant = acme
 }
 
+// WithCaller links the next run to a caller in another process — here
+// the run and tool call an upstream service named in its request. The
+// run records weft.caller.run.id / weft.caller.call.id (a link, not
+// parenthood); weft/mcp's Serve does this for an MCP client's _meta.
+func ExampleWithCaller() {
+	agt := core.New(wefttest.Script(wefttest.Say("done")), core.Name("worker"))
+	handle := func(ctx context.Context, callerRun, callerCall, prompt string) (string, error) {
+		res, err := agt.Generate(core.WithCaller(ctx, callerRun, callerCall), core.Prompt(prompt))
+		if err != nil {
+			return "", err
+		}
+		return res.Text(), nil
+	}
+	out, _ := handle(context.Background(), "lead-run-7", "call_3", "summarise the incident")
+	fmt.Println(out)
+	// Output:
+	// done
+}
+
 // ParkSource gives the agent a park set read once per run, at its
 // start — a debugger's breakpoints the app's own runs honour. The
 // source must answer promptly from a cached set.

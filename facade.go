@@ -391,6 +391,25 @@ func New(m Model, opts ...Option) *Agent { return core.New(m, opts...) }
 // set: a manifest describes the code, not the registry behind a source.
 func ToolSource(fn func() []*ToolDef) Option { return core.ToolSource(fn) }
 
+// WithCaller returns a copy of ctx naming the run and tool call that
+// called this process from outside it — an MCP client's tool call
+// (weft/mcp's Serve reads it from the request's _meta), a queue
+// message, an RPC: the run started next on ctx records
+// weft.caller.run.id and weft.caller.call.id (callID omitted when "")
+// on its invoke_agent span and run_start record — a link to its
+// caller, never parenthood: no weft.parent.*, and its usage stays its
+// own (record contract §2, O11).
+//
+// The link is that run's alone: a run started inside it (from its
+// model chain, or a tool handler's Generate, which carries the
+// handler's own call instead) does not inherit it, and a run started
+// on a tool call's context keeps that call's link — the in-process
+// caller wins. An empty runID returns ctx unchanged. Reporting only:
+// the link changes nothing the model sees.
+func WithCaller(ctx context.Context, runID, callID string) context.Context {
+	return core.WithCaller(ctx, runID, callID)
+}
+
 // CancelCause is a typed cancellation cause: what a layer passes to the
 // CancelCauseFunc of a context.WithCancelCause it fells a run with, so
 // the run's record says who cancelled it. Its value is a short,

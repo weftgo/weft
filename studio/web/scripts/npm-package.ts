@@ -127,6 +127,13 @@ async function check(): Promise<void> {
   if ((await readFile(`${pkgDir}ssr-guard.js`, "utf8")) !== SSR_GUARD || (await readFile(`${pkgDir}ssr-unguard.js`, "utf8")) !== SSR_UNGUARD)
     fail("npm/ssr-guard.js or ssr-unguard.js is not this script's (the npm entry's mark) — run 'make studio-build'")
   const readme = await readFile(`${pkgDir}README.md`, "utf8")
+  // The README's meta list is the panel's own field list (UX-S5a-14):
+  // config.ts's FIELDS, in order — never a stale subset.
+  const config = await readFile("src/panel/config.ts", "utf8")
+  const fields = /export const FIELDS = \[([^\]]*)\]/.exec(config)?.[1].match(/"([^"]+)"/g)?.map((f) => f.slice(1, -1)) ?? []
+  if (!fields.length) fail("src/panel/config.ts: no FIELDS list to check npm/README.md's meta tags against")
+  if (!readme.includes(`<meta name="weft:${fields.join("|")}">`))
+    fail(`npm/README.md's meta list is not config.ts's fields: want <meta name="weft:${fields.join("|")}">`)
   const other = [...readme.matchAll(/\bv?(\d+\.\d+\.\d+)\b/g)].map((m) => m[1]).filter((v) => v !== npmVersion)
   if (other.length) fail(`npm/README.md names version ${other[0]}, the weft version is ${npmVersion}`)
   console.log(

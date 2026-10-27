@@ -52,6 +52,10 @@ func TestVacuum(t *testing.T) {
 	if strings.Contains(out.String(), "swept") || !strings.Contains(out.String(), "vacuum: "+path) {
 		t.Errorf("vacuum without a retention said %q", out.String())
 	}
+	// The main file and the WAL apart, the WAL checkpointed (UX-S5a-12).
+	if !strings.Contains(out.String(), " bytes (WAL ") || !strings.HasSuffix(out.String(), " → 0 bytes)\n") {
+		t.Errorf("vacuum's size line %q: want the main file and the WAL apart, the WAL at 0", out.String())
+	}
 
 	t.Setenv("WEFT_RETAIN", "24h")
 	out.Reset()

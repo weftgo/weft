@@ -207,7 +207,7 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 	for _, s := range []string{"content   studio stores content as received; latest run", ": stripped", "fix: drop otel.NoContent()",
 		"ok   data      newest run ", " by weft ", "ok   otlp      walled: OTLP at " + ts.URL + "/v1/traces",
 		"warn discovery this Studio wrote " + discPath + ", which this shell does not find",
-		"db        sqlite /", "weft.json 1 agents, 1 checked against their latest runs: current",
+		"db        sqlite /", "manifest  weft.json: 1 agent, 1 checked against their latest runs: current",
 		// The ingest counters (UX-E-37): the app's batches accepted, the
 		// one refused above, and the refusal with its fix.
 		"warn ingest    ", " OTLP batches accepted, 1 refused; no app reported lost records",
@@ -309,7 +309,7 @@ func TestReadErrorsWarn(t *testing.T) {
 	}
 	for _, want := range []string{
 		"warn content   studio stores content as received; the latest run could not be read: content: read the latest run: disk on fire",
-		"warn weft.json the check failed: manifest_check: the manifest does not parse",
+		"warn manifest  the check failed: manifest_check: the manifest does not parse",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -341,7 +341,7 @@ func TestStaleManifest(t *testing.T) {
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	want := "warn weft.json stale for orders: weft.json and the latest runs disagree (the latest run of orders ran manifest "
+	want := "warn manifest  weft.json: stale for orders: weft.json and the latest runs disagree (the latest run of orders ran manifest "
 	want2 := "): regenerate weft.json, or redeploy the app if weft.json is newer"
 	var out string
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {

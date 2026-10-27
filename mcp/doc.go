@@ -25,6 +25,7 @@
 // by §7.1's corpus): field-for-field maps between two
 // already-compatible shapes, no translation layer of its own. This
 // module is a satellite (ADR 0005): it imports the core, the core's
-// internal/adapterkit, and the SDK — nothing else — and the core
-// never imports it or names it.
+// internal/adapterkit, the SDK and the OpenTelemetry trace API (a
+// tools/call's _meta traceparent, meta.go) — nothing else — and the
+// core never imports it or names it.
 package mcp

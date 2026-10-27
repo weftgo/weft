@@ -77,16 +77,17 @@ from --token`, `from WEFT_STUDIO_TOKEN`, `from the discovery file`).
 
 The tools, as `weft mcp --help` lists them: `explain_failure` (the run,
 every step, its child runs and the transcript composed), `runs`,
-`search`, `run`, `step`, `request`, `events`, `tools`, `diff`, `export`
-(json, jsonl, otlp), `sessions`, `session`, `logs`, `spans`, `trace`,
-`transcript`, `live`, `agents`, `experiments`, `runtimes`, `meta`. Every
+`search`, `stats`, `run`, `step`, `request`, `events`, `tools`, `diff`,
+`export` (json, jsonl, otlp), `sessions`, `session`, `logs`, `spans`,
+`trace`, `transcript`, `live`, `agents`, `experiments`, `runtimes`,
+`meta`. Every
 answer is three parts: a one-line summary, the route's JSON — compact
 rows on the list tools and compact spans on `spans`/`trace` (below;
 `full: true` answers the JSON as served) — and a note when the output
 was cut.
 
 **Compact rows.** A coding agent pays for every byte, so the list tools
-(`runs`, `search`, `sessions`, `session`, `live`) answer a projection of
+(`runs`, `search`, `sessions`, `session`, `live`, and `stats`' groups) answer a projection of
 the route's JSON: empty, zero, false and null fields are omitted (absent
 reads as that); a run row keeps its identity, outcome and size — id,
 parent, agent, model as `provider/name`, session and turn, status, `err`
@@ -101,9 +102,14 @@ a `*_known` flag is kept only when false and `cache` only when it is not
 `exact`; a session's turns omit the agent, session
 and public id the session names, cut `prompt_preview` to 80 characters
 and omit their model, cost badge, stop reason and stopped-by when equal
-to `turn_defaults` (the first turn's, said once; a turn with none where
+to `turn_defaults` (said once: per key the value most turns share — a
+tie to the earlier turn's — and only a value two turns or more share, so
+a key no two turns agree on stays on each turn; a turn with none where
 the default has one reads `none`); a session's outcomes strip is
-counted (`outcome_counts`). `spans` and `trace` answer each span
+counted (`outcome_counts`); a `stats` group leaves out its 24-bucket
+`series`. `events` renames the route's `done` to `run_terminal` — the
+run has ended, which is not "this is the last page": follow
+`next_after` until it is absent (the summary says both). `spans` and `trace` answer each span
 as its name, ids, `start_ms` / `dur_ms` from the first span (`t0`),
 status and the attributes that say what it was (model, tokens, tool,
 step, attempt, error, HTTP status), content attributes and events left
@@ -118,6 +124,8 @@ tool call failing, the prompts ~220 characters — answers 3.2 KB compact,
 | It succeeded, but something went wrong inside | `explain_failure {"id": X}` | `first_error` names the run (a child's own) and the step; the `digest` has every step and child |
 | What did the model see at step N? | `request {"id": X, "step": N, "transcript": true}` | `step {"id": X, "n": N}` for the step whole |
 | Find the runs that called refund and failed | `search {"tool": "refund", "status": "failed"}` (or `"q": "<run error text>"`) | `explain_failure` on a hit |
+| Which failures keep happening? | `search {"status": "failed", "all": true}` — `facets.error_class`, the failures grouped by their normalised error text, the summary naming the commonest | `search {"error_class": "<class>"}` or `runs {"error_class": "<class>"}` for that class's runs |
+| How is agent X doing — failure rate, cost, latency? | `stats {"by": "agent", "since": "7d"}` (or `by` model, tool, error_type, step; `agent`, `tag`, `public_id` narrow it) | a group's `runs_query` is the `search` that lists its runs |
 | Where did the refund tool return an error? | `step {"id": X, "n": N}` (each call's `result.is_error`) or `events {"id": X}` (`tool_finish` with `is_error`) | — search does not filter on tool results |
 | Compare run A and B | `diff {"a": A, "b": B}` | `step` on the first changed step |
 | What can this Studio do? | `meta {}` | a 404 or 403 elsewhere: is the capability off, and why |

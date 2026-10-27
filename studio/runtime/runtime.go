@@ -230,6 +230,30 @@ func (a AgentRegistration) ManifestToolNames() []string {
 	return names
 }
 
+// manifestApprovals is the agent's tools built with RequireApproval,
+// by name, as its manifest records them (require_approval); nil when
+// the manifest does not read.
+func (a AgentRegistration) manifestApprovals() map[string]bool {
+	var doc struct {
+		Agents []struct {
+			Tools []struct {
+				Name            string `json:"name"`
+				RequireApproval bool   `json:"require_approval"`
+			} `json:"tools"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal([]byte(a.Manifest), &doc); err != nil || len(doc.Agents) == 0 {
+		return nil
+	}
+	gated := map[string]bool{}
+	for _, t := range doc.Agents[0].Tools {
+		if t.RequireApproval {
+			gated[t.Name] = true
+		}
+	}
+	return gated
+}
+
 // ManifestToolSchemas returns the agent's tools' input schemas by name,
 // as its manifest records them — what the runtime checks a tool_args
 // edit against (its agent's own tools). ok is false when the manifest
@@ -640,11 +664,17 @@ type AgentView struct {
 	Instructions string `json:"instructions,omitempty"`
 }
 
-// ToolView is one tool of a connected runtime's agent.
+// ToolView is one tool of a connected runtime's agent. SideEffects is
+// its replay class — "safe" (re-run on a replay) or "never" (never
+// re-run: substituted, parked or, opted in, allowed) — not whether the
+// tool has effects. Approval says the tool is built with
+// RequireApproval (its manifest's require_approval): a gated call, so
+// "never" beside it reads as what it is (UX-H-22).
 type ToolView struct {
 	Name        string `json:"name"`
 	SideEffects string `json:"side_effects"`
 	Allow       bool   `json:"allow"`
+	Approval    bool   `json:"approval,omitempty"`
 }
 
 // Errors Enqueue and the routes answer with.
@@ -1880,11 +1910,13 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			if av.Models == nil {
 				av.Models = []string{}
 			}
+			gated := a.manifestApprovals()
 			for _, name := range a.ManifestToolNames() {
 				av.Tools = append(av.Tools, ToolView{
 					Name:        name,
 					SideEffects: a.SideEffects[name],
 					Allow:       a.IsAllowed(name),
+					Approval:    gated[name],
 				})
 			}
 			if av.Tools == nil {

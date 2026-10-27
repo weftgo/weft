@@ -255,6 +255,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -282,6 +283,42 @@ var errUsage = errors.New("usage")
 // usageError is a command-line mistake; run exits 2 on it.
 func usageError(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{errUsage}, args...)...)
+}
+
+// gotArgs is a usage error's account of the arguments it was given, in
+// words, never a Go slice (UX-S5a-11): "none", or each one quoted.
+func gotArgs(args []string) string {
+	if len(args) == 0 {
+		return "none"
+	}
+	q := make([]string, len(args))
+	for i, a := range args {
+		q[i] = strconv.Quote(a)
+	}
+	return strings.Join(q, " ")
+}
+
+// printDefaults is fs.PrintDefaults with each flag spelled the way the
+// usage lines and the docs spell it, --name (the flag package accepts
+// both; UX-S5a-11).
+func printDefaults(fs *flag.FlagSet) {
+	var b strings.Builder
+	out := fs.Output()
+	fs.SetOutput(&b)
+	fs.PrintDefaults()
+	fs.SetOutput(out)
+	_, _ = io.WriteString(out, dashDash(b.String()))
+}
+
+// dashDash turns flag.PrintDefaults' "  -name" lines into "  --name".
+func dashDash(s string) string {
+	lines := strings.SplitAfter(s, "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "  -") && !strings.HasPrefix(l, "  --") {
+			lines[i] = "  --" + l[3:]
+		}
+	}
+	return strings.Join(lines, "")
 }
 
 const usage = `weft — the weft framework's command line
@@ -373,7 +410,7 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return runVacuum(rest, stdout, stderr)
 	case "version", "--version", "-version":
 		if len(rest) > 0 {
-			return usageError("version takes no arguments, got %q", rest)
+			return usageError("version takes no arguments (got %s)", gotArgs(rest))
 		}
 		_, err := fmt.Fprintln(stdout, version.Runtime())
 		return err
@@ -392,6 +429,10 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 func newFlags(name string, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet("weft "+name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintf(fs.Output(), "Usage of weft %s:\n", name)
+		printDefaults(fs)
+	}
 	return fs
 }
 
@@ -420,7 +461,7 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return usageError("studio takes no arguments, got %q", fs.Args())
+		return usageError("studio takes no arguments (got %s)", gotArgs(fs.Args()))
 	}
 	restoreLog, err := logs.install(stderr)
 	if err != nil {
@@ -552,7 +593,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return usageError("doctor takes no arguments, got %q", fs.Args())
+		return usageError("doctor takes no arguments (got %s)", gotArgs(fs.Args()))
 	}
 	t := resolveStudio(*base, *token)
 	t.say(stderr)

@@ -85,8 +85,8 @@ metadata rides every span and record verbatim):
 | run | `weft.run.id` | string | the core | 32 lowercase hex digits for a plain run; `<session>-t<n>` for a `thread` turn; `<parent>/<step>/<call id>` for a Subagent child (below); or the caller's own, through `core.RunID` (any string — it must not start with `otel-`, the derived-run prefix of §9; nothing enforces that — the core accepts any id, and obsdb does not guard it either: a weft run whose id has the exact derived shape, `otel-<32 hex>-<16 hex>`, would have its spans read as a derived run's, by trace — `obsdb.ParseStockRunID`) |
 | parent run | `weft.parent.run.id` | string | the core | on a Subagent child's `invoke_agent` span and its `run_start` record only |
 | parent call | `weft.parent.call.id` | string | the core | the parent's tool call the child ran under (its `gen_ai.tool.call.id`); on the same span and record as `weft.parent.run.id` |
-| caller run | `weft.caller.run.id` | string | the core | on the `invoke_agent` span and `run_start` record of any other run started on a tool call's context — a `thread/pool` child session's turn, another agent's `Generate` inside a handler — never with `weft.parent.*` (O11, U14): a link, not parenthood |
-| caller call | `weft.caller.call.id` | string | the core | the tool call that run was started from (its `gen_ai.tool.call.id`); on the same span and record as `weft.caller.run.id` |
+| caller run | `weft.caller.run.id` | string | the core | on the `invoke_agent` span and `run_start` record of any other run started on a tool call's context — a `thread/pool` child session's turn, another agent's `Generate` inside a handler — or on a context `core.WithCaller` named a caller from another process on (an MCP client's `params._meta`, read by `mcp.Serve`) — never with `weft.parent.*` (O11, U14): a link, not parenthood |
+| caller call | `weft.caller.call.id` | string | the core | the tool call that run was started from (its `gen_ai.tool.call.id`); on the same span and record as `weft.caller.run.id` (absent when a `core.WithCaller` caller named no call) |
 | session | `weft.session.id` | string | `thread`, or the app via `Metadata` | mirrored as `gen_ai.conversation.id` and `session.id` on every span and record the core emits for the run (and so on the heartbeat, which copies `run_start`'s attributes) — not on `thread`'s session compaction marker, which carries `weft.session.id` alone (§4) |
 | turn | `weft.turn` | int (as a string) | `thread` | the turn number the run id was minted from (`-t<n>`) |
 | public id | `weft.public_id` | string | `thread.PublicID`, or the app via `Metadata` | the browser-facing id a panel token is scoped to |
@@ -128,7 +128,15 @@ parent call). A `thread/pool` child is a separate session
 with its own id (`<child session>-t<n>`): its caller link names the
 delegating turn and call when the delegation ran under one (`pool.Wrap`),
 none when `p.Submit` was called outside a run, and its lineage is the
-session metadata below either way (the `pool_child` fixture). Before
+session metadata below either way (the `pool_child` fixture). Across a
+process boundary the caller names itself: `core.WithCaller(ctx, run,
+call)` links the next run started on `ctx` (outside a tool call — a call
+on the context wins; no run inside it inherits the link), and
+`mcp.Serve` does that for a `tools/call` whose `params._meta` carries
+`dev.weftgo/caller` `{run_id, call_id}` — `mcp.Tools`' imported tools
+send it, with the W3C `traceparent` of their `execute_tool` span, which
+the served call takes as its remote parent: the served run's spans join
+the caller's trace, its run a caller-linked run on the served side. Before
 weft 0.18 the core stamped `weft.parent.*` on every run started on a
 tool call's context; a reader of older records tells a Subagent child by
 its id (`<parent>/…`) and a pool child session's turn by its own
@@ -239,7 +247,7 @@ child). It ends when the run does, however the run ends.
 | `gen_ai.request.model` | string | the model reports a name |
 | `weft.instructions.hash` | string, sha256 hex | always (on runs written since ADR 0028; the empty string's hash for no instructions) |
 | `weft.parent.run.id`, `weft.parent.call.id` | string | Subagent children |
-| `weft.caller.run.id`, `weft.caller.call.id` | string | any other run started on a tool call's context (§2's caller link) |
+| `weft.caller.run.id`, `weft.caller.call.id` | string | any other run started on a tool call's context, or under `core.WithCaller` (§2's caller link) |
 | `weft.manifest.hash` | string | named agents |
 | `weft.version` | string | always |
 | `weft.logs.bridged` | int | at start, while the pipeline has a live slog bridge (a `Pipeline.SlogHandler`, `otel.Slog`'s wrap while it is still `slog.Default`'s handler, or any handler that has teed a line into this pipeline; set by `weft/otel`'s span processor, not the core), and only on the copy a destination that takes app logs (`otel.AppLogs`) exports — a content-off sink, an `AppLogs(false)` one or a third party not opted in receives the span without it: the lines the bridge had emitted so far. Its presence is the mark — "this store holds the run's bridged lines"; a stored root without it ran with no bridge reaching this store, which the logs route's hint reads (§7); not caller metadata (`obsdb.MetaOf` skips it) |

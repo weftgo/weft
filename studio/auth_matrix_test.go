@@ -992,17 +992,19 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "POST /api/runs/{app's own run}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + run[res] + "/cancel" },
 			resources: []string{"A", "B", "none"}, want: acting(forbidden403)},
 		// The app's own turns with a runtime.Sessions runtime of their
-		// service connected (plan F4): the three verbs are forwarded as
-		// session commands — 202 for whoever may act inside the run's
+		// service connected (plan F4): a decision is forwarded as a
+		// session command — 202 for whoever may act inside the run's
 		// public id; a read token 403, a panel token for another public
 		// id 403; a turn with no public id 403 "app-owned turn" (nothing
-		// to resolve it by) — and an unknown id 404.
+		// to resolve it by) — and an unknown id 404. Cancel, and steer on
+		// this finished turn, are refused at once in the runtime's words
+		// for whoever may act (409, UX-H-19), after the same scope checks.
 		{name: "POST /api/runs/{app session turn}/approvals", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/approvals" },
 			body: fixed(`{"call_id":"call_1","decision":"approve"}`), resources: []string{"A", "B", "missing"}, want: acting(accepted)},
 		{name: "POST /api/runs/{app session turn}/steer", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/steer" },
-			body: fixed(`{"message":"hi"}`), resources: []string{"A", "B", "missing"}, want: acting(accepted)},
+			body: fixed(`{"message":"hi"}`), resources: []string{"A", "B", "missing"}, want: acting(http.StatusConflict)},
 		{name: "POST /api/runs/{app session turn}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/cancel" },
-			resources: []string{"A", "B", "missing"}, want: acting(accepted)},
+			resources: []string{"A", "B", "missing"}, want: acting(http.StatusConflict)},
 		{name: "POST /api/runs/{app session turn, no public id}/approvals", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/approvals" },
 			body: fixed(`{"call_id":"call_1","decision":"approve"}`), resources: []string{"none"}, want: anyValid(forbidden403)},
 		{name: "POST /api/runs/{app session turn, no public id}/steer", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/steer" },

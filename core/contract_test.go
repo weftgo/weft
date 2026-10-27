@@ -7548,3 +7548,85 @@ func TestRequestRecorderCatalogMemoIsItsOwn(t *testing.T) {
 		}
 	}
 }
+
+// TestWithCallerLinksTheNextRunOnly (O11, record contract §2; U33.1):
+// WithCaller names a caller from another process — weft/mcp's Serve
+// reads it from an MCP client's _meta. The run started on that context
+// records weft.caller.run.id / weft.caller.call.id on its invoke_agent
+// span and run_start record, never weft.parent.*; a run its own tool
+// starts carries that tool call's link instead, a judge in its model
+// chain carries none, a run started on a tool call's context keeps the
+// call's link over a WithCaller around it, and an empty run id is no
+// link.
+func TestWithCallerLinksTheNextRunOnly(t *testing.T) {
+	tp, lp := newRecProvider(), newRecLogProvider()
+	obs := []core.Option{core.TracerProvider(tp), core.LoggerProvider(lp)}
+	judge := core.New(wefttest.Script(wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok")), append(obs, core.Name("judge"))...)
+	worker := core.New(wefttest.Script(wefttest.Say("looked up"), wefttest.Say("again")), append(obs, core.Name("worker"))...)
+	lookup := core.Tool("lookup", "Look up.", func(ctx context.Context, _ struct{}) (string, error) {
+		// A WithCaller inside a handler: the handler's own call wins.
+		res, err := worker.Generate(core.WithCaller(ctx, "elsewhere", "x"), core.Prompt("look it up"))
+		if err != nil {
+			return "", err
+		}
+		return res.Text(), nil
+	})
+	served := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup", Args: `{}`, ID: "c_l"}),
+		wefttest.Say("served done"),
+	), append(obs, core.Name("served"), lookup, core.WrapModel(func(next core.Model) core.Model {
+		return judgedModel{next: next, judge: func(ctx context.Context) { _, _ = judge.Generate(ctx, core.Prompt("judge")) }}
+	}))...)
+	ctx := core.WithCaller(context.Background(), "remote_run", "remote_call")
+	if _, err := served.Generate(ctx, core.RunID("s1"), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.Generate(core.WithCaller(context.Background(), "", "ignored"), core.RunID("w0"), core.Prompt("alone")); err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{"weft.parent.run.id", "weft.parent.call.id", "weft.caller.run.id", "weft.caller.call.id"}
+	tp.mu.Lock()
+	spans := append([]*recSpan(nil), tp.spans...)
+	tp.mu.Unlock()
+	lp.mu.Lock()
+	all := append([]recLogRecord(nil), lp.records...)
+	lp.mu.Unlock()
+	starts := map[string]recLogRecord{}
+	for _, r := range all {
+		if r.attr("weft.event.type") == "run_start" {
+			starts[r.attr("weft.run.id")] = r
+		}
+	}
+	byAgent := map[string][]map[string]string{}
+	for _, s := range spans {
+		if a := s.attrsMap(); strings.HasPrefix(s.name, "invoke_agent ") {
+			byAgent[a["gen_ai.agent.name"]] = append(byAgent[a["gen_ai.agent.name"]], a)
+		}
+	}
+	check := func(a map[string]string, want map[string]string) {
+		t.Helper()
+		id := a["weft.run.id"]
+		for _, k := range keys {
+			if a[k] != want[k] {
+				t.Errorf("run %s (%s) span %s = %q, want %q", id, a["gen_ai.agent.name"], k, a[k], want[k])
+			}
+			if got := starts[id].attr(k); got != want[k] {
+				t.Errorf("run %s run_start %s = %q, want %q", id, k, got, want[k])
+			}
+		}
+	}
+	if len(byAgent["served"]) != 1 || len(byAgent["worker"]) != 2 || len(byAgent["judge"]) != 2 {
+		t.Fatalf("runs by agent: %v", byAgent)
+	}
+	check(byAgent["served"][0], map[string]string{"weft.caller.run.id": "remote_run", "weft.caller.call.id": "remote_call"})
+	for _, a := range byAgent["worker"] {
+		if a["weft.run.id"] == "w0" {
+			check(a, nil)
+			continue
+		}
+		check(a, map[string]string{"weft.caller.run.id": "s1", "weft.caller.call.id": "c_l"})
+	}
+	for _, a := range byAgent["judge"] {
+		check(a, nil)
+	}
+}

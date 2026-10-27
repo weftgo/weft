@@ -79,13 +79,13 @@ func runVacuum(args []string, stdout, stderr io.Writer) error {
 	fs.Usage = func() {
 		_, _ = fmt.Fprintln(fs.Output(), "Usage: weft vacuum [--db sqlite://path|clickhouse://…] [--retain duration]")
 		_, _ = fmt.Fprintln(fs.Output(), "One retention sweep (with --retain or WEFT_RETAIN), then VACUUM (SQLite) or OPTIMIZE TABLE … FINAL (ClickHouse); studio's tables only.")
-		fs.PrintDefaults()
+		printDefaults(fs)
 	}
 	if err := parse(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return usageError("vacuum takes no arguments, got %q", fs.Args())
+		return usageError("vacuum takes no arguments (got %s)", gotArgs(fs.Args()))
 	}
 	d, err := resolveRetain(*retain)
 	if err != nil {
@@ -106,12 +106,18 @@ func runVacuum(args []string, stdout, stderr io.Writer) error {
 		_, _ = fmt.Fprintf(stdout, "vacuum: swept %d runs last seen before %s (retention %s)\n",
 			n, cutoff.UTC().Format(time.RFC3339), d)
 	}
-	before := fileSize(path)
+	beforeMain, beforeWAL := fileSizes(path)
 	if err := db.Vacuum(ctx); err != nil {
 		return fmt.Errorf("vacuum: %w", err)
 	}
 	if path != "" {
-		_, _ = fmt.Fprintf(stdout, "vacuum: %s %d → %d bytes\n", path, before, fileSize(path))
+		// The main file and its WAL apart (UX-S5a-12): Vacuum checkpoints,
+		// so the WAL is usually 0 after; one a reader held says so.
+		afterMain, afterWAL := fileSizes(path)
+		_, _ = fmt.Fprintf(stdout, "vacuum: %s %d → %d bytes (WAL %d → %d bytes)\n", path, beforeMain, afterMain, beforeWAL, afterWAL)
+		if afterWAL > 0 {
+			_, _ = fmt.Fprintln(stdout, "vacuum: the WAL is not checkpointed yet (a reader holds it): the next checkpoint folds it into the file")
+		}
 	} else {
 		_, _ = fmt.Fprintf(stdout, "vacuum: %s optimized\n", dbLabel(*dbFlag))
 	}
@@ -158,17 +164,17 @@ func openVacuumDB(dbFlag string) (obsdb.DB, string, error) {
 	}
 }
 
-// fileSize is a SQLite file's bytes with its WAL sidecar, 0 when it
-// cannot be read (or path is "").
-func fileSize(path string) int64 {
+// fileSizes is a SQLite file's bytes and its WAL sidecar's, each 0
+// when it cannot be read (or path is "").
+func fileSizes(path string) (main, wal int64) {
 	if path == "" {
-		return 0
+		return 0, 0
 	}
-	var n int64
-	for _, p := range []string{path, path + "-wal"} {
-		if fi, err := os.Stat(p); err == nil {
-			n += fi.Size()
-		}
+	if fi, err := os.Stat(path); err == nil {
+		main = fi.Size()
 	}
-	return n
+	if fi, err := os.Stat(path + "-wal"); err == nil {
+		wal = fi.Size()
+	}
+	return main, wal
 }

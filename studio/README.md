@@ -384,6 +384,49 @@ row.
 
 ## The devtools panel (WEFT-DEVTOOLS.md)
 
+**Quickstart** — three setups, each one line of markup or code; the
+rest of this section is the reference.
+
+- *The Go app serves Studio* (setup A, `studio.Handler` mounted at
+  `/studio/`): `<script type="module" src="/studio/panel.js" data-weft
+  data-scope="pub_…"></script>` — same origin, no token.
+- *A separate `weft studio` / `weft dev`* (setup B): the tag names the
+  Studio and carries a token — in development the dev token (`weft open
+  --with-token` prints it in a link), on a page you ship a panel token
+  your backend mints (`POST /api/panel-tokens`): `<script type="module"
+  src="http://127.0.0.1:7341/panel.js" data-weft
+  data-endpoint="http://127.0.0.1:7341/" data-token="…"
+  data-scope="pub_…"></script>`.
+- *A bundled app with no `<script>` tag*: `import "@weftgo/devtools"`
+  (or `mount({endpoint, scope})`, `useWeftDevtools(…)` in React), the
+  same ladder minus the tag ([`web/npm/README.md`](web/npm/README.md)).
+- *Hand-off*: the panel's ⤢ links open the same run, step or session in
+  Studio.
+
+Where the panel's scope comes from is [the ladder](#the-scope-and-the-ladder-that-finds-it)
+(explicit, header, DOM marker, URL, fallback); its attributes are the
+table under [Layout, attributes, theme and memory](#layout-attributes-theme-and-memory).
+
+In this section:
+
+- [What it shows](#what-it-shows)
+- [The views and tabs](#the-views-and-tabs)
+- [The Request tab](#the-request-tab)
+- [Replay from here](#replay-from-here)
+- [The scope and the ladder that finds it](#the-scope-and-the-ladder-that-finds-it)
+- [Layout, attributes, theme and memory](#layout-attributes-theme-and-memory)
+- [The keyboard](#the-keyboard)
+- [Rendering and accessibility](#rendering-and-accessibility)
+- [Where the configuration comes from](#where-the-configuration-comes-from)
+- [When Studio does not answer](#when-studio-does-not-answer)
+- [The size ledger](#the-size-ledger)
+- [The npm package](#the-npm-package)
+- [The host API and events](#the-host-api-and-events)
+- [The app's own turns](#the-apps-own-turns)
+- [The scope header, server side](#the-scope-header-server-side)
+
+### Install: the script tag, a token, npm
+
 One script tag puts the run loop in the corner of your own page —
 `/panel.js` is served by the same handler:
 
@@ -403,6 +446,8 @@ token your backend mints instead):
 
     <script type="module" src="http://127.0.0.1:7341/panel.js" data-weft
       data-endpoint="http://127.0.0.1:7341/" data-token="<dev token>" data-scope="pub_…"></script>
+
+### What it shows
 
 Rung 1 is a viewer scoped to that conversation: the turns (parked
 shown), the step story with tool calls, usage splits, each step's
@@ -436,6 +481,8 @@ default (UX-D-12: the attempts, the changed marks, the badges) and opens
 on a click to the prompt, the catalog and the params — the params only
 when one is not the adapter's default; the "insert a message" lines
 show on hover or focus.
+
+### The views and tabs
 
 The views (plan D4). The open turn has four tabs, a `role="tablist"`
 (`←`/`→`, `Home`/`End` move and select; one tab stop), labelled with
@@ -655,6 +702,8 @@ concurrency chip and the "last step stopped on" relabel of a stop
 reason that contradicts `stopped_by` — the panel's turn chip names what
 ended the turn, the run page draws the rest.
 
+### The Request tab
+
 The Request tab (plan E1.2) is the run page's Request pane in the panel
 (`src/panel/request.ts`, the same readings: `lib/request-pane.ts`,
 `lib/requests.ts`, `lib/diff.ts`'s bounded diff). It shows one step — the
@@ -694,6 +743,8 @@ gets one **wire ↗** link — `lib/links.ts`'s `runLink(id, {step, view:
 "story", pane: "wire"})` off the endpoint, in a new tab like `⤢` — to the
 run page's Wire tab for that step; a step whose rows have `raw: null`
 gets no link.
+
+### Replay from here
 
 Replay from here (plan F1). The Story view's step cards, tool calls,
 steers, the subagent call's child row and the child's own steps carry
@@ -807,6 +858,8 @@ that switches conversations sets `window.__WEFT__ = { scope }` (or
 `{ publicId }`) instead of `data-scope`; the tag then carries no other
 knob, so keep `data-weft` on it — it is how the panel finds its own tag
 (and with it the endpoint) whatever the file is called.
+
+### The scope and the ladder that finds it
 
 The panel follows a scope,
 `pub_…;session=s_…;flow=f_…;run=r_…;agent=…;tag.<k>=<v>`
@@ -1039,6 +1092,8 @@ when that run is the turn the panel follows, else its row's (unknown
 while it runs: `●` alone, `weft devtools · running`). When the run
 ends the next draw is the plain pill.
 
+### Layout, attributes, theme and memory
+
 Layout (plan D1). The dock floats — dragged by its header, resized
 from its corner, between 360×280 and the viewport minus 16 px, clamped
 again on every window resize (a passive listener, removed on
@@ -1126,6 +1181,8 @@ read and write is guarded, so a private window just forgets.
 `localStorage.removeItem("weft.devtools")` resets everything (and turns
 `debug` off).
 
+### The keyboard
+
 The keyboard (`src/lib/keys.ts`'s `PANEL_KEYMAP`, the `?` list; a key Studio binds too — `j`/`k`, `[`/`]`, `s`/`w`/`q`/`r`, `o`, `/`, `?` — means the same there, `STUDIO_KEYMAP`).
 `Alt+W` is the one key the panel hears on `window`; every other key is
 heard on its shadow root, so it fires only while focus is inside the
@@ -1147,6 +1204,8 @@ puts focus in it, so the keys below work at once.
 | `?` | the key list |
 | `↓` / `↑` | on a turn row: move the list's one tab stop to the next / previous row (`Enter` or a click selects) |
 | `Tab` | in an open, focused float: wraps from the last control Tab can reach to the first (`Shift+Tab` back) — controls inside a closed `<details>` or hidden by CSS (the narrow float's list) are skipped. The float is non-modal (`role="complementary"`, no backdrop, the page stays live), so this is the one focus trap, and `Esc` collapses the dock to leave it; docked, the pill and the sheet never trap |
+
+### Rendering and accessibility
 
 The renderer (plan D3). A draw builds the dock afresh and patches it
 into the nodes on screen (`src/panel/render.ts`'s `patch`, about 1 KiB,
@@ -1195,6 +1254,8 @@ and speaks the step-end status once is a manual browser-gate check) —
 is the browser gate's (`scripts/panel-gate.ts` against a real Studio,
 and a manual pass).
 
+### Where the configuration comes from
+
 Where the configuration comes from (plan C2). Each field — `endpoint`,
 `scope` (or the deprecated `public-id`; `scope` wins at the same rung),
 `token`, `detect`, `position`, `open`, `auto`, `global`, `mode`, `push`,
@@ -1221,6 +1282,8 @@ directory.
 A `weft:token` meta tag, like `data-token`, is a token in the page's
 source: in HTML you ship, use a per-page panel token your backend
 mints (`POST /api/panel-tokens`), never a dev or server token.
+
+### When Studio does not answer
 
 No Studio answering: the dock the script mounted by itself removes
 itself silently unless the endpoint is one you named on loopback (production safety)
@@ -1289,6 +1352,8 @@ first paint, and 2.2 KiB of headroom remained at the time, so it is accepted.
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 
+### The size ledger
+
 The size ledger. Every panel build (`bun run build`, `make
 studio-build`, `make studio-check`) prints the per-item size table,
 measured with the version stamp normalized — the stamped version
@@ -1331,6 +1396,8 @@ the unbudgeted rows after it, as `budget.test.ts` pins). The per-item
 marks are evidence, not a gate; the build itself fails only over the
 cap (`vite.panel.config.ts`).
 
+### The npm package
+
 The same file is packaged as `@weftgo/devtools`, for apps that bundle
 everything and ship no `<script>` tag (Vite, Next, SvelteKit) — not
 published to npm yet: build the tarball (`make devtools-npm`, then `npm
@@ -1362,6 +1429,8 @@ version; the same check is the package's `prepublishOnly`, and
 `publishConfig.access` is `public`. Publishing is done by hand. A Vite app
 that installs the packed package is in `examples/devtools-vite`
 (`make devtools-vite-check`).
+
+### The host API and events
 
 The host API (plan C4) drives the panel from the page's own UI — a
 "debug this" button beside a reply, a "report this run" link — with no
@@ -1415,6 +1484,8 @@ none. `examples/studio-local`'s page uses it: "debug this" per reply,
 "report this run" from `on("run")` and `studioLink`, and `on("parked")`
 counted into `<body data-parked-count>` (ask it about a refund: the
 turn parks on `refund_order`, a `weft.RequireApproval` tool).
+
+### The app's own turns
 
 The app's own turns (plan F4.3). A parked turn the app started — no
 `weft.playground`, a turn of a thread session with a public id — takes
@@ -1528,6 +1599,8 @@ the session again, in its ask and its resolver.
 Without `WEFT_ENV=dev` the turn is read-only because the link is closed:
 the options are set, but no runtime of the service is connected, and the
 line says to open the link.
+
+### The scope header, server side
 
 The scope header (plan C3, rung 2, the development rung) is set by the
 app's own handler, since `thread` has no HTTP layer: one line,
@@ -1672,7 +1745,7 @@ is not retried, cancel again. Auth is steer's:
 the dev token or setup A's loopback, a playground-scoped panel token inside
 its public id; a read panel token is 403.
 
-The app's own turns (plan F4.1). A run no runtime started is the app's: its approvals, steer and cancel go through a connected runtime of the run's service (the run row's `service`, the registration's `service`) installed with `runtime.Sessions(resolver)` — `/api/runtimes` reports it as `"sessions": true`, and `meta.debug_scope` reads `"own+runtime"` while one is connected. The route then forwards the verb as an `event: session` command (`{command_id, verb: decide|steer|cancel, public_id, session_id, run_id, call_id?, decision?, reason?, content?, message?, actor?}`, addressed by the run row's `weft.public_id` and `weft.session.id`) and answers **202** `{command_id, state: "queued", run_id, runtime_id}` at once; the client polls `GET /api/playground/commands/{id}`. The runtime claims the app's Session writer lease before it acks, so its refusals arrive on the row as `state: "rejected"` with `error`: `the app is writing this session; fork instead` (another writer holds the session — nothing written), `no session for this public id`, `the session resolver answered session <id> for public id <pub>, not the run's session <id>` (the resolver handed back another session under that public id — one public id naming two sessions, e.g. an app that creates a new session per process start; nothing written), `this session requires signed decisions: …` (a `thread.RequireSigned` session — the app decides it with `DecideSigned`), `cancel is not supported on an app turn` (thread has no per-turn cancel), or the resolver's own error. Two answers arrive after the ack, as `state: "finished"`, `status: "failed"`, nothing written: a steer whose run is not the turn running now (`no running turn to steer for run <id> (…)`, naming the run running instead when there is one — `thread.Session.Steer` decides it under the session's lock with the run's id, so the call never starts a turn and never lands in a newer one; a delivered steer that misses its drain point — StopWhen, a park, the run ending first — still becomes a follow-up turn under ADR 0019's rule: the finished ack then reads `succeeded` for the named run, and the follow-up turn shows up later as the session's next run), and a lease lost between the claim and the write (the locked sentence). With several replicas of one service, Studio picks the Sessions runtime seen most recently, which may not be the process holding the session: it answers `the app is writing this session; fork instead` (a shared store) or `no session for this public id` (per-process stores) — misleading, but safe: nothing is written. A decision's finished ack names the resumed turn (`<session>-tN`, the app's run — never `weft.playground`). Without such a runtime the three verbs answer alike, **403** `{"error":{"code":"forbidden","message":"app-owned turn · read-only: …"},"fix":"set runtime.Sessions(resolver) at runtime.Install in the app …"}`; a run that is not a turn of a thread session with a public id is 403 "app-owned turn" with the fix `thread.PublicID(...)`. Identity rules are every playground verb's: the dev token or setup A loopback; a playground panel token inside its own public id (another's 403); a read token 403.
+The app's own turns (plan F4.1). A run no runtime started is the app's: its approvals, steer and cancel go through a connected runtime of the run's service (the run row's `service`, the registration's `service`) installed with `runtime.Sessions(resolver)` — `/api/runtimes` reports it as `"sessions": true`, and `meta.debug_scope` reads `"own+runtime"` while one is connected. The route then forwards the verb as an `event: session` command (`{command_id, verb: decide|steer|cancel, public_id, session_id, run_id, call_id?, decision?, reason?, content?, message?, actor?}`, addressed by the run row's `weft.public_id` and `weft.session.id`) and answers **202** `{command_id, state: "queued", run_id, runtime_id}` at once; the client polls `GET /api/playground/commands/{id}`. The runtime claims the app's Session writer lease before it acks, so its refusals arrive on the row as `state: "rejected"` with `error`: `the app is writing this session; fork instead` (another writer holds the session — nothing written), `no session for this public id`, `the session resolver answered session <id> for public id <pub>, not the run's session <id>` (the resolver handed back another session under that public id — one public id naming two sessions, e.g. an app that creates a new session per process start; nothing written), `this session requires signed decisions: …` (a `thread.RequireSigned` session — the app decides it with `DecideSigned`), or the resolver's own error. Two are refused before any command is queued, **409** in the runtime's own words (UX-H-19): a cancel — `cancel is not supported on an app turn: run <id> is the app's own turn` (thread has no per-turn cancel; a parked turn reads "is parked: decide its pending calls (approve/deny) instead") — and a steer on a turn whose run row already reads succeeded or failed — `no running turn to steer: run <id> already finished (<status>)`. Two answers arrive after the ack, as `state: "finished"`, `status: "failed"`, nothing written: a steer whose run is not the turn running now (its row still reading running, or a newer turn running) (`no running turn to steer for run <id> (…)`, naming the run running instead when there is one — `thread.Session.Steer` decides it under the session's lock with the run's id, so the call never starts a turn and never lands in a newer one; a delivered steer that misses its drain point — StopWhen, a park, the run ending first — still becomes a follow-up turn under ADR 0019's rule: the finished ack then reads `succeeded` for the named run, and the follow-up turn shows up later as the session's next run), and a lease lost between the claim and the write (the locked sentence). With several replicas of one service, Studio picks the Sessions runtime seen most recently, which may not be the process holding the session: it answers `the app is writing this session; fork instead` (a shared store) or `no session for this public id` (per-process stores) — misleading, but safe: nothing is written. A decision's finished ack names the resumed turn (`<session>-tN`, the app's run — never `weft.playground`). Without such a runtime the three verbs answer alike, **403** `{"error":{"code":"forbidden","message":"app-owned turn · read-only: …"},"fix":"set runtime.Sessions(resolver) at runtime.Install in the app …"}`; a run that is not a turn of a thread session with a public id is 403 "app-owned turn" with the fix `thread.PublicID(...)`. Identity rules are every playground verb's: the dev token or setup A loopback; a playground panel token inside its own public id (another's 403); a read token 403.
 Why no runtime acts, in four cases, first match wins (U20.2; `appturn.go`'s `appRefusal`, `lib/honesty.ts`'s `refusalWords` in the same words on both surfaces): a runtime of the service that registered Sessions listed disconnected (the app stopped, or Studio restarted under it — even while another process of the service, a CLI, is connected without Sessions) — `app-owned turn · read-only: the app's runtime <id> of service <svc> disconnected — last seen <RFC 3339, UTC, to the second>`, fix `restart the app: its runtime link registers again` (never "add runtime.Sessions"; the clause after "disconnected" is left out when the row has no `last_seen`); a runtime of the service connected without Sessions — the `set runtime.Sessions(resolver)` fix; none of the service known here while this process's own runtime link dialled another Studio (`/api/meta`'s `runtime_link.studio_url`, db.path's rule) — `… no runtime of service <svc> is connected here — the app's link dialled <url>`, fix `open the panel there (data-endpoint), or link in-process: runtime.Local(srv)`; otherwise the closed link's `open the runtime link in the app: …`. `/api/meta`'s `runtime_link` is `{studio_url?, in_process}`: `in_process` while a link of this process talks to this very server (`runtime.Local(srv)`, or over HTTP to it: this Studio holds a registration with the link's instance), `studio_url` the Studio another link of this process dialled (userinfo stripped); omitted when no link of this process is open, and for a panel token (`testdata/api/meta-runtime-link.golden.json`).
 
 `GET /api/runs/{id}/commands` (capability `run_commands`, with the playground; U20.2) lists the commands acting on one run, oldest first — `{"commands":[{command_id, state, run_id, status?, error, reason?, created, updated, verb: decide|steer|cancel, call_id?, decision?}]}`, each the command's lifecycle row plus what it did (`testdata/api/run-commands.golden.json`). A decision lost before it landed (`state: "lost"`: no ack in time, the runtime disconnected, Studio restarted) stays on the run: the run page marks the parked call `your approve at … was lost: <why> — decide again`, and the panel reads the route once when it draws the parked turn and marks the call `lost: <why>`, after a reload, not only while the page that sent it polls. A panel token reads a run inside its public id, and only its own public id's commands; a run never stored with no command is 404. A Studio restarted over a command store logs one INFO line, `studio/runtime: restored from the store runtimes=N open_commands=M lost_commands=K`.

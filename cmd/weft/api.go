@@ -315,7 +315,7 @@ func runRuns(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if len(pos) > 0 {
-		return usageError("runs takes no arguments, got %q", pos)
+		return usageError("runs takes no arguments (got %s)", gotArgs(pos))
 	}
 	if *limit < 0 {
 		return usageError("--limit must be 0 or more")
@@ -482,7 +482,7 @@ func runOpen(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if len(pos) > 1 || len(pos) == 1 && pos[0] == "" {
-		return usageError("open takes at most one id — a run id, a public id, a session id or a trace id — got %q", pos)
+		return usageError("open takes at most one id — a run id, a public id, a session id or a trace id (got %s)", gotArgs(pos))
 	}
 	c, _ := clientFor(*base, *token, stderr)
 	ctx := context.Background()
@@ -578,7 +578,7 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if len(pos) != 1 || pos[0] == "" {
-		return usageError("export takes one run id, got %q", pos)
+		return usageError("export needs exactly one run id (got %s)", gotArgs(pos))
 	}
 	id := pos[0]
 	set := map[string]bool{}

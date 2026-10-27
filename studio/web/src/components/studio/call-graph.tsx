@@ -21,6 +21,7 @@ import {
   EDGE_HINT,
   GRAPH_ALONE,
   fittedSize,
+  graphBox,
   graphScrollLabel,
   edgeLabel,
   graphUnsourced,
@@ -45,9 +46,7 @@ const LOUD: ReadonlySet<StatusKey> = new Set([
   "parked",
 ])
 
-const W = 230
 const H = 62
-const GX = 110
 const GY = 22
 const PAD = 12
 /** Room above the first row for a self-call's loop. */
@@ -76,6 +75,32 @@ export function CallGraphView({
     if (c) c.push(n)
     else cols.set(n.depth, [n])
   }
+  // Each node's words, once: what it draws, and how wide it is.
+  const words = new Map(
+    graph.nodes.map((n) => {
+      const cost = n.kind === "agent" ? costOf?.(n.runs) : undefined
+      const st = nodeStatus(n, rowOf)
+      const line = st ? nodeStatusLine(st) : undefined
+      // An MCP server's failures by kind (U23.2): the third line.
+      const mcp = n.kind === "mcp" ? mcpFailLine(n) : null
+      return [n.id, { cost, st, line, mcp }] as const
+    })
+  )
+  // The node width and the column gap fit the words (P020.1): no line
+  // past its box, no edge label over a node.
+  const { w: W, gx: GX } = graphBox(
+    graph.nodes.map((n) => {
+      const { cost, line, mcp } = words.get(n.id)!
+      return [
+        `▣ ${n.label}${cost ? `  ${cost.text}` : ""}`,
+        nodeLine(n),
+        ...(line ? [line.word + line.rest] : []),
+        ...(mcp ? [mcp] : []),
+      ]
+    }),
+    graph.edges.filter((e) => e.from !== e.to).map(edgeLabel),
+    graph.edges.filter((e) => e.from === e.to).map(loopLabel)
+  )
   const loops = graph.edges.some((e) => e.from === e.to)
   const top = PAD + (loops ? LOOP : 0)
   const at = new Map<string, { x: number; y: number }>()
@@ -240,14 +265,10 @@ export function CallGraphView({
           {graph.nodes.map((n) => {
             const p = at.get(n.id)!
             const on = n.id === selected
-            const cost = n.kind === "agent" ? costOf?.(n.runs) : undefined
-            const st = nodeStatus(n, rowOf)
-            const line = st ? nodeStatusLine(st) : undefined
+            const { cost, st, line, mcp } = words.get(n.id)!
             const paint =
               ROLE_SVG[st ? studioVar(st.status.role) : "muted-foreground"]
             const loud = st !== undefined && LOUD.has(st.status.key)
-            // An MCP server's failures by kind (U23.2): the third line.
-            const mcp = n.kind === "mcp" ? mcpFailLine(n) : null
             const hint = n.kind === "mcp" ? MCP_NODE_HINT : cost?.title
             return (
               <GraphTip key={n.id} hint={hint}>

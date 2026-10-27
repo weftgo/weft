@@ -8,6 +8,9 @@ import {
   callGraph,
   catalogSources,
   edgeLabel,
+  GRAPH_GAP_X,
+  GRAPH_NODE_W,
+  graphBox,
   graphUnsourced,
   loopLabel,
   mcpFailLine,
@@ -273,5 +276,34 @@ describe("MCP identity in the graph (U23.2, O8)", () => {
     expect(
       g2.edges.some((e) => e.from === "a:director" && e.to === "a:analyst")
     ).toBe(true)
+  })
+})
+
+describe("graphBox (P020.1: the call graph's words fit)", () => {
+  it("the least box for short words", () => {
+    expect(graphBox([["▣ a", "1 run · slowest 1 ms"]], ["1× · 2 ms"])).toEqual({
+      w: GRAPH_NODE_W,
+      gx: GRAPH_GAP_X,
+    })
+  })
+  it("a node as wide as its longest line; a gap as wide as its edge label and arrow", () => {
+    const lines = [
+      "▣ billing-desk  $0 · scripted",
+      "1 run · slowest 664 µs · 20 in · 10 out",
+      "1 unreachable · 1 refused · 1 tool error",
+    ]
+    const label = "1× · 221 µs · 3 failed"
+    const { w, gx } = graphBox([lines], [label])
+    // 10 px mono: 6 px a character, 10 px inset each side.
+    for (const t of lines.slice(1))
+      expect(w).toBeGreaterThanOrEqual([...t].length * 6 + 20)
+    expect(w).toBeGreaterThanOrEqual([...lines[0]].length * 6.6 + 20)
+    // The label, centred in the gap, clears both nodes and the arrow.
+    expect(gx).toBeGreaterThanOrEqual([...label].length * 6 + 28)
+  })
+  it("a self-call's label beside its loop stays out of the next column", () => {
+    const loop = "↻ 12× · 1.2 s · 4 failed"
+    const { w, gx } = graphBox([["▣ a"]], [], [loop])
+    expect(w * 0.8 + 6 + [...loop].length * 6).toBeLessThanOrEqual(w + gx)
   })
 })

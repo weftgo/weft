@@ -346,6 +346,34 @@ export const MCP_NODE_HINT = `an MCP server (the tools' Origin, weft.tool.origin
   .map((f) => `${f.word}: ${f.hint}`)
   .join("; ")}`
 
+/** The call graph's least node width and column gap, in viewBox px. */
+export const GRAPH_NODE_W = 230
+export const GRAPH_GAP_X = 110
+
+/** graphBox is the call graph's node width and column gap for what it
+ * draws (P020.1): every node line inside its box — the first (11 px,
+ * the name and the cost beside it) and the rest (10 px) at the mono
+ * stack's 0.6 em a character, 10 px inset each side — and every edge
+ * label inside its gap with room for the arrow (a self-call's beside
+ * its loop, over the node's right fifth). Never under the least. */
+export function graphBox(
+  nodeLines: readonly (readonly string[])[],
+  edgeLabels: readonly string[],
+  loopLabels: readonly string[] = []
+): { w: number; gx: number } {
+  const len = (t: string, px: number) => Math.ceil([...t].length * px * 0.6)
+  let w = GRAPH_NODE_W
+  for (const lines of nodeLines)
+    lines.forEach((t, i) => {
+      w = Math.max(w, len(t, i ? 10 : 11) + 20)
+    })
+  let gx = GRAPH_GAP_X
+  for (const t of edgeLabels) gx = Math.max(gx, len(t, 10) + 28)
+  for (const t of loopLabels)
+    gx = Math.max(gx, Math.ceil(len(t, 10) + 6 - w * 0.2) + 8)
+  return { w, gx }
+}
+
 /** The least a fitted graph is scaled to: below it its text (10 px in
  * the viewBox) drops under 9 px, so the pane scrolls sideways instead —
  * the graph's own wrapper, never the page (P9-pre-web-fix2 3). */

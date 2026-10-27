@@ -293,17 +293,14 @@ export async function sha256Hex(text: string): Promise<string | undefined> {
   ).join("")
 }
 
-/** composeSystem mirrors core/loop.go's: the instructions, then each
- * offered tool's PromptSnippet, paragraphs apart. */
-export function composeSystem(
-  instructions: string,
-  snippets: string[]
-): string {
-  let out = instructions
-  for (const s of snippets) {
-    if (!s) continue
-    if (out.length > 0) out += "\n\n"
-    out += s
+/** The previous recorded step's last row, for each step that has one. */
+export function previousRows(rows: RequestRow[]): Map<number, RequestRow> {
+  const sorted = [...rows].sort((a, b) => a.step - b.step || a.index - b.index)
+  const out = new Map<number, RequestRow>()
+  let prev: RequestRow | undefined
+  for (const r of sorted) {
+    if (prev && prev.step !== r.step && !out.has(r.step)) out.set(r.step, prev)
+    if (!prev || prev.step !== r.step || r.index > prev.index) prev = r
   }
   return out
 }
@@ -323,18 +320,6 @@ export interface PromptBaseline {
   verified?: boolean
   /** kind "registered": the run replaced its instructions. */
   overridden?: boolean
-}
-
-/** The previous recorded step's last row, for each step that has one. */
-export function previousRows(rows: RequestRow[]): Map<number, RequestRow> {
-  const sorted = [...rows].sort((a, b) => a.step - b.step || a.index - b.index)
-  const out = new Map<number, RequestRow>()
-  let prev: RequestRow | undefined
-  for (const r of sorted) {
-    if (prev && prev.step !== r.step && !out.has(r.step)) out.set(r.step, prev)
-    if (!prev || prev.step !== r.step || r.index > prev.index) prev = r
-  }
-  return out
 }
 
 /** The diff's caption. */
@@ -389,6 +374,21 @@ export async function composedFromInstructions(
   if (!text.endsWith(`\n\n${tail}`)) return false
   const h = await sha256Hex(text.slice(0, text.length - tail.length - 2))
   return h === undefined ? undefined : h === instructionsHash
+}
+
+/** composeSystem mirrors core/loop.go's: the instructions, then each
+ * offered tool's PromptSnippet, paragraphs apart. */
+export function composeSystem(
+  instructions: string,
+  snippets: string[]
+): string {
+  let out = instructions
+  for (const s of snippets) {
+    if (!s) continue
+    if (out.length > 0) out += "\n\n"
+    out += s
+  }
+  return out
 }
 
 /** What one request sent as messages: the count the record keeps and,

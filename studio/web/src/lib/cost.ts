@@ -36,17 +36,25 @@ export function costView(f: CostFields | null | undefined): CostView {
 export const CACHE_HINT =
   "the adapter reported no cache splits: every input token was priced at the input rate, which may overstate a cached prompt"
 
-/** "$1.23"; under a cent four decimals ("$0.0042"), under that
- * "<$0.0001"; a known zero "$0.00". Only ever called on a known
- * figure — an unknown one is "—" (costView). */
-export function formatUSD(v: number): string {
-  if (!Number.isFinite(v)) return "—"
-  if (v === 0) return "$0.00"
-  const abs = Math.abs(v)
-  const sign = v < 0 ? "-" : ""
-  if (abs < 0.0001) return `${sign}<$0.0001`
-  if (abs < 0.01) return `${sign}$${abs.toFixed(4)}`
-  return `${sign}$${abs.toFixed(2)}`
+/** delegatedView reads a run's delegated block (its subagents'). The
+ * API sends no delegated badge, only delegated_cost_reason: the badge
+ * is "unknown" when the reason leads with pricing.go's unknown words —
+ * a child still running (usage arrives at its end), one whose end never
+ * arrived, children that could not be read — even when the list names
+ * an unpriced child too; else "unpriced" when it names an unpriced
+ * model, else "unknown". The title is the API's reason either way. */
+export function delegatedView(
+  f: DelegatedCostFields | null | undefined
+): CostView {
+  const known = f?.delegated_cost_known
+  const reason = f?.delegated_cost_reason
+  const badge =
+    known === false
+      ? reason && (UNKNOWN_LEAD.test(reason) || !UNPRICED_WORDS.test(reason))
+        ? "unknown"
+        : "unpriced"
+      : undefined
+  return view(f?.delegated_cost_usd, known, reason, badge)
 }
 
 /** A figure as drawn: its words, its tooltip, whether it is known. */
@@ -111,17 +119,17 @@ export function summarizerView(
   }
 }
 
-/** scriptedChip is a scripted run's chip (UX-C-42), the same words on
- * the panel's turn row, Studio's run header and experiment grid:
- * "scripted · 0 tokens" only when the row's usage is zero — a scripted
- * parent's Subagent child on a real model rolls real usage in. */
-export function scriptedChip(
-  r: Pick<RunRow, "model" | "usage">
-): string | undefined {
-  if (!isScripted(r)) return undefined
-  return r.usage.input_tokens + r.usage.output_tokens
-    ? "scripted"
-    : "scripted · 0 tokens"
+/** "$1.23"; under a cent four decimals ("$0.0042"), under that
+ * "<$0.0001"; a known zero "$0.00". Only ever called on a known
+ * figure — an unknown one is "—" (costView). */
+export function formatUSD(v: number): string {
+  if (!Number.isFinite(v)) return "—"
+  if (v === 0) return "$0.00"
+  const abs = Math.abs(v)
+  const sign = v < 0 ? "-" : ""
+  if (abs < 0.0001) return `${sign}<$0.0001`
+  if (abs < 0.01) return `${sign}$${abs.toFixed(4)}`
+  return `${sign}$${abs.toFixed(2)}`
 }
 
 /** The bill's two parts in words (U21.1, UX-F-15, UX-F-16): "$0.0012
@@ -138,25 +146,17 @@ export const costLine = (own: string, delegated: string) =>
 export const BILL_TITLE =
   "the run's whole bill: own + delegated (its model calls and its child runs')"
 
-/** delegatedView reads a run's delegated block (its subagents'). The
- * API sends no delegated badge, only delegated_cost_reason: the badge
- * is "unknown" when the reason leads with pricing.go's unknown words —
- * a child still running (usage arrives at its end), one whose end never
- * arrived, children that could not be read — even when the list names
- * an unpriced child too; else "unpriced" when it names an unpriced
- * model, else "unknown". The title is the API's reason either way. */
-export function delegatedView(
-  f: DelegatedCostFields | null | undefined
-): CostView {
-  const known = f?.delegated_cost_known
-  const reason = f?.delegated_cost_reason
-  const badge =
-    known === false
-      ? reason && (UNKNOWN_LEAD.test(reason) || !UNPRICED_WORDS.test(reason))
-        ? "unknown"
-        : "unpriced"
-      : undefined
-  return view(f?.delegated_cost_usd, known, reason, badge)
+/** scriptedChip is a scripted run's chip (UX-C-42), the same words on
+ * the panel's turn row, Studio's run header and experiment grid:
+ * "scripted · 0 tokens" only when the row's usage is zero — a scripted
+ * parent's Subagent child on a real model rolls real usage in. */
+export function scriptedChip(
+  r: Pick<RunRow, "model" | "usage">
+): string | undefined {
+  if (!isScripted(r)) return undefined
+  return r.usage.input_tokens + r.usage.output_tokens
+    ? "scripted"
+    : "scripted · 0 tokens"
 }
 
 /** An estimate's badge, mark and word (studio/pricing.go's
@@ -348,66 +348,6 @@ export const sumRuns = (rows: readonly CostRow[]): CostView =>
  * scripted model's exact $0, or the unknown view that is the total. */
 type Part = [usd: number, scripted: boolean] | CostView
 
-/** runPart is a run's whole bill as a total's part. A scripted parent
- * whose subagents bill is not scripted: its whole bill (runTotal,
- * delegated included) must be an exact $0 too — pricing.go's setCost
- * rule (U5U7-fix 1). */
-function runPart(r: CostRow): Part {
-  const t = runTotal(r)
-  return t.known
-    ? [t.usd, r.cost_badge === "scripted" && t.usd === 0]
-    : totalUnknown(r)
-}
-
-/** runTotal is a run's whole bill, own + delegated — search's sort
- * key (pricing.go's runCost.total): unknown when either part is. A
- * row without a delegated block (a Studio that sent none) counts own
- * alone only when it carries no delegated fields at all. */
-export function runTotal(r: CostFields & DelegatedCostFields): {
-  usd: number
-  known: boolean
-} {
-  const own = costView(r)
-  if (!own.known) return { usd: 0, known: false }
-  if (
-    r.delegated_cost_known === undefined &&
-    r.delegated_cost_usd === undefined
-  )
-    return { usd: own.usd ?? 0, known: true }
-  const del = delegatedView(r)
-  if (!del.known) return { usd: 0, known: false }
-  return { usd: (own.usd ?? 0) + (del.usd ?? 0), known: true }
-}
-
-/** cacheNotReported: the figure was priced without cache splits. */
-export function cacheNotReported(
-  f: Pick<CostFields, "cache"> | null | undefined
-): boolean {
-  return !!f?.cache && f.cache !== "exact"
-}
-
-/** A row sumCost and atLeastCost read: its cost blocks and, on a run
- * row, its derived mark (lib/honesty.ts's isDerived). */
-type CostRow = CostFields &
-  DelegatedCostFields & { derived?: boolean; requests_badge?: string }
-
-/** total adds the rows' parts, in order: the first unknown part is the
- * total; every run a scripted model's $0 is "$0 · scripted" too. */
-function total<TRow>(rows: readonly TRow[], part: (r: TRow) => Part): CostView {
-  if (!rows.length) return view(null, false, "no run to total")
-  let usd = 0
-  let scripted = true
-  for (const r of rows) {
-    const p = part(r)
-    if (!Array.isArray(p)) return p
-    usd += p[0]
-    scripted &&= p[1]
-  }
-  return scripted
-    ? view(0, true, scriptedTitle(rows) || undefined, "scripted")
-    : view(usd, true, undefined)
-}
-
 /** atLeastCost totals runs' whole bills where an unknown run must not
  * hide the known ones (the panel's header over its turns, its replays
  * of a turn — A5.3): every run known → sumCost; some unknown → "≥ $x ·
@@ -482,6 +422,66 @@ export function atLeastCost(
     badge: badge || "unknown",
     usd,
   }
+}
+
+/** cacheNotReported: the figure was priced without cache splits. */
+export function cacheNotReported(
+  f: Pick<CostFields, "cache"> | null | undefined
+): boolean {
+  return !!f?.cache && f.cache !== "exact"
+}
+
+/** total adds the rows' parts, in order: the first unknown part is the
+ * total; every run a scripted model's $0 is "$0 · scripted" too. */
+function total<TRow>(rows: readonly TRow[], part: (r: TRow) => Part): CostView {
+  if (!rows.length) return view(null, false, "no run to total")
+  let usd = 0
+  let scripted = true
+  for (const r of rows) {
+    const p = part(r)
+    if (!Array.isArray(p)) return p
+    usd += p[0]
+    scripted &&= p[1]
+  }
+  return scripted
+    ? view(0, true, scriptedTitle(rows) || undefined, "scripted")
+    : view(usd, true, undefined)
+}
+
+/** A row sumCost and atLeastCost read: its cost blocks and, on a run
+ * row, its derived mark (lib/honesty.ts's isDerived). */
+type CostRow = CostFields &
+  DelegatedCostFields & { derived?: boolean; requests_badge?: string }
+
+/** runPart is a run's whole bill as a total's part. A scripted parent
+ * whose subagents bill is not scripted: its whole bill (runTotal,
+ * delegated included) must be an exact $0 too — pricing.go's setCost
+ * rule (U5U7-fix 1). */
+function runPart(r: CostRow): Part {
+  const t = runTotal(r)
+  return t.known
+    ? [t.usd, r.cost_badge === "scripted" && t.usd === 0]
+    : totalUnknown(r)
+}
+
+/** runTotal is a run's whole bill, own + delegated — search's sort
+ * key (pricing.go's runCost.total): unknown when either part is. A
+ * row without a delegated block (a Studio that sent none) counts own
+ * alone only when it carries no delegated fields at all. */
+export function runTotal(r: CostFields & DelegatedCostFields): {
+  usd: number
+  known: boolean
+} {
+  const own = costView(r)
+  if (!own.known) return { usd: 0, known: false }
+  if (
+    r.delegated_cost_known === undefined &&
+    r.delegated_cost_usd === undefined
+  )
+    return { usd: own.usd ?? 0, known: true }
+  const del = delegatedView(r)
+  if (!del.known) return { usd: 0, known: false }
+  return { usd: (own.usd ?? 0) + (del.usd ?? 0), known: true }
 }
 
 // ── A page's one unpriced line (U7) ───────────────────────────────

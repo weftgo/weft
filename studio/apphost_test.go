@@ -190,7 +190,7 @@ func TestAppTurnPlainGenerateFix(t *testing.T) {
 	}
 	code, body := approve("plain_gen")
 	if code != http.StatusForbidden ||
-		!strings.Contains(body, `"fix":"resume it in your app; to decide here, run it as a session turn (weft/thread)"`) {
+		!strings.Contains(body, `"fix":"resume it in your app; to decide here, run it as a session turn with thread.PublicID(...) (weft/thread)"`) {
 		t.Errorf("a plain Generate's approve = %d %s, want the resume-in-your-app fix", code, body)
 	}
 	code, body = approve("s_np-t1")

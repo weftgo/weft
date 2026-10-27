@@ -72,39 +72,23 @@ export interface VerdictInput {
   breakpoints?: string[]
 }
 
-/** The class words: "replay safe", "replay never", "replay never
- * (unannotated)" — unannotated counts as never. */
-function classWords(
-  entry: CatalogTool,
-  reg: ToolView | undefined
-): { safe: boolean; words: string } {
-  const cls = reg ? reg.side_effects : entry.replay
-  if (cls === "safe") return { safe: true, words: "replay safe" }
-  // A registration says "never" for an unannotated tool too; the
-  // catalog keeps the difference ("" = no annotation at all).
-  return {
-    safe: false,
-    words: entry.replay ? "replay never" : "replay never (unannotated)",
+/** tokenClaimsOf reads a panel token's claims (scope, public_id, tags)
+ * — a hint, never a check; null for any other bearer, {} for a panel
+ * token that does not parse. */
+export function tokenClaimsOf(
+  token: string
+): { scope?: unknown; public_id?: unknown; tags?: unknown } | null {
+  if (!token.startsWith("weft_pt.")) return null
+  try {
+    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
+    return JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))) ?? {}
+  } catch {
+    return {}
   }
 }
 
 const SUBSTITUTED =
   "substituted from the recorded result when the call repeats, else parked"
-
-/** The breakpoints a runtime parks on for this agent (its stored set,
- * restricted to the agent's tools). */
-export function breakpointsFor(
-  runtime: Pick<RuntimeView, "breakpoints"> | undefined,
-  agent: Pick<AgentView, "tools"> | undefined
-): string[] {
-  const have = new Set((agent?.tools ?? []).map((t) => t.name))
-  return (runtime?.breakpoints ?? []).filter((t) => have.has(t))
-}
-
-/** A whole, non-negative number, or 0. */
-function pos(n: number): number {
-  return Number.isInteger(n) && n >= 0 ? n : 0
-}
 
 /** edit this result and replay: step `step`'s call `callID` is the
  * field the drawer opens on, the next step run fresh — from_step =
@@ -122,6 +106,22 @@ export function editResultAndReplay(step: number, callID: string): ReplayDraft {
     input: "",
     focus: "edit",
     at: { step: at, callID },
+  }
+}
+
+/** A whole, non-negative number, or 0. */
+function pos(n: number): number {
+  return Number.isInteger(n) && n >= 0 ? n : 0
+}
+
+/** replay from this step: steps 0..n-1 kept, step n run fresh. */
+export function replayFromStep(n: number): ReplayDraft {
+  return {
+    verb: "from_step",
+    fromStep: pos(n),
+    edits: [],
+    thread: "ephemeral",
+    input: "",
   }
 }
 
@@ -163,17 +163,6 @@ export interface ReplayDraft {
   at?: { step: number; callID: string }
 }
 
-/** replay from this step: steps 0..n-1 kept, step n run fresh. */
-export function replayFromStep(n: number): ReplayDraft {
-  return {
-    verb: "from_step",
-    fromStep: pos(n),
-    edits: [],
-    thread: "ephemeral",
-    input: "",
-  }
-}
-
 /** edit the prompt and replay: step n run fresh under an edited system
  * prompt, pre-filled with the text the step was called with. */
 export function editPromptAndReplay(
@@ -188,6 +177,32 @@ export function editPromptAndReplay(
     thread: "ephemeral",
     input: "",
     focus: "prompt",
+  }
+}
+
+/** The breakpoints a runtime parks on for this agent (its stored set,
+ * restricted to the agent's tools). */
+export function breakpointsFor(
+  runtime: Pick<RuntimeView, "breakpoints"> | undefined,
+  agent: Pick<AgentView, "tools"> | undefined
+): string[] {
+  const have = new Set((agent?.tools ?? []).map((t) => t.name))
+  return (runtime?.breakpoints ?? []).filter((t) => have.has(t))
+}
+
+/** The class words: "replay safe", "replay never", "replay never
+ * (unannotated)" — unannotated counts as never. */
+function classWords(
+  entry: CatalogTool,
+  reg: ToolView | undefined
+): { safe: boolean; words: string } {
+  const cls = reg ? reg.side_effects : entry.replay
+  if (cls === "safe") return { safe: true, words: "replay safe" }
+  // A registration says "never" for an unannotated tool too; the
+  // catalog keeps the difference ("" = no annotation at all).
+  return {
+    safe: false,
+    words: entry.replay ? "replay never" : "replay never (unannotated)",
   }
 }
 
@@ -252,6 +267,17 @@ export function allowRefusals(
       (t) => !t.allow && t.side_effects !== "safe" && t.name !== OUTPUT_TOOL
     )
     .map((t) => t.name)
+}
+
+/** stepPositionOf is the from_step a step of the run sends: its own
+ * ordinal (from_step IS the ordinal — see above), or -1 when the run
+ * has no step of that ordinal. It never shifts a number: a fold that
+ * lacks a step sends each card's own index. */
+export function stepPositionOf(
+  stepIndexes: readonly number[],
+  ordinal: number
+): number {
+  return stepIndexes.includes(ordinal) ? ordinal : -1
 }
 
 /**
@@ -337,17 +363,6 @@ export function replayVerdicts(input: VerdictInput): ToolVerdict[] {
   })
 }
 
-/** stepPositionOf is the from_step a step of the run sends: its own
- * ordinal (from_step IS the ordinal — see above), or -1 when the run
- * has no step of that ordinal. It never shifts a number: a fold that
- * lacks a step sends each card's own index. */
-export function stepPositionOf(
-  stepIndexes: readonly number[],
-  ordinal: number
-): number {
-  return stepIndexes.includes(ordinal) ? ordinal : -1
-}
-
 /** endsInAnsweredCalls is studio/edits.go's (and the runtime's) rule
  * for a from_step AT the step count: over the run's own messages in
  * order, the last assistant message made at least one tool call and
@@ -377,6 +392,26 @@ export function endsInAnsweredCalls(
   return calls > 0
 }
 
+/** transcriptStepCount is the server's stepCount (studio/edits.go):
+ * one past the last step ordinal holding an assistant message. A
+ * from_step at or past it has nothing fresh to answer (400). */
+export function transcriptStepCount(
+  assistantOrdinals: readonly number[]
+): number {
+  let n = 0
+  for (const o of assistantOrdinals) if (o + 1 > n) n = o + 1
+  return n
+}
+
+/** The token scope a bearer carries: a panel token (weft_pt.<claims>.
+ * <sig>) names "read" or "playground"; any other bearer (the dev or
+ * server token, none) is "". An unreadable panel token is the default
+ * mint, read. */
+export function tokenScopeOf(token: string): "" | "read" | "playground" {
+  const c = tokenClaimsOf(token)
+  return !c ? "" : c.scope === "playground" ? "playground" : "read"
+}
+
 /** maxFromStep is the highest from_step the server accepts: the step
  * count when the kept prefix ends in answered calls, else one less (a
  * from_step past it is a 400). -1 when the run has no step. */
@@ -393,41 +428,6 @@ export function prefixLine(fromStep: number, compacted: boolean): string {
   return compacted
     ? `${kept} · the compacted prefix (what the model saw at step ${fromStep})`
     : kept
-}
-
-/** The token scope a bearer carries: a panel token (weft_pt.<claims>.
- * <sig>) names "read" or "playground"; any other bearer (the dev or
- * server token, none) is "". An unreadable panel token is the default
- * mint, read. */
-export function tokenScopeOf(token: string): "" | "read" | "playground" {
-  const c = tokenClaimsOf(token)
-  return !c ? "" : c.scope === "playground" ? "playground" : "read"
-}
-
-/** tokenClaimsOf reads a panel token's claims (scope, public_id, tags)
- * — a hint, never a check; null for any other bearer, {} for a panel
- * token that does not parse. */
-export function tokenClaimsOf(
-  token: string
-): { scope?: unknown; public_id?: unknown; tags?: unknown } | null {
-  if (!token.startsWith("weft_pt.")) return null
-  try {
-    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
-    return JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))) ?? {}
-  } catch {
-    return {}
-  }
-}
-
-/** transcriptStepCount is the server's stepCount (studio/edits.go):
- * one past the last step ordinal holding an assistant message. A
- * from_step at or past it has nothing fresh to answer (400). */
-export function transcriptStepCount(
-  assistantOrdinals: readonly number[]
-): number {
-  let n = 0
-  for (const o of assistantOrdinals) if (o + 1 > n) n = o + 1
-  return n
 }
 
 /** canReplay: the replay verbs are offered when the server reports the

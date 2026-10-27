@@ -69,8 +69,11 @@ import {
   DIFF_COLUMNS,
   cellHole,
   markerWords,
+  noSpans,
   nWayView,
   stepDiffView,
+  UNTRACED,
+  untraced,
 } from "../lib/stepdiff"
 import type { DiffDoc } from "../lib/stepdiff"
 import { stepDiffBlock } from "./compare"
@@ -866,6 +869,9 @@ describe("step compare parity (E3.2)", () => {
     cellHoles: Record<string, string[]>
     /** The response's own badges. */
     top: string[]
+    /** The compared run said once as run without a tracer (UX-D-40):
+     * each such head badge's visible words. */
+    untraced: string[]
   }
   const blank = (): Drawn => ({
     markers: [],
@@ -874,6 +880,7 @@ describe("step compare parity (E3.2)", () => {
     chips: {},
     cellHoles: {},
     top: [],
+    untraced: [],
   })
   const attr = (ns: Iterable<Element>, a: string) =>
     [...ns].map((n) => n.getAttribute(a)!)
@@ -885,6 +892,9 @@ describe("step compare parity (E3.2)", () => {
       box.querySelectorAll(":scope > .weft-note [data-hole]"),
       "data-hole"
     )
+    out.untraced = [
+      ...box.querySelectorAll(':scope > [data-hole="not_recorded"]'),
+    ].map((n) => n.firstChild?.textContent ?? "")
     for (const m of box.querySelectorAll("[data-weft-diff-marker]"))
       out.markers.push({
         step: m.getAttribute("data-weft-diff-marker")!,
@@ -928,6 +938,9 @@ describe("step compare parity (E3.2)", () => {
       container.querySelectorAll("[data-diff-holes] [data-hole]"),
       "data-hole"
     )
+    out.untraced = [
+      ...container.querySelectorAll("[data-diff-untraced] [data-hole]"),
+    ].map((n) => n.firstChild?.textContent ?? "")
     for (const m of container.querySelectorAll("[data-diff-marker]"))
       out.markers.push({
         step: m.getAttribute("data-diff-marker")!,
@@ -971,6 +984,8 @@ describe("step compare parity (E3.2)", () => {
     const v = stepDiffView(doc)
     const out = blank()
     out.top = v.holes.map((h) => h.hole)
+    const nt = untraced(v)
+    if (nt) out.untraced = [UNTRACED]
     for (const r of v.rows) {
       const n = String(r.step)
       if (r.changed) out.markers.push({ step: n, text: markerWords(r) })
@@ -984,7 +999,9 @@ describe("step compare parity (E3.2)", () => {
       ] as const) {
         out.holes[`${n}${side}`] = [
           ...sv.marks.flatMap((m) => m.hole ?? []),
-          ...sv.holes.map((h) => h.hole),
+          ...sv.holes
+            .filter((h) => !(nt && side === "b" && noSpans(h)))
+            .map((h) => h.hole),
         ]
         out.chips[`${n}${side}`] = sv.marks
           .filter((m) => !m.hole)
@@ -1023,11 +1040,30 @@ describe("step compare parity (E3.2)", () => {
     return doc
   }
 
+  /** untracedDoc is diff.golden.json with every b step carrying the
+   * no_spans hole: a replay its runtime ran without a tracer. */
+  function untracedDoc(): DiffDoc {
+    const doc = golden<DiffDoc>("diff")
+    for (const s of doc.steps)
+      if (s.b)
+        s.b = {
+          ...s.b,
+          holes: [
+            {
+              hole: "not_recorded",
+              ...CAUSES.not_recorded!.no_spans,
+            },
+          ],
+        }
+    return doc
+  }
+
   const cases: [string, () => DiffDoc][] = [
     ["diff", () => golden<DiffDoc>("diff")],
     ["diff-hidden", () => golden<DiffDoc>("diff-hidden")],
     ["diff-not-recorded", () => golden<DiffDoc>("diff-not-recorded")],
     ["diff with marks and a truncated response", marked],
+    ["a replay its runtime ran without a tracer (UX-D-40)", untracedDoc],
   ]
   it.each(cases)(
     "%s: the same rows, cells, markers, badges and chips on both surfaces",
@@ -1037,6 +1073,15 @@ describe("step compare parity (E3.2)", () => {
       expect(await studioDrawn(doc), "studio").toEqual(want(doc))
     }
   )
+
+  it("an all-untraced replay: said once above the table on both, no per-step no_spans badge on its side (UX-D-40)", async () => {
+    const doc = untracedDoc()
+    for (const got of [panelDrawn(doc), await studioDrawn(doc)]) {
+      expect(got.untraced).toEqual([UNTRACED])
+      for (const [k, hs] of Object.entries(got.holes))
+        if (k.endsWith("b")) expect(hs).not.toContain("not_recorded")
+    }
+  })
 
   it("marks: one badge per hole per side — max_tokens in both marks and holes is drawn once — subagent a chip", async () => {
     const doc = marked()

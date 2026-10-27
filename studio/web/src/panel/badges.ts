@@ -340,9 +340,6 @@ export function promptReadError(error: string): HoleMark {
 export function promptNotServed(): HoleMark {
   return { hole: "not_recorded", cause: "not_served" }
 }
-export function catalogCapped(n: number): HoleMark {
-  return { hole: "truncated", ...requestCappedWords(n) }
-}
 
 /** The ack preview's holes for a step the request record has no row
  * of (the run page's words): a step that never ran (at or past the
@@ -364,30 +361,6 @@ export function promptNotRecorded(): HoleMark {
     reason:
       "the step carries no request record: the system prompt it was called with is unknown",
   }
-}
-
-// ── Cost (A5.3) ──────────────────────────────────────────────────
-
-/** costText draws one figure as Studio's CostText does: lib/cost.ts's
- * words and title; an unknown one says its reason in the accessible
- * text too (" not known: <reason>", the badge's pattern), a partial sum
- * " partial: <title>" —
- * "—" is never a 0. */
-export function costText(v: CostView): HTMLElement {
-  const n = el("span", "", v.text, {
-    title: v.title,
-    "data-weft-cost": v.known ? String(v.usd) : "unknown",
-  })
-  // A partial sum (atLeastCost's "≥ $x", usd its known part) is not "not known".
-  if (!v.known)
-    n.append(
-      el(
-        "span",
-        "weft-sr",
-        `${v.usd === undefined ? " not known" : " partial"}: ${v.title}`
-      )
-    )
-  return n
 }
 
 /** turnCost is a turn's own figure and, when its subagents cost
@@ -426,6 +399,30 @@ export function turnCost(r: RunRow, sum?: CostView | null): HTMLElement {
   return n
 }
 
+// ── Cost (A5.3) ──────────────────────────────────────────────────
+
+/** costText draws one figure as Studio's CostText does: lib/cost.ts's
+ * words and title; an unknown one says its reason in the accessible
+ * text too (" not known: <reason>", the badge's pattern), a partial sum
+ * " partial: <title>" —
+ * "—" is never a 0. */
+export function costText(v: CostView): HTMLElement {
+  const n = el("span", "", v.text, {
+    title: v.title,
+    "data-weft-cost": v.known ? String(v.usd) : "unknown",
+  })
+  // A partial sum (atLeastCost's "≥ $x", usd its known part) is not "not known".
+  if (!v.known)
+    n.append(
+      el(
+        "span",
+        "weft-sr",
+        `${v.usd === undefined ? " not known" : " partial"}: ${v.title}`
+      )
+    )
+  return n
+}
+
 /** ackCatalogHole is the ack preview's line for a catalog it cannot
  * read (the run page's ReplayAck): the hole's badge, its words said,
  * then what the verdicts cover instead — never an empty list. */
@@ -452,4 +449,7 @@ export function catalogReadError(error: string): HoleMark {
     hole: "derived",
     reason: `the step's catalog could not be read (${error}): the list is the runtime's registration`,
   }
+}
+export function catalogCapped(n: number): HoleMark {
+  return { hole: "truncated", ...requestCappedWords(n) }
 }

@@ -340,6 +340,16 @@ describe("the panel's script tag (C2: never by its file name)", () => {
     expect(readConfig().endpoint).toBe("https://own.example/studio/")
   })
 
+  it("a bare own tag and a config-only data-weft tag: the data-weft tag's words (U30.1-fix)", () => {
+    script({}, selfURL)
+    const cfgTag = script(
+      { "data-weft": "", "data-endpoint": "https://cfg.example/studio" },
+      "/js/weft-config.js"
+    )
+    expect(findPanelScript()).toBe(cfgTag)
+    expect(readConfig().endpoint).toBe("https://cfg.example/studio/")
+  })
+
   it("the running classic script (document.currentScript) is the panel's, whatever it is called", async () => {
     script({ "data-weft": "", "data-public-id": "pub_other" }, "/other.js")
     const mine = script({ "data-public-id": "pub_mine" }, "/cdn/x9f.js")

@@ -286,50 +286,10 @@ const MARK_WORDS: Record<string, { label: string; title: string }> = {
   error: { label: "error", title: "this step ended in an error" },
 }
 
-/** cellOf reads one column of one row as the server compared it. */
-export function cellOf(row: DiffRowDoc, col: DiffColumn): CellState {
-  if (row.kept) return "kept"
-  // A sibling row whose source could not be read: not compared.
-  if (row.kept_by && (!row.a || !row.b)) return "unknown"
-  const changes = list(row.changes)
-  if (!row.a || !row.b || changes.includes("missing")) return "missing"
-  if (list(row.unknown).includes(col)) return "unknown"
-  if (changes.includes(col)) return "changed"
-  if (list(row.differs).includes(col)) return "differs"
-  return "same"
+function argsText(args: unknown): string {
+  if (args === undefined || args === null) return ""
+  return typeof args === "string" ? args : JSON.stringify(args)
 }
-
-/** rowNote is a sibling row's note ("" for any other row). */
-export function rowNote(
-  row: Pick<DiffRowDoc, "kept_by" | "a" | "b">,
-  state: RowState
-): string {
-  if (!row.kept_by) return ""
-  return SOURCE_ROW.note(
-    row.kept_by,
-    !row.a || !row.b ? SOURCE_ROW.notCompared : ROW_WORDS[state]
-  )
-}
-
-/** markChip is one mark's chip. */
-export function markChip(mark: string): MarkChip {
-  if (isHole(mark)) {
-    const n = HOLES[mark]
-    return {
-      mark,
-      label: n.label,
-      title: n.fix ? `${n.reason} — fix: ${n.fix}` : n.reason,
-      hole: mark,
-    }
-  }
-  const w = Object.hasOwn(MARK_WORDS, mark) ? MARK_WORDS[mark] : undefined
-  return { mark, label: w?.label ?? mark, title: w?.title ?? mark }
-}
-
-// ── Cell words ────────────────────────────────────────────────────
-
-/** The longest a cell's value is drawn; the rest is "…". */
-export const CELL_CHARS = 160
 
 /** docHoles is the response's own holes: a truncated diff is the
  * response_cap cause (the step cap, nothing lost). */
@@ -341,11 +301,6 @@ export function docHoles(doc: Pick<DiffDoc, "holes">): HoleMark[] {
   )
 }
 
-function argsText(args: unknown): string {
-  if (args === undefined || args === null) return ""
-  return typeof args === "string" ? args : JSON.stringify(args)
-}
-
 /** systemHidden: the side's system prompt is withheld from this
  * token (a read-scoped panel token: system null, the side's
  * system_hidden). Its hash still compares, so the cell keeps the
@@ -355,15 +310,10 @@ export function systemHidden(side: DiffSide | null): boolean {
   return !!side && side.system == null && side.system_hidden === true
 }
 
-/** cellHole is the hole a compared cell carries beside its state: the
- * hidden badge in the system column when either side's prompt is
- * withheld — a "same" there is the hashes', the words unseen. */
-export function cellHole(
-  col: DiffColumn,
-  ...sides: (DiffSide | null)[]
-): "hidden" | undefined {
-  return col === "system" && sides.some(systemHidden) ? "hidden" : undefined
-}
+// ── Cell words ────────────────────────────────────────────────────
+
+/** The longest a cell's value is drawn; the rest is "…". */
+export const CELL_CHARS = 160
 
 /** cellText is what a side holds in a column, in one short line both
  * surfaces print the same: the system prompt (or its hash's head when
@@ -402,6 +352,49 @@ export function cellText(side: DiffSide | null, col: DiffColumn): string {
         ? tokenPair(side.usage.input_tokens, side.usage.output_tokens)
         : "—"
   }
+}
+
+/** cellHole is the hole a compared cell carries beside its state: the
+ * hidden badge in the system column when either side's prompt is
+ * withheld — a "same" there is the hashes', the words unseen. */
+export function cellHole(
+  col: DiffColumn,
+  ...sides: (DiffSide | null)[]
+): "hidden" | undefined {
+  return col === "system" && sides.some(systemHidden) ? "hidden" : undefined
+}
+
+/** sideView is a side as drawn: its holes, and its marks less any
+ * mark its holes already carry (the server lists max_tokens and
+ * interrupted in both) — one badge per hole per side. A mark that is a
+ * hole (hole set) is drawn as that hole's badge on both surfaces. */
+export function sideView(side: DiffSide | null): SideView {
+  const holes = sideHoles(side)
+  const marks = (side?.marks ?? [])
+    .filter((m) => !holes.some((h) => h.hole === m))
+    .map(markChip)
+  return { side, marks, holes }
+}
+
+function cellsOf(row: DiffRowDoc): Record<DiffColumn, CellState> {
+  const out = {} as Record<DiffColumn, CellState>
+  for (const c of DIFF_COLUMNS) out[c] = cellOf(row, c)
+  return out
+}
+
+/** markChip is one mark's chip. */
+export function markChip(mark: string): MarkChip {
+  if (isHole(mark)) {
+    const n = HOLES[mark]
+    return {
+      mark,
+      label: n.label,
+      title: n.fix ? `${n.reason} — fix: ${n.fix}` : n.reason,
+      hole: mark,
+    }
+  }
+  const w = Object.hasOwn(MARK_WORDS, mark) ? MARK_WORDS[mark] : undefined
+  return { mark, label: w?.label ?? mark, title: w?.title ?? mark }
 }
 
 // ── The 2-way view ────────────────────────────────────────────────
@@ -447,24 +440,6 @@ export interface StepDiffView {
   differs: number
 }
 
-/** sideView is a side as drawn: its holes, and its marks less any
- * mark its holes already carry (the server lists max_tokens and
- * interrupted in both) — one badge per hole per side. A mark that is a
- * hole (hole set) is drawn as that hole's badge on both surfaces. */
-export function sideView(side: DiffSide | null): SideView {
-  const holes = sideHoles(side)
-  const marks = (side?.marks ?? [])
-    .filter((m) => !holes.some((h) => h.hole === m))
-    .map(markChip)
-  return { side, marks, holes }
-}
-
-function cellsOf(row: DiffRowDoc): Record<DiffColumn, CellState> {
-  const out = {} as Record<DiffColumn, CellState>
-  for (const c of DIFF_COLUMNS) out[c] = cellOf(row, c)
-  return out
-}
-
 /** stepDiffView reads one response into the rows a renderer draws. */
 export function stepDiffView(doc: DiffDoc): StepDiffView {
   const rows = [...list(doc.steps)]
@@ -504,6 +479,31 @@ export function stepDiffView(doc: DiffDoc): StepDiffView {
       DIFF_COLUMNS.some((c) => r.cells[c] === "differs")
     ).length,
   }
+}
+
+/** cellOf reads one column of one row as the server compared it. */
+export function cellOf(row: DiffRowDoc, col: DiffColumn): CellState {
+  if (row.kept) return "kept"
+  // A sibling row whose source could not be read: not compared.
+  if (row.kept_by && (!row.a || !row.b)) return "unknown"
+  const changes = list(row.changes)
+  if (!row.a || !row.b || changes.includes("missing")) return "missing"
+  if (list(row.unknown).includes(col)) return "unknown"
+  if (changes.includes(col)) return "changed"
+  if (list(row.differs).includes(col)) return "differs"
+  return "same"
+}
+
+/** rowNote is a sibling row's note ("" for any other row). */
+export function rowNote(
+  row: Pick<DiffRowDoc, "kept_by" | "a" | "b">,
+  state: RowState
+): string {
+  if (!row.kept_by) return ""
+  return SOURCE_ROW.note(
+    row.kept_by,
+    !row.a || !row.b ? SOURCE_ROW.notCompared : ROW_WORDS[state]
+  )
 }
 
 /** markerWords is a changed step's marker: "changed at step 3", the
@@ -673,7 +673,12 @@ export const UNTRACED = "replay ran without tracing"
 export const noSpans = (h: HoleMark) =>
   h.reason === CAUSES.not_recorded?.no_spans.reason
 
-/** untraced: every step of the compared run (b) carries noSpans. */
+/** untracedSides: every step a run has among sides carries noSpans. */
+export const untracedSides = (sides: SideView[]) =>
+  sides.some((s) => s.side) &&
+  sides.every((s) => !s.side || s.holes.some(noSpans))
+
+/** untraced: the compared run (b) ran without a tracer — both
+ * surfaces' rule (Studio's N-way per compared run). */
 export const untraced = (v: StepDiffView) =>
-  v.rows.some((r) => r.b.side) &&
-  v.rows.every((r) => !r.b.side || r.b.holes.some(noSpans))
+  untracedSides(v.rows.map((r) => r.b))

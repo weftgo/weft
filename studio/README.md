@@ -1209,7 +1209,7 @@ behind a proxy configures itself the same way.
 | 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, scope, publicId, token, detect, position, mode, push, zIndex, open, auto, theme, target, enabled})` — `mode`/`push`/`zIndex` written as `data-mode`/`data-push`/`data-z-index`; `enabled: false` mounts nothing (`null`) |
 | 2 | the `<weft-devtools>` element's attributes | `<weft-devtools data-endpoint="…" data-token="…">` |
 | 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:scope`, `weft:public-id`, `weft:token`, `weft:detect`, `weft:position`, `weft:open`, `weft:auto`, `weft:global`, `weft:mode`, `weft:push`, `weft:z-index`, `weft:theme`) |
-| 4 | the panel's `<script>` tag: the running classic script, else the module script whose `src` resolves to the bundle's own URL (`import.meta.url`) — its own tag before another's `data-weft`, so two tags on a page each read their own (UX-D-28) — else the first with a `data-weft` attribute (any `src`, any value) — never a tag because it carries a `data-endpoint`, `data-token` or other generic `data-*` word: a third-party widget's tag is not the panel's configuration. The running script and the own-URL match apply to the standalone `panel.js` only (`/studio/panel.js`, or the package's `panel.js` served as its own file): imported through `@weftgo/devtools` the panel is part of the app's chunk, whose URL and `<script>` are the app's, so only `data-weft` counts and the endpoint default stays the page's directory | `<script type="module" src="…" data-weft data-endpoint="…">` |
+| 4 | the panel's `<script>` tag: the running classic script, else the module script whose `src` resolves to the bundle's own URL (`import.meta.url`) when it carries `data-weft` (two marked tags on a page each read their own, UX-D-28), else the first with a `data-weft` attribute (any `src`, any value: a config-only tag beside a bare include), else the module's own bare tag — never a tag because it carries a `data-endpoint`, `data-token` or other generic `data-*` word: a third-party widget's tag is not the panel's configuration. The running script and the own-URL match apply to the standalone `panel.js` only (`/studio/panel.js`, or the package's `panel.js` served as its own file): imported through `@weftgo/devtools` the panel is part of the app's chunk, whose URL and `<script>` are the app's, so only `data-weft` counts and the endpoint default stays the page's directory | `<script type="module" src="…" data-weft data-endpoint="…">` |
 | 5 | `panel-config.json` beside the script (`/studio/panel.js` → `/studio/panel-config.json`), asked only when rungs 1–4 named no endpoint; its `endpoint` is taken on the script's own origin only, and it never carries a token | name the endpoint at any rung above |
 | 6 | the script's own origin + directory (setup A) | name the endpoint at any rung above |
 
@@ -1245,8 +1245,8 @@ retries one `/api/meta` read a minute, while the page is visible,
 brings it back by itself. The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 293,246 B raw / 98,435 B gzip
-(96.1 KiB, the bundle of the ledger's row "U30.1"; 8,061 B — 7.9 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 293,618 B raw / 98,515 B gzip
+(96.2 KiB, the bundle of the ledger's row "U30.1-fix"; 7,981 B — 7.8 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

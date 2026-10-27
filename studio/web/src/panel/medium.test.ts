@@ -212,11 +212,20 @@ describe("Studio stops answering after boot (UX-F-09)", () => {
    * refused connection does (fetch rejects), or answers 401 when
    * walled; the fake still counts each one. */
   function stoppable(routes = baseRoutes()) {
-    const st = { down: false, walled: false }
+    const st = {
+      down: false,
+      walled: false,
+      /** Set: a meta read waits for it (a read in flight). */
+      hold: null as Promise<void> | null,
+    }
     const studio = fakeStudio(routes)
     vi.stubGlobal(
       "fetch",
       async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (st.hold && String(input).includes("/api/meta")) {
+          await st.hold
+          return studio.fetchMock(input, init)
+        }
         if (st.walled) {
           await studio.fetchMock(input, init)
           return new Response(JSON.stringify({ error: "unauthorized" }), {
@@ -296,6 +305,79 @@ describe("Studio stops answering after boot (UX-F-09)", () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(line(el)).toBeNull()
     expect(studio.gets(LIST).length).toBeGreaterThan(lists)
+  })
+
+  it("removed while Studio is down: nothing reads again, nothing reopens (U30.1-fix)", async () => {
+    const { st, studio } = stoppable()
+    const el = await mount()
+    vi.useFakeTimers()
+    st.down = true
+    for (const es of FakeEventSource.live("public_id=")) es.fail()
+    await vi.advanceTimersByTimeAsync(6_000)
+    expect(line(el)).not.toBeNull()
+    el.remove()
+    const reads = studio.calls.length
+    const streams = FakeEventSource.instances.length
+    await vi.advanceTimersByTimeAsync(30 * 60_000)
+    expect(studio.calls.length).toBe(reads)
+    expect(FakeEventSource.instances.length).toBe(streams)
+  })
+
+  it("a slow poll's meta read that lands after the element left opens no stream and reads no list (U30.1-fix)", async () => {
+    const { st, studio } = stoppable()
+    const el = await mount()
+    vi.useFakeTimers()
+    st.down = true
+    for (const es of FakeEventSource.live("public_id=")) es.fail()
+    await vi.advanceTimersByTimeAsync(9 * 60_000)
+    let land = () => {}
+    st.hold = new Promise<void>((r) => (land = r))
+    const metas = studio.gets("meta").length
+    await vi.advanceTimersByTimeAsync(60_000)
+    // The read is in flight (counted once it lands): the element leaves.
+    el.remove()
+    const lists = studio.gets(LIST).length
+    const streams = FakeEventSource.instances.length
+    st.down = false
+    land()
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    expect(studio.gets("meta").length).toBe(metas + 1)
+    expect(studio.gets(LIST).length).toBe(lists)
+    expect(FakeEventSource.instances.length).toBe(streams)
+    expect(FakeEventSource.live("public_id=")).toHaveLength(0)
+  })
+
+  it("a closed dock makes no slow-poll reads (U30.1-fix)", async () => {
+    const { st, studio } = stoppable()
+    const el = await mount()
+    vi.useFakeTimers()
+    st.down = true
+    for (const es of FakeEventSource.live("public_id=")) es.fail()
+    await vi.advanceTimersByTimeAsync(9 * 60_000)
+    el.close()
+    await vi.advanceTimersByTimeAsync(100)
+    const metas = studio.gets("meta").length
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(studio.gets("meta").length).toBe(metas)
+    // Open again: the next tick reads.
+    el.open()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(studio.gets("meta").length).toBe(metas + 1)
+  })
+
+  it("a revoked token (meta 200, the list 401): the line and its retry, no slow poll resetting the backoff (U30.1-fix)", async () => {
+    const { st, studio } = stoppable()
+    const el = await mount()
+    vi.useFakeTimers()
+    st.walled = true
+    for (const es of FakeEventSource.live("public_id=")) es.fail()
+    await vi.advanceTimersByTimeAsync(9 * 60_000)
+    expect(line(el)!.textContent).toContain("Studio needs a token")
+    const metas = studio.gets("meta").length
+    const lists = studio.gets(LIST).length
+    await vi.advanceTimersByTimeAsync(60 * 60_000)
+    expect(studio.gets("meta").length).toBe(metas)
+    expect(studio.gets(LIST).length).toBe(lists)
   })
 
   it("a hidden page makes no reads while Studio is down", async () => {

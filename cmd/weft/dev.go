@@ -375,6 +375,10 @@ func tokenLine(st *devStudioRun, fixed bool) string {
 		return "studio: token: the one --token / WEFT_STUDIO_TOKEN set"
 	case st.dbPath != "" && readTokenFile(tokenPath(st.dbPath)) == st.token:
 		return "studio: token: " + tokenPath(st.dbPath) + " (weft open --with-token)"
+	case st.dbPath != "":
+		// A reused Studio whose token is not the file's (its own
+		// discovery file names it): never a file that would not sign in.
+		return "studio: token: the running Studio's, not " + tokenPath(st.dbPath) + " (weft open --with-token)"
 	}
 	return ""
 }

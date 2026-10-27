@@ -123,6 +123,19 @@ export function runEngineWords(r: Pick<RunRow, "model">): string {
   return RAN_WORDS.live(m || ENGINE_WORDS.ownModel)
 }
 
+/** engineChoice is the rule (see the header). */
+export function engineChoice(f: EngineFacts): EngineChoice {
+  const reason = scriptedBlock(f)
+  return {
+    default: reason ? "live" : "scripted",
+    scripted: { enabled: !reason, reason },
+    live: {
+      model: f.model || f.ownModel || ENGINE_WORDS.ownModel,
+      ...liveEstimate(f),
+    },
+  }
+}
+
 /** liveEstimate is the live engine's cost line: the source's usage
  * from from_step on at its model's price — never $0 for an unknown. */
 function liveEstimate(f: EngineFacts): { estimate: string; usd: string } {
@@ -154,19 +167,6 @@ function liveEstimate(f: EngineFacts): { estimate: string; usd: string } {
   return {
     estimate: `~${tokens(tok)} tokens ≈ ${text} for ${k > 1 ? `steps ${n}–${n + k - 1}` : `step ${n}`}${all ? "" : " · later steps also run live"}`,
     usd: `${all ? "≈" : "≥"} ${text}`,
-  }
-}
-
-/** engineChoice is the rule (see the header). */
-export function engineChoice(f: EngineFacts): EngineChoice {
-  const reason = scriptedBlock(f)
-  return {
-    default: reason ? "live" : "scripted",
-    scripted: { enabled: !reason, reason },
-    live: {
-      model: f.model || f.ownModel || ENGINE_WORDS.ownModel,
-      ...liveEstimate(f),
-    },
   }
 }
 
@@ -210,46 +210,6 @@ export const engineHeld = (c: EngineChoice, picked?: Engine): string =>
   engineOf(c, picked) === "scripted" && !c.scripted.enabled
     ? ENGINE_WORDS.refused(c.scripted.reason)
     : ""
-
-/** runLabel is Run's label: it names the engine (and, on the
- * playground, the variant: "Run A on scripted · 0 tokens"). */
-export function runLabel(c: EngineChoice, picked?: Engine, name = ""): string {
-  const run = name ? `Run ${name}` : "Run"
-  if (engineOf(c, picked) === "scripted") return `${run} on scripted · 0 tokens`
-  return `${run} live on ${c.live.model} · ${c.live.usd || ENGINE_WORDS.unknown}`
-}
-
-/** noEdit says a field's value is no edit: empty, or the recording
- * itself (an edit equal to the recording is not an edit). */
-export const noEdit = (value: string, recorded: string | undefined): boolean =>
-  value === "" || value === recorded
-
-/** The most steps the estimate reads (each its own step-route read). */
-export const COST_STEPS = 20
-
-/** stepsOf is the steps the estimate reads, from from_step on: up to
- * the source's step count (unknown: from_step alone), at most
- * COST_STEPS — a -1 last marks the steps left unread (the estimate then
- * says "later steps also run live"). */
-export function stepsOf(from: number, steps?: number): number[] {
-  const n = steps === undefined ? 1 : Math.max(0, steps - from)
-  const at = Array.from({ length: Math.min(n, COST_STEPS) }, (_, i) => from + i)
-  return steps === undefined || n > COST_STEPS ? [...at, -1] : at
-}
-
-type Overrides = NonNullable<PlaygroundRunBody["overrides"]>
-
-/** sameModel says a model override names the agent's own model as the
- * source recorded it (its name, or provider/name): no override — the
- * body leaves it out (lib/experiment-body.ts's overridesOf, the
- * panel's buildRunBody). */
-export const sameModel = (m: string, own?: ModelInfo): boolean =>
-  !!own && (m === own.name || m === `${own.provider}/${own.name}`)
-
-/** modelLabel is a model choice's label (UX-D-04): a model the source
- * never ran on is a live call, said beside it. */
-export const modelLabel = (m: string, own?: ModelInfo): string =>
-  sameModel(m, own) ? m : `${m} · live call`
 
 /** factsOf is the one reading of a command both drawers make: the
  * overrides the body sends (overridesOf's and labOverrides' equality —
@@ -299,4 +259,44 @@ export function factsOf(p: {
     costs: p.costs,
     costWhy: p.costWhy,
   }
+}
+
+/** noEdit says a field's value is no edit: empty, or the recording
+ * itself (an edit equal to the recording is not an edit). */
+export const noEdit = (value: string, recorded: string | undefined): boolean =>
+  value === "" || value === recorded
+
+/** The most steps the estimate reads (each its own step-route read). */
+export const COST_STEPS = 20
+
+/** runLabel is Run's label: it names the engine (and, on the
+ * playground, the variant: "Run A on scripted · 0 tokens"). */
+export function runLabel(c: EngineChoice, picked?: Engine, name = ""): string {
+  const run = name ? `Run ${name}` : "Run"
+  if (engineOf(c, picked) === "scripted") return `${run} on scripted · 0 tokens`
+  return `${run} live on ${c.live.model} · ${c.live.usd || ENGINE_WORDS.unknown}`
+}
+
+type Overrides = NonNullable<PlaygroundRunBody["overrides"]>
+
+/** sameModel says a model override names the agent's own model as the
+ * source recorded it (its name, or provider/name): no override — the
+ * body leaves it out (lib/experiment-body.ts's overridesOf, the
+ * panel's buildRunBody). */
+export const sameModel = (m: string, own?: ModelInfo): boolean =>
+  !!own && (m === own.name || m === `${own.provider}/${own.name}`)
+
+/** modelLabel is a model choice's label (UX-D-04): a model the source
+ * never ran on is a live call, said beside it. */
+export const modelLabel = (m: string, own?: ModelInfo): string =>
+  sameModel(m, own) ? m : `${m} · live call`
+
+/** stepsOf is the steps the estimate reads, from from_step on: up to
+ * the source's step count (unknown: from_step alone), at most
+ * COST_STEPS — a -1 last marks the steps left unread (the estimate then
+ * says "later steps also run live"). */
+export function stepsOf(from: number, steps?: number): number[] {
+  const n = steps === undefined ? 1 : Math.max(0, steps - from)
+  const at = Array.from({ length: Math.min(n, COST_STEPS) }, (_, i) => from + i)
+  return steps === undefined || n > COST_STEPS ? [...at, -1] : at
 }

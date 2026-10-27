@@ -665,6 +665,32 @@ export class PanelModel {
   /** Dev-list reads while Studio is down (armDev: LIVE_RETRIES at
    * most). */
   private downs = 0
+
+  /** followExperiment points the pane at one run and streams it in
+   * place (§3: "the result streams in place from the live lane"). */
+  private followExperiment(res: ExperimentResult, runID: string) {
+    const feed = newFold()
+    res.runID = runID
+    res.row = null
+    res.events = []
+    res.seen = new Set()
+    res.feed = feed
+    res.folded = viewOf(feed)
+    // A fresh lane: a read still in flight for the previous run of the
+    // chain is no longer this lane's (its own checks drop it).
+    res.pos = -1
+    res.held = []
+    res.reading = false
+    res.recheck = false
+    res.loading = false
+    res.stale = false
+    res.ready = false
+    res.words = null
+    res.deciding = null // the run it was held for has been resumed
+    res.decided = {}
+    this.retries.exp = 0
+    this.openExperimentStream(res)
+  }
   /** Reopen attempts since each stream last opened (LIVE_RETRIES). */
   private retries = { scope: 0, run: 0, exp: 0, dev: 0 }
   /** Each lane's overflow backoff: the step it is at and its last reopen. */
@@ -824,6 +850,24 @@ export class PanelModel {
     return []
   }
 
+  /** drain folds a lane's held frames in arrival order; one past a
+   * position nobody carried sends the lane back to the pages (it and
+   * the frames behind it wait for that read). */
+  private drain(lane: Lane, id: string, current: () => boolean) {
+    const held = lane.held.splice(0)
+    for (let i = 0; i < held.length; i++) {
+      if (foldLive(lane, held[i]) !== "gap") continue
+      lane.held.push(...held.slice(i))
+      void this.catchUp(lane, id, current).catch(quiet)
+      return
+    }
+  }
+
+  private setPreview(p: PanelPreview) {
+    this.state.preview = p
+    this.emit()
+  }
+
   /** scope starts over on the conversation: the header and the turn
    * list, and the live lane for it (S4.5: exactly one selector).
    * Nothing of the previous conversation stays — its open turn, its
@@ -911,17 +955,6 @@ export class PanelModel {
     return run
   }
 
-  /** reach asks a Studio that stopped answering again now (the
-   * header's retry, UX-F-09): the backoffs start over, the live lane
-   * reopens, the list is read. */
-  reach() {
-    this.downs = this.retries.scope = 0
-    if (this.scoped && !this.scopeSub) this.subscribe(this.loadSeq)
-    void this.refresh()
-      .catch(quiet)
-      .then(() => this.armDev())
-  }
-
   private clearTimers() {
     for (const t of this.timers) clearTimeout(t)
     this.timers.clear()
@@ -932,6 +965,19 @@ export class PanelModel {
       this.rtTimer =
       this.slowT =
         null
+  }
+
+  /** reach asks a Studio that stopped answering again now (the
+   * header's retry, UX-F-09): the backoffs start over, the live lane
+   * reopens, the list is read. */
+  reach() {
+    // A slow poll's meta read may land after dispose: nothing reopens.
+    if (this.disposed) return
+    this.downs = this.retries.scope = 0
+    if (this.scoped && !this.scopeSub) this.subscribe(this.loadSeq)
+    void this.refresh()
+      .catch(quiet)
+      .then(() => this.armDev())
   }
 
   /** armDev schedules the dev list's next read (DEV_POLL_MS): no
@@ -989,6 +1035,7 @@ export class PanelModel {
    * unscoped — §5.2's default) and no selector that covers it (S4.5
    * wants exactly one): history only, and the dot says so. */
   private subscribe(seq: number) {
+    if (this.disposed) return
     this.scopeSub?.close()
     this.sessSub?.close()
     this.scopeSub = this.sessSub = undefined
@@ -1174,7 +1221,8 @@ export class PanelModel {
     this.slowT ||= this.after(60_000, () => {
       this.slowT = null
       if (!this.state.down) return
-      if (document.visibilityState == "visible")
+      // Read only while the page is visible and the dock open.
+      if (document.visibilityState == "visible" && this.watching)
         fetchMeta(this.ep).then(() => this.reach(), quiet)
       this.slow()
     })
@@ -1185,91 +1233,6 @@ export class PanelModel {
    * delegated session's): then only a child run (childRun) is not. */
   private notTurn(r: RunRow | RunDoc): boolean {
     return !!(this.narrowing.session ? childRun(r) : linkedRun(r))
-  }
-
-  /** followExperiment points the pane at one run and streams it in
-   * place (§3: "the result streams in place from the live lane"). */
-  private followExperiment(res: ExperimentResult, runID: string) {
-    const feed = newFold()
-    res.runID = runID
-    res.row = null
-    res.events = []
-    res.seen = new Set()
-    res.feed = feed
-    res.folded = viewOf(feed)
-    // A fresh lane: a read still in flight for the previous run of the
-    // chain is no longer this lane's (its own checks drop it).
-    res.pos = -1
-    res.held = []
-    res.reading = false
-    res.recheck = false
-    res.loading = false
-    res.stale = false
-    res.ready = false
-    res.words = null
-    res.deciding = null // the run it was held for has been resumed
-    res.decided = {}
-    this.retries.exp = 0
-    this.openExperimentStream(res)
-  }
-
-  /** readExp reads a parked session turn's request expiries (its doc
-   * pending and undecided, capability "timeline"), one read out at a
-   * time. thread files the approval.request records after the run's
-   * end, so on a batched destination they can land after the read: an
-   * answer missing an awaiting call's approval.request record (one with
-   * no expiry is final), or a failed one, is read again — with the next loadTurn and once 2 s on, three reads at
-   * most, never a loop. An answer for a view the user has left is
-   * dropped (a return reads afresh). */
-  private readExp(view: TurnView) {
-    const doc = view.doc
-    const x = view.exp
-    if (
-      !doc?.session_id ||
-      !doc.pending ||
-      doc.decided ||
-      (x && (x.busy || !x.again || x.n > 2)) ||
-      this.state.turn !== view ||
-      !this.state.meta?.capabilities.includes("timeline")
-    )
-      return
-    const id = view.id
-    const n = (x?.n ?? 0) + 1
-    view.exp = { at: new Map(), ...x, n, busy: true }
-    void panelGet<EntriesPage>(this.ep, runMarksPath(doc.session_id, id))
-      .then(
-        (p) => ({
-          at: requestExpiries(p.entries, id),
-          hole: marksCapped(p) ? "truncated" : "",
-          // A pending call with no approval.request record yet: early.
-          // Every record there, an expiry or none, is the final answer.
-          again: view.folded.pending.some(
-            (c) =>
-              !p.entries.some(
-                (m) =>
-                  m.kind === "approval.request" && m.fields.call_id === c.id
-              )
-          ),
-        }),
-        // Failed: what an earlier read answered is kept, its words
-        // drawn; the badge only when none did (Studio's rule).
-        () => {
-          const { at, hole } = view.exp!
-          return hole == null || hole === "not_recorded"
-            ? {
-                at: new Map<string, string>(),
-                hole: "not_recorded",
-                again: true,
-              }
-            : { at, hole, again: true }
-        }
-      )
-      .then((r) => {
-        if (this.disposed || this.state.turn !== view) return
-        view.exp = { ...r, n }
-        if (r.again && n < 3) this.after(2e3, () => this.readExp(view))
-        this.emit()
-      })
   }
 
   /** upsertRun merges one run row by id: the live lane forwards every
@@ -1295,6 +1258,12 @@ export class PanelModel {
       experiments.set(key, [...(experiments.get(key) ?? []), ...list])
     }
     this.state.experiments = experiments
+  }
+
+  /** scoped: a public id or a query scope names the list; otherwise
+   * the dev list. */
+  get scoped(): boolean {
+    return !!this.publicId || Object.keys(this.q).length > 0
   }
 
   /** capDev bounds the dev list: the newest DEV_LIMIT turns, and the
@@ -1331,10 +1300,24 @@ export class PanelModel {
     return out
   }
 
-  /** scoped: a public id or a query scope names the list; otherwise
-   * the dev list. */
-  get scoped(): boolean {
-    return !!this.publicId || Object.keys(this.q).length > 0
+  /** liveInto takes one live frame for a lane: held while its pages are
+   * being read, folded in order otherwise, and a frame past a position
+   * the stream never carried sends the lane back to the pages. */
+  private liveInto(
+    lane: Lane,
+    id: string,
+    rec: LiveRecord,
+    current: () => boolean
+  ) {
+    if (lane.loading || lane.reading) {
+      lane.held.push(rec)
+      return
+    }
+    const r = foldLive(lane, rec)
+    if (r === "gap") {
+      lane.held.push(rec)
+      void this.catchUp(lane, id, current).catch(quiet)
+    } else if (r === "folded") this.emit(true)
   }
 
   /** select loads one turn: the doc (subagent children), every events
@@ -1444,6 +1427,51 @@ export class PanelModel {
     else view.done = true
   }
 
+  /** onRunFrame upserts a turn row from the live lane and keeps the
+   * open turn's final state honest: when a run finishes, its stored
+   * records reload (the finished words are the transcript's, not the
+   * deltas'). */
+  private onRunFrame(f: LiveRun) {
+    const run = f.run
+    // The dev list's agent stream carries every conversation's runs.
+    if (this.publicId && run.public_id && run.public_id !== this.publicId)
+      return
+    // A subagent's run — or any run a call started (caller_run_id,
+    // U14: a pool child turn, a nested Generate) — inherits the public
+    // id, but it is not a turn:
+    // the list is top-level runs (runs?public_id= reads the same way)
+    // and the child hangs off its parent's call.
+    if (this.notTurn(run)) return
+    // Another session's run is not a turn of the narrowed list.
+    if (!this.inSession(run)) return
+    for (const c of this.collectors) c.push(run)
+    this.upsertRun(run)
+    if (!this.scoped) this.capDev()
+    this.armStale()
+    // The scope's run, heard as it starts: the pin takes it.
+    const pin = this.takePin()
+    if (pin) {
+      void this.select(pin).catch(quiet)
+      return
+    }
+    if (!this.state.selected && this.state.turns.length) {
+      const running = this.state.turns.find((r) => r.status === "running")
+      void this.select((running ?? this.state.turns[0]).id).catch(quiet)
+      return
+    }
+    const view = this.state.turn
+    if (view && view.id === run.id) {
+      if (!isLive(run)) void this.settleTurn(view).catch(quiet)
+      else if (view.done && !this.runSub && !view.loading) {
+        // A row that read ended and runs again (a stale read, a
+        // heartbeat after an interruption): its tail is followed.
+        view.done = false
+        void this.resumeTurn(view).catch(quiet)
+      }
+    }
+    this.emit()
+  }
+
   /** refresh reloads the header and the turn list. */
   async refresh() {
     const seq = this.loadSeq
@@ -1546,7 +1574,10 @@ export class PanelModel {
         this.state.down = true
         this.state.walled = !!st
         this.emit()
-        this.slow()
+        // A wall (401/403: a revoked token) is the token's to fix: the
+        // line and its retry say so; a meta read would answer 200 and
+        // start the backoffs over forever.
+        if (!st) this.slow()
       }
       return
     } finally {
@@ -1582,84 +1613,6 @@ export class PanelModel {
     } else {
       this.emit()
     }
-  }
-
-  /** onRunFrame upserts a turn row from the live lane and keeps the
-   * open turn's final state honest: when a run finishes, its stored
-   * records reload (the finished words are the transcript's, not the
-   * deltas'). */
-  private onRunFrame(f: LiveRun) {
-    const run = f.run
-    // The dev list's agent stream carries every conversation's runs.
-    if (this.publicId && run.public_id && run.public_id !== this.publicId)
-      return
-    // A subagent's run — or any run a call started (caller_run_id,
-    // U14: a pool child turn, a nested Generate) — inherits the public
-    // id, but it is not a turn:
-    // the list is top-level runs (runs?public_id= reads the same way)
-    // and the child hangs off its parent's call.
-    if (this.notTurn(run)) return
-    // Another session's run is not a turn of the narrowed list.
-    if (!this.inSession(run)) return
-    for (const c of this.collectors) c.push(run)
-    this.upsertRun(run)
-    if (!this.scoped) this.capDev()
-    this.armStale()
-    // The scope's run, heard as it starts: the pin takes it.
-    const pin = this.takePin()
-    if (pin) {
-      void this.select(pin).catch(quiet)
-      return
-    }
-    if (!this.state.selected && this.state.turns.length) {
-      const running = this.state.turns.find((r) => r.status === "running")
-      void this.select((running ?? this.state.turns[0]).id).catch(quiet)
-      return
-    }
-    const view = this.state.turn
-    if (view && view.id === run.id) {
-      if (!isLive(run)) void this.settleTurn(view).catch(quiet)
-      else if (view.done && !this.runSub && !view.loading) {
-        // A row that read ended and runs again (a stale read, a
-        // heartbeat after an interruption): its tail is followed.
-        view.done = false
-        void this.resumeTurn(view).catch(quiet)
-      }
-    }
-    this.emit()
-  }
-
-  /** drain folds a lane's held frames in arrival order; one past a
-   * position nobody carried sends the lane back to the pages (it and
-   * the frames behind it wait for that read). */
-  private drain(lane: Lane, id: string, current: () => boolean) {
-    const held = lane.held.splice(0)
-    for (let i = 0; i < held.length; i++) {
-      if (foldLive(lane, held[i]) !== "gap") continue
-      lane.held.push(...held.slice(i))
-      void this.catchUp(lane, id, current).catch(quiet)
-      return
-    }
-  }
-
-  /** liveInto takes one live frame for a lane: held while its pages are
-   * being read, folded in order otherwise, and a frame past a position
-   * the stream never carried sends the lane back to the pages. */
-  private liveInto(
-    lane: Lane,
-    id: string,
-    rec: LiveRecord,
-    current: () => boolean
-  ) {
-    if (lane.loading || lane.reading) {
-      lane.held.push(rec)
-      return
-    }
-    const r = foldLive(lane, rec)
-    if (r === "gap") {
-      lane.held.push(rec)
-      void this.catchUp(lane, id, current).catch(quiet)
-    } else if (r === "folded") this.emit(true)
   }
 
   /** loadTurn reads the run's stored records into the view, in place:
@@ -1806,11 +1759,6 @@ export class PanelModel {
     }
   }
 
-  private setPreview(p: PanelPreview) {
-    this.state.preview = p
-    this.emit()
-  }
-
   /** loadOlder reads the conversation's next older page (D4): runs?
    * with before= and before_id= (studio/api.go's cursor), merged under
    * the list; one read at a time; a failed read leaves the cursor for
@@ -1942,6 +1890,65 @@ export class PanelModel {
     this.emit()
   }
 
+  /** readExp reads a parked session turn's request expiries (its doc
+   * pending and undecided, capability "timeline"), one read out at a
+   * time. thread files the approval.request records after the run's
+   * end, so on a batched destination they can land after the read: an
+   * answer missing an awaiting call's approval.request record (one with
+   * no expiry is final), or a failed one, is read again — with the next loadTurn and once 2 s on, three reads at
+   * most, never a loop. An answer for a view the user has left is
+   * dropped (a return reads afresh). */
+  private readExp(view: TurnView) {
+    const doc = view.doc
+    const x = view.exp
+    if (
+      !doc?.session_id ||
+      !doc.pending ||
+      doc.decided ||
+      (x && (x.busy || !x.again || x.n > 2)) ||
+      this.state.turn !== view ||
+      !this.state.meta?.capabilities.includes("timeline")
+    )
+      return
+    const id = view.id
+    const n = (x?.n ?? 0) + 1
+    view.exp = { at: new Map(), ...x, n, busy: true }
+    void panelGet<EntriesPage>(this.ep, runMarksPath(doc.session_id, id))
+      .then(
+        (p) => ({
+          at: requestExpiries(p.entries, id),
+          hole: marksCapped(p) ? "truncated" : "",
+          // A pending call with no approval.request record yet: early.
+          // Every record there, an expiry or none, is the final answer.
+          again: view.folded.pending.some(
+            (c) =>
+              !p.entries.some(
+                (m) =>
+                  m.kind === "approval.request" && m.fields.call_id === c.id
+              )
+          ),
+        }),
+        // Failed: what an earlier read answered is kept, its words
+        // drawn; the badge only when none did (Studio's rule).
+        () => {
+          const { at, hole } = view.exp!
+          return hole == null || hole === "not_recorded"
+            ? {
+                at: new Map<string, string>(),
+                hole: "not_recorded",
+                again: true,
+              }
+            : { at, hole, again: true }
+        }
+      )
+      .then((r) => {
+        if (this.disposed || this.state.turn !== view) return
+        view.exp = { ...r, n }
+        if (r.again && n < 3) this.after(2e3, () => this.readExp(view))
+        this.emit()
+      })
+  }
+
   /** schedulePreview reads the drawer's preview again once the draft
    * rests (POST /api/playground/preview — the body Run posts; plan F2):
    * only with capability "preview", never for a fork (no ephemeral
@@ -2013,33 +2020,6 @@ export class PanelModel {
         this.pvSeq++
         this.setPreview({ doc: this.state.preview.doc, error: PREVIEW_SILENT })
       }
-    })
-  }
-
-  /** armStale watches the rows that read running: a run whose app died
-   * never sends another frame — its row reads interrupted only when it
-   * is read again (derivation, S4.3; meta.interrupted_after_ms). One
-   * timer, pushed back by every change heard: the list is read again
-   * once nothing has been heard for that long while something reads
-   * running. */
-  private armStale() {
-    this.cancel(this.staleTimer)
-    this.staleTimer = null
-    if (this.disposed) return
-    const rows = [
-      ...this.state.turns,
-      ...[...this.state.experiments.values()].flat(),
-    ]
-    // Running or settling (isLive): a settling row stops settling with
-    // no frame when its window passes — the list read says so.
-    if (!rows.some(isLive)) return
-    const ia = this.state.meta?.interrupted_after_ms
-    const ms =
-      (typeof ia === "number" && ia > 0 ? Math.min(ia, 10 * 60_000) : 30_000) +
-      1_000
-    this.staleTimer = this.after(ms, () => {
-      this.staleTimer = null
-      void this.refresh().catch(quiet)
     })
   }
 
@@ -2122,6 +2102,33 @@ export class PanelModel {
     this.upsertRun(row)
     this.emit()
     return "ok"
+  }
+
+  /** armStale watches the rows that read running: a run whose app died
+   * never sends another frame — its row reads interrupted only when it
+   * is read again (derivation, S4.3; meta.interrupted_after_ms). One
+   * timer, pushed back by every change heard: the list is read again
+   * once nothing has been heard for that long while something reads
+   * running. */
+  private armStale() {
+    this.cancel(this.staleTimer)
+    this.staleTimer = null
+    if (this.disposed) return
+    const rows = [
+      ...this.state.turns,
+      ...[...this.state.experiments.values()].flat(),
+    ]
+    // Running or settling (isLive): a settling row stops settling with
+    // no frame when its window passes — the list read says so.
+    if (!rows.some(isLive)) return
+    const ia = this.state.meta?.interrupted_after_ms
+    const ms =
+      (typeof ia === "number" && ia > 0 ? Math.min(ia, 10 * 60_000) : 30_000) +
+      1_000
+    this.staleTimer = this.after(ms, () => {
+      this.staleTimer = null
+      void this.refresh().catch(quiet)
+    })
   }
 
   /** pickTarget is the drawer's target pick (U18.2): the agent the
@@ -2645,6 +2652,85 @@ export class PanelModel {
     void tick().catch(quiet)
   }
 
+  /** settleExperiment loads the ended run's stored records: the diff
+   * is taken against the transcript, never the deltas, and the
+   * approval controls act on this run's own pending set. The finished
+   * ack travels the runtime link while the run's last records travel
+   * the OTel pipeline — when they have not landed yet, the load is
+   * tried again a few times before the pane settles on what it has. */
+  private async settleExperiment(res: ExperimentResult, attempt: number) {
+    if (res.ready || this.state.result !== res || this.settling.has(res)) return
+    this.settling.add(res)
+    let loaded: { transcript: Transcript | null } | null
+    try {
+      loaded = await this.loadExperiment(res)
+    } finally {
+      this.settling.delete(res)
+    }
+    if (!loaded || isReady(res)) return
+    // Ack before export: the runtime's finished ack travels the link,
+    // the run's last records the OTel pipeline — its row (spans) and
+    // its run_finish (logs, the event naming the pending calls) can
+    // land after it. Settled is the row out of running and, for a run
+    // that succeeded, its run_finish read; until then the stream stays
+    // open and the run is read again (SETTLE_READS, 1 s apart, the
+    // Studio UI's bound) — the final words, the diff and the approval
+    // controls are taken from the settled run only.
+    const row = res.row
+    const settled =
+      !!row &&
+      row.status !== "running" &&
+      (row.status !== "succeeded" || res.folded.finished)
+    if (!settled && attempt < SETTLE_READS - 1) {
+      this.after(
+        1_000,
+        () => void this.settleExperiment(res, attempt + 1).catch(quiet)
+      )
+      return
+    }
+    res.ready = true
+    res.words = turnWordsOf(loaded.transcript) ?? foldedWords(res.folded)
+    this.expSub?.close()
+    this.expSub = undefined
+    this.emit()
+    void this.loadStepDiff(res).catch(quiet)
+  }
+  wantRuntimes() {
+    const wait = this.rtAt + RT_MS - Date.now()
+    if (this.disposed || this.rtTimer) return
+    if (wait > 0) {
+      this.rtTimer = this.after(wait, () => {
+        this.rtTimer = null
+        this.emit()
+      })
+      return
+    }
+    this.rtAt = Date.now()
+    const n = ++this.rtSeq
+    fetchRuntimes(this.ep)
+      .then((d) => {
+        this.state.runtimes = Array.isArray(d.runtimes) ? d.runtimes : []
+        this.state.rtErr = ""
+        this.state.rtN = Math.max(this.state.rtN, n)
+      })
+      .catch((err: unknown) => {
+        this.state.rtErr = messageOf(err)
+      })
+      .finally(() => {
+        this.state.rtRead = true
+        this.emit()
+      })
+  }
+
+  /** wantRuntimes reads GET /api/runtimes for the app turn's gate
+   * (plan F4.3: a Sessions runtime of the run's service), at most once
+   * every RT_MS while a parked or running app turn is drawn — a
+   * quiet parked turn too: a throttled ask leaves one timer that draws
+   * again when the window ends, and that draw asks again. */
+  private rtAt = 0
+  private rtSeq = 0
+  private rtTimer: ReturnType<typeof setTimeout> | null = null
+
   private openExperimentStream(res: ExperimentResult) {
     const runID = res.runID
     const current = () => !this.left(res) && res.runID === runID && !res.ready
@@ -2694,85 +2780,6 @@ export class PanelModel {
         else this.retry("exp", again)
       },
     })
-  }
-
-  /** settleExperiment loads the ended run's stored records: the diff
-   * is taken against the transcript, never the deltas, and the
-   * approval controls act on this run's own pending set. The finished
-   * ack travels the runtime link while the run's last records travel
-   * the OTel pipeline — when they have not landed yet, the load is
-   * tried again a few times before the pane settles on what it has. */
-  private async settleExperiment(res: ExperimentResult, attempt: number) {
-    if (res.ready || this.state.result !== res || this.settling.has(res)) return
-    this.settling.add(res)
-    let loaded: { transcript: Transcript | null } | null
-    try {
-      loaded = await this.loadExperiment(res)
-    } finally {
-      this.settling.delete(res)
-    }
-    if (!loaded || isReady(res)) return
-    // Ack before export: the runtime's finished ack travels the link,
-    // the run's last records the OTel pipeline — its row (spans) and
-    // its run_finish (logs, the event naming the pending calls) can
-    // land after it. Settled is the row out of running and, for a run
-    // that succeeded, its run_finish read; until then the stream stays
-    // open and the run is read again (SETTLE_READS, 1 s apart, the
-    // Studio UI's bound) — the final words, the diff and the approval
-    // controls are taken from the settled run only.
-    const row = res.row
-    const settled =
-      !!row &&
-      row.status !== "running" &&
-      (row.status !== "succeeded" || res.folded.finished)
-    if (!settled && attempt < SETTLE_READS - 1) {
-      this.after(
-        1_000,
-        () => void this.settleExperiment(res, attempt + 1).catch(quiet)
-      )
-      return
-    }
-    res.ready = true
-    res.words = turnWordsOf(loaded.transcript) ?? foldedWords(res.folded)
-    this.expSub?.close()
-    this.expSub = undefined
-    this.emit()
-    void this.loadStepDiff(res).catch(quiet)
-  }
-
-  /** wantRuntimes reads GET /api/runtimes for the app turn's gate
-   * (plan F4.3: a Sessions runtime of the run's service), at most once
-   * every RT_MS while a parked or running app turn is drawn — a
-   * quiet parked turn too: a throttled ask leaves one timer that draws
-   * again when the window ends, and that draw asks again. */
-  private rtAt = 0
-  private rtSeq = 0
-  private rtTimer: ReturnType<typeof setTimeout> | null = null
-  wantRuntimes() {
-    const wait = this.rtAt + RT_MS - Date.now()
-    if (this.disposed || this.rtTimer) return
-    if (wait > 0) {
-      this.rtTimer = this.after(wait, () => {
-        this.rtTimer = null
-        this.emit()
-      })
-      return
-    }
-    this.rtAt = Date.now()
-    const n = ++this.rtSeq
-    fetchRuntimes(this.ep)
-      .then((d) => {
-        this.state.runtimes = Array.isArray(d.runtimes) ? d.runtimes : []
-        this.state.rtErr = ""
-        this.state.rtN = Math.max(this.state.rtN, n)
-      })
-      .catch((err: unknown) => {
-        this.state.rtErr = messageOf(err)
-      })
-      .finally(() => {
-        this.state.rtRead = true
-        this.emit()
-      })
   }
 
   /** appVerb sends one verb on an app turn (plan F4.3) and follows its
@@ -2884,15 +2891,6 @@ export class PanelModel {
     )
   }
 
-  private after(ms: number, fn: () => void): ReturnType<typeof setTimeout> {
-    const t = setTimeout(() => {
-      this.timers.delete(t)
-      if (!this.disposed) fn()
-    }, ms)
-    this.timers.add(t)
-    return t
-  }
-
   /** steerApp delivers one user message into the app turn running now
    * (plan F4.3): the run id is the turn's — a newer turn is refused. */
   steerApp(runID: string, message: string) {
@@ -2997,6 +2995,15 @@ export class PanelModel {
     if (!this.left(res)) this.emit()
   }
 
+  private after(ms: number, fn: () => void): ReturnType<typeof setTimeout> {
+    const t = setTimeout(() => {
+      this.timers.delete(t)
+      if (!this.disposed) fn()
+    }, ms)
+    this.timers.add(t)
+    return t
+  }
+
   /** inSession keeps a row under the scope's session: every row when
    * the scope names none, and a row that carries no session id (an
    * experiment, a run outside a thread) is not judged — unless the list
@@ -3018,12 +3025,6 @@ export class PanelModel {
   /** The runs cursor of the oldest page loaded (next_before /
    * next_before_id), null when every run is listed. */
   private cursor: Cursor | null = null
-
-  /** drawPending: a draw is scheduled (the next frame, or a live draw
-   * waiting out LIVE_DRAW_MS). */
-  drawPending(): boolean {
-    return this.raf !== 0 || this.liveTimer !== null
-  }
 
   /** wantCommands reads a parked turn's commands once (capability
    * run_commands, U20.2-fix, UX-H-15): a call whose latest decision was
@@ -3062,6 +3063,12 @@ export class PanelModel {
   }
   private lastDraw = 0
   private liveTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** drawPending: a draw is scheduled (the next frame, or a live draw
+   * waiting out LIVE_DRAW_MS). */
+  drawPending(): boolean {
+    return this.raf !== 0 || this.liveTimer !== null
+  }
   /** emit draws the state once per frame. The live lanes' views are
    * taken here, not per frame of the stream: a burst of deltas folds
    * at the stream's pace and is dressed (transcript, subagent links)

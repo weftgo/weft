@@ -163,12 +163,23 @@ export function earliestStart(timed: readonly TimedSpan[]): number {
   return t0
 }
 
-// ── Attributes ─────────────────────────────────────────────────────
-
-/** A span's attributes; {} for a span that arrived without any (a
- * hand-built or foreign one: the type promises them, the wire may not). */
-export function attrsOf(s: TimedSpan | undefined): Record<string, unknown> {
-  return (s as { attrs?: Record<string, unknown> } | undefined)?.attrs ?? {}
+/** Marks the critical path (the chain that set the run's length):
+ * from a row's end backwards, the child that ends last, then the one
+ * that ended last before that child started, and so on — serial steps
+ * all mark, of overlapping calls only the one that ended last; then
+ * the same inside each marked child. */
+function markCritical(root: Node) {
+  for (const st = [root]; st.length;) {
+    const n = st.pop()!
+    n.critical = true
+    const kids = [...n.kids].sort((a, b) => endOf(b) - endOf(a))
+    let bound = Infinity
+    for (const k of kids)
+      if (endOf(k) <= bound) {
+        st.push(k)
+        bound = k.start
+      }
+  }
 }
 
 /** An attempt's key from its model call's key. */
@@ -189,22 +200,18 @@ export interface TreeNode {
 /** A span's identity: span ids are unique within a trace only. */
 export const spanRef = (s: TimedSpan, id = s.span_id) => `${s.trace_id}/${id}`
 
+// ── Attributes ─────────────────────────────────────────────────────
+
+/** A span's attributes; {} for a span that arrived without any (a
+ * hand-built or foreign one: the type promises them, the wire may not). */
+export function attrsOf(s: TimedSpan | undefined): Record<string, unknown> {
+  return (s as { attrs?: Record<string, unknown> } | undefined)?.attrs ?? {}
+}
+
 /** The span's GenAI operation; the name's first word for spans that
  * carry none ("invoke_agent planner"). */
 export function opOf(s: TimedSpan): string {
   return str(attrsOf(s)["gen_ai.operation.name"]) ?? s.name.split(" ")[0]
-}
-
-/** The first finish reason: a list, or the list as a JSON string (the
- * ClickHouse fallback map), or one reason. */
-function finishOf(v: unknown): string | undefined {
-  if (typeof v === "string" && v.startsWith("["))
-    try {
-      v = JSON.parse(v)
-    } catch {
-      /* the string itself */
-    }
-  return Array.isArray(v) ? str(v[0]) : str(v)
 }
 
 /** The time axis's domain: [0, the latest end] in milliseconds. */
@@ -226,6 +233,26 @@ function stepGist(names: string[], text: string | undefined): string {
 }
 
 export const str = (v: unknown) => (typeof v === "string" ? v : undefined)
+
+/** The first finish reason: a list, or the list as a JSON string (the
+ * ClickHouse fallback map), or one reason. */
+function finishOf(v: unknown): string | undefined {
+  if (typeof v === "string" && v.startsWith("["))
+    try {
+      v = JSON.parse(v)
+    } catch {
+      /* the string itself */
+    }
+  return Array.isArray(v) ? str(v[0]) : str(v)
+}
+
+/** A boolean attribute; ClickHouse's fallback map stores "true". */
+export const bool = (v: unknown) => v === true || v === "true"
+
+/** A resumed (approved, before step 0's model call) or denied
+ * (zero-length, at the resume) call: the run's own, keyed "resume". */
+export const resumedCall = (a: Record<string, unknown>) =>
+  bool(a["weft.tool.approved"]) || bool(a["weft.tool.denied"])
 
 // ── Keys ───────────────────────────────────────────────────────────
 
@@ -258,23 +285,10 @@ export function rowKeys(run: string, qualify: boolean) {
   }
 }
 
-/** A boolean attribute; ClickHouse's fallback map stores "true". */
-export const bool = (v: unknown) => v === true || v === "true"
-
-/** A resumed (approved, before step 0's model call) or denied
- * (zero-length, at the resume) call: the run's own, keyed "resume". */
-export const resumedCall = (a: Record<string, unknown>) =>
-  bool(a["weft.tool.approved"]) || bool(a["weft.tool.denied"])
-
 export function int(v: unknown): number | undefined {
   if (typeof v === "number" && Number.isInteger(v)) return v
   if (typeof v === "string" && /^\d+$/.test(v)) return Number(v)
   return undefined
-}
-
-function spanStatus(s: TimedSpan): RowStatus {
-  if (s.status === "error") return "error"
-  return bool(attrsOf(s)["weft.tool.pending"]) ? "pending" : "ok"
 }
 
 // ── Gists ──────────────────────────────────────────────────────────
@@ -286,23 +300,15 @@ const quote = (s: string) => `“${clip(s, GIST)}”`
 /** A ToolError renders "CODE: message" — the code is the error. */
 const CODED = /^([A-Z][A-Z0-9_]+): /
 
-/** Marks the critical path (the chain that set the run's length):
- * from a row's end backwards, the child that ends last, then the one
- * that ended last before that child started, and so on — serial steps
- * all mark, of overlapping calls only the one that ended last; then
- * the same inside each marked child. */
-function markCritical(root: Node) {
-  for (const st = [root]; st.length;) {
-    const n = st.pop()!
-    n.critical = true
-    const kids = [...n.kids].sort((a, b) => endOf(b) - endOf(a))
-    let bound = Infinity
-    for (const k of kids)
-      if (endOf(k) <= bound) {
-        st.push(k)
-        bound = k.start
-      }
-  }
+/** A duration in ms in the tightest unit that reads: 15µs, 9.5ms,
+ * 120ms, 7.7s (lib/format.ts's spanMs from 100ms up). The unit is
+ * chosen on the rounded value: 999.6µs reads 1.0ms, 99.96ms 100ms. */
+export function took(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—"
+  const us = Math.round(ms * 1000)
+  if (us < 1000) return `${us}µs`
+  const r = Math.round(ms * 10) / 10
+  return r < 100 ? `${r.toFixed(1)}ms` : spanMs(ms)
 }
 
 // ── Rows ───────────────────────────────────────────────────────────
@@ -427,6 +433,14 @@ const toolRow = (
         : undefined),
   })
 
+function spanStatus(s: TimedSpan): RowStatus {
+  if (s.status === "error") return "error"
+  return bool(attrsOf(s)["weft.tool.pending"]) ? "pending" : "ok"
+}
+
+const endOf = (n: WaterfallRow) =>
+  n.took === null ? Infinity : n.start + n.took
+
 /**
  * spanTree orders spans as a tree: a span, then its whole subtree,
  * siblings by start, whatever order the API returned. A span whose
@@ -482,9 +496,6 @@ export function spanTree(timed: readonly TimedSpan[]): TreeNode[] {
   return out
 }
 
-const endOf = (n: WaterfallRow) =>
-  n.took === null ? Infinity : n.start + n.took
-
 /** The rows in tree order. A key met twice (a call id a step repeats,
  * spans ingest stored twice) yields to the span's own t: key, else a
  * counter: keys stay unique, as a selection needs. */
@@ -506,21 +517,6 @@ function flatten(root: Node, rootRun: string): WaterfallRow[] {
       stack.push([sorted[i], depth + 1, key])
   }
   return out
-}
-
-/** Assigns lanes greedily: a call takes the first lane free at its
- * start. Sets the step's lane count (its widest concurrency). */
-function assignLanes(step: Node) {
-  const tools = step.kids.filter((t) => t.kind === "tool")
-  if (!tools.length) return
-  const ends: number[] = []
-  for (const t of tools.sort((a, b) => a.start - b.start)) {
-    let i = ends.findIndex((e) => e <= t.start)
-    if (i < 0) i = ends.push(0) - 1
-    ends[i] = endOf(t)
-    t.lane = i + 1
-  }
-  step.lanes = ends.length
 }
 
 // ── The time scale ─────────────────────────────────────────────────
@@ -563,14 +559,36 @@ export type Descend = (
   ) => void
 }
 
-/** A span on the axis: offset from t0 and duration, or undefined when
- * its times do not read (unparseable, an end before the start). */
-function place(span: TimedSpan, t0: number): Placed | undefined {
-  const a = instantMs(span.start)
-  const b = instantMs(span.end)
-  return Number.isFinite(a) && Number.isFinite(b) && b >= a
-    ? { span, start: a - t0, took: b - a }
-    : undefined
+/** Assigns lanes greedily: a call takes the first lane free at its
+ * start. Sets the step's lane count (its widest concurrency). */
+function assignLanes(step: Node) {
+  const tools = step.kids.filter((t) => t.kind === "tool")
+  if (!tools.length) return
+  const ends: number[] = []
+  for (const t of tools.sort((a, b) => a.start - b.start)) {
+    let i = ends.findIndex((e) => e <= t.start)
+    if (i < 0) i = ends.push(0) - 1
+    ends[i] = endOf(t)
+    t.lane = i + 1
+  }
+  step.lanes = ends.length
+}
+
+/**
+ * waterfallRows builds the run tree on a scale: `time` when asked, or
+ * by default when any span can be placed; else `order`. Rows come out
+ * in tree order (a row, then its subtree, siblings by start), with
+ * depth and parent keys; a collapsed child contributes its one row.
+ */
+export function waterfallRows(
+  input: WaterfallInput,
+  scale?: Scale
+): WaterfallModel {
+  return (scale ??
+    ((input.spans ?? []).some((s) => place(s, 0)) ? "time" : "order")) ===
+    "time"
+    ? timeRows(input)
+    : orderRows(input)
 }
 
 function timeRows(input: WaterfallInput): WaterfallModel {
@@ -984,6 +1002,16 @@ function timeRows(input: WaterfallInput): WaterfallModel {
   return { scale: "time", rows: flatten(root, input.runId), domain, unplaced }
 }
 
+/** A span on the axis: offset from t0 and duration, or undefined when
+ * its times do not read (unparseable, an end before the start). */
+function place(span: TimedSpan, t0: number): Placed | undefined {
+  const a = instantMs(span.start)
+  const b = instantMs(span.end)
+  return Number.isFinite(a) && Number.isFinite(b) && b >= a
+    ? { span, start: a - t0, took: b - a }
+    : undefined
+}
+
 // ── The order scale ────────────────────────────────────────────────
 
 function orderRows(input: WaterfallInput): WaterfallModel {
@@ -1129,34 +1157,6 @@ function orderRows(input: WaterfallInput): WaterfallModel {
   let hi = total
   for (const r of rows) hi = Math.max(hi, r.start + (r.took ?? 0))
   return { scale: "order", rows, domain: [0, Math.max(1, hi)], unplaced: 0 }
-}
-
-/**
- * waterfallRows builds the run tree on a scale: `time` when asked, or
- * by default when any span can be placed; else `order`. Rows come out
- * in tree order (a row, then its subtree, siblings by start), with
- * depth and parent keys; a collapsed child contributes its one row.
- */
-export function waterfallRows(
-  input: WaterfallInput,
-  scale?: Scale
-): WaterfallModel {
-  return (scale ??
-    ((input.spans ?? []).some((s) => place(s, 0)) ? "time" : "order")) ===
-    "time"
-    ? timeRows(input)
-    : orderRows(input)
-}
-
-/** A duration in ms in the tightest unit that reads: 15µs, 9.5ms,
- * 120ms, 7.7s (lib/format.ts's spanMs from 100ms up). The unit is
- * chosen on the rounded value: 999.6µs reads 1.0ms, 99.96ms 100ms. */
-export function took(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "—"
-  const us = Math.round(ms * 1000)
-  if (us < 1000) return `${us}µs`
-  const r = Math.round(ms * 10) / 10
-  return r < 100 ? `${r.toFixed(1)}ms` : spanMs(ms)
 }
 
 // ── Words ──────────────────────────────────────────────────────────

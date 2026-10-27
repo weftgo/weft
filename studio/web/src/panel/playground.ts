@@ -191,6 +191,51 @@ export interface TurnWords {
   calls: string[]
 }
 
+/** callLine is the tool-call diff's line: name(args). */
+export function callLine(name: string, args: unknown): string {
+  let a = ""
+  if (args !== undefined) {
+    try {
+      a = stringify(args) ?? ""
+    } catch {
+      a = "?"
+    }
+  }
+  return `${name}(${a})`
+}
+
+/** experimentLabel names a replay of a turn (UX-D-14): `Replay 1 of
+ * t3` — the source turn's t-number from its run id (`<session>-t3`),
+ * the replay's 1-based index among the runs that forked from it. */
+export function experimentLabel(
+  sourceRunID: string,
+  forkedCount: number
+): string {
+  const m = /-t(\d+)$/.exec(sourceRunID)
+  return REPLAY_WORDS.head(
+    forkedCount + 1,
+    m ? `t${m[1]}` : sourceRunID.slice(-8)
+  )
+}
+
+// ── A turn's words ────────────────────────────────────────────────
+// A run's first messages record is its INPUT (ADR 0024 D1) —
+// everything it was fed: for turn 2+ of a session the whole
+// conversation so far, for a continued or resumed experiment the kept
+// prefix. lib/events' splitTranscript draws that line (one rule, two
+// clients — V6); the panel reads the turn's prompt and its words
+// through it.
+
+function textOf(m: Message): string {
+  return m.content
+    .filter(
+      (p: Part | null): p is Extract<Part, { type: "text" }> =>
+        p?.type === "text"
+    )
+    .map((p) => p.text)
+    .join("")
+}
+
 /** turnWordsOf is the whole turn as the model spoke it: the assistant
  * messages after the input's last user message (the steps a continued
  * run kept, the legs a substitute chain already ran) and every one the
@@ -215,37 +260,6 @@ export function turnWordsOf(t: Transcript | null): TurnWords | null {
   return { text: said.map(textOf).filter(Boolean).join("\n"), calls }
 }
 
-/** callLine is the tool-call diff's line: name(args). */
-export function callLine(name: string, args: unknown): string {
-  let a = ""
-  if (args !== undefined) {
-    try {
-      a = stringify(args) ?? ""
-    } catch {
-      a = "?"
-    }
-  }
-  return `${name}(${a})`
-}
-
-// ── A turn's words ────────────────────────────────────────────────
-// A run's first messages record is its INPUT (ADR 0024 D1) —
-// everything it was fed: for turn 2+ of a session the whole
-// conversation so far, for a continued or resumed experiment the kept
-// prefix. lib/events' splitTranscript draws that line (one rule, two
-// clients — V6); the panel reads the turn's prompt and its words
-// through it.
-
-function textOf(m: Message): string {
-  return m.content
-    .filter(
-      (p: Part | null): p is Extract<Part, { type: "text" }> =>
-        p?.type === "text"
-    )
-    .map((p) => p.text)
-    .join("")
-}
-
 /** foldedWords reads the same words off a fold (no transcript). */
 export function foldedWords(f: FoldedRun): TurnWords {
   return {
@@ -257,20 +271,6 @@ export function foldedWords(f: FoldedRun): TurnWords {
       .flatMap((s) => s.toolCalls)
       .map((c) => callLine(c.name, c.args)),
   }
-}
-
-/** experimentLabel names a replay of a turn (UX-D-14): `Replay 1 of
- * t3` — the source turn's t-number from its run id (`<session>-t3`),
- * the replay's 1-based index among the runs that forked from it. */
-export function experimentLabel(
-  sourceRunID: string,
-  forkedCount: number
-): string {
-  const m = /-t(\d+)$/.exec(sourceRunID)
-  return REPLAY_WORDS.head(
-    forkedCount + 1,
-    m ? `t${m[1]}` : sourceRunID.slice(-8)
-  )
 }
 
 /** labOf is the drawer's option lab through Studio's labOverrides: the

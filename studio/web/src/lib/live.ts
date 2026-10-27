@@ -61,6 +61,28 @@ function liveKinds(kinds?: string[]): string {
 }
 
 /**
+ * grantDeadline turns the server's exp into a deadline on this page's
+ * clock: the lifetime the server meant (exp minus the answer's own Date
+ * header, less a second for the header's resolution), clamped to
+ * [0, LIVE_GRANT_TTL_MS], from now. A client clock that runs ahead or
+ * behind therefore neither spends every grant at once nor trusts a
+ * spent one. Without a readable Date header (or exp) the full TTL.
+ */
+export function grantDeadline(
+  exp: unknown,
+  date: string | null,
+  now = Date.now()
+): number {
+  const serverExp = typeof exp === "string" ? Date.parse(exp) : NaN
+  const serverNow = date ? Date.parse(date) : NaN
+  if (!Number.isFinite(serverExp) || !Number.isFinite(serverNow))
+    return now + LIVE_GRANT_TTL_MS
+  return (
+    now + Math.min(LIVE_GRANT_TTL_MS, Math.max(0, serverExp - serverNow - 1000))
+  )
+}
+
+/**
  * requestLiveGrant asks grantURL (POST {base}api/live-grant) for a sig
  * that opens this one stream: the selector and kinds in the JSON body,
  * the bearer in the Authorization header (none in setup A). The token
@@ -89,28 +111,6 @@ export async function requestLiveGrant(
   if (typeof doc?.sig !== "string" || !doc.sig)
     throw new LiveGrantError(res.status)
   return { sig: doc.sig, exp: grantDeadline(doc.exp, res.headers.get("Date")) }
-}
-
-/**
- * grantDeadline turns the server's exp into a deadline on this page's
- * clock: the lifetime the server meant (exp minus the answer's own Date
- * header, less a second for the header's resolution), clamped to
- * [0, LIVE_GRANT_TTL_MS], from now. A client clock that runs ahead or
- * behind therefore neither spends every grant at once nor trusts a
- * spent one. Without a readable Date header (or exp) the full TTL.
- */
-export function grantDeadline(
-  exp: unknown,
-  date: string | null,
-  now = Date.now()
-): number {
-  const serverExp = typeof exp === "string" ? Date.parse(exp) : NaN
-  const serverNow = date ? Date.parse(date) : NaN
-  if (!Number.isFinite(serverExp) || !Number.isFinite(serverNow))
-    return now + LIVE_GRANT_TTL_MS
-  return (
-    now + Math.min(LIVE_GRANT_TTL_MS, Math.max(0, serverExp - serverNow - 1000))
-  )
 }
 
 /** liveStreamURL is the stream a grant opens: GET {base}api/live with

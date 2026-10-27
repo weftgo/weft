@@ -657,3 +657,35 @@ func TestDevPendingSignalStartsNoApp(t *testing.T) {
 		t.Errorf("the app was started (or tried) after a pending signal:\n%s", out)
 	}
 }
+
+// TestTokenLine (UX-D-25, U30.1-fix): the line names <db>.token only
+// when it holds the token in use — a reused holder whose token differs
+// from the file is said as the running Studio's; a token in the link,
+// or none, prints nothing.
+func TestTokenLine(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.Join(dir, "weft.db")
+	if err := os.WriteFile(tokenPath(db), []byte("file-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name  string
+		st    devStudioRun
+		fixed bool
+		want  string
+	}{
+		{"the file's", devStudioRun{token: "file-token", dbPath: db, link: "http://x/"}, false,
+			"studio: token: " + db + ".token (weft open --with-token)"},
+		{"a reused holder's, not the file's", devStudioRun{token: "holder-token", dbPath: db, link: "http://x/"}, false,
+			"studio: token: the running Studio's, not " + db + ".token (weft open --with-token)"},
+		{"fixed", devStudioRun{token: "k", dbPath: db, link: "http://x/"}, true,
+			"studio: token: the one --token / WEFT_STUDIO_TOKEN set"},
+		{"in the link", devStudioRun{token: "g", link: "http://x/#token=g"}, false, ""},
+		{"none", devStudioRun{link: "http://x/"}, false, ""},
+		{"no database file", devStudioRun{token: "g", link: "http://x/"}, false, ""},
+	} {
+		if got := tokenLine(&c.st, c.fixed); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}

@@ -42,15 +42,11 @@ export interface PanelEndpoint {
   token: string
 }
 
-/** GET /api/panel-handoff?to= (plan G3, capability "handoff"): a
- * playground panel token's Studio page, as {location} — the minted
- * read token rides its fragment. Accept: application/json, as every
- * read here: a fetch cannot read a redirect's Location. */
-export function fetchHandoff(
+export function fetchRuntimes(
   ep: PanelEndpoint,
-  to: string
-): Promise<{ location: string }> {
-  return panelGet(ep, `panel-handoff?to=${encodeURIComponent(to)}`)
+  signal?: AbortSignal
+): Promise<{ runtimes: RuntimeView[] }> {
+  return panelGet<{ runtimes: RuntimeView[] }>(ep, "runtimes", signal)
 }
 
 export class PanelApiError extends Error {
@@ -64,13 +60,6 @@ export class PanelApiError extends Error {
   ) {
     super(message)
   }
-}
-
-export function fetchRuntimes(
-  ep: PanelEndpoint,
-  signal?: AbortSignal
-): Promise<{ runtimes: RuntimeView[] }> {
-  return panelGet<{ runtimes: RuntimeView[] }>(ep, "runtimes", signal)
 }
 
 /** apiUrl is path under {endpoint}api/ — every request the panel makes stays
@@ -144,12 +133,6 @@ export function putProposal(
   })
 }
 
-/** The request record pages the panel reads for one run: the turn is
- * bounded by MaxSteps, and so is this walk — past it the view says
- * truncated, never a gap. */
-export const MAX_REQUEST_PAGES = 10
-export const REQUEST_PAGE = 1000
-
 export function fetchCommand(
   ep: PanelEndpoint,
   id: string
@@ -158,6 +141,23 @@ export function fetchCommand(
     ep,
     `playground/commands/${encodeURIComponent(id)}`
   )
+}
+
+/** The request record pages the panel reads for one run: the turn is
+ * bounded by MaxSteps, and so is this walk — past it the view says
+ * truncated, never a gap. */
+export const MAX_REQUEST_PAGES = 10
+export const REQUEST_PAGE = 1000
+
+/** GET /api/panel-handoff?to= (plan G3, capability "handoff"): a
+ * playground panel token's Studio page, as {location} — the minted
+ * read token rides its fragment. Accept: application/json, as every
+ * read here: a fetch cannot read a redirect's Location. */
+export function fetchHandoff(
+  ep: PanelEndpoint,
+  to: string
+): Promise<{ location: string }> {
+  return panelGet(ep, `panel-handoff?to=${encodeURIComponent(to)}`)
 }
 
 /** fetchRequests reads a run's request record (GET runs/{id}/requests,
@@ -265,19 +265,13 @@ export function fetchSession(
   return panelGet<SessionDoc>(ep, `sessions/${encodeURIComponent(id)}`, signal)
 }
 
-/** POST /api/runs/{id}/approvals — the parked experiment's continue /
- * skip / resolve (WEFT-DEVTOOLS §8.2), on the runtime-started run. */
-export function postApproval(
+// ── Reads the panel uses (S4.2 shapes) ────────────────────────────
+
+export function fetchMeta(
   ep: PanelEndpoint,
-  runID: string,
-  body: {
-    call_id: string
-    decision: "approve" | "deny" | "resolve"
-    reason?: string
-    content?: string
-  }
-): Promise<{ command_id: string; state: string }> {
-  return panelPost(ep, `runs/${encodeURIComponent(runID)}/approvals`, body)
+  signal?: AbortSignal
+): Promise<Meta> {
+  return panelGet<Meta>(ep, "meta", signal)
 }
 
 export function fetchPublic(
@@ -337,15 +331,6 @@ export interface RuntimeView {
   breakpoints?: string[]
 }
 
-// ── Reads the panel uses (S4.2 shapes) ────────────────────────────
-
-export function fetchMeta(
-  ep: PanelEndpoint,
-  signal?: AbortSignal
-): Promise<Meta> {
-  return panelGet<Meta>(ep, "meta", signal)
-}
-
 /** POST /api/playground/runs → 202 { command_id, state }. */
 export function postPlaygroundRun(
   ep: PanelEndpoint,
@@ -361,6 +346,17 @@ export function postPreview(
   body: Record<string, unknown>
 ): Promise<PreviewDoc> {
   return panelPost(ep, PREVIEW_PATH, body)
+}
+
+/** POST /api/runs/{id}/steer — the rung-4 verb (§8.4): one user
+ * message delivered into a runtime-started run mid-flight; on an app
+ * turn (plan F4.3) a 202 with the command to poll. */
+export function postSteer(
+  ep: PanelEndpoint,
+  runID: string,
+  message: string
+): Promise<{ steered?: boolean; command_id?: string }> {
+  return panelPost(ep, `runs/${encodeURIComponent(runID)}/steer`, { message })
 }
 
 /** GET /api/playground/commands/{id} — §10.5's lifecycle row. */
@@ -380,15 +376,19 @@ export interface CommandStatus {
   updated: string
 }
 
-/** POST /api/runs/{id}/steer — the rung-4 verb (§8.4): one user
- * message delivered into a runtime-started run mid-flight; on an app
- * turn (plan F4.3) a 202 with the command to poll. */
-export function postSteer(
+/** POST /api/runs/{id}/approvals — the parked experiment's continue /
+ * skip / resolve (WEFT-DEVTOOLS §8.2), on the runtime-started run. */
+export function postApproval(
   ep: PanelEndpoint,
   runID: string,
-  message: string
-): Promise<{ steered?: boolean; command_id?: string }> {
-  return panelPost(ep, `runs/${encodeURIComponent(runID)}/steer`, { message })
+  body: {
+    call_id: string
+    decision: "approve" | "deny" | "resolve"
+    reason?: string
+    content?: string
+  }
+): Promise<{ command_id: string; state: string }> {
+  return panelPost(ep, `runs/${encodeURIComponent(runID)}/approvals`, body)
 }
 
 export function fetchEvents(

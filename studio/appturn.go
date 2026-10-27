@@ -71,7 +71,7 @@ func (s *Server) appTurnRuntime(w http.ResponseWriter, r *http.Request, rs *link
 		// a session turn without a public id needs one (UX-D-17).
 		fix := "run the agent through weft/thread with thread.PublicID(...): runtime.Sessions resolves a session by its public id"
 		if row.SessionID == "" {
-			fix = "resume it in your app; to decide here, run it as a session turn (weft/thread)"
+			fix = "resume it in your app; to decide here, run it as a session turn with thread.PublicID(...) (weft/thread)"
 		}
 		refuseAppOwned(w, r,
 			appOwned+" · read-only: run "+row.ID+" is not a turn of a session with a public id", fix)

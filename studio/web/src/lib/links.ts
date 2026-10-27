@@ -612,28 +612,6 @@ export function traceLink(
   return link
 }
 
-/** runsLink is the runs list under these filters (empty values are
- * dropped: a link never carries a cleared chip). */
-export function runsLink(search: RunsSearch = {}): RunsLink {
-  const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(search))
-    if (v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0))
-      out[k] = v
-  return { to: "/runs", search: out }
-}
-
-/** traceSelectionLink is a trace's page with a row selected by its
- * key (TraceSearch.sel) — the trace page's own links (plan H7). */
-export function traceSelectionLink(
-  id: string,
-  opts: { sel?: string; view?: "tree" | "chat" } = {}
-): TraceLink {
-  const link = traceLink(id, { view: opts.view })
-  return opts.sel
-    ? { ...link, search: { sel: opts.sel, ...link.search } }
-    : link
-}
-
 /** runPage is runLink without the raw view's state and the replay
  * drawer's (the devtools panel writes neither, so its bundle carries
  * neither): the same keys, in the same order, for every option it
@@ -659,6 +637,28 @@ export function runPage(
   const t = ordinal(opts.t)
   if (t !== undefined) search.t = t
   return { to: "/runs/$id", params: { id }, search }
+}
+
+/** traceSelectionLink is a trace's page with a row selected by its
+ * key (TraceSearch.sel) — the trace page's own links (plan H7). */
+export function traceSelectionLink(
+  id: string,
+  opts: { sel?: string; view?: "tree" | "chat" } = {}
+): TraceLink {
+  const link = traceLink(id, { view: opts.view })
+  return opts.sel
+    ? { ...link, search: { sel: opts.sel, ...link.search } }
+    : link
+}
+
+/** runsLink is the runs list under these filters (empty values are
+ * dropped: a link never carries a cleared chip). */
+export function runsLink(search: RunsSearch = {}): RunsLink {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(search))
+    if (v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0))
+      out[k] = v
+  return { to: "/runs", search: out }
 }
 
 /** tracesLink is the trace list under these filters. */
@@ -692,17 +692,22 @@ export function sessionLink(id: string): SessionLink {
   return { to: "/sessions/$id", params: { id }, search: {} }
 }
 
-/** tracePage is a trace's page alone: traceLink with no option (the
- * devtools panel's, whose bundle so carries no other). */
-export function tracePage(id: string): TraceLink {
-  return { to: "/traces/$id", params: { id }, search: {} }
-}
-
 /** settingsLink is the Settings page (plan H4); with a provider/model,
  * its pricing table with a row prefilled for it (U7's "price this
  * model…"). */
 export function settingsLink(price?: string): SettingsLink {
   return { to: "/settings", search: price ? { price } : {} }
+}
+
+/** conceptLink is the Settings page's Concepts section (U21.2): with a
+ * glossary key (lib/glossary.ts TERMS), that term's entry — where a
+ * <Term> tooltip's "more ›" goes. */
+export function conceptLink(term?: string): SettingsLink {
+  return {
+    to: "/settings",
+    search: {},
+    hash: term ? `concept-${term}` : "concepts",
+  }
 }
 
 /** matrixLink is the playground's multi-source matrix over these runs
@@ -793,15 +798,11 @@ export function pickOf(v: unknown): string[] {
     .slice(-2)
 }
 
-/** conceptLink is the Settings page's Concepts section (U21.2): with a
- * glossary key (lib/glossary.ts TERMS), that term's entry — where a
- * <Term> tooltip's "more ›" goes. */
-export function conceptLink(term?: string): SettingsLink {
-  return {
-    to: "/settings",
-    search: {},
-    hash: term ? `concept-${term}` : "concepts",
-  }
+/** connectLink is the Settings page's connect card (U21.2's connect
+ * lines: an app, a page, a coding agent to this Studio) — where the
+ * panel's empty list sends a first run (U21.3, UX-F-11). */
+export function connectLink(): SettingsLink {
+  return { to: "/settings", search: {}, hash: "settings-connect" }
 }
 
 /** HANDOFF is the panel's words for its hand-offs to the Studio-only
@@ -813,11 +814,10 @@ export const HANDOFF = {
   replays: (n: number) => `${plural(n, "replay")} in Studio ⤢`,
 }
 
-/** connectLink is the Settings page's connect card (U21.2's connect
- * lines: an app, a page, a coding agent to this Studio) — where the
- * panel's empty list sends a first run (U21.3, UX-F-11). */
-export function connectLink(): SettingsLink {
-  return { to: "/settings", search: {}, hash: "settings-connect" }
+/** tracePage is a trace's page alone: traceLink with no option (the
+ * devtools panel's, whose bundle so carries no other). */
+export function tracePage(id: string): TraceLink {
+  return { to: "/traces/$id", params: { id }, search: {} }
 }
 
 /** experimentsLink is the saved experiments' list. */
@@ -930,6 +930,16 @@ export function canonical(url: string | URL): string {
   return u.toString()
 }
 
+// ── Save as test (plan F6) ──────────────────────────────────────────
+
+/** saveTestLink is the run page that, on landing, downloads the run's
+ * wefttest zip with Studio's own bearer (never a token in the URL) and
+ * drops ?save= — the devtools panel's "save as test" hands off here. */
+export function saveTestLink(id: string): RunLink {
+  const l = runPage(id)
+  return { ...l, search: { ...l.search, save: "test" } }
+}
+
 /** path renders a link's route path with its params encoded, relative
  * (no leading "/") so it resolves under the Studio mount. */
 export function path(link: StudioLink): string {
@@ -941,16 +951,6 @@ export function path(link: StudioLink): string {
   const qs = q.toString()
   const hash = "hash" in link && link.hash ? `#${link.hash}` : ""
   return `${p}${qs ? `?${qs}` : ""}${hash}`
-}
-
-// ── Save as test (plan F6) ──────────────────────────────────────────
-
-/** saveTestLink is the run page that, on landing, downloads the run's
- * wefttest zip with Studio's own bearer (never a token in the URL) and
- * drops ?save= — the devtools panel's "save as test" hands off here. */
-export function saveTestLink(id: string): RunLink {
-  const l = runPage(id)
-  return { ...l, search: { ...l.search, save: "test" } }
 }
 
 // ── Open in app (plan G3) ───────────────────────────────────────────

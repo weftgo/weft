@@ -540,25 +540,6 @@ function picker(
   return box
 }
 
-/** A toggle the user opened, kept in the element's open keys. */
-function toggle(
-  d: RequestTabDeps,
-  key: string,
-  label: (open: boolean) => string
-): [HTMLElement, boolean] {
-  const open = d.keys.has(key)
-  const b = el("button", "weft-btn weft-rq-more", label(open), {
-    type: "button",
-    "aria-expanded": String(open),
-  })
-  on(b, "click", () => {
-    if (d.keys.has(key)) d.keys.delete(key)
-    else d.keys.add(key)
-    d.redraw()
-  })
-  return [b, open]
-}
-
 /** renderRequestTab is the Request tab's panel content. */
 export function renderRequestTab(d: RequestTabDeps): HTMLElement {
   const t = d.t
@@ -759,6 +740,11 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
   return box
 }
 
+function cut(r: RequestRow | undefined): boolean {
+  const p = r?.prompt
+  return !!p && !isHoleRef(p) && p.truncated_bytes > 0
+}
+
 /** A tool's policy chips (the Studio pane's ToolChips). */
 function toolChips(t: ToolEntry): HTMLElement {
   const box = el("div", "weft-holes")
@@ -774,7 +760,21 @@ function toolChips(t: ToolEntry): HTMLElement {
   return box
 }
 
-function cut(r: RequestRow | undefined): boolean {
-  const p = r?.prompt
-  return !!p && !isHoleRef(p) && p.truncated_bytes > 0
+/** A toggle the user opened, kept in the element's open keys. */
+function toggle(
+  d: RequestTabDeps,
+  key: string,
+  label: (open: boolean) => string
+): [HTMLElement, boolean] {
+  const open = d.keys.has(key)
+  const b = el("button", "weft-btn weft-rq-more", label(open), {
+    type: "button",
+    "aria-expanded": String(open),
+  })
+  on(b, "click", () => {
+    if (d.keys.has(key)) d.keys.delete(key)
+    else d.keys.add(key)
+    d.redraw()
+  })
+  return [b, open]
 }

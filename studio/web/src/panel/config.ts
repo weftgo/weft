@@ -7,9 +7,10 @@
 //   3. <meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto|global|mode|push|z-index|theme">;
 //   4. the panel's <script> tag's data-* attributes: the running
 //      classic script (document.currentScript), else the script whose
-//      src resolves to the module's own URL (import.meta.url), else the
-//      first script carrying data-weft (any src — a renamed or proxied
-//      bundle) — never a tag for its generic data-* words;
+//      src resolves to the module's own URL (import.meta.url) when it
+//      carries data-weft, else the first script carrying data-weft (any
+//      src — a renamed or proxied bundle, a config-only tag), else the
+//      module's own bare tag — never a tag for its generic data-* words;
 //   5. <script directory>/panel-config.json (B3), asked only when no
 //      rung above named an endpoint, for the endpoint alone (never a
 //      token, never another origin) — resolveEndpoint in element.ts's
@@ -211,6 +212,19 @@ const entry = {
   })(),
 }
 
+/** scriptDir is the script's own origin + directory (rung 6) — what
+ * /studio/panel.js, or /assets/devtools.abc123.js, serves from. "" for
+ * a script without a src. */
+function scriptDir(script: HTMLScriptElement | null): string {
+  const src = script?.getAttribute("src")
+  if (!src) return ""
+  try {
+    return normalize("./", new URL(src, document.baseURI).toString())
+  } catch {
+    return ""
+  }
+}
+
 /** detectSetting reads a data-detect value: "off" wherever it is
  * named (the author asked for less), else the rungs it names (headers,
  * markers, comma-separated, either order, empty words skipped); a
@@ -228,29 +242,6 @@ export function detectSetting(v: string | null | undefined): DetectSetting {
   const m = words.delete("markers")
   if (words.size) return ""
   return h && m ? "headers,markers" : h ? "headers" : m ? "markers" : ""
-}
-
-/** viaPackage reports whether the bundle runs as the npm entry's import. */
-export function viaPackage(): boolean {
-  return entry.npm
-}
-
-/** setViaPackage sets it (the element class's npmEntry setter). */
-export function setViaPackage(v: boolean): void {
-  entry.npm = v
-}
-
-/** scriptDir is the script's own origin + directory (rung 6) — what
- * /studio/panel.js, or /assets/devtools.abc123.js, serves from. "" for
- * a script without a src. */
-function scriptDir(script: HTMLScriptElement | null): string {
-  const src = script?.getAttribute("src")
-  if (!src) return ""
-  try {
-    return normalize("./", new URL(src, document.baseURI).toString())
-  } catch {
-    return ""
-  }
 }
 
 /** scopeOption is mount's scope option in its string form (a Scope
@@ -286,15 +277,18 @@ export function weftScope(): Scope {
   return { publicId: weftPublicId() }
 }
 
-/** A rung: the raw value it sets for a field, or null when it sets none. */
-type Rung = (f: Field) => string | null
+/** viaPackage reports whether the bundle runs as the npm entry's import. */
+export function viaPackage(): boolean {
+  return entry.npm
+}
 
 /** The panel's own <script> tag (rung 4): document.currentScript when
  * the bundle ran as a classic script; else the script whose src
- * resolves to the module's own URL (import.meta.url) — its own tag
- * before another's data-weft, so two tags on a page each read their
- * own (UX-D-28); else the first script carrying data-weft, in document
- * order (any src: a renamed bundle, a proxy). Never the file name, and
+ * resolves to the module's own URL (import.meta.url) when it carries
+ * data-weft — two marked tags on a page each read their own (UX-D-28);
+ * else the first script carrying data-weft, in document order (any
+ * src: a renamed bundle, a proxy, a config-only tag beside a bare
+ * include); else the module's own bare tag. Never the file name, and
  * never a tag because it
  * carries a generic data-* attribute: a third-party widget's
  * data-endpoint or data-token is not the panel's configuration.
@@ -306,6 +300,7 @@ export function findPanelScript(): HTMLScriptElement | null {
   const npm = entry.npm
   if (!npm && bootScript?.isConnected) return bootScript
   try {
+    let own: HTMLScriptElement | null = null
     if (!npm && selfURL)
       for (const s of Array.from(
         document.querySelectorAll<HTMLScriptElement>("script[src]")
@@ -315,16 +310,24 @@ export function findPanelScript(): HTMLScriptElement | null {
             new URL(s.getAttribute("src") ?? "", document.baseURI).href ===
             selfURL
           )
-            return s
+            own ||= s
         } catch {
           // an unparsable src is not the panel's
         }
       }
-    return document.querySelector<HTMLScriptElement>("script[data-weft]")
+    // Its own tag marked data-weft first; then the first data-weft tag
+    // (a config-only <script data-weft data-endpoint> beside a bare
+    // include); then its own bare tag.
+    return own?.hasAttribute("data-weft")
+      ? own
+      : (document.querySelector<HTMLScriptElement>("script[data-weft]") ?? own)
   } catch {
     return null
   }
 }
+
+/** A rung: the raw value it sets for a field, or null when it sets none. */
+type Rung = (f: Field) => string | null
 
 function metaRung(): Rung {
   return (f) => {
@@ -338,6 +341,11 @@ function metaRung(): Rung {
       return null
     }
   }
+}
+
+/** setViaPackage sets it (the element class's npmEntry setter). */
+export function setViaPackage(v: boolean): void {
+  entry.npm = v
 }
 
 const attrRung =

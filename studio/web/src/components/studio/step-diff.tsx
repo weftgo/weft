@@ -23,10 +23,13 @@ import {
   DIFF_COLUMNS,
   ROW_WORDS,
   SOURCE_ROW,
+  UNTRACED,
   cellHole,
   cellText,
   markerWords,
+  noSpans,
   nWayView,
+  untracedSides,
 } from "@/lib/stepdiff"
 import type {
   CellState,
@@ -79,8 +82,17 @@ function RowWord({ state, note = "" }: { state: RowState; note?: string }) {
  * hole of the table (compacted, max_tokens, interrupted — one its
  * holes do not already carry) is that hole's badge, as the panel's
  * badge() draws it; the others are chips. */
-function SideMarks({ side }: { side: SideView }) {
-  if (!side.marks.length && !side.holes.length) return null
+function SideMarks({
+  side,
+  untraced = false,
+}: {
+  side: SideView
+  /** The run ran without a tracer, said once above the table
+   * (UX-D-40): its no_spans badge is not repeated per step. */
+  untraced?: boolean
+}) {
+  const holes = untraced ? side.holes.filter((h) => !noSpans(h)) : side.holes
+  if (!side.marks.length && !holes.length) return null
   return (
     <span className="flex flex-wrap items-center gap-1">
       {side.marks.map((m) =>
@@ -99,7 +111,7 @@ function SideMarks({ side }: { side: SideView }) {
           </Badge>
         )
       )}
-      <HoleBadges holes={side.holes} />
+      <HoleBadges holes={holes} />
     </span>
   )
 }
@@ -343,6 +355,11 @@ export function StepDiffTable({
         }),
       }))
   )
+  // A compared run its runtime ran without a tracer (UX-D-40): said
+  // once here, as the panel's head does, not on each of its steps.
+  const untraced = view.others.map((_, i) =>
+    untracedSides(view.rows.map((r) => r.others[i].side))
+  )
   return (
     <div className="space-y-2" data-step-diff>
       {view.holes.length ? (
@@ -352,6 +369,14 @@ export function StepDiffTable({
           ))}
         </div>
       ) : null}
+      {view.others.map((o, i) =>
+        untraced[i] ? (
+          <div key={o.run_id} className="text-xs" data-diff-untraced={o.run_id}>
+            {view.others.length > 1 ? `${o.run_id}: ` : ""}
+            <HoleBadge hole="not_recorded" cause="no_spans" label={UNTRACED} />
+          </div>
+        ) : null
+      )}
       <ul className="space-y-0.5 text-xs" aria-label="changed steps">
         {view.others.map((o, i) =>
           view.markers[i].length === 0 ? (
@@ -505,7 +530,10 @@ export function StepDiffTable({
                       data-diff-marks
                     >
                       <RowWord state={o.state} note={o.note} />
-                      <SideMarks side={o.side} />
+                      <SideMarks
+                        side={o.side}
+                        untraced={untraced[row.others.indexOf(o)]}
+                      />
                     </td>
                     {DIFF_COLUMNS.map((c) => (
                       <Cell

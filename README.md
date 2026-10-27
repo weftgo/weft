@@ -543,8 +543,9 @@ app needs runtime.Install; WEFT_ENV=dev is set), or the app links its
 own embedded Studio` and a later line when one does. With no browser
 opened (`--open=false`, the default off a terminal) and a bare link,
 one line first says where the token is: `studio: token:
-<db>.token (weft open --with-token)`, or the fixed token's flag and
-variable. A Studio bound to every interface (`--addr 0.0.0.0:7331`) is
+<db>.token (weft open --with-token)` when the file holds the token in
+use, "the running Studio's, not <db>.token" for a reused Studio whose
+token differs, or the fixed token's flag and variable. A Studio bound to every interface (`--addr 0.0.0.0:7331`) is
 handed to the app, and printed, as `127.0.0.1`.
 
 Reuse follows the port policy, whose probe carries the fixed token

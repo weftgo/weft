@@ -20,46 +20,6 @@ import type { PreviewDoc } from "../lib/preview"
 import { badge } from "./badges"
 import { el, on } from "./render"
 
-/** editList is the drawer's list of the command's edits by kind, each
- * droppable (Studio's EditList). */
-export function editList(
-  edits: ReplayEdit[],
-  drop: (e: ReplayEdit) => void
-): HTMLElement | null {
-  if (!edits.length) return null
-  const list = el("ul", "weft-verdicts", "", {
-    "aria-label": "transcript edits",
-    "data-key": "edits",
-  })
-  for (const e of edits) {
-    const b = el("button", "weft-btn", "drop", {
-      type: "button",
-      "aria-label": `drop ${editLine(e)}`,
-    })
-    on(b, "click", () => drop(e))
-    list.append(
-      el("li", "", [el("span", "weft-reason", editLine(e)), b], {
-        "data-weft-edit-kind": kindOf(e),
-        "data-key": editKey(e),
-      })
-    )
-  }
-  return list
-}
-
-/** The preview as the panel holds it: the answer, or the refusal
- * (refused: the command's 400, which holds Run). */
-export interface PanelPreview {
-  doc?: PreviewDoc
-  error?: string
-  refused?: boolean
-  /** The draft changed and its answer is not in yet: Run waits. */
-  pending?: boolean
-}
-
-const line = (cls: string, text: string, attrs: Record<string, string>) =>
-  el("div", cls, text, attrs)
-
 /** marksBlock is a replayed run's weft.edits read back (Studio's
  * EditsMark): none on a child run, which inherits its parent's. */
 export function marksBlock(
@@ -106,6 +66,46 @@ export function marksBlock(
       el("div", "weft-reason", `+${more} more (the mark is capped at 1024 B)`)
     )
   return box
+}
+
+/** The preview as the panel holds it: the answer, or the refusal
+ * (refused: the command's 400, which holds Run). */
+export interface PanelPreview {
+  doc?: PreviewDoc
+  error?: string
+  refused?: boolean
+  /** The draft changed and its answer is not in yet: Run waits. */
+  pending?: boolean
+}
+
+const line = (cls: string, text: string, attrs: Record<string, string>) =>
+  el("div", cls, text, attrs)
+
+/** editList is the drawer's list of the command's edits by kind, each
+ * droppable (Studio's EditList). */
+export function editList(
+  edits: ReplayEdit[],
+  drop: (e: ReplayEdit) => void
+): HTMLElement | null {
+  if (!edits.length) return null
+  const list = el("ul", "weft-verdicts", "", {
+    "aria-label": "transcript edits",
+    "data-key": "edits",
+  })
+  for (const e of edits) {
+    const b = el("button", "weft-btn", "drop", {
+      type: "button",
+      "aria-label": `drop ${editLine(e)}`,
+    })
+    on(b, "click", () => drop(e))
+    list.append(
+      el("li", "", [el("span", "weft-reason", editLine(e)), b], {
+        "data-weft-edit-kind": kindOf(e),
+        "data-key": editKey(e),
+      })
+    )
+  }
+  return list
 }
 
 /** previewBlock draws the preview (Studio's PreviewPane, row for row). */

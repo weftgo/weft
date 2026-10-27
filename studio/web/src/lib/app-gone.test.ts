@@ -26,7 +26,7 @@ const row = { id: "s1-t1", session_id: "s1", public_id: "pub", service: "acme" }
 
 describe("appGone", () => {
   it("names the opted-in runtime, last seen in UTC to the second", () => {
-    expect(appGone([gone], "acme")).toEqual({ words: GONE, fix: FIX })
+    expect(appGone([gone], "acme")).toEqual({ words: GONE, fix: FIX, rt: true })
   })
   it("omits the last-seen clause when the row has none", () => {
     expect(appGone([{ ...gone, last_seen: undefined }], "acme")?.words).toBe(
@@ -58,6 +58,7 @@ describe("refusalWords", () => {
     expect(refusalWords("read-only", row, [cli, gone], false)).toEqual({
       words: GONE,
       fix: FIX,
+      rt: true,
     })
   })
 })

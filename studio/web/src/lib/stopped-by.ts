@@ -26,43 +26,10 @@ const LOOP: Record<string, [string, string]> = {
   model_retries_exceeded: ["tool retry budget spent", "MaxModelRetries" + E],
 }
 
-/** stoppedByWords maps a stopped_by value (and, for canceled, its
- * cancel cause) to its words; null when the run recorded none. */
-export function stoppedByWords(by?: string, cause?: string): StopWords | null {
-  if (!by) return null
-  // Only a value with a "name:" prefix carries an argument: a bare
-  // custom name ("step_count_is" from a String()) is the name whole.
-  const i = by.indexOf(":")
-  const [k, arg] = i > 0 ? [by.slice(0, i), by.slice(i + 1)] : [by, ""]
-  if (k === "has_tool_call" && i > 0 && !arg)
-    return {
-      word: "stopped by a tool call (StopWhen)",
-      hint: `${SW}HasToolCall()`,
-    }
-  if (k === "has_tool_call" && arg)
-    return {
-      word: `stopped by the tool call ${arg}`,
-      hint: `${SW}HasToolCall(${arg})`,
-    }
-  if (k === "step_count_is" && i > 0 && !arg)
-    return {
-      word: "stopped by a step count (StopWhen)",
-      hint: `${SW}StepCountIs()`,
-    }
-  if (k === "step_count_is" && arg)
-    return {
-      word: `stopped after ${arg} steps`,
-      hint: `${SW}StepCountIs(${arg})`,
-    }
-  if (by === "canceled")
-    return {
-      word: cause ? `cancelled · ${cause}` : "cancelled",
-      hint: "the run's context ended",
-    }
-  const w = LOOP[by] as [string, string] | undefined
-  return w
-    ? { word: w[0], hint: w[1] }
-    : { word: by, hint: "a custom stop condition" }
+/** stopStep is the step the stop fired at: the run's last (steps − 1),
+ * undefined when it ran none. */
+export function stopStep(steps?: number): number | undefined {
+  return steps && steps > 0 ? steps - 1 : undefined
 }
 
 /** endStep is the step the header chip, its link and the story's end
@@ -108,6 +75,60 @@ export function stopDetail(err?: string, by?: string): string {
   return /\(([^()]+)\)\s*$/.exec(e)?.[1] ?? ""
 }
 
+/** stoppedByWords maps a stopped_by value (and, for canceled, its
+ * cancel cause) to its words; null when the run recorded none. */
+export function stoppedByWords(by?: string, cause?: string): StopWords | null {
+  if (!by) return null
+  // Only a value with a "name:" prefix carries an argument: a bare
+  // custom name ("step_count_is" from a String()) is the name whole.
+  const i = by.indexOf(":")
+  const [k, arg] = i > 0 ? [by.slice(0, i), by.slice(i + 1)] : [by, ""]
+  if (k === "has_tool_call" && i > 0 && !arg)
+    return {
+      word: "stopped by a tool call (StopWhen)",
+      hint: `${SW}HasToolCall()`,
+    }
+  if (k === "has_tool_call" && arg)
+    return {
+      word: `stopped by the tool call ${arg}`,
+      hint: `${SW}HasToolCall(${arg})`,
+    }
+  if (k === "step_count_is" && i > 0 && !arg)
+    return {
+      word: "stopped by a step count (StopWhen)",
+      hint: `${SW}StepCountIs()`,
+    }
+  if (k === "step_count_is" && arg)
+    return {
+      word: `stopped after ${arg} steps`,
+      hint: `${SW}StepCountIs(${arg})`,
+    }
+  if (by === "canceled")
+    return {
+      word: cause ? `cancelled · ${cause}` : "cancelled",
+      hint: "the run's context ended",
+    }
+  const w = LOOP[by] as [string, string] | undefined
+  return w
+    ? { word: w[0], hint: w[1] }
+    : { word: by, hint: "a custom stop condition" }
+}
+
+/** landStep is where a selection lands for the step a run failed at
+ * among the steps a surface draws: that step, else the last drawn
+ * before it (a cancel before step N began: N − 1); undefined with no
+ * failure or none drawn before it (the caller's step 0). */
+export function landStep(
+  failedAt: number | undefined,
+  drawn: readonly number[]
+): number | undefined {
+  let best: number | undefined
+  if (failedAt !== undefined)
+    for (const n of drawn)
+      if (n <= failedAt && (best === undefined || n > best)) best = n
+  return best
+}
+
 /** stopChip is the chip's text (the word, the error's detail in
  * parentheses) and title (the hint and the raw value); null when the
  * run recorded no stopped_by. besideStatus: the chip sits beside the
@@ -143,24 +164,6 @@ export function stopChip(
   }
 }
 
-/** failedAtStep is the step a failed run failed at: the one core's
- * RunError names ("run failed at step N"), else its last step;
- * undefined for a run that did not fail or ran no step. Core appends a
- * step's record only after its model call and its tools, so a model
- * error or a cancel during step N reads "at step N" with steps N: step
- * N is the open one (its errored chat span, the fold's open step). A
- * max_steps run's error names the step it would have run next ("at step
- * 3" after steps 0–2): its stop is its last step (stopStep). A cancel
- * before step N began names a step no surface draws: landStep falls
- * back to the last one drawn. */
-export function failedAtStep(r: StopRow): number | undefined {
-  if (r.status !== "failed") return undefined
-  const at = /run failed at step (\d+)/.exec(r.err ?? "")?.[1]
-  return at === undefined || r.stopped_by === "max_steps"
-    ? stopStep(r.steps)
-    : Number(at)
-}
-
 /** endCard is the story's last line: "■ <word> at step N (detail)";
  * for a failed run that named no stop (a model error), "■ failed ·
  * <err>" — its stored Error root span is the terminal record. n is
@@ -180,27 +183,24 @@ export function endCard(
   return `■ ${w.word}${n === undefined ? "" : ` at step ${n}`}${d ? ` (${d})` : ""}`
 }
 
-/** stopStep is the step the stop fired at: the run's last (steps − 1),
- * undefined when it ran none. */
-export function stopStep(steps?: number): number | undefined {
-  return steps && steps > 0 ? steps - 1 : undefined
-}
-
 export const FAILED_WORD = "failed"
 
-/** landStep is where a selection lands for the step a run failed at
- * among the steps a surface draws: that step, else the last drawn
- * before it (a cancel before step N began: N − 1); undefined with no
- * failure or none drawn before it (the caller's step 0). */
-export function landStep(
-  failedAt: number | undefined,
-  drawn: readonly number[]
-): number | undefined {
-  let best: number | undefined
-  if (failedAt !== undefined)
-    for (const n of drawn)
-      if (n <= failedAt && (best === undefined || n > best)) best = n
-  return best
+/** failedAtStep is the step a failed run failed at: the one core's
+ * RunError names ("run failed at step N"), else its last step;
+ * undefined for a run that did not fail or ran no step. Core appends a
+ * step's record only after its model call and its tools, so a model
+ * error or a cancel during step N reads "at step N" with steps N: step
+ * N is the open one (its errored chat span, the fold's open step). A
+ * max_steps run's error names the step it would have run next ("at step
+ * 3" after steps 0–2): its stop is its last step (stopStep). A cancel
+ * before step N began names a step no surface draws: landStep falls
+ * back to the last one drawn. */
+export function failedAtStep(r: StopRow): number | undefined {
+  if (r.status !== "failed") return undefined
+  const at = /run failed at step (\d+)/.exec(r.err ?? "")?.[1]
+  return at === undefined || r.stopped_by === "max_steps"
+    ? stopStep(r.steps)
+    : Number(at)
 }
 
 /** contradicts says the model's last finish reason (stop_reason) reads

@@ -504,13 +504,14 @@ function messagesOf(b: TranscriptBatch | null | undefined): Message[] {
   return out
 }
 
-function usageOf(u: Usage | undefined): Usage {
-  const o = typeof u === "object" ? u : null
-  return {
-    ...o,
-    input_tokens: o?.input_tokens ?? 0,
-    output_tokens: o?.output_tokens ?? 0,
-  }
+/** runHoles is what the run header badges: the run document's own
+ * (api.go's runHoles: not_recorded, interrupted, derived, stripped,
+ * gap) and the fold's (the recorder's cuts on any event). */
+export function runHoles(
+  doc: { holes?: HoleMark[] } | null | undefined,
+  view: FoldedRun
+): HoleMark[] {
+  return mergeHoles(Array.isArray(doc?.holes) ? doc.holes : [], view.holes)
 }
 
 /** A batch placed: the step it joined and whether it is the run's
@@ -524,14 +525,49 @@ export interface PlacedBatch {
   messages: Message[]
 }
 
-/** runHoles is what the run header badges: the run document's own
- * (api.go's runHoles: not_recorded, interrupted, derived, stripped,
- * gap) and the fold's (the recorder's cuts on any event). */
-export function runHoles(
-  doc: { holes?: HoleMark[] } | null | undefined,
-  view: FoldedRun
+function usageOf(u: Usage | undefined): Usage {
+  const o = typeof u === "object" ? u : null
+  return {
+    ...o,
+    input_tokens: o?.input_tokens ?? 0,
+    output_tokens: o?.output_tokens ?? 0,
+  }
+}
+
+/**
+ * stepHoles is what a step card badges (ADR 0028 §11): the union of
+ * the step route's holes when the page has them cached (A7's
+ * assembled step; not while that doc says the step is running), the fold's — the recorder's cuts on the step's
+ * events, a `derived` placement of its words, a `max_tokens` finish —
+ * and the run's holes that hold for every step of it (not_recorded: a
+ * run written before the request record; stripped: a content-off
+ * chain). In the table's order, one badge per hole (the step route's
+ * words first).
+ */
+export function stepHoles(
+  step: FoldedStep,
+  inherited?: HoleMark[],
+  stepDoc?: { holes?: HoleMark[]; status?: string }
 ): HoleMark[] {
-  return mergeHoles(Array.isArray(doc?.holes) ? doc.holes : [], view.holes)
+  // A step doc read while the step ran carries running-time holes (no
+  // spans yet, not recorded yet): they say nothing about the step until
+  // it is over and the doc is read again.
+  if (stepDoc?.status === "running") stepDoc = undefined
+  const own: HoleMark[] = [...(step.holes ?? [])]
+  if (step.derived)
+    own.push({
+      hole: "derived",
+      reason:
+        "this step's words come from a transcript batch whose step was inferred, not stored",
+    })
+  if (step.finish?.reason === "max_tokens") own.push({ hole: "max_tokens" })
+  return mergeHoles(
+    Array.isArray(stepDoc?.holes) ? stepDoc.holes : [],
+    own,
+    (inherited ?? []).filter(
+      (h) => h.hole === "not_recorded" || h.hole === "stripped"
+    )
+  )
 }
 
 /**
@@ -588,6 +624,21 @@ function derivedPlacement(
   })
 }
 
+/** The run's own assistant texts, in order — its reply, never the
+ * history it was fed. */
+export function producedTexts(batches: TranscriptBatch[]): string[] {
+  return splitTranscript(batches)
+    .produced.filter((m) => m.role === "assistant")
+    .map((m) => messageText(m))
+    .filter(Boolean)
+}
+
+/** producedTexts joined by newlines: the diff base and the result
+ * text of the playground. */
+export function producedText(batches: TranscriptBatch[]): string {
+  return producedTexts(batches).join("\n")
+}
+
 /**
  * splitTranscript separates what a run was FED from what it PRODUCED.
  * The run's input record (ADR 0024 D1) is everything it was fed — for
@@ -606,21 +657,6 @@ export function splitTranscript(batches: TranscriptBatch[]): {
   return { input, produced }
 }
 
-/** The run's own assistant texts, in order — its reply, never the
- * history it was fed. */
-export function producedTexts(batches: TranscriptBatch[]): string[] {
-  return splitTranscript(batches)
-    .produced.filter((m) => m.role === "assistant")
-    .map((m) => messageText(m))
-    .filter(Boolean)
-}
-
-/** producedTexts joined by newlines: the diff base and the result
- * text of the playground. */
-export function producedText(batches: TranscriptBatch[]): string {
-  return producedTexts(batches).join("\n")
-}
-
 /** The words the run was asked: the last user text it was fed (the
  * turn's own prompt — earlier user messages are history). */
 export function turnPrompt(batches: TranscriptBatch[]): string | null {
@@ -631,42 +667,6 @@ export function turnPrompt(batches: TranscriptBatch[]): string | null {
     if (words) return words
   }
   return null
-}
-
-/**
- * stepHoles is what a step card badges (ADR 0028 §11): the union of
- * the step route's holes when the page has them cached (A7's
- * assembled step; not while that doc says the step is running), the fold's — the recorder's cuts on the step's
- * events, a `derived` placement of its words, a `max_tokens` finish —
- * and the run's holes that hold for every step of it (not_recorded: a
- * run written before the request record; stripped: a content-off
- * chain). In the table's order, one badge per hole (the step route's
- * words first).
- */
-export function stepHoles(
-  step: FoldedStep,
-  inherited?: HoleMark[],
-  stepDoc?: { holes?: HoleMark[]; status?: string }
-): HoleMark[] {
-  // A step doc read while the step ran carries running-time holes (no
-  // spans yet, not recorded yet): they say nothing about the step until
-  // it is over and the doc is read again.
-  if (stepDoc?.status === "running") stepDoc = undefined
-  const own: HoleMark[] = [...(step.holes ?? [])]
-  if (step.derived)
-    own.push({
-      hole: "derived",
-      reason:
-        "this step's words come from a transcript batch whose step was inferred, not stored",
-    })
-  if (step.finish?.reason === "max_tokens") own.push({ hole: "max_tokens" })
-  return mergeHoles(
-    Array.isArray(stepDoc?.holes) ? stepDoc.holes : [],
-    own,
-    (inherited ?? []).filter(
-      (h) => h.hole === "not_recorded" || h.hole === "stripped"
-    )
-  )
 }
 
 /** The text parts of a message, joined. Files and other parts are not

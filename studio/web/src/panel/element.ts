@@ -722,6 +722,59 @@ const clickBtn = (
 ): HTMLElement => on(el("button", "weft-btn", t, attrs), "click", f)
 
 export class WeftDevtools extends HTMLElement {
+  /** fire dispatches a host event from the element, asynchronously: a
+   * host listener runs outside the panel's draw. */
+  private fire<TEvent extends DevtoolsEvent>(
+    name: TEvent,
+    detail: DevtoolsEvents[TEvent]
+  ) {
+    queueMicrotask(() => {
+      try {
+        if (this.isConnected)
+          this.dispatchEvent(
+            new CustomEvent(`weft:${name}`, {
+              detail,
+              bubbles: true,
+              composed: true,
+            })
+          )
+      } catch {
+        // never the host's error
+      }
+    })
+  }
+
+  /** scopeNow is the scope the panel follows: the user's switcher
+   * choice; the explicit forms', unless a marker on the page carries
+   * the same conversation (the helpers' scope() and marker: then the
+   * marked one, so focus moves between helpers' chats); with no
+   * explicit form, the page URL's (rung 4, as written); the marked
+   * conversation (the header's newest scope of it, when the header
+   * rung saw it: its run narrows); the explicit one; the newest
+   * detected one while the header rung is on; else none (the dev list). */
+  private scopeNow(): Scope {
+    return this.decide()[0]
+  }
+
+  /** on calls cb with each event of the kind named this panel
+   * dispatches, and returns the unsubscribe. A throwing cb is the
+   * host's: swallowed, never the panel's console. */
+  on<TEvent extends DevtoolsEvent>(
+    event: TEvent,
+    cb: (detail: DevtoolsEvents[TEvent]) => void
+  ): () => void {
+    if (!DEVTOOLS_EVENTS.includes(event) || typeof cb !== "function")
+      return () => {}
+    const listener = (e: Event) => {
+      try {
+        cb((e as CustomEvent<DevtoolsEvents[TEvent]>).detail)
+      } catch {
+        // the host's listener: not the panel's to report
+      }
+    }
+    this.addEventListener(`weft:${event}`, listener)
+    return () => this.removeEventListener(`weft:${event}`, listener)
+  }
   /** schedule coalesces connect and attribute changes into one apply:
    * an upgraded element hears every attribute, then the connect, in
    * one turn — that is one start, one meta request. */
@@ -746,6 +799,74 @@ export class WeftDevtools extends HTMLElement {
   detectedByPath(): Map<string, Scope> {
     return new Map(this.byPath)
   }
+  constructor() {
+    super()
+    this.cfg = readConfig(this)
+    this.lay = initialLayout(this.cfg.position, this.cfg.open, this.cfg.mode)
+    this.shadow = this.attachShadow({ mode: "open" })
+    this.body = el("div", "weft-root")
+    attachStyles(this.shadow)
+    this.shadow.append(this.body)
+    this.shadow.addEventListener("pointerdown", () => this.hold())
+    // Every shortcut but Alt+W is heard here, inside the shadow root:
+    // only a key pressed with focus in the panel reaches it, so the
+    // panel never captures a key of the host page's (D1).
+    this.shadow.addEventListener("keydown", (e) =>
+      this.panelKey(e as KeyboardEvent)
+    )
+    this.shadow.addEventListener("compositionstart", () => {
+      this.composing = true
+    })
+    this.shadow.addEventListener("compositionend", () => {
+      this.composing = false
+      this.flush()
+    })
+    // The failsafe for a composition whose end is never reported: the
+    // field lost focus — whatever the IME did with it, nothing is being
+    // composed in the dock any more, and a dock that waits for it would
+    // stay frozen.
+    this.shadow.addEventListener("focusout", () => {
+      if (!this.composing) return
+      this.composing = false
+      this.flush()
+    })
+    this.render(this.last)
+  }
+
+  static observedAttributes = [
+    "data-endpoint",
+    "data-scope",
+    "data-public-id",
+    "data-token",
+    "data-detect",
+    "data-position",
+    "data-open",
+    "data-auto",
+    "data-global",
+    "data-push",
+    "data-z-index",
+    "data-theme",
+  ]
+
+  /** Set by the entry module on the dock it mounts itself: only that
+   * node is the panel's to remove (§5.3). An element the page wrote —
+   * markup a framework may own — goes inert in place instead, because
+   * a node removed behind a framework's back breaks its next unmount. */
+  autoMounted = false
+
+  private edSync(key: number | undefined, always = false) {
+    if (always || key !== this.edKey)
+      for (const m of [this.edOpen, this.edText, this.edErr]) m.clear()
+    this.edKey = key
+  }
+
+  /** Configuration rung 1 (plan C2): what mount(opts) passed; above
+   * the element's own attributes, field by field. */
+  options: MountOptions | null = null
+
+  private cfg: PanelConfig
+  private shadow: ShadowRoot
+  private model: PanelModel | null = null
 
   /** lookupSession resolves a session-only scope to its public id
    * (plan C4.1's route) and applies it; refusals are said, not thrown. */
@@ -805,68 +926,6 @@ export class WeftDevtools extends HTMLElement {
       this.applyScope({ ...s, publicId: pub })
     })
   }
-  constructor() {
-    super()
-    this.cfg = readConfig(this)
-    this.lay = initialLayout(this.cfg.position, this.cfg.open, this.cfg.mode)
-    this.shadow = this.attachShadow({ mode: "open" })
-    this.body = el("div", "weft-root")
-    attachStyles(this.shadow)
-    this.shadow.append(this.body)
-    this.shadow.addEventListener("pointerdown", () => this.hold())
-    // Every shortcut but Alt+W is heard here, inside the shadow root:
-    // only a key pressed with focus in the panel reaches it, so the
-    // panel never captures a key of the host page's (D1).
-    this.shadow.addEventListener("keydown", (e) =>
-      this.panelKey(e as KeyboardEvent)
-    )
-    this.shadow.addEventListener("compositionstart", () => {
-      this.composing = true
-    })
-    this.shadow.addEventListener("compositionend", () => {
-      this.composing = false
-      this.flush()
-    })
-    // The failsafe for a composition whose end is never reported: the
-    // field lost focus — whatever the IME did with it, nothing is being
-    // composed in the dock any more, and a dock that waits for it would
-    // stay frozen.
-    this.shadow.addEventListener("focusout", () => {
-      if (!this.composing) return
-      this.composing = false
-      this.flush()
-    })
-    this.render(this.last)
-  }
-
-  static observedAttributes = [
-    "data-endpoint",
-    "data-scope",
-    "data-public-id",
-    "data-token",
-    "data-detect",
-    "data-position",
-    "data-open",
-    "data-auto",
-    "data-global",
-    "data-push",
-    "data-z-index",
-    "data-theme",
-  ]
-
-  /** Set by the entry module on the dock it mounts itself: only that
-   * node is the panel's to remove (§5.3). An element the page wrote —
-   * markup a framework may own — goes inert in place instead, because
-   * a node removed behind a framework's back breaks its next unmount. */
-  autoMounted = false
-
-  /** Configuration rung 1 (plan C2): what mount(opts) passed; above
-   * the element's own attributes, field by field. */
-  options: MountOptions | null = null
-
-  private cfg: PanelConfig
-  private shadow: ShadowRoot
-  private model: PanelModel | null = null
   /** What the running model was started with. */
   private conn: { endpoint: string; token: string; scope: string } | null = null
   /** The header rung's fetch wrapper, while it is installed. */
@@ -875,6 +934,17 @@ export class WeftDevtools extends HTMLElement {
   private notRestored = false
   /** The newest scope the header rung saw (null: none yet). */
   private detected: Scope | null = null
+
+  /** dropRung restores the page's fetch and forgets what was seen. */
+  private dropRung() {
+    if (!this.rung) return
+    this.notRestored = !this.rung.restore()
+    this.rung = null
+    this.detected = null
+    this.byPath.clear()
+    this.seen = []
+    this.followedPath = ""
+  }
 
   /** The newest scope seen per response path. */
   private byPath = new Map<string, Scope>()
@@ -1003,6 +1073,12 @@ export class WeftDevtools extends HTMLElement {
   /** The expiry clock's pending redraw (0: none), due at due. */
   private tick = 0
   private due = 0
+
+  private unhold() {
+    this.holdTimer = null
+    this.held = false
+    this.flush()
+  }
   /** A press or an IME composition is in progress inside the dock:
    * redrawing now would take the pressed button from under the
    * pointer (no click follows) or end the composition. The redraw
@@ -1081,19 +1157,19 @@ export class WeftDevtools extends HTMLElement {
   /** Why window.weft.devtools was not added ("" when it was, or off). */
   private globalNote = ""
 
-  /** afterSettle runs fn once the apply already scheduled, and the
-   * start or rescope it began, have settled — so a select() right after
-   * a scope() acts in the new scope's list. */
-  private afterSettle(fn: (settled: boolean) => Promise<void>) {
-    void this.settled().then(fn).catch(quiet)
+  private say(line: string) {
+    this.note = line
+    this.render(this.last)
   }
   /** Set by the npm entry on the registered class: the package's
    * exports are the API, so no panel adds the global. */
   static noGlobal = false
 
-  private say(line: string) {
-    this.note = line
-    this.render(this.last)
+  // ── The host API (plan C4) ──────────────────────────────────────
+
+  /** isOpen reports whether the dock is expanded. */
+  get isOpen(): boolean {
+    return this.shown
   }
 
   /** Set by the npm entry on the registered class (with noGlobal): the
@@ -1102,13 +1178,6 @@ export class WeftDevtools extends HTMLElement {
    * ssr-guard.js marks it before the first read; this keeps it. */
   static get npmEntry(): boolean {
     return viaPackage()
-  }
-
-  // ── The host API (plan C4) ──────────────────────────────────────
-
-  /** isOpen reports whether the dock is expanded. */
-  get isOpen(): boolean {
-    return this.shown
   }
   static set npmEntry(v: boolean) {
     setViaPackage(v === true)
@@ -1340,28 +1409,6 @@ export class WeftDevtools extends HTMLElement {
     this.model?.selectStep(steps[at])
   }
 
-  /** fire dispatches a host event from the element, asynchronously: a
-   * host listener runs outside the panel's draw. */
-  private fire<TEvent extends DevtoolsEvent>(
-    name: TEvent,
-    detail: DevtoolsEvents[TEvent]
-  ) {
-    queueMicrotask(() => {
-      try {
-        if (this.isConnected)
-          this.dispatchEvent(
-            new CustomEvent(`weft:${name}`, {
-              detail,
-              bubbles: true,
-              composed: true,
-            })
-          )
-      } catch {
-        // never the host's error
-      }
-    })
-  }
-
   /** dropGlobal removes this panel's window.weft.devtools: another
    * connected panel publishes its own instead; with none, a namespace
    * the panel created and left empty goes too. */
@@ -1390,26 +1437,6 @@ export class WeftDevtools extends HTMLElement {
     } catch {
       // nothing thrown into the host
     }
-  }
-
-  /** on calls cb with each event of the kind named this panel
-   * dispatches, and returns the unsubscribe. A throwing cb is the
-   * host's: swallowed, never the panel's console. */
-  on<TEvent extends DevtoolsEvent>(
-    event: TEvent,
-    cb: (detail: DevtoolsEvents[TEvent]) => void
-  ): () => void {
-    if (!DEVTOOLS_EVENTS.includes(event) || typeof cb !== "function")
-      return () => {}
-    const listener = (e: Event) => {
-      try {
-        cb((e as CustomEvent<DevtoolsEvents[TEvent]>).detail)
-      } catch {
-        // the host's listener: not the panel's to report
-      }
-    }
-    this.addEventListener(`weft:${event}`, listener)
-    return () => this.removeEventListener(`weft:${event}`, listener)
   }
 
   /** syncGlobal publishes window.weft.devtools while this panel is
@@ -1541,6 +1568,13 @@ export class WeftDevtools extends HTMLElement {
       .catch(quiet)
   }
 
+  /** afterSettle runs fn once the apply already scheduled, and the
+   * start or rescope it began, have settled — so a select() right after
+   * a scope() acts in the new scope's list. */
+  private afterSettle(fn: (settled: boolean) => Promise<void>) {
+    void this.settled().then(fn).catch(quiet)
+  }
+
   /** openInStudio is g s: the selected turn (and step) in Studio, the
    * link ⤢ carries (lib/links.ts), in a new tab. */
   private openInStudio() {
@@ -1548,6 +1582,41 @@ export class WeftDevtools extends HTMLElement {
       ? this.studioLink(this.last.selected, this.stepNow(this.last))
       : ""
     if (url && !this.handoff(url)) openTab(url)
+  }
+
+  /** follow picks the marked conversation: the marker holding the
+   * focused element, else the one focus was last in, else the one
+   * followed now (its newest form), else — nothing followed yet — the
+   * explicit scope's marker (a helper's scope()) or, with no explicit
+   * scope, the first in document order. A followed marker that left the page stays followed. */
+  private follow() {
+    const list = this.markers
+    const at = (e: Element | null) =>
+      e ? list.find((m) => m.element === e) : undefined
+    const key = this.marked ? conversationKey(this.marked) : ""
+    const pick =
+      at(markerOf(document.activeElement)) ??
+      at(this.lastFocused) ??
+      list.find((m) => key && conversationKey(m.scope) === key)
+    // Once a marker carries the explicit conversation (a helper's
+    // scope() and marker), the explicit scope is a marker's until it
+    // changes — that marker leaving does not hand the panel back to it.
+    const exKey = conversationKey(this.cfg.scope)
+    if (
+      this.cfg.scopeExplicit &&
+      list.some((m) => conversationKey(m.scope) === exKey)
+    )
+      this.explicitMarked = true
+    if (pick) this.marked = pick.scope
+    else if (!this.marked) {
+      // An explicit scope whose marker is not read yet (a helper sets
+      // both; the scan is debounced) waits for it: the explicit one
+      // wins meanwhile, and the next scan finds its marker.
+      const ex = this.cfg.scopeExplicit ? conversationKey(this.cfg.scope) : ""
+      this.marked =
+        (ex ? list.find((m) => conversationKey(m.scope) === ex) : list.at(0))
+          ?.scope ?? null
+    }
   }
 
   /** onMarkerFocus: focus went into a marker's element — the user is
@@ -1675,50 +1744,6 @@ export class WeftDevtools extends HTMLElement {
     }
   }
 
-  /** follow picks the marked conversation: the marker holding the
-   * focused element, else the one focus was last in, else the one
-   * followed now (its newest form), else — nothing followed yet — the
-   * explicit scope's marker (a helper's scope()) or, with no explicit
-   * scope, the first in document order. A followed marker that left the page stays followed. */
-  private follow() {
-    const list = this.markers
-    const at = (e: Element | null) =>
-      e ? list.find((m) => m.element === e) : undefined
-    const key = this.marked ? conversationKey(this.marked) : ""
-    const pick =
-      at(markerOf(document.activeElement)) ??
-      at(this.lastFocused) ??
-      list.find((m) => key && conversationKey(m.scope) === key)
-    // Once a marker carries the explicit conversation (a helper's
-    // scope() and marker), the explicit scope is a marker's until it
-    // changes — that marker leaving does not hand the panel back to it.
-    const exKey = conversationKey(this.cfg.scope)
-    if (
-      this.cfg.scopeExplicit &&
-      list.some((m) => conversationKey(m.scope) === exKey)
-    )
-      this.explicitMarked = true
-    if (pick) this.marked = pick.scope
-    else if (!this.marked) {
-      // An explicit scope whose marker is not read yet (a helper sets
-      // both; the scan is debounced) waits for it: the explicit one
-      // wins meanwhile, and the next scan finds its marker.
-      const ex = this.cfg.scopeExplicit ? conversationKey(this.cfg.scope) : ""
-      this.marked =
-        (ex ? list.find((m) => conversationKey(m.scope) === ex) : list.at(0))
-          ?.scope ?? null
-    }
-  }
-
-  /** markerSig is what a marker change can change on screen: the
-   * scope followed and the switcher's entries. */
-  private markerSig(): string {
-    return [
-      serializeScope(this.scopeNow()),
-      ...this.conversations().map((c) => c.key + c.source),
-    ].join("|")
-  }
-
   /** conversations is what the switcher lists: the explicit scope,
    * then the markers in document order, then the header-detected
    * scopes in first-seen order — each conversation once, under the
@@ -1741,21 +1766,13 @@ export class WeftDevtools extends HTMLElement {
     return out
   }
 
-  // ── Scope detection (plan C3.2, C3.3) ───────────────────────────
-
-  /** detectWord is the resolved detection choice, as the footer says it. */
-  detectWord(): DetectWord {
-    const rungs: RungWord | "" = this.rung
-      ? this.markerRung
-        ? "headers+markers"
-        : "headers"
-      : this.markerRung
-        ? "markers"
-        : ""
-    if (this.followsURL()) return rungs ? `url+${rungs}` : "url"
-    if (rungs) return rungs
-    if (this.cfg.detect === "off") return "off"
-    return this.cfg.scopeExplicit ? "explicit" : "none"
+  /** markerSig is what a marker change can change on screen: the
+   * scope followed and the switcher's entries. */
+  private markerSig(): string {
+    return [
+      serializeScope(this.scopeNow()),
+      ...this.conversations().map((c) => c.key + c.source),
+    ].join("|")
   }
 
   /** ownsToggle: of the connected panels, exactly one answers Alt+W —
@@ -1788,25 +1805,6 @@ export class WeftDevtools extends HTMLElement {
     const t = this.themeNow
     if (this.isConnected && this.getAttribute("data-theme-resolved") !== t)
       this.setAttribute("data-theme-resolved", t)
-  }
-
-  /** turnish: the list is one conversation's turns — a public id and
-   * no tag, agent or flow filter; else it is a page of runs (U22), and
-   * the header, the list and every row say "run". */
-  private turnish(): boolean {
-    const m = this.model
-    return !!m?.publicId && !Object.keys(m.q).length
-  }
-
-  /** dropRung restores the page's fetch and forgets what was seen. */
-  private dropRung() {
-    if (!this.rung) return
-    this.notRestored = !this.rung.restore()
-    this.rung = null
-    this.detected = null
-    this.byPath.clear()
-    this.seen = []
-    this.followedPath = ""
   }
 
   /** syncDetect installs or removes the header rung as the
@@ -1858,6 +1856,23 @@ export class WeftDevtools extends HTMLElement {
     }
   }
 
+  // ── Scope detection (plan C3.2, C3.3) ───────────────────────────
+
+  /** detectWord is the resolved detection choice, as the footer says it. */
+  detectWord(): DetectWord {
+    const rungs: RungWord | "" = this.rung
+      ? this.markerRung
+        ? "headers+markers"
+        : "headers"
+      : this.markerRung
+        ? "markers"
+        : ""
+    if (this.followsURL()) return rungs ? `url+${rungs}` : "url"
+    if (rungs) return rungs
+    if (this.cfg.detect === "off") return "off"
+    return this.cfg.scopeExplicit ? "explicit" : "none"
+  }
+
   /** choose follows a conversation the user picked in the switcher:
    * above every rung until focus moves into a marker or the explicit
    * scope changes, and its run pins (force). */
@@ -1865,18 +1880,6 @@ export class WeftDevtools extends HTMLElement {
     this.chosen = c.scope
     this.forceNext = true
     this.rescopeSoon()
-  }
-
-  /** scopeNow is the scope the panel follows: the user's switcher
-   * choice; the explicit forms', unless a marker on the page carries
-   * the same conversation (the helpers' scope() and marker: then the
-   * marked one, so focus moves between helpers' chats); with no
-   * explicit form, the page URL's (rung 4, as written); the marked
-   * conversation (the header's newest scope of it, when the header
-   * rung saw it: its run narrows); the explicit one; the newest
-   * detected one while the header rung is on; else none (the dev list). */
-  private scopeNow(): Scope {
-    return this.decide()[0]
   }
 
   /** decide is scopeNow with the rung that named the scope, as the
@@ -1907,19 +1910,6 @@ export class WeftDevtools extends HTMLElement {
       ]
     if (cfg.scopeExplicit) return [cfg.scope, "explicit"]
     return d ? [d, `header from ${this.followedPath}`] : [cfg.scope, "none"]
-  }
-
-  /** studioLink is the Studio page of a run — at a step, given its
-   * ordinal — through lib/links.ts (G1): the link ⤢ would carry,
-   * never with a token. "" before the panel knows its endpoint. */
-  studioLink(runId: string, step?: number): string {
-    const base = this.base || this.cfg.endpoint
-    if (!base || typeof runId !== "string" || !runId) return ""
-    try {
-      return studioLink(base, runId, stepOrdinal(step))
-    } catch {
-      return ""
-    }
   }
 
   /** runBtn is a button that opens a run in the panel (the decided and
@@ -1962,36 +1952,98 @@ export class WeftDevtools extends HTMLElement {
     return api
   }
 
-  private edSync(key: number | undefined, always = false) {
-    if (always || key !== this.edKey)
-      for (const m of [this.edOpen, this.edText, this.edErr]) m.clear()
-    this.edKey = key
+  /** rescan re-reads the configuration from outside the element's own
+   * attributes — window.__WEFT__ changed (main.ts's setter) — and
+   * applies it like an attribute change: an explicit data-public-id
+   * still wins (readConfig). */
+  rescan() {
+    this.cfg = readConfig(this)
+    if (this.isConnected) {
+      this.syncGlobal()
+      this.syncDetect()
+      this.schedule()
+    }
   }
 
-  attributeChangedCallback(
-    name: string,
-    old: string | null,
-    value: string | null
-  ) {
-    if (old === value) return
-    this.cfg = readConfig(this)
-    if (!this.isConnected) return
-    // A data-position set after connect is the host moving the dock
-    // (D1): the float's corner, or a dock's side; the size stays.
-    if (name === "data-position") {
-      const at = initialLayout(this.cfg.position, true, "")
-      const l = this.lay
-      Object.assign(l, {
-        mode: at.mode,
-        side: at.side,
-        y: innerHeight - l.h - 16,
-      })
-      l.x = this.cfg.position === "bottom-left" ? 16 : innerWidth - l.w - 16
-    }
-    if (name === "data-theme") this.render(this.last)
-    this.syncGlobal()
+  /** apply brings the model in line with the attributes: a new
+   * endpoint or token is a new connection; a new public id rescopes
+   * the one there is (the §5.2 setter path); position only redraws. */
+  private apply() {
+    const cfg = this.cfg
+    const conn = this.conn
     this.syncDetect()
-    this.schedule()
+    if (
+      this.model &&
+      conn &&
+      conn.endpoint === cfg.endpoint &&
+      conn.token === cfg.token
+    ) {
+      const next = this.scopeNow()
+      const form = serializeScope(next)
+      if (conn.scope !== form) {
+        // What was typed for the previous conversation (an unsent steer,
+        // a resolve result) is not offered under the next one.
+        if (this.model.publicId !== next.publicId) {
+          this.scratch.clear()
+        }
+        conn.scope = form
+        // An explicit scope's run (or the user's switcher choice) pins
+        // whatever the user clicked; a detected one (the next turn's
+        // header, a marker focus follows) respects the click.
+        const force =
+          this.forceNext ||
+          (cfg.scopeExplicit && next === cfg.scope && !this.explicitMarked)
+        this.settling = this.model.rescope(next, { force }).catch(quiet)
+      }
+      this.forceNext = false
+      this.render(this.last)
+      return
+    }
+    this.settling = this.start().catch(quiet)
+  }
+
+  /** render never throws into the host page: the model calls it from
+   * an animation frame, over records that were stored as ingested. A
+   * state that cannot be drawn leaves the previous frame standing. */
+  private render(s: PanelState) {
+    this.last = s
+    // Once connected, a disconnected element draws nothing: a timer, a
+    // debounce or a promise that answers after the disconnect must not
+    // re-create an observer on a detached sentinel. The next connect
+    // draws this.last. (Before the first connect the constructor's
+    // empty frame is drawn.)
+    if (!this.isConnected && this.opened) return
+    // D2: the theme, resolved once per render (the header's ◐ and
+    // data-theme-resolved read it); not before the connect, which
+    // resolves it itself.
+    if (this.isConnected) this.themeNow = this.resolveNow()
+    try {
+      this.watchRuns(s)
+    } catch {
+      // observability never changes behaviour
+    }
+    // Whether anyone is looking: the dev list is polled only then.
+    this.model?.watch(this.shown && !this.dormant)
+    // The selected turn is remembered (D1); the tab by setTab (D4).
+    if (
+      this.model &&
+      s === this.model.state &&
+      s.selected &&
+      s.selected !== this.lay.run
+    ) {
+      this.lay.run = s.selected
+      this.save()
+    }
+    if (this.held || this.composing || this.dragging) {
+      this.dirty = true
+      return
+    }
+    this.dirty = false
+    try {
+      this.draw(s)
+    } catch {
+      // fail silent (§5.3)
+    }
   }
 
   /** handoff opens a Studio page through GET /api/panel-handoff (plan
@@ -2087,68 +2139,10 @@ export class WeftDevtools extends HTMLElement {
     if (back?.isConnected) back.focus({ preventScroll: true })
   }
 
-  /** apply brings the model in line with the attributes: a new
-   * endpoint or token is a new connection; a new public id rescopes
-   * the one there is (the §5.2 setter path); position only redraws. */
-  private apply() {
-    const cfg = this.cfg
-    const conn = this.conn
-    this.syncDetect()
-    if (
-      this.model &&
-      conn &&
-      conn.endpoint === cfg.endpoint &&
-      conn.token === cfg.token
-    ) {
-      const next = this.scopeNow()
-      const form = serializeScope(next)
-      if (conn.scope !== form) {
-        // What was typed for the previous conversation (an unsent steer,
-        // a resolve result) is not offered under the next one.
-        if (this.model.publicId !== next.publicId) {
-          this.scratch.clear()
-        }
-        conn.scope = form
-        // An explicit scope's run (or the user's switcher choice) pins
-        // whatever the user clicked; a detected one (the next turn's
-        // header, a marker focus follows) respects the click.
-        const force =
-          this.forceNext ||
-          (cfg.scopeExplicit && next === cfg.scope && !this.explicitMarked)
-        this.settling = this.model.rescope(next, { force }).catch(quiet)
-      }
-      this.forceNext = false
-      this.render(this.last)
-      return
-    }
-    this.settling = this.start().catch(quiet)
-  }
-
-  private unhold() {
-    this.holdTimer = null
-    this.held = false
-    this.flush()
-  }
-
   /** view opens a view's tab (its key, lib/keys.ts's VIEW_KEYS); on it
    * already, the tab before it. */
   private view(id: string) {
     this.setTab(this.lay.tab === id ? this.prevTab : id)
-  }
-
-  /** stepNow is the step being read: linkedStep, or — on the Request
-   * tab, which always shows one — the step it falls back to (the
-   * first), so ⤢ and J/K start from what is on screen. */
-  private stepNow(s: PanelState): number | undefined {
-    const n = linkedStep(s)
-    if (
-      n !== undefined ||
-      this.lay.tab !== "request" ||
-      !s.turn ||
-      s.turn.id !== s.selected
-    )
-      return n
-    return stepsOf(s.turn, s.turn.requests)[0]
   }
 
   /** setTab opens one of the turn view's tabs (D4), remembered as the
@@ -2179,17 +2173,30 @@ export class WeftDevtools extends HTMLElement {
     this.render(this.last)
   }
 
-  /** rescan re-reads the configuration from outside the element's own
-   * attributes — window.__WEFT__ changed (main.ts's setter) — and
-   * applies it like an attribute change: an explicit data-public-id
-   * still wins (readConfig). */
-  rescan() {
+  attributeChangedCallback(
+    name: string,
+    old: string | null,
+    value: string | null
+  ) {
+    if (old === value) return
     this.cfg = readConfig(this)
-    if (this.isConnected) {
-      this.syncGlobal()
-      this.syncDetect()
-      this.schedule()
+    if (!this.isConnected) return
+    // A data-position set after connect is the host moving the dock
+    // (D1): the float's corner, or a dock's side; the size stays.
+    if (name === "data-position") {
+      const at = initialLayout(this.cfg.position, true, "")
+      const l = this.lay
+      Object.assign(l, {
+        mode: at.mode,
+        side: at.side,
+        y: innerHeight - l.h - 16,
+      })
+      l.x = this.cfg.position === "bottom-left" ? 16 : innerWidth - l.w - 16
     }
+    if (name === "data-theme") this.render(this.last)
+    this.syncGlobal()
+    this.syncDetect()
+    this.schedule()
   }
 
   /** publisherConnected: the panel whose API api is is still connected. */
@@ -2197,50 +2204,6 @@ export class WeftDevtools extends HTMLElement {
     return panelsOnPage().some(
       (n) => n !== this && (n as Partial<WeftDevtools>).apiObjIs?.(api) === true
     )
-  }
-
-  /** render never throws into the host page: the model calls it from
-   * an animation frame, over records that were stored as ingested. A
-   * state that cannot be drawn leaves the previous frame standing. */
-  private render(s: PanelState) {
-    this.last = s
-    // Once connected, a disconnected element draws nothing: a timer, a
-    // debounce or a promise that answers after the disconnect must not
-    // re-create an observer on a detached sentinel. The next connect
-    // draws this.last. (Before the first connect the constructor's
-    // empty frame is drawn.)
-    if (!this.isConnected && this.opened) return
-    // D2: the theme, resolved once per render (the header's ◐ and
-    // data-theme-resolved read it); not before the connect, which
-    // resolves it itself.
-    if (this.isConnected) this.themeNow = this.resolveNow()
-    try {
-      this.watchRuns(s)
-    } catch {
-      // observability never changes behaviour
-    }
-    // Whether anyone is looking: the dev list is polled only then.
-    this.model?.watch(this.shown && !this.dormant)
-    // The selected turn is remembered (D1); the tab by setTab (D4).
-    if (
-      this.model &&
-      s === this.model.state &&
-      s.selected &&
-      s.selected !== this.lay.run
-    ) {
-      this.lay.run = s.selected
-      this.save()
-    }
-    if (this.held || this.composing || this.dragging) {
-      this.dirty = true
-      return
-    }
-    this.dirty = false
-    try {
-      this.draw(s)
-    } catch {
-      // fail silent (§5.3)
-    }
   }
 
   /** howToBox is the fallback's expander: the one-line fixes. */
@@ -2269,6 +2232,24 @@ export class WeftDevtools extends HTMLElement {
     return box
   }
 
+  /** stepNow is the step being read: linkedStep, or — on the Request
+   * tab, which always shows one — the step it falls back to (the
+   * first), so ⤢ and J/K start from what is on screen. */
+  private stepNow(s: PanelState): number | undefined {
+    const n = linkedStep(s)
+    if (
+      n !== undefined ||
+      this.lay.tab !== "request" ||
+      !s.turn ||
+      s.turn.id !== s.selected
+    )
+      return n
+    return stepsOf(s.turn, s.turn.requests)[0]
+  }
+
+  /** The tab r goes back to from Raw. */
+  private prevTab = "story"
+
   /** themeButton cycles the user's theme (D2): auto → light → dark;
    * stored per origin, auto clears it. An explicit data-theme wins, so
    * the button then only says so — aria-disabled, not disabled, so it
@@ -2296,11 +2277,25 @@ export class WeftDevtools extends HTMLElement {
     })
     return b
   }
-
-  /** The tab r goes back to from Raw. */
-  private prevTab = "story"
   /** The stored tab (and raw) while a linked tab shows (U21.2-fix). */
   private keptTab?: [string, boolean]
+
+  /** expHole is the badge for expiries the panel could not read: past
+   * the run's marks read's cap (truncated), or a failed read
+   * (not_recorded). */
+  private expHole(t?: TurnView): HTMLElement[] {
+    const h = t?.exp?.hole
+    return h
+      ? [
+          badge(
+            h,
+            h === "truncated"
+              ? { cause: "response_cap", ...RUN_MARKS_HOLE }
+              : EXPIRY_UNREAD
+          ),
+        ]
+      : []
+  }
 
   disconnectedCallback() {
     LIVE.delete(this)
@@ -2694,23 +2689,6 @@ export class WeftDevtools extends HTMLElement {
     to.focus()
   }
 
-  /** expHole is the badge for expiries the panel could not read: past
-   * the run's marks read's cap (truncated), or a failed read
-   * (not_recorded). */
-  private expHole(t?: TurnView): HTMLElement[] {
-    const h = t?.exp?.hole
-    return h
-      ? [
-          badge(
-            h,
-            h === "truncated"
-              ? { cause: "response_cap", ...RUN_MARKS_HOLE }
-              : EXPIRY_UNREAD
-          ),
-        ]
-      : []
-  }
-
   /** pillEnd finishes the pill (D1): the current turn's cost — its
    * tokens in→out once the run has finished, "—" while unknown — the
    * z-index, the click. */
@@ -2913,21 +2891,6 @@ export class WeftDevtools extends HTMLElement {
     })
   }
 
-  /** studioA is a link into Studio that opens through the hand-off (a
-   * Studio tab already open takes it, G3.2), else in a new tab. */
-  private studioA(
-    cls: string,
-    text: string,
-    url: string,
-    attrs: Record<string, string> = {}
-  ): HTMLElement {
-    const a = el("a", cls, text, { href: url, ...NEW_TAB, ...attrs })
-    on(a, "click", (e) => {
-      if (this.handoff((a as HTMLAnchorElement).href)) e.preventDefault()
-    })
-    return a
-  }
-
   /** switcher is the header's conversation switcher (C3.3): shown only
    * when more than one conversation is known, each listed by its public
    * id (session, flow when set) and its source, the live dot (●) on the
@@ -2975,6 +2938,35 @@ export class WeftDevtools extends HTMLElement {
       if (c && c.key !== cur) this.choose(c)
     })
     return sel
+  }
+
+  /** match is the turn filter's test of one row. */
+  private match(r: RunRow): boolean {
+    const f = this.tq
+    // "parked" is open or not yet linked (U1-fix): a decided one reads
+    // parked → tN, the "parked → (decided)" pick.
+    if (f.status && this.st(r).key !== f.status) return false
+    if (f.err && !r.err && r.status !== "failed") return false
+    const q = f.text.trim().toLowerCase()
+    return (
+      !q ||
+      `${r.id}\n${r.err}\n${r.prompt_preview ?? ""}`.toLowerCase().includes(q)
+    )
+  }
+
+  /** studioA is a link into Studio that opens through the hand-off (a
+   * Studio tab already open takes it, G3.2), else in a new tab. */
+  private studioA(
+    cls: string,
+    text: string,
+    url: string,
+    attrs: Record<string, string> = {}
+  ): HTMLElement {
+    const a = el("a", cls, text, { href: url, ...NEW_TAB, ...attrs })
+    on(a, "click", (e) => {
+      if (this.handoff((a as HTMLAnchorElement).href)) e.preventDefault()
+    })
+    return a
   }
 
   private header(s: PanelState): HTMLElement {
@@ -3079,8 +3071,9 @@ export class WeftDevtools extends HTMLElement {
     const more = all == null && s.turnsCapped
     const noun = this.noun(s)
     const stats = `${count}${more ? "+" : ""} ${noun}${count - 1 || more ? "s" : ""} · ${tok}`
-    // A narrow dock hides the stat and cost line (UX-D-32: the header
-    // keeps to two lines); the title's tooltip says the stats.
+    // A narrow dock hides the stat and cost line from sight (UX-D-32:
+    // the header keeps to two lines; a screen reader still reads them);
+    // the title's tooltip says them.
     te.title += ` · ${stats}`
     h.append(
       el("span", "", stats, {
@@ -3094,22 +3087,22 @@ export class WeftDevtools extends HTMLElement {
     // loaded turns' only, "≥". Then what is unpriced, once (U7: lib/
     // cost.ts's unpricedLine), a link to Studio's pricing table.
     if (s.turns.length && hasCapability(s, "pricing") && (scope || q)) {
-      h.append(
-        el(
-          "span",
-          "",
-          [
-            costText(
-              atLeastCost(
-                s.turns,
-                loadedOnly(s, s.turns.length, noun, noun),
-                noun
-              )
-            ),
-          ],
-          { "data-weft-cost-total": "" }
-        )
+      const cost = el(
+        "span",
+        "",
+        [
+          costText(
+            atLeastCost(
+              s.turns,
+              loadedOnly(s, s.turns.length, noun, noun),
+              noun
+            )
+          ),
+        ],
+        { "data-weft-cost-total": "" }
       )
+      te.title += ` · ${cost.textContent}`
+      h.append(cost)
       const u = unpricedLine(s.turns, noun, s.turnsCapped)
       if (u) {
         h.append(
@@ -3164,20 +3157,6 @@ export class WeftDevtools extends HTMLElement {
       })
     )
     return h
-  }
-
-  /** match is the turn filter's test of one row. */
-  private match(r: RunRow): boolean {
-    const f = this.tq
-    // "parked" is open or not yet linked (U1-fix): a decided one reads
-    // parked → tN, the "parked → (decided)" pick.
-    if (f.status && this.st(r).key !== f.status) return false
-    if (f.err && !r.err && r.status !== "failed") return false
-    const q = f.text.trim().toLowerCase()
-    return (
-      !q ||
-      `${r.id}\n${r.err}\n${r.prompt_preview ?? ""}`.toLowerCase().includes(q)
-    )
   }
 
   /** say draws the API's honest line. */
@@ -3383,7 +3362,11 @@ export class WeftDevtools extends HTMLElement {
         session
           ? `no turns of session ${session} yet`
           : this.model?.scoped
-            ? sc.publicId && (rung === "explicit" || rung === "url")
+            ? // Only once its list read landed, Studio answering.
+              sc.publicId &&
+              (rung === "explicit" || rung === "url") &&
+              !s.down &&
+              s.listKey === listKey(sc.publicId)
               ? `Studio has no runs for ${sc.publicId} yet — check the id (scope: ${rung})`
               : `no ${noun}s yet — run your app`
             : // How to connect, to THIS Studio (UX-F-11): its URL, and
@@ -3408,6 +3391,19 @@ export class WeftDevtools extends HTMLElement {
       turns.forEach((r, i) => at.has(r.agent) || at.set(r.agent, i))
       turns.sort((a, b) => at.get(a.agent)! - at.get(b.agent)!)
     }
+    // The page's scope as the runs list reads it (U30.1-fix): its
+    // public id, session, agent and tags — a flow is its weft.flow tag.
+    const nw = this.model?.narrowing ?? {}
+    const tag = Object.entries({
+      ...nw.tags,
+      ...(nw.flow && { "weft.flow": nw.flow }),
+    }).map(([k, v]) => `${k}=${v}`)
+    const scopeQ = {
+      public_id: this.model?.publicId,
+      session,
+      agent: nw.agent,
+      tag,
+    }
     const filtered = this.filtering()
     if (filtered) {
       const f = this.tq
@@ -3425,13 +3421,14 @@ export class WeftDevtools extends HTMLElement {
           href(
             this.base,
             runsLink({
-              public_id: this.model?.publicId,
-              session,
+              ...scopeQ,
               q: f.text,
+              // "has error" is a failed run on the runs list.
               status:
                 f.status == "resumed"
                   ? undefined
-                  : (f.status as RunsSearch["status"]),
+                  : ((f.status ||
+                      (f.err ? "failed" : "")) as RunsSearch["status"]),
             })
           )
         )
@@ -3472,7 +3469,10 @@ export class WeftDevtools extends HTMLElement {
             href(
               this.base,
               runsLink({
-                public_id: this.model?.publicId,
+                // Replays carry no session of the source's (and not
+                // its tags): the public id and the agent narrow them.
+                public_id: scopeQ.public_id,
+                agent: scopeQ.agent,
                 experiments: "on",
                 experiment_id: x.size == 1 ? [...x][0] : "",
               })
@@ -3526,6 +3526,10 @@ export class WeftDevtools extends HTMLElement {
         el("div", "weft-tq-n weft-all", `all ${s.turns.length} ${noun}s loaded`)
       )
     return list
+  }
+
+  private rowOf(id: string): RunRow | undefined {
+    return this.model?.rowOf(id)
   }
 
   private resolveNow() {
@@ -4293,6 +4297,11 @@ export class WeftDevtools extends HTMLElement {
     return card
   }
 
+  /** apiObjIs reports whether api is this panel's API object. */
+  apiObjIs(api: unknown): boolean {
+    return this.apiObj !== null && api === this.apiObj && this.isConnected
+  }
+
   /** retry is the not-reachable line's control: probe again. */
   private retry() {
     this.cfg = readConfig(this)
@@ -4526,15 +4535,6 @@ export class WeftDevtools extends HTMLElement {
     return n
   }
 
-  private rowOf(id: string): RunRow | undefined {
-    return this.model?.rowOf(id)
-  }
-
-  /** apiObjIs reports whether api is this panel's API object. */
-  apiObjIs(api: unknown): boolean {
-    return this.apiObj !== null && api === this.apiObj && this.isConnected
-  }
-
   /** requestView is the Request tab (E1.2, request.ts): the step
    * being read (J/K, a click, select) — its prompt, diff, chips,
    * messages, catalog, params and attempts. */
@@ -4626,60 +4626,6 @@ export class WeftDevtools extends HTMLElement {
         return box
       },
     })
-  }
-
-  /** actions is §3's row: ✎ Replay… (the drawer), ↻ Re-run (the
-   * drawer as the rerun() draft — the whole turn, its prompt, tools and
-   * model kept, its transcript edits dropped — posted only by Run after
-   * the ack preview), ⎇ Continue from
-   * the step being read. */
-  private actions(s: PanelState): HTMLElement {
-    const t = s.turn
-    if (!t) return el("div")
-    const row = el("div", "weft-actions")
-    row.append(
-      clickBtn(
-        REPLAY_OPEN,
-        () => this.go(this.model?.openExperiment(t.id, 0)),
-        { title: SHORT.replay }
-      )
-    )
-    const again = el("button", "weft-btn", "↻ Re-run", {
-      title: `the whole ${this.noun(s)} from step 0, edits dropped — Run after the ack`,
-    })
-    on(again, "click", () => {
-      this.edSync(this.edKey, true)
-      this.go(this.model?.rerun(t.id))
-    })
-    row.append(again)
-    // The step being read, by its ordinal (from_step's count).
-    const from = readStep(t.folded, s.selectedStep)
-    if (from > 0) {
-      const cont = el("button", "weft-btn", `⎇ Continue from step ${from}`, {
-        title: SHORT.replay,
-      })
-      on(cont, "click", () =>
-        this.go(this.model?.openExperiment(t.id, replayFromStep(from)))
-      )
-      row.append(cont)
-    }
-    return row
-  }
-
-  /** edPut puts (next null: drops) one edit into the drawer's command:
-   * from_step follows the edits up (the engine is lib/engine.ts's). */
-  private edPut(t: TurnView, target: ReplayEdit, next: ReplayEdit | null) {
-    const m = this.model
-    const d = m?.state.drawer
-    if (!m || !d || d.runId !== t.id) {
-      this.render(this.last)
-      return
-    }
-    const edits = putEdit(d.edits, next ?? target, !next)
-    // A fork starts at step 0: its from_step stays (the drawer holds Run).
-    const step =
-      d.thread === "fork" ? d.step : Math.max(d.step, impliedFromStep(edits))
-    m.setDraft({ edits, step })
   }
 
   /** lab is the option lab (plan F3; Studio's OptionLab): every
@@ -4847,6 +4793,44 @@ export class WeftDevtools extends HTMLElement {
     return box
   }
 
+  /** actions is §3's row: ✎ Replay… (the drawer), ↻ Re-run (the
+   * drawer as the rerun() draft — the whole turn, its prompt, tools and
+   * model kept, its transcript edits dropped — posted only by Run after
+   * the ack preview), ⎇ Continue from
+   * the step being read. */
+  private actions(s: PanelState): HTMLElement {
+    const t = s.turn
+    if (!t) return el("div")
+    const row = el("div", "weft-actions")
+    row.append(
+      clickBtn(
+        REPLAY_OPEN,
+        () => this.go(this.model?.openExperiment(t.id, 0)),
+        { title: SHORT.replay }
+      )
+    )
+    const again = el("button", "weft-btn", "↻ Re-run", {
+      title: `the whole ${this.noun(s)} from step 0, edits dropped — Run after the ack`,
+    })
+    on(again, "click", () => {
+      this.edSync(this.edKey, true)
+      this.go(this.model?.rerun(t.id))
+    })
+    row.append(again)
+    // The step being read, by its ordinal (from_step's count).
+    const from = readStep(t.folded, s.selectedStep)
+    if (from > 0) {
+      const cont = el("button", "weft-btn", `⎇ Continue from step ${from}`, {
+        title: SHORT.replay,
+      })
+      on(cont, "click", () =>
+        this.go(this.model?.openExperiment(t.id, replayFromStep(from)))
+      )
+      row.append(cont)
+    }
+    return row
+  }
+
   private edBox(
     s: PanelState,
     t: TurnView,
@@ -4990,6 +4974,40 @@ export class WeftDevtools extends HTMLElement {
         })
       )
     return box
+  }
+
+  /** diffInto appends one before → after diff under its header, or
+   * the note that sends a diff too large for the dock to Studio. */
+  private diffInto(
+    box: HTMLElement,
+    title: string,
+    before: string,
+    after: string
+  ) {
+    const cells =
+      (before.split("\n").length + 1) * (after.split("\n").length + 1)
+    if (cells > DIFF_CELLS) {
+      box.append(
+        el(
+          "div",
+          "weft-diff-h",
+          `${title}  too large for the panel — compare in Studio`
+        )
+      )
+      return
+    }
+    const rows = diffLines(before, after)
+    box.append(el("div", "weft-diff-h", `${title}  ${diffSummary(rows)}`))
+    for (const row of rows) {
+      if (row.kind === "same") continue
+      box.append(
+        el(
+          "div",
+          `weft-diff-row weft-diff-${row.kind}`,
+          `${row.kind === "add" ? "+" : "−"} ${row.text}`
+        )
+      )
+    }
   }
 
   private edCtx(s: PanelState, t: TurnView): EdCtx | undefined {
@@ -5199,38 +5217,6 @@ export class WeftDevtools extends HTMLElement {
     )
   }
 
-  /** shortcuts is §5.2's ? overlay: the keys, and the collision Q4
-   * records (Alt+W is the primary because Chrome eats Ctrl+Shift+W
-   * as close-window before any page can see it); then the words
-   * (U21.3, UX-D-22, UX-F-10): the glossary's eight core one-liners
-   * and the hand-off to Studio's Concepts for the rest. */
-  private shortcuts(): HTMLElement {
-    const box = el("div", "weft-keys")
-    const dl = el("dl")
-    for (const [k, v] of SHORTCUTS) {
-      dl.append(el("dt", "", k), el("dd", "", v))
-    }
-    const words = el("dl")
-    for (const k of CORE_TERMS) {
-      const [w, d] = SHORT[k].split(" — ")
-      words.append(el("dt", "", w), el("dd", "", d))
-    }
-    // The hand-off after the list, not in it: a <dl> holds only its
-    // term / definition groups.
-    box.append(
-      dl,
-      el("div", "weft-words", [
-        words,
-        this.studioA(
-          "",
-          "all words in Studio ⤢",
-          href(this.base, conceptLink())
-        ),
-      ])
-    )
-    return box
-  }
-
   /** edCtx is the editor for a turn: the playground's verbs, a turn
    * that is over, its transcript read (the server's bounds). */
   /** derived: the turn was built by the reader from stock spans (plan
@@ -5303,68 +5289,6 @@ export class WeftDevtools extends HTMLElement {
         )
       )
     return box
-  }
-
-  /** notes renders the honesty rules (§2): truncation badges live on
-   * the calls themselves (renderCall); these are the turn's holes from
-   * the shared table (lib/honesty.ts, as the run page's header) — the
-   * run document's (not_recorded, interrupted, derived, stripped,
-   * gap), the recorder's cuts, the gaps the walk saw, a max_tokens
-   * finish, content-off spans — each a badge with its reason and fix,
-   * and a story longer than the panel reads. */
-  private notes(t: TurnView): HTMLElement {
-    const box = el("div")
-    box.setAttribute("data-weft-turn-holes", "")
-    const row = this.rowOf(t.id)
-    const holes = turnHoles(t, row)
-    // The runs its calls started (U14): cut, hidden or unread — never
-    // merged into a badge of the run's own (mergeHoles keeps one each).
-    for (const m of [...holes, ...linkedHoles(t.doc ?? {})])
-      box.append(holeLine(m))
-    if (t.capped) {
-      box.append(
-        el(
-          "div",
-          "weft-note weft-warn",
-          `a long run: the first ${MAX_EVENT_PAGES * 500} events are shown — the whole story is in Studio (⤢)`
-        )
-      )
-    }
-    return box
-  }
-
-  /** diffInto appends one before → after diff under its header, or
-   * the note that sends a diff too large for the dock to Studio. */
-  private diffInto(
-    box: HTMLElement,
-    title: string,
-    before: string,
-    after: string
-  ) {
-    const cells =
-      (before.split("\n").length + 1) * (after.split("\n").length + 1)
-    if (cells > DIFF_CELLS) {
-      box.append(
-        el(
-          "div",
-          "weft-diff-h",
-          `${title}  too large for the panel — compare in Studio`
-        )
-      )
-      return
-    }
-    const rows = diffLines(before, after)
-    box.append(el("div", "weft-diff-h", `${title}  ${diffSummary(rows)}`))
-    for (const row of rows) {
-      if (row.kind === "same") continue
-      box.append(
-        el(
-          "div",
-          `weft-diff-row weft-diff-${row.kind}`,
-          `${row.kind === "add" ? "+" : "−"} ${row.text}`
-        )
-      )
-    }
   }
 
   private turnRow(
@@ -5450,6 +5374,74 @@ export class WeftDevtools extends HTMLElement {
       role: "listitem",
       "data-key": r.id,
     })
+  }
+
+  /** shortcuts is §5.2's ? overlay: the keys, and the collision Q4
+   * records (Alt+W is the primary because Chrome eats Ctrl+Shift+W
+   * as close-window before any page can see it); then the words
+   * (U21.3, UX-D-22, UX-F-10): the glossary's eight core one-liners
+   * and the hand-off to Studio's Concepts for the rest. */
+  private shortcuts(): HTMLElement {
+    const box = el("div", "weft-keys")
+    const dl = el("dl")
+    for (const [k, v] of SHORTCUTS) {
+      dl.append(el("dt", "", k), el("dd", "", v))
+    }
+    const words = el("dl")
+    for (const k of CORE_TERMS) {
+      const [w, d] = SHORT[k].split(" — ")
+      words.append(el("dt", "", w), el("dd", "", d))
+    }
+    // The hand-off after the list, not in it: a <dl> holds only its
+    // term / definition groups.
+    box.append(
+      dl,
+      el("div", "weft-words", [
+        words,
+        this.studioA(
+          "",
+          "all words in Studio ⤢",
+          href(this.base, conceptLink())
+        ),
+      ])
+    )
+    return box
+  }
+
+  /** notes renders the honesty rules (§2): truncation badges live on
+   * the calls themselves (renderCall); these are the turn's holes from
+   * the shared table (lib/honesty.ts, as the run page's header) — the
+   * run document's (not_recorded, interrupted, derived, stripped,
+   * gap), the recorder's cuts, the gaps the walk saw, a max_tokens
+   * finish, content-off spans — each a badge with its reason and fix,
+   * and a story longer than the panel reads. */
+  private notes(t: TurnView): HTMLElement {
+    const box = el("div")
+    box.setAttribute("data-weft-turn-holes", "")
+    const row = this.rowOf(t.id)
+    const holes = turnHoles(t, row)
+    // The runs its calls started (U14): cut, hidden or unread — never
+    // merged into a badge of the run's own (mergeHoles keeps one each).
+    for (const m of [...holes, ...linkedHoles(t.doc ?? {})])
+      box.append(holeLine(m))
+    if (t.capped) {
+      box.append(
+        el(
+          "div",
+          "weft-note weft-warn",
+          `a long run: the first ${MAX_EVENT_PAGES * 500} events are shown — the whole story is in Studio (⤢)`
+        )
+      )
+    }
+    return box
+  }
+
+  /** turnish: the list is one conversation's turns — a public id and
+   * no tag, agent or flow filter; else it is a page of runs (U22), and
+   * the header, the list and every row say "run". */
+  private turnish(): boolean {
+    const m = this.model
+    return !!m?.publicId && !Object.keys(m.q).length
   }
 
   /** readManifest is the registered config the Request tab's first
@@ -5922,6 +5914,22 @@ export class WeftDevtools extends HTMLElement {
     return [n2]
   }
 
+  /** edPut puts (next null: drops) one edit into the drawer's command:
+   * from_step follows the edits up (the engine is lib/engine.ts's). */
+  private edPut(t: TurnView, target: ReplayEdit, next: ReplayEdit | null) {
+    const m = this.model
+    const d = m?.state.drawer
+    if (!m || !d || d.runId !== t.id) {
+      this.render(this.last)
+      return
+    }
+    const edits = putEdit(d.edits, next ?? target, !next)
+    // A fork starts at step 0: its from_step stays (the drawer holds Run).
+    const step =
+      d.thread === "fork" ? d.step : Math.max(d.step, impliedFromStep(edits))
+    m.setDraft({ edits, step })
+  }
+
   /** rawView is the Raw tab (D4): the turn's records as one JSON tree
    * — {doc, events, transcript, spans}, and requests when the panel
    * holds them — built once per change of what it holds. */
@@ -6227,23 +6235,22 @@ export class WeftDevtools extends HTMLElement {
     )
     const body = el("div", "weft-step-b")
     const read = tokenScopeOf(this.cfg.token) === "read"
-    const line = refusalLine(
-      refusalWords(
-        kind,
-        run,
-        s.runtimes,
-        read,
-        refused,
-        act && !read ? s.rtErr : "",
-        s.meta
-          ? {
-              capabilities: s.meta.capabilities,
-              capabilities_off: s.meta.capabilities_off,
-              link: s.meta.runtime_link,
-            }
-          : undefined
-      )
+    const why = refusalWords(
+      kind,
+      run,
+      s.runtimes,
+      read,
+      refused,
+      act && !read ? s.rtErr : "",
+      s.meta
+        ? {
+            capabilities: s.meta.capabilities,
+            capabilities_off: s.meta.capabilities_off,
+            link: s.meta.runtime_link,
+          }
+        : undefined
     )
+    const line = refusalLine(why)
     const waiting = kind === "read-only" && act && !s.rtRead && !refused
     // A failed runtimes read: its error, no verdict, no verbs.
     const unread = kind === "read-only" && act && !read && !!s.rtErr && !refused
@@ -6320,25 +6327,12 @@ export class WeftDevtools extends HTMLElement {
         }),
         // A refusal that names a runtime: Studio's runtimes page
         // (UX-F-03), beside the line, not in it.
-        /runtime/.test(line)
+        why.rt
           ? this.studioA("", RUNS_IN.manage, href(this.base, runtimesLink()))
           : ""
       )
     box.append(body)
     return box
-  }
-
-  /** noun is the list's word (UX-F-13, lib/glossary.ts TURN): "turn"
-   * only for one conversation's turns whose runs all have a session (a
-   * public id mixing harness runs says "run"), or a session scope whose
-   * turns have not loaded yet; a public id's harness runs, a page of runs and the fallback say
-   * "run". The header, the list, the filter and the picker read it. */
-  private noun(s: PanelState): "turn" | "run" {
-    // A session scope says "turn" before its turns load (U23.2-fix).
-    return this.turnish() &&
-      (s.turns.length ? s.turns.every((r) => r.session_id) : s.session)
-      ? "turn"
-      : "run"
   }
 
   /** appSaid is one app-turn verb's state under its call: in flight,
@@ -6366,6 +6360,19 @@ export class WeftDevtools extends HTMLElement {
         })
       )
     return box
+  }
+
+  /** studioLink is the Studio page of a run — at a step, given its
+   * ordinal — through lib/links.ts (G1): the link ⤢ would carry,
+   * never with a token. "" before the panel knows its endpoint. */
+  studioLink(runId: string, step?: number): string {
+    const base = this.base || this.cfg.endpoint
+    if (!base || typeof runId !== "string" || !runId) return ""
+    try {
+      return studioLink(base, runId, stepOrdinal(step))
+    } catch {
+      return ""
+    }
   }
 
   /** decision is one decided call's outcome (U13.2, lib/decisions.ts):
@@ -6524,6 +6531,19 @@ export class WeftDevtools extends HTMLElement {
     }
     approvals.append(abody)
     return approvals
+  }
+
+  /** noun is the list's word (UX-F-13, lib/glossary.ts TURN): "turn"
+   * only for one conversation's turns whose runs all have a session (a
+   * public id mixing harness runs says "run"), or a session scope whose
+   * turns have not loaded yet; a public id's harness runs, a page of runs and the fallback say
+   * "run". The header, the list, the filter and the picker read it. */
+  private noun(s: PanelState): "turn" | "run" {
+    // A session scope says "turn" before its turns load (U23.2-fix).
+    return this.turnish() &&
+      (s.turns.length ? s.turns.every((r) => r.session_id) : s.session)
+      ? "turn"
+      : "run"
   }
 }
 
@@ -6810,81 +6830,6 @@ function verb(
   return b
 }
 
-function shortId(id: string): string {
-  const parts = id.split("/")
-  return parts[parts.length - 1] || id
-}
-
-/** The Request tab asks for a manifest it could not read again after
- * this long (a 404 before a runtime registered, a restart). */
-export const MANIFEST_RETRY_MS = 30_000
-
-/** linkedStep is the step ⤢ carries into Studio (G1): the one the
- * user is reading, else — while the turn runs — the running one (its
- * last step). Either is the step's ordinal (its index as the loop
- * counts it, lib/links.ts), never an event's position. */
-export function linkedStep(s: PanelState): number | undefined {
-  if (s.selectedStep != null) return s.selectedStep
-  const t = s.turn
-  if (!t || t.id !== s.selected) return undefined
-  const row = turnsAndExperiments(s).find((r) => r.id === t.id)
-  const running = (row?.status ?? t.doc?.status) === "running"
-  return running ? t.folded.steps.at(-1)?.index : undefined
-}
-
-/** The loop in one line (U34, WEFT-LOOP-GRAPH.md §4): lib/loopgraph.ts's
- * model over the Timeline's rows, Studio's counts — each tool with its
- * marks (a click selects its first call's step, as a step card's does),
- * the end in the U3 words, and "graph ⤢" to Studio's loop at the
- * selection. */
-function loopLine(
-  t: TurnView,
-  by: string | undefined,
-  status: string | undefined,
-  sel: number | null | undefined,
-  base: string,
-  pick: (step: number) => void
-): HTMLElement | null {
-  const g = loopCore(turnRows(t).rows, t.id, {
-    stoppedBy: by,
-    status,
-    pending: t.folded.pending,
-  })
-  if (g.last === undefined) return null
-  const box = el("div", "weft-loop", `${LOOP_LABEL} ◆ ⇄`)
-  for (const c of loopChips(g)) {
-    const b = el("button", "weft-btn", c.text, {
-      type: "button",
-      "data-tone": c.tone,
-    })
-    if (c.step !== undefined) on(b, "click", () => pick(c.step!))
-    box.append(b)
-  }
-  box.append(
-    el("a", "weft-btn", GRAPH_HANDOFF, {
-      href: href(
-        base,
-        runPage(t.id, { scale: "graph", step: sel ?? undefined })
-      ),
-      ...NEW_TAB,
-      "data-weft-handoff": t.id,
-    })
-  )
-  return box
-}
-
-/** A turn's run tree (lib/waterfall.ts): the Timeline's rows, and the
- * loop line's. */
-const turnRows = (t: TurnView) =>
-  waterfallRows({
-    runId: t.id,
-    status: t.doc?.status,
-    spans: t.spans,
-    fold: t.folded,
-    total: (t.events.at(-1)?.pos ?? 0) + 1,
-    agents: new Map((t.doc?.children ?? []).map((c) => [c.id, c.agent])),
-  })
-
 /** answerBlock is the step read, answer first (U10.2, audit §6.3):
  * Studio's drawer at panel width — lib/summarize.ts's verdict, sent,
  * replied, tools ran and then lines, Studio's words — its Logs and Raw
@@ -6955,6 +6900,83 @@ function answerBlock(
   return box
 }
 
+/** The Request tab asks for a manifest it could not read again after
+ * this long (a 404 before a runtime registered, a restart). */
+export const MANIFEST_RETRY_MS = 30_000
+
+/** linkedStep is the step ⤢ carries into Studio (G1): the one the
+ * user is reading, else — while the turn runs — the running one (its
+ * last step). Either is the step's ordinal (its index as the loop
+ * counts it, lib/links.ts), never an event's position. */
+export function linkedStep(s: PanelState): number | undefined {
+  if (s.selectedStep != null) return s.selectedStep
+  const t = s.turn
+  if (!t || t.id !== s.selected) return undefined
+  const row = turnsAndExperiments(s).find((r) => r.id === t.id)
+  const running = (row?.status ?? t.doc?.status) === "running"
+  return running ? t.folded.steps.at(-1)?.index : undefined
+}
+
+/** lastStep is the highest step the request record holds a row of. */
+function lastStep(req: PanelRequests): number {
+  let n = -1
+  for (const k of req.steps.keys()) if (k > n) n = k
+  return n
+}
+
+/** A turn's run tree (lib/waterfall.ts): the Timeline's rows, and the
+ * loop line's. */
+const turnRows = (t: TurnView) =>
+  waterfallRows({
+    runId: t.id,
+    status: t.doc?.status,
+    spans: t.spans,
+    fold: t.folded,
+    total: (t.events.at(-1)?.pos ?? 0) + 1,
+    agents: new Map((t.doc?.children ?? []).map((c) => [c.id, c.agent])),
+  })
+
+/** The loop in one line (U34, WEFT-LOOP-GRAPH.md §4): lib/loopgraph.ts's
+ * model over the Timeline's rows, Studio's counts — each tool with its
+ * marks (a click selects its first call's step, as a step card's does),
+ * the end in the U3 words, and "graph ⤢" to Studio's loop at the
+ * selection. */
+function loopLine(
+  t: TurnView,
+  by: string | undefined,
+  status: string | undefined,
+  sel: number | null | undefined,
+  base: string,
+  pick: (step: number) => void
+): HTMLElement | null {
+  const g = loopCore(turnRows(t).rows, t.id, {
+    stoppedBy: by,
+    status,
+    pending: t.folded.pending,
+  })
+  if (g.last === undefined) return null
+  const box = el("div", "weft-loop", `${LOOP_LABEL} ◆ ⇄`)
+  for (const c of loopChips(g)) {
+    const b = el("button", "weft-btn", c.text, {
+      type: "button",
+      "data-tone": c.tone,
+    })
+    if (c.step !== undefined) on(b, "click", () => pick(c.step!))
+    box.append(b)
+  }
+  box.append(
+    el("a", "weft-btn", GRAPH_HANDOFF, {
+      href: href(
+        base,
+        runPage(t.id, { scale: "graph", step: sel ?? undefined })
+      ),
+      ...NEW_TAB,
+      "data-weft-handoff": t.id,
+    })
+  )
+  return box
+}
+
 /** Where a fold is drawn: the Studio endpoint (the hand-off links),
  * and — inside a subagent expander — the child's own view, whose
  * request record and holes its steps show, and below which nothing
@@ -7000,13 +7022,6 @@ export interface EdCtx {
   users: UserMessage[]
   /** The highest from_step the server accepts (null: unknown). */
   max: number | null
-}
-
-/** lastStep is the highest step the request record holds a row of. */
-function lastStep(req: PanelRequests): number {
-  let n = -1
-  for (const k of req.steps.keys()) if (k > n) n = k
-  return n
 }
 
 /** openTab opens url in a new tab; a blocked popup throws nothing into
@@ -7057,17 +7072,6 @@ export function readStep(view: FoldedRun, selected: number | null): number {
   return selected != null && view.steps.some((st) => st.index === selected)
     ? selected
     : -1
-}
-
-/** handOff is "open in Studio" for a child run: its run page
- * (studioLink, lib/links.ts's runLink). */
-function handOff(endpoint: string, runId: string): HTMLElement {
-  return el("a", "weft-btn", "open in Studio ⤢", {
-    href: studioLink(endpoint, runId),
-    ...NEW_TAB,
-    title: `open the child run ${runId} in Studio`,
-    "data-weft-handoff": runId,
-  })
 }
 
 /** requestLine is the step's request (ADR 0028 §10, the Studio run
@@ -7255,6 +7259,17 @@ export function renderFolded(
   return wrap
 }
 
+/** handOff is "open in Studio" for a child run: its run page
+ * (studioLink, lib/links.ts's runLink). */
+function handOff(endpoint: string, runId: string): HTMLElement {
+  return el("a", "weft-btn", "open in Studio ⤢", {
+    href: studioLink(endpoint, runId),
+    ...NEW_TAB,
+    title: `open the child run ${runId} in Studio`,
+    "data-weft-handoff": runId,
+  })
+}
+
 function renderCall(
   call: FoldedToolCall,
   stepIndex: number,
@@ -7419,102 +7434,6 @@ function renderCall(
   return box
 }
 
-/** studioPlaygroundLink builds the §2 hand-off: "compare in Studio"
- * with the context carried over — the run, the step being read, and
- * the drawer's current overrides — so nothing is retyped (the parity
- * rule's documented hand-off for the Studio-only surfaces). Every
- * parameter rides the URL fragment (/playground#run=…): a prompt can be
- * long and is the app's content — the fragment is never sent to a
- * server, never in its logs or a Referer, and no request line bounds
- * it. Studio's /playground reads the fragment (then strips it). */
-export function studioPlaygroundLink(
-  endpoint: string,
-  draft: ExperimentDraft | null,
-  step: number | null
-): string {
-  const p: PlaygroundHandoff = {}
-  if (draft) {
-    if (draft.runId) p.run = draft.runId
-    if (step != null && step > 0) p.step = step
-    // Only what changed (§10.1): Studio pre-fills the registered
-    // prompt itself, and a prompt is long for a URL.
-    if (
-      draft.instructions &&
-      draft.instructions !== draft.registeredInstructions
-    )
-      p.instructions = draft.instructions
-    const kept = Object.entries(draft.tools)
-      .filter(([, enabled]) => enabled)
-      .map(([name]) => name)
-    if (kept.length && kept.length < Object.keys(draft.tools).length)
-      p.tools = kept.join(",")
-    if (draft.model) p.model = draft.model
-    if (draft.thinking) p.thinking = draft.thinking
-    if (draft.input && draft.step === 0) p.input = draft.input
-    // The run's shape rides along too (the non-default values): a
-    // scripted, parked or forked experiment must not open in Studio
-    // as a live substitute ephemeral one.
-    if (draft.engine === "scripted") p.engine = draft.engine
-    if (draft.sideEffects && draft.sideEffects !== "substitute")
-      p.side_effects = draft.sideEffects
-    if (draft.thread === "fork") p.thread = draft.thread
-    // …and who runs it: the agent and the runtime the drawer opened on.
-    if (draft.agent) p.agent = draft.agent
-    if (draft.runtimeId) p.runtime = draft.runtimeId
-    // …and the option lab and the edits: the same command, not a cousin.
-    p.lab = labHandoff(draft.lab)
-    p.edits = editsHandoff(draft.edits)
-  }
-  return href(endpoint, playgroundLink(p))
-}
-
-export function catalogAt(
-  req: PanelRequests | null | undefined,
-  ordinal: number,
-  served: boolean,
-  /** The transcript's step count (null: unknown) and whether the run
-   * is still running: a missing row is said by why it is missing. */
-  count: number | null = null,
-  running = false
-): AckCatalog {
-  if (!req)
-    return served
-      ? { tools: null, loading: true }
-      : {
-          tools: null,
-          hole: catalogReadError("the server has no request route"),
-        }
-  if (req.badge)
-    return {
-      tools: null,
-      hole: { hole: req.badge, reason: req.reason, fix: req.fix },
-    }
-  if (req.error) return { tools: null, hole: catalogReadError(req.error) }
-  const rows = req.steps.get(ordinal)?.rows
-  const row = rows?.[rows.length - 1]
-  if (!row) {
-    if (req.truncated && ordinal > lastStep(req))
-      return {
-        tools: null,
-        hole: catalogCapped(MAX_REQUEST_PAGES * REQUEST_PAGE),
-      }
-    if (count !== null && ordinal >= count)
-      return { tools: null, hole: catalogNotRecorded() }
-    if (running) return { tools: null, hole: catalogNotStored() }
-    return {
-      tools: null,
-      hole: { hole: "gap", reason: REQUEST_NO_RECORD_REASON },
-    }
-  }
-  const c = row.tools
-  if (!c)
-    return row.catalog_hash
-      ? { tools: null, hole: { hole: "gap" } }
-      : { tools: [], none: true }
-  if (isHoleRef(c)) return { tools: null, hole: { hole: c.badge } }
-  return { tools: c.tools }
-}
-
 /** renderTimeline is the Timeline tab (D4, U8.3): lib/waterfall.ts's
  * run tree — Studio's run page's rows, one level deep: the run, its
  * steps, their model calls and tools (and the spans under them), each
@@ -7648,6 +7567,107 @@ export function renderTimeline(
   }
   box.append(wrap)
   return box
+}
+
+/** studioPlaygroundLink builds the §2 hand-off: "compare in Studio"
+ * with the context carried over — the run, the step being read, and
+ * the drawer's current overrides — so nothing is retyped (the parity
+ * rule's documented hand-off for the Studio-only surfaces). Every
+ * parameter rides the URL fragment (/playground#run=…): a prompt can be
+ * long and is the app's content — the fragment is never sent to a
+ * server, never in its logs or a Referer, and no request line bounds
+ * it. Studio's /playground reads the fragment (then strips it). */
+export function studioPlaygroundLink(
+  endpoint: string,
+  draft: ExperimentDraft | null,
+  step: number | null
+): string {
+  const p: PlaygroundHandoff = {}
+  if (draft) {
+    if (draft.runId) p.run = draft.runId
+    if (step != null && step > 0) p.step = step
+    // Only what changed (§10.1): Studio pre-fills the registered
+    // prompt itself, and a prompt is long for a URL.
+    if (
+      draft.instructions &&
+      draft.instructions !== draft.registeredInstructions
+    )
+      p.instructions = draft.instructions
+    const kept = Object.entries(draft.tools)
+      .filter(([, enabled]) => enabled)
+      .map(([name]) => name)
+    if (kept.length && kept.length < Object.keys(draft.tools).length)
+      p.tools = kept.join(",")
+    if (draft.model) p.model = draft.model
+    if (draft.thinking) p.thinking = draft.thinking
+    if (draft.input && draft.step === 0) p.input = draft.input
+    // The run's shape rides along too (the non-default values): a
+    // scripted, parked or forked experiment must not open in Studio
+    // as a live substitute ephemeral one.
+    if (draft.engine === "scripted") p.engine = draft.engine
+    if (draft.sideEffects && draft.sideEffects !== "substitute")
+      p.side_effects = draft.sideEffects
+    if (draft.thread === "fork") p.thread = draft.thread
+    // …and who runs it: the agent and the runtime the drawer opened on.
+    if (draft.agent) p.agent = draft.agent
+    if (draft.runtimeId) p.runtime = draft.runtimeId
+    // …and the option lab and the edits: the same command, not a cousin.
+    p.lab = labHandoff(draft.lab)
+    p.edits = editsHandoff(draft.edits)
+  }
+  return href(endpoint, playgroundLink(p))
+}
+
+export function catalogAt(
+  req: PanelRequests | null | undefined,
+  ordinal: number,
+  served: boolean,
+  /** The transcript's step count (null: unknown) and whether the run
+   * is still running: a missing row is said by why it is missing. */
+  count: number | null = null,
+  running = false
+): AckCatalog {
+  if (!req)
+    return served
+      ? { tools: null, loading: true }
+      : {
+          tools: null,
+          hole: catalogReadError("the server has no request route"),
+        }
+  if (req.badge)
+    return {
+      tools: null,
+      hole: { hole: req.badge, reason: req.reason, fix: req.fix },
+    }
+  if (req.error) return { tools: null, hole: catalogReadError(req.error) }
+  const rows = req.steps.get(ordinal)?.rows
+  const row = rows?.[rows.length - 1]
+  if (!row) {
+    if (req.truncated && ordinal > lastStep(req))
+      return {
+        tools: null,
+        hole: catalogCapped(MAX_REQUEST_PAGES * REQUEST_PAGE),
+      }
+    if (count !== null && ordinal >= count)
+      return { tools: null, hole: catalogNotRecorded() }
+    if (running) return { tools: null, hole: catalogNotStored() }
+    return {
+      tools: null,
+      hole: { hole: "gap", reason: REQUEST_NO_RECORD_REASON },
+    }
+  }
+  const c = row.tools
+  if (!c)
+    return row.catalog_hash
+      ? { tools: null, hole: { hole: "gap" } }
+      : { tools: [], none: true }
+  if (isHoleRef(c)) return { tools: null, hole: { hole: c.badge } }
+  return { tools: c.tools }
+}
+
+function shortId(id: string): string {
+  const parts = id.split("/")
+  return parts[parts.length - 1] || id
 }
 
 function renderStep(
@@ -7826,6 +7846,17 @@ function renderStep(
   return card
 }
 
+/** usageLine renders usage with the cached/reasoning splits §2 names. */
+function usageLine(u: Usage): string {
+  const parts = [tokenPair(u.input_tokens, u.output_tokens)]
+  if (u.cached_input_tokens)
+    parts.push(`${tokens(u.cached_input_tokens)} cached`)
+  if (u.reasoning_tokens) parts.push(`${tokens(u.reasoning_tokens)} reasoning`)
+  if (u.cache_write_tokens)
+    parts.push(`${tokens(u.cache_write_tokens)} cache-write`)
+  return parts.join(" · ")
+}
+
 /** sourceLabel takes the turn back out of a `Replay 1 of t3` label (the
  * diff header reads "diff vs t3"). */
 function sourceLabel(label: string): string {
@@ -7869,17 +7900,6 @@ function loadedOnly(
   return s.turnsCapped
     ? `the ${n} loaded ${what}${n > 1 ? "s" : ""} only — load older ${older}s for more`
     : undefined
-}
-
-/** usageLine renders usage with the cached/reasoning splits §2 names. */
-function usageLine(u: Usage): string {
-  const parts = [tokenPair(u.input_tokens, u.output_tokens)]
-  if (u.cached_input_tokens)
-    parts.push(`${tokens(u.cached_input_tokens)} cached`)
-  if (u.reasoning_tokens) parts.push(`${tokens(u.reasoning_tokens)} reasoning`)
-  if (u.cache_write_tokens)
-    parts.push(`${tokens(u.cache_write_tokens)} cache-write`)
-  return parts.join(" · ")
 }
 
 /** boundsOf is the server's reading of a run's transcript (its step

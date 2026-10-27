@@ -250,27 +250,22 @@ export function attemptTag(
   )
 }
 
-/** fileWords is a file part as a chip (UX-S1-13): "file image/png ·
- * url", "file text/plain · 14 B" — the media type and size, never the
- * bytes. */
-export function fileWords(p: {
-  media_type?: string
-  data?: string
-  url?: string
-}): string {
-  const d = p.data?.replace(/=+$/, "")
-  const size = d
-    ? `${Math.floor((d.length * 3) / 4)} B`
-    : p.url
-      ? "url"
-      : "no data"
-  return `file ${p.media_type || "?"} · ${size}`
-}
-
 /** preparedChip is the step's PrepareStep chip (O9, UX-E-14): the parts
  * its PrepareStep chain changed, from the request record's prepared. */
 export function preparedChip(p: string[] | undefined): string | null {
   return p?.length ? `PrepareStep: ${p.join(", ")}` : null
+}
+
+/** thinkingWords is the request's thinking with the adapter's wire
+ * (O16, UX-S2-09): "low → reasoning_effort". */
+export function thinkingWords(t?: {
+  level: string
+  budget?: number
+  wire?: string
+}): string {
+  return t
+    ? `${t.level}${t.budget ? ` · budget ${t.budget}` : ""}${t.wire ? ` → ${t.wire}` : ""}`
+    : "adapter default"
 }
 
 /** overrideTitle names an experiment's overridden knobs (UX-S5b-03):
@@ -329,16 +324,21 @@ export function paramsOverride(v: unknown): string | null {
   return `replaced whole: ${out.join(", ") || "every knob the adapter's default"}`
 }
 
-/** thinkingWords is the request's thinking with the adapter's wire
- * (O16, UX-S2-09): "low → reasoning_effort". */
-export function thinkingWords(t?: {
-  level: string
-  budget?: number
-  wire?: string
+/** fileWords is a file part as a chip (UX-S1-13): "file image/png ·
+ * url", "file text/plain · 14 B" — the media type and size, never the
+ * bytes. */
+export function fileWords(p: {
+  media_type?: string
+  data?: string
+  url?: string
 }): string {
-  return t
-    ? `${t.level}${t.budget ? ` · budget ${t.budget}` : ""}${t.wire ? ` → ${t.wire}` : ""}`
-    : "adapter default"
+  const d = p.data?.replace(/=+$/, "")
+  const size = d
+    ? `${Math.floor((d.length * 3) / 4)} B`
+    : p.url
+      ? "url"
+      : "no data"
+  return `file ${p.media_type || "?"} · ${size}`
 }
 
 /** attachmentsOf lists the file parts of the turn's prompt — the last

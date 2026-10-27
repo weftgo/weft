@@ -566,6 +566,9 @@ describe("the failed derived run (one step, its root span in error)", () => {
     // (said once, UX-S4-02), the chip's tooltip carries it.
     const note = document.querySelector("[data-derived-note='waterfall']")!
     expect(note.textContent).toContain(DERIVED_WORDS.waterfall)
+    // No layout toggle over the note (P020.2-fix): there is no
+    // waterfall to lay out.
+    expect(screen.queryByRole("button", { name: /^layout: / })).toBeNull()
     saysStock(
       note.querySelector("[data-hole='derived']")!.getAttribute("title"),
       "trace note chip"

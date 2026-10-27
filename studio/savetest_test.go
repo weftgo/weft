@@ -361,8 +361,64 @@ func TestSaveAsTestCompilesWithoutTools(t *testing.T) {
 		t.Errorf("the tools skeleton lacks its stub:\n%s", s)
 	}
 
+	// The other branches, hand-built (P020.2-fix): a non-prompt input,
+	// a compacted step 0 and step 1, rewritten steps (with per-step
+	// catalogs), a plain steer and a steer that needs decodeMessage —
+	// each with and without tools. go vet compiles every one.
+	u, a := core.User("hi"), core.Message{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: "ok"}}}
+	two := core.Message{Role: core.RoleUser, Content: []core.Part{core.TextPart{Text: "one"}, core.TextPart{Text: "two"}}}
+	note := &compactedNote{Index: 1, Step: 0, FromSeq: 0, ToSeq: 1, Hash: "h", Entries: 1}
+	cases := map[string][]fixtureStep{
+		"nonprompt":  {{plain: []core.Message{u, core.User("again")}, reply: a}},
+		"compacted0": {{plain: []core.Message{u}, reply: a, compacted: note}, {plain: []core.Message{u, a}, reply: a}},
+		"compacted1": {{plain: []core.Message{u}, reply: a}, {plain: []core.Message{u, a}, reply: a, compacted: note}},
+		"rewritten": {
+			{plain: []core.Message{u}, reply: a},
+			{plain: []core.Message{core.User("rewritten")}, reply: a},
+			{plain: []core.Message{core.User("rewritten"), a}, reply: a},
+		},
+		"steer":       {{plain: []core.Message{u}, reply: a}, {plain: []core.Message{u, a, core.User("steered")}, reply: a}},
+		"steerdecode": {{plain: []core.Message{u}, reply: a}, {plain: []core.Message{u, a, two}, reply: a}},
+	}
+	dirs := []string{"./plain", "./tools"}
+	for name, base := range cases {
+		for _, withTools := range []bool{false, true} {
+			steps := slices.Clone(base)
+			set := &fixtureSet{steps: steps, last: a, system: "You are a support agent."}
+			for i := range steps {
+				steps[i].key.Messages = steps[i].plain
+				if withTools {
+					// Step 0 offers one tool, the later steps two: a
+					// per-step catalog (PrepareStep's req.Tools).
+					steps[i].key.Tools = []string{"lookup_order"}
+					if i > 0 {
+						steps[i].key.Tools = []string{"lookup_order", "refund"}
+					}
+				}
+				set.files = append(set.files, fixtureFile{Name: fmt.Sprintf("%05d-x.json", i+1)})
+			}
+			src, err := replaySkeleton{runID: "r_" + name, agent: "orders", set: set}.render()
+			if err != nil {
+				t.Fatalf("%s (tools %v): render: %v", name, withTools, err)
+			}
+			dir := fmt.Sprintf("hb_%s_%v", name, withTools)
+			if err := os.MkdirAll(filepath.Join(mod, dir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			write(filepath.Join(dir, "orders_replay_test.go"), string(src))
+			dirs = append(dirs, "./"+dir)
+		}
+	}
+	if s, err := os.ReadFile(filepath.Join(mod, "hb_steerdecode_false", "orders_replay_test.go")); err != nil || !strings.Contains(string(s), "decodeMessage(") {
+		t.Errorf("the decode case does not decode (%v):\n%s", err, s)
+	}
+
 	for _, verb := range []string{"vet", "test"} {
-		cmd := exec.Command(gobin, verb, "./plain", "./tools")
+		pkgs := dirs
+		if verb == "test" {
+			pkgs = dirs[:2] // the hand-built ones have no fixtures to replay
+		}
+		cmd := exec.Command(gobin, append([]string{verb}, pkgs...)...)
 		cmd.Dir = mod
 		cmd.Env = append(os.Environ(),
 			"GOWORK="+filepath.Join(mod, "go.work"), "GOFLAGS=", "GOPROXY=off", "GOTOOLCHAIN=local",

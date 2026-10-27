@@ -743,7 +743,11 @@ function RunTableRow({
           ) : null}
         </TableCell>
         <TableCell
-          className="max-w-0 min-[1360px]:max-w-64 sm:max-w-56"
+          // Value-sorted arbitrary steps only (P020.2-fix): a named
+          // sm: step sorts after them in Tailwind's output and wins at
+          // every width. 14rem again from 1536 px, where the session
+          // and model columns arrive; 20rem from 1680 px.
+          className="max-w-0 min-[640px]:max-w-56 min-[1360px]:max-w-64 min-[1536px]:max-w-56 min-[1680px]:max-w-80"
           style={depth ? { paddingLeft: `${0.5 + depth * 1.25}rem` } : {}}
         >
           <div className="flex min-w-0 items-center gap-1.5">
@@ -818,7 +822,7 @@ function RunTableRow({
             <span className="text-faint">—</span>
           )}
         </TableCell>
-        <TableCell className={`max-w-36 ${COL.model}`}>
+        <TableCell className={`max-w-32 ${COL.model}`}>
           <Badge
             variant="outline"
             className="max-w-full truncate font-mono text-[11px] font-normal"

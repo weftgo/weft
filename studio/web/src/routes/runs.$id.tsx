@@ -1737,6 +1737,10 @@ function RunPage() {
         }
       : null
 
+  // The toggle ends the view's header row when there is no step strip
+  // and the waterfall is drawn (not the derived note).
+  const toggleInRow =
+    view === "waterfall" && flow.length === 0 && !(derived && !haveTime)
   // The waterfall's layout toggle: beside the step strip, or ending the
   // view's header row when there is no strip (P020.2).
   const layoutToggle = (
@@ -2002,14 +2006,17 @@ function RunPage() {
                 keys
               </span>
               {stream.loading ? (
-                <span className="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-faint">
+                <span
+                  className={`flex items-center gap-1.5 font-mono text-[11px] text-faint ${toggleInRow ? "" : "ml-auto"}`}
+                >
                   <Spinner className="size-3" /> loading events…
                 </span>
               ) : null}
               {/* No step strip (a derived run): the layout toggle ends
                   this row instead of standing alone over the waterfall
-                  (P020.2). */}
-              {view === "waterfall" && flow.length === 0 ? (
+                  (P020.2); none while the derived note stands in for
+                  the waterfall. The spinner then sits before it. */}
+              {toggleInRow ? (
                 <span className="ml-auto">{layoutToggle}</span>
               ) : null}
             </div>

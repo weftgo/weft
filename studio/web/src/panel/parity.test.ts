@@ -3648,7 +3648,7 @@ describe("a resume and an experiment on both surfaces (U6-fix)", () => {
       "s_01-t4": `● succeeded t4 · 1 step · 811 ms · ${RESUME}`,
       // t4 resumed t3 (U1): its word is the decided park's.
       "s_01-t3": `● parked → t4 t3 · 1 step · 1.0 s · ${PROMPT}`,
-      pg_x1: "↻ replay of t3 · step 0 · scripted · ● failed · 1 step · 2.5 s",
+      pg_x1: "● failed · 1 step · 2.5 s · ↻ replay of t3 · step 0 · scripted",
     })
     const rows = Object.fromEntries(
       all(el, ".weft-turn").map((r) => [

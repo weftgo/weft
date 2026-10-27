@@ -5198,8 +5198,8 @@ export class WeftDevtools extends HTMLElement {
     for (const r of rows) {
       // What the user recognises (U6): "● parked t3 How many units… ·
       // 2 steps · 811ms" (a resume in turnTitle's words, as Studio's
-      // session page); an experiment in its card's order, "↻ replay of
-      // t3 · scripted · ● failed · 2 steps · 811ms". The id is the
+      // session page); an experiment "● failed · 2 steps · 811ms · ↻
+      // replay of t3 · scripted". The id is the
       // option's title only.
       const t = turnTitle(prevTurn(r, s.turns), r)
       const tail = `${stepCount(r.steps)} · ${tookOf(r)}`
@@ -5208,9 +5208,9 @@ export class WeftDevtools extends HTMLElement {
       option(
         sel,
         line
-          ? `${line} · ${engineWord(r)} · ● ${this.st(r).word} · ${tail}`
-          : // The tail before the title (P020.2): a narrow select cuts
-            // the title, never "· 3 st".
+          ? `● ${this.st(r).word} · ${tail} · ${line} · ${engineWord(r)}`
+          : // The tail before the title or the lineage (P020.2): a
+            // narrow select cuts those, never "· 3 st".
             `${["●", this.st(r).word, turnLabel(r)].filter(Boolean).join(" ")} · ${tail} · ${clipTitle(t.text)}`,
         { value: r.id, "data-key": r.id, title: `${r.id}\n${t.full}` },
         r.id === s.selected
@@ -7346,13 +7346,13 @@ function handOff(endpoint: string, runId: string): HTMLElement {
   })
 }
 
-/** parkedHead is a parked call's line: its name, its arguments (the
- * JSON, "(…)" when the record has none), then what follows them. */
 /** tookOf is a row's duration, "…" while it runs (P020.2: duration's
  * "—" for an unfinished run read "— —" beside an unknown cost). */
 const tookOf = (r: { started: string; finished: string | null }) =>
   r.finished ? duration(r.started, r.finished) : "…"
 
+/** parkedHead is a parked call's line: its name, its arguments (the
+ * JSON, "(…)" when the record has none), then what follows them. */
 function parkedHead(call: ToolCallPart, after: HTMLElement[]): HTMLElement {
   return el("div", "weft-call-h", [
     el("span", "weft-name", call.name),

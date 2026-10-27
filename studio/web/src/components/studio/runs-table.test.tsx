@@ -270,3 +270,22 @@ describe("RunsTable at 1280 px (P020.1)", () => {
     expect(cell("tokens").className).not.toContain("hidden xl:")
   })
 })
+
+describe("the run column's width steps (P020.2-fix)", () => {
+  it("are value-sorted arbitrary min-width variants only: Tailwind emits a named sm: step after them, where it would win at every width", async () => {
+    await renderWithRouter(<RunsTable runs={goldenRuns()} now={NOW} />)
+    const td = document.querySelector("tbody tr td:nth-child(2)")!
+    const steps = td.className
+      .split(/\s+/)
+      .filter((c) => /max-w-/.test(c) && c.includes(":"))
+    expect(steps.length).toBeGreaterThan(0)
+    const px = steps.map((c) => {
+      const m = /^min-\[(\d+)px\]:max-w-\d+$/.exec(c)
+      expect(m, c).not.toBeNull()
+      return Number(m![1])
+    })
+    expect(px).toEqual([...px].sort((a, b) => a - b))
+    // 20rem once the frame holds it beside the session and model columns.
+    expect(steps.at(-1)).toBe("min-[1680px]:max-w-80")
+  })
+})

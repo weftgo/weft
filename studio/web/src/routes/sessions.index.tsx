@@ -410,7 +410,7 @@ function SessionsPage() {
                         <SessionState row={s} />
                         <OutcomeStrip row={s} />
                       </TableCell>
-                      <TableCell className="max-w-52 min-[1360px]:max-w-64 2xl:max-w-80">
+                      <TableCell className="max-w-52 min-[1360px]:max-w-64 min-[1536px]:max-w-80">
                         <Link
                           {...sessionLink(s.id)}
                           className="flex min-w-0 items-center gap-1.5 text-[13px] hover:text-thread-ink"

@@ -11,6 +11,7 @@ module, ADR 0005).
 ### Fixed
 
 - Studio (P020.1): the run page's waterfall draws only the time-axis ticks its track's width holds — a short run's or a narrow track's labels no longer print over each other ("0 75.0 ms 151 ms…" read "Ø75.0 m̶s̶50 m226301 ms ms"); a derived run's root row counts its steps as its header does ("2 steps", it read "0 steps"); an attempt's error chip (`model_error`, `stream_idle`) stays whole beside its name instead of under its bar's marker.
+- Studio (P020.1): the runs list and the sessions list fit a 1280 px window with the sidebar open — the runs list's model column shows from 2xl (1536 px) and its status, tokens and cost wrap, so the compare pick no longer pushes tokens off the edge; the sessions list's status and turns wrap and its agent truncates, so tokens, cost and last seen stay in the frame.
 
 ## 0.20.0 — 2026-10-27
 

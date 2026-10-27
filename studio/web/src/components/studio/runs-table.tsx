@@ -637,11 +637,13 @@ export function RunsTable({
 /** The columns a narrow window folds (H9, UX-A-09/21): the run, its
  * status and duration always; the rest from the width that has room —
  * no page ever scrolls sideways (the table scrolls in its own frame
- * past them). */
+ * past them). The model gives way before the tokens: at 1280 px, with
+ * the sidebar open and the compare pick, the tokens and cost stay in
+ * the frame (P020.1). */
 const COL = {
   agent: "hidden sm:table-cell",
   session: "hidden 2xl:table-cell",
-  model: "hidden xl:table-cell",
+  model: "hidden 2xl:table-cell",
   steps: "hidden lg:table-cell",
   tokens: "hidden md:table-cell",
   cost: "hidden md:table-cell",
@@ -707,7 +709,9 @@ function RunTableRow({
         }}
         data-picked={picked ? "" : undefined}
       >
-        <TableCell>
+        {/* The status wraps (a long "parked → <run>" link): with the
+            compare pick beside it the column stays narrow (P020.1). */}
+        <TableCell className="max-w-32 whitespace-normal">
           <div className="flex items-center gap-1.5">
             {picked !== undefined && onPick ? (
               <input
@@ -732,7 +736,7 @@ function RunTableRow({
           ) : null}
         </TableCell>
         <TableCell
-          className="max-w-0 sm:max-w-64 lg:max-w-80"
+          className="max-w-0 sm:max-w-64 2xl:max-w-80"
           style={depth ? { paddingLeft: `${0.5 + depth * 1.25}rem` } : {}}
         >
           <div className="flex min-w-0 items-center gap-1.5">
@@ -785,7 +789,7 @@ function RunTableRow({
           ) : null}
         </TableCell>
         <TableCell
-          className={`max-w-32 truncate whitespace-nowrap ${COL.agent}`}
+          className={`max-w-28 truncate whitespace-nowrap ${COL.agent}`}
         >
           {run.agent || (
             <span className="text-faint" title={UNNAMED_AGENT_HINT}>
@@ -819,7 +823,7 @@ function RunTableRow({
         <TableCell className={`text-right font-mono tabular-nums ${COL.steps}`}>
           {run.steps}
         </TableCell>
-        <TableCell className={`text-right ${COL.tokens}`}>
+        <TableCell className={`text-right whitespace-normal ${COL.tokens}`}>
           {derivedUsageUnknown(run) ? (
             <UnknownTokens reason={run.cost_reason} />
           ) : (
@@ -827,10 +831,7 @@ function RunTableRow({
           )}
         </TableCell>
         {showCost ? (
-          <TableCell
-            className={`text-right whitespace-nowrap ${COL.cost}`}
-            data-cost-cell
-          >
+          <TableCell className={`text-right ${COL.cost}`} data-cost-cell>
             <CostCell run={run} />
           </TableCell>
         ) : null}

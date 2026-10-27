@@ -241,3 +241,24 @@ describe("RunsTable polish (U29.1)", () => {
     expect(word.getAttribute("title")).toContain("weft.Name(")
   })
 })
+
+describe("RunsTable at 1280 px (P020.1)", () => {
+  it("the model gives way before the tokens; status, tokens and cost may wrap", async () => {
+    const { container } = await renderWithRouter(
+      <RunsTable runs={goldenRuns()} now={NOW} />
+    )
+    const heads = [...container.querySelectorAll("thead th")]
+    const at = (label: string) =>
+      heads.findIndex((h) => h.textContent.trim().startsWith(label))
+    const model = heads[at("model")]
+    // Hidden below 2xl (1536 px): 1280 px less the sidebar has no room
+    // for it beside the compare pick, tokens and cost.
+    expect(model.className).toContain("hidden 2xl:table-cell")
+    const row = container.querySelector("tbody tr")!
+    const cell = (label: string) => row.children[at(label)]
+    expect(cell("status").className).toContain("whitespace-normal")
+    expect(cell("status").className).toContain("max-w-32")
+    expect(cell("tokens").className).toContain("whitespace-normal")
+    expect(cell("tokens").className).not.toContain("hidden xl:")
+  })
+})

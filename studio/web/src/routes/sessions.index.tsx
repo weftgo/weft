@@ -397,11 +397,14 @@ function SessionsPage() {
                   )
                   return (
                     <TableRow key={s.id} className="group h-9">
-                      <TableCell>
+                      {/* At 1280 px every column fits the frame: the
+                          status, agent and turns wrap or cut before
+                          tokens, cost and last seen leave it (P020.1). */}
+                      <TableCell className="max-w-40 whitespace-normal">
                         <SessionState row={s} />
                         <OutcomeStrip row={s} />
                       </TableCell>
-                      <TableCell className="max-w-80">
+                      <TableCell className="max-w-64 2xl:max-w-80">
                         <Link
                           {...sessionLink(s.id)}
                           className="flex min-w-0 items-center gap-1.5 text-[13px] hover:text-thread-ink"
@@ -452,11 +455,14 @@ function SessionsPage() {
                           </div>
                         ) : null}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">
+                      <TableCell
+                        className="max-w-32 truncate whitespace-nowrap"
+                        title={s.agent || undefined}
+                      >
                         {s.agent || <span className="text-faint">—</span>}
                       </TableCell>
                       <TableCell
-                        className="text-right font-mono whitespace-nowrap tabular-nums"
+                        className="text-right font-mono whitespace-normal tabular-nums"
                         data-session-exchanges
                       >
                         {exchangesOfRow(s)}

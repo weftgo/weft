@@ -12,6 +12,9 @@ import (
 // is the guard.
 const openNoFollow = 0
 
+// singleLink: no link count is checked here (Acquire's doc says why).
+func singleLink(fs.FileInfo) bool { return true }
+
 func lockFile(*os.File) error   { return nil }
 func unlockFile(*os.File) error { return nil }
 

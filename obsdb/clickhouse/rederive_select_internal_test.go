@@ -65,9 +65,12 @@ func rederiveCases() (spans []obsdb.Span, want []string) {
 }
 
 // TestRederive0031Selection: migration 0031's step re-derives the traces
-// the 0.20 rule changes and no other (the selection matches the Go
-// predicate shape by shape), and a database older than 0009 — derived
-// runs never written — re-derives every stock trace.
+// the 0.20 rule changes and no other once every trace has its derived
+// rows (the selection matches the Go predicate shape by shape); a
+// database older than 0009 — derived runs never written — re-derives
+// every stock trace, and so does one whose ancient upgrade stopped
+// between 0009 and 0031 (reopened at 0030 with no derived row: the
+// reopen converges on the full derivation).
 func TestRederive0031Selection(t *testing.T) {
 	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
 	if base == "" {
@@ -94,6 +97,13 @@ func TestRederive0031Selection(t *testing.T) {
 	u.Path = "/" + name
 	conn := rawConn(t, u.String())
 	defer func() { _ = conn.Close() }()
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	// Recorded through 0030; 0031's SQL (the column) applied unrecorded,
+	// so its step can run here and the reopen below runs it again.
 	for v := 1; v <= 31; v++ {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
 		if err != nil {
@@ -102,6 +112,11 @@ func TestRederive0031Selection(t *testing.T) {
 		for _, stmt := range splitStatements(string(body)) {
 			if err := conn.Exec(ctx, stmt); err != nil {
 				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if v <= 30 {
+			if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+				t.Fatal(err)
 			}
 		}
 	}
@@ -132,25 +147,39 @@ func TestRederive0031Selection(t *testing.T) {
 		}
 		return out
 	}
-	if got := traces(`SELECT DISTINCT TraceId FROM otel_traces WHERE ` + chRederive0031 + ` ORDER BY TraceId`); !slices.Equal(got, want) {
-		t.Errorf("0031 selection = %v, want %v", got, want)
-	}
+	const selection = `SELECT DISTINCT TraceId FROM otel_traces WHERE ` + chRederive0031 + ` ORDER BY TraceId`
 	const derived = `SELECT DISTINCT TraceID FROM weft_runs WHERE Derived = 1 ORDER BY TraceID`
-	if err := rederiveStock(ctx, conn, 30); err != nil {
+	// No trace derived yet: every candidate trace is selected — the
+	// conversation-rooted trace without content (the first case) and the
+	// chatbot one's root too, never derived.
+	all := len(want) + 2
+	if got := traces(selection); len(got) != all {
+		t.Errorf("0031 selection with no derived row = %v, want every stock trace but the weft one (%d)", got, all)
+	}
+	// From 0008 every candidate trace is derived.
+	if err := rederiveStock(ctx, conn, 8); err != nil {
 		t.Fatal(err)
 	}
-	if got := traces(derived); !slices.Equal(got, want) {
-		t.Errorf("from 0030: derived traces %v, want the selection %v", got, want)
+	if got := traces(derived); len(got) != all {
+		t.Errorf("from 0008: derived traces %v, want every stock trace but the weft one (%d)", got, all)
 	}
 	if err := conn.Exec(ctx, `DELETE FROM weft_runs WHERE Derived = 1`); err != nil {
 		t.Fatal(err)
 	}
-	// From 0008 every candidate trace is derived: the conversation-rooted
-	// trace without content (the first case) and the chatbot one's root too.
-	if err := rederiveStock(ctx, conn, 8); err != nil {
+	// The interrupted ancient upgrade: recorded at 0030, nothing derived.
+	// Reopening converges on the full derivation.
+	db, err := Open(u.String())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := traces(derived); len(got) != len(want)+2 {
-		t.Errorf("from 0008: derived traces %v, want every stock trace but the weft one (%d)", got, len(want)+2)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := traces(derived); len(got) != all {
+		t.Errorf("reopened at 0030 with nothing derived: derived traces %v, want every stock trace but the weft one (%d)", got, all)
+	}
+	// Every trace derived: the selection is exactly what the 0.20 rule changes.
+	if got := traces(selection); !slices.Equal(got, want) {
+		t.Errorf("0031 selection once derived = %v, want %v", got, want)
 	}
 }

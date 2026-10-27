@@ -70,7 +70,11 @@ var ErrNotRegular = errors.New("dblock: the lock file is not a regular file")
 // the check after the open is its guard: a symlink there when the
 // handle was taken fails it, and one swapped in after it changes
 // nothing, since Truncate and Chmod act on the handle (the regular file
-// checked), never on the name.
+// checked), never on the name. On unix a file with more than one link
+// is refused too: a hard link planted at the path to another file
+// (another user's or the database's own) is never truncated or
+// chmodded. Windows does not check (a hard link there needs write
+// access to the target already).
 func Acquire(dbPath string) (*Lock, error) {
 	p := Path(dbPath)
 	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|openNoFollow, 0o600)
@@ -82,7 +86,7 @@ func Acquire(dbPath string) (*Lock, error) {
 	}
 	lfi, lerr := os.Lstat(p)
 	ffi, ferr := f.Stat()
-	if lerr != nil || ferr != nil || !lfi.Mode().IsRegular() || !ffi.Mode().IsRegular() || !os.SameFile(lfi, ffi) {
+	if lerr != nil || ferr != nil || !lfi.Mode().IsRegular() || !ffi.Mode().IsRegular() || !os.SameFile(lfi, ffi) || !singleLink(ffi) {
 		_ = f.Close()
 		return nil, ErrNotRegular
 	}

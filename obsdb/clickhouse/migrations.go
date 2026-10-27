@@ -85,7 +85,7 @@ const derivedRunsMigration = 9
 const rederiveChunk = 1000
 
 // rederiveStock is migration 0031's Go step: the traces whose derivation
-// the 0031 rule changes (chRederive0031; every stock candidate trace,
+// the 0031 rule changes, or that no writer derived (chRederive0031; every stock candidate trace,
 // chStockOp, for a database older than 0009, which never had derived
 // runs written) re-derived. Open waits for it: one INFO line before,
 // with the count, and one after, with the time.
@@ -188,8 +188,12 @@ func (d *DB) rederiveChunk(ctx context.Context, traces []string) error {
 // obsdb.StockHasMessages reads: gen_ai.system_instructions,
 // gen_ai.input.messages, gen_ai.output.messages, gen_ai.prompt,
 // gen_ai.completion, gen_ai.content.prompt, gen_ai.content.completion,
-// or a key starting gen_ai.prompt. or gen_ai.completion. Every other
-// stock trace derives exactly as the 0.19 writer derived it: a top-level
+// or a key starting gen_ai.prompt. or gen_ai.completion. — or an
+// invoke_agent span with a conversation id whose trace has no derived
+// row (no otel-<trace>- id with Derived = 1: a trace no writer derived,
+// as a database upgraded from below 0009 whose upgrade stopped between
+// 0009 and 0031 holds; it reopens with from ≥ 0009). Every other stock
+// trace derives exactly as the 0.19 writer derived it: a top-level
 // agent without a conversation id is the rule's one new root, and a
 // chat span's message content the row's one new count.
 const chRederive0031 = `(RunId = '' AND (
@@ -197,7 +201,9 @@ const chRederive0031 = `(RunId = '' AND (
 		OR (SpanAttributes['gen_ai.operation.name'] = '' AND startsWith(SpanName, 'invoke_agent')))
 	AND (SpanAttributes['gen_ai.conversation.id'] = ''
 		OR (WeftAttrs != '' AND (JSONType(WeftAttrs, 'gen_ai.conversation.id') != 'String'
-			OR JSONExtractString(WeftAttrs, 'gen_ai.conversation.id') = ''))))
+			OR JSONExtractString(WeftAttrs, 'gen_ai.conversation.id') = ''))
+		OR lower(TraceId) NOT IN (SELECT substring(RunId, 6, 32) FROM weft_runs
+			WHERE startsWith(RunId, 'otel-') AND Derived = 1)))
 	OR ((SpanAttributes['gen_ai.operation.name'] = 'chat'
 		OR (SpanAttributes['gen_ai.operation.name'] = '' AND (SpanName = 'chat' OR startsWith(SpanName, 'chat '))))
 	AND (mapContains(SpanAttributes, 'gen_ai.system_instructions')

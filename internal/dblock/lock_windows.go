@@ -19,6 +19,9 @@ func lockRange() *windows.Overlapped { return &windows.Overlapped{OffsetHigh: 0x
 // is the guard.
 const openNoFollow = 0
 
+// singleLink: no link count is checked here (Acquire's doc says why).
+func singleLink(fs.FileInfo) bool { return true }
+
 func lockFile(f *os.File) error {
 	ol := lockRange()
 	err := windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, ol)

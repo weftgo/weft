@@ -135,3 +135,32 @@ func TestPlantedSymlinkRefused(t *testing.T) {
 		t.Error("Acquire over a directory succeeded, want refused")
 	}
 }
+
+// TestPlantedHardLinkRefused: a hard link planted at <db>.lock to
+// another file is refused (ErrNotRegular) on unix — the other file keeps
+// its bytes and its mode.
+func TestPlantedHardLinkRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the link count is checked on unix")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "precious.txt")
+	if err := os.WriteFile(target, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(dir, "weft.db")
+	if err := os.Link(target, dblock.Path(db)); err != nil {
+		t.Skipf("hard links unavailable here: %v", err)
+	}
+	if l, err := dblock.Acquire(db); !errors.Is(err, dblock.ErrNotRegular) {
+		l.Release()
+		t.Fatalf("Acquire through a planted hard link = %v, want ErrNotRegular", err)
+	}
+	b, err := os.ReadFile(target)
+	if err != nil || string(b) != "keep me" {
+		t.Errorf("the hard link's target now reads %q (%v), want it untouched", b, err)
+	}
+	if fi, err := os.Stat(target); err != nil || fi.Mode().Perm() != 0o644 {
+		t.Errorf("the hard link's target mode = %v (%v), want 0644 kept", fi.Mode(), err)
+	}
+}

@@ -63,9 +63,13 @@ func rederiveCases() (spans []obsdb.Span, want []string) {
 }
 
 // TestRederive0026Selection: migration 0026's step re-derives the traces
-// the 0.20 rule changes and no other (the selection matches the Go
-// predicate shape by shape), and a file older than 0008 — derived runs
-// never written — re-derives every stock trace.
+// the 0.20 rule changes and no other once every trace has its derived
+// rows (the selection matches the Go predicate shape by shape); a file
+// older than 0008 — derived runs never written — re-derives every stock
+// trace, and so does one whose ancient upgrade stopped between 0008 and
+// 0026 (reopened at 0025 with no derived row: a conversation-rooted
+// trace never derived is selected too, and the reopen converges on the
+// full derivation).
 func TestRederive0026Selection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "at25.db")
 	raw, err := sql.Open("sqlite", "file:"+path)
@@ -86,6 +90,9 @@ func TestRederive0026Selection(t *testing.T) {
 		}
 		if _, err := raw.Exec(string(body)); err != nil {
 			t.Fatalf("migration %d: %v", v, err)
+		}
+		if _, err := raw.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
 		}
 	}
 	// 0026's SQL (the index) without its step.
@@ -110,36 +117,9 @@ func TestRederive0026Selection(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	rs, err := raw.Query(`SELECT DISTINCT trace_id FROM spans WHERE ` + sqlRederive0026 + ` ORDER BY trace_id`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for rs.Next() {
-		var tr string
-		if err := rs.Scan(&tr); err != nil {
-			t.Fatal(err)
-		}
-		got = append(got, tr)
-	}
-	if err := rs.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("0026 selection = %v, want %v", got, want)
-	}
-
-	derivedTraces := func(from int) []string {
+	selection := func() []string {
 		t.Helper()
-		tx, err := raw.Begin()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := rederiveStock(tx, from); err != nil {
-			t.Fatal(err)
-		}
-		rs, err := tx.Query(`SELECT DISTINCT trace_id FROM runs WHERE derived = 1 ORDER BY trace_id`)
+		rs, err := raw.Query(`SELECT DISTINCT trace_id FROM spans WHERE ` + sqlRederive0026 + ` ORDER BY trace_id`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -154,12 +134,60 @@ func TestRederive0026Selection(t *testing.T) {
 		}
 		return out
 	}
-	if got := derivedTraces(25); !slices.Equal(got, want) {
-		t.Errorf("from 0025: derived traces %v, want the selection %v", got, want)
+	derived := func(q interface {
+		Query(string, ...any) (*sql.Rows, error)
+	}) []string {
+		t.Helper()
+		rs, err := q.Query(`SELECT DISTINCT trace_id FROM runs WHERE derived = 1 ORDER BY trace_id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rs.Close() }()
+		var out []string
+		for rs.Next() {
+			var tr string
+			if err := rs.Scan(&tr); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, tr)
+		}
+		return out
 	}
-	// From 0007 every candidate trace is derived: the conversation-rooted
-	// trace without content (the first case) and the chatbot one's root too.
-	if got := derivedTraces(7); len(got) != len(want)+2 {
-		t.Errorf("from 0007: derived traces %v, want every stock trace but the weft one (%d)", got, len(want)+2)
+	// No trace derived yet: every candidate trace is selected — the
+	// conversation-rooted trace without content (the first case) and the
+	// chatbot one's root too, never derived.
+	all := len(want) + 2
+	if got := selection(); len(got) != all {
+		t.Errorf("0026 selection with no derived row = %v, want every stock trace but the weft one (%d)", got, all)
+	}
+	// From 0007 every candidate trace is derived.
+	tx, err = raw.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rederiveStock(tx, 7); err != nil {
+		t.Fatal(err)
+	}
+	if got := derived(tx); len(got) != all {
+		t.Errorf("from 0007: derived traces %v, want every stock trace but the weft one (%d)", got, all)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	// The interrupted ancient upgrade: recorded at 0025, nothing derived.
+	// Reopening converges on the full derivation.
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := derived(raw); len(got) != all {
+		t.Errorf("reopened at 0025 with nothing derived: derived traces %v, want every stock trace but the weft one (%d)", got, all)
+	}
+	// Every trace derived: the selection is exactly what the 0.20 rule changes.
+	if got := selection(); !slices.Equal(got, want) {
+		t.Errorf("0026 selection once derived = %v, want %v", got, want)
 	}
 }

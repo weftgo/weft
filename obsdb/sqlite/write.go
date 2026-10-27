@@ -248,7 +248,8 @@ func deriveStock(ctx context.Context, tx *sql.Tx, traces []string) (ids []string
 }
 
 // rederiveStock is migration 0026's Go step: the traces whose
-// derivation the 0026 rule changes re-derived through deriveStock, in
+// derivation the 0026 rule changes, or that no writer derived,
+// re-derived through deriveStock, in
 // the migration's transaction (Open waits: one INFO line before, with
 // the count, and one after, with the time — never a silent wait).
 //
@@ -257,12 +258,16 @@ func deriveStock(ctx context.Context, tx *sql.Tx, traces []string) (ids []string
 // without a string gen_ai.conversation.id (a top-level one is now a
 // run of its own; a nested one may now parent a conversation-rooted
 // run), or a non-weft chat span carrying the conventions' message
-// content (the row's message count). Every other stock trace derives
-// exactly as the 0.19 writer derived it, its rows already right. A file
-// older than migration 0008 (from < derivedRunsMigration) never had
-// derived runs written at all: every stock candidate trace is
-// re-derived (sqlStockOp). Re-deriving is idempotent: an interrupted
-// run rolls back whole and the next Open starts it again.
+// content (the row's message count) — or a conversation-rooted
+// invoke_agent span whose trace has no derived row at all (a trace no
+// writer derived: a file upgraded from below 0008 whose upgrade stopped
+// between 0008 and 0026 reopens with from ≥ 0008). Every other stock
+// trace derives exactly as the 0.19 writer derived it, its rows already
+// right. A file opened below migration 0008 (from <
+// derivedRunsMigration) never had derived runs written at all: every
+// stock candidate trace is re-derived (sqlStockOp). Re-deriving is
+// idempotent: an interrupted run rolls back whole and the next Open
+// starts it again.
 func rederiveStock(tx *sql.Tx, from int) error {
 	ctx := context.Background()
 	where := sqlRederive0026
@@ -306,7 +311,8 @@ const derivedRunsMigration = 8
 // sqlRederive0026 is rederiveStock's selection over a spans row: no
 // weft.run.id, and either an invoke_agent span (sqlStockOp's operation
 // rule) whose gen_ai.conversation.id is not a non-empty string
-// (obsdb's attr reads only a string), or a chat span carrying a key
+// (obsdb's attr reads only a string) or whose trace has no derived row
+// (never derived; runs_derived_trace answers it), or a chat span carrying a key
 // obsdb.StockHasMessages reads — gen_ai.system_instructions,
 // gen_ai.input.messages, gen_ai.output.messages, gen_ai.prompt,
 // gen_ai.completion, gen_ai.content.prompt, gen_ai.content.completion
@@ -315,7 +321,8 @@ const derivedRunsMigration = 8
 const sqlRederive0026 = `(run_id = '' AND (
 	((COALESCE(json_extract(attrs, '$."gen_ai.operation.name"'), '') = 'invoke_agent'
 		OR (COALESCE(json_extract(attrs, '$."gen_ai.operation.name"'), '') = '' AND name LIKE 'invoke\_agent%' ESCAPE '\'))
-	AND COALESCE(json_type(attrs, '$."gen_ai.conversation.id"') = 'text' AND json_extract(attrs, '$."gen_ai.conversation.id"') <> '', 0) = 0)
+	AND (COALESCE(json_type(attrs, '$."gen_ai.conversation.id"') = 'text' AND json_extract(attrs, '$."gen_ai.conversation.id"') <> '', 0) = 0
+		OR NOT EXISTS (SELECT 1 FROM runs WHERE runs.trace_id = spans.trace_id AND runs.derived = 1)))
 	OR ((COALESCE(json_extract(attrs, '$."gen_ai.operation.name"'), '') = 'chat'
 		OR (COALESCE(json_extract(attrs, '$."gen_ai.operation.name"'), '') = '' AND (name = 'chat' OR name LIKE 'chat %')))
 	AND (json_type(attrs, '$."gen_ai.system_instructions"') IS NOT NULL

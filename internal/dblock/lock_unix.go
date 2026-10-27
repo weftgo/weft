@@ -45,6 +45,13 @@ func checkOwner(fi fs.FileInfo) error {
 	return nil
 }
 
+// singleLink reports whether the file has exactly one link: a hard link
+// planted at the lock path to another file has two or more.
+func singleLink(fi fs.FileInfo) bool {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && st.Nlink == 1
+}
+
 // alive reports whether pid runs: signal 0 delivered, or refused for
 // permission (the process exists).
 func alive(pid int) bool {

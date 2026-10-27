@@ -2237,7 +2237,7 @@ export class WeftDevtools extends HTMLElement {
     }
     box.append(
       el("a", "", "all rungs ⤢", {
-        href: "https://github.com/weftgo/weft/tree/main/studio#the-devtools-panel-weft-devtoolsmd",
+        href: "https://github.com/weftgo/weft/tree/main/studio#the-devtools-panel",
         ...NEW_TAB,
       })
     )
@@ -3903,9 +3903,10 @@ export class WeftDevtools extends HTMLElement {
       engRow.append(
         el(
           "label",
-          // One option a block, its reason the line under it (P020.1:
-          // as flex items they wrapped into two overlapping columns).
-          "weft-edit",
+          // One option a block in the foreground colour, its reason the
+          // line under it (P020.1: as flex items they wrapped into two
+          // overlapping columns) — the Request tab's tool-line rule.
+          "weft-rq-tool",
           [
             r,
             ` ${words}`,
@@ -7559,7 +7560,7 @@ export function renderTimeline(
     "div",
     "weft-axis",
     [0, Math.round(end)].map((v) =>
-      el("span", "weft-tick", time ? `${v} ms` : `seq ${v}`)
+      el("span", "", time ? `${v} ms` : `seq ${v}`)
     )
   )
   box.append(

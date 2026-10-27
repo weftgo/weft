@@ -126,7 +126,7 @@ describe("the Timeline on the director run (U8.3)", () => {
     expect(
       row(box, "c:0:call_1").querySelector(".weft-wf-ms")!.getAttribute("title")
     ).toBe("+1.0 ms")
-    expect(box.querySelector(".weft-tick")!.textContent).toBe("0 ms")
+    expect(box.querySelector(".weft-axis > span")!.textContent).toBe("0 ms")
   })
 
   it("a step's rows select it; the child row hands off with ?sel=", () => {

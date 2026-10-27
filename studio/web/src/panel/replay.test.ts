@@ -175,7 +175,8 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
     // A block per option, the reason a line under it (P020.1: flex
     // items, they wrapped into two overlapping columns in a 640 px dock).
     const opt = $(el, '[data-engine-option="scripted"]')!
-    expect(opt.className).toBe("weft-edit")
+    // The foreground colour: a block of its own, not a dimmed field label.
+    expect(opt.className).toBe("weft-rq-tool")
     expect(opt.querySelector("[data-engine-why]")!.tagName).toBe("DIV")
     expect(runBtn(el)!.textContent).toMatch(/^Run live on wefttest\/script · /)
     click(

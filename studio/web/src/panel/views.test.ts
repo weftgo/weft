@@ -233,7 +233,7 @@ describe("the timeline", () => {
     await settle()
     const tl = $(el, ".weft-timeline")!
     expect(tl.getAttribute("data-axis")).toBe("time")
-    expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
+    expect(all(el, ".weft-axis > span").map((n) => n.textContent)).toEqual([
       "0 ms",
       "2000 ms",
     ])
@@ -281,7 +281,7 @@ describe("the timeline", () => {
     click(tab(el, "waterfall"))
     await settle()
     expect($(el, ".weft-timeline")!.getAttribute("data-axis")).toBe("seq")
-    expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
+    expect(all(el, ".weft-axis > span").map((n) => n.textContent)).toEqual([
       "seq 0",
       "seq 5",
     ])
@@ -337,7 +337,7 @@ describe("the timeline", () => {
     const el = await mount(BASE)
     click(tab(el, "waterfall"))
     await settle()
-    expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
+    expect(all(el, ".weft-axis > span").map((n) => n.textContent)).toEqual([
       "0 ms",
       "1000 ms",
     ])

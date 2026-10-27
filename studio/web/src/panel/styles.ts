@@ -65,6 +65,8 @@ export const TOKENS = [
 
 // The stylesheet carries no CSS comment (P8-fix-a: they shipped in
 // panel.js, ~345 B gzip); its notes live here, in its order:
+//   .weft-root * — every element's margin and padding 0, its font
+//     inherited: no rule after it says so again (P020.1-ui-fix).
 //   .weft-root — no colour: the dock and the pill set theirs; the
 //     unreachable line keeps the host's (:host inherits color past
 //     all: initial).
@@ -117,7 +119,7 @@ export const PANEL_CSS = `
 .weft-turn-pick { display: none; }
 .weft-narrow .weft-cols { flex-direction: column; }
 .weft-narrow .weft-turn-pick { display: block; margin: 6px 10px 0; background: var(--weft-bg3); color: var(--weft-fg);
-  border: 1px solid var(--weft-faint); border-radius: var(--weft-radius-sm); font: inherit; }
+  border: 1px solid var(--weft-faint); border-radius: var(--weft-radius-sm); }
 .weft-narrow .weft-turns { width: auto; border-right: none; max-height: 30%; }
 .weft-narrow .weft-rows { display: none; }
 .weft-narrow .weft-head { flex-wrap: wrap; white-space: normal; }
@@ -138,8 +140,8 @@ export const PANEL_CSS = `
 
 .weft-unreachable { display: inline; font: 12px/1.45 var(--weft-font); color: inherit; }
 .weft-down .weft-turn { color: var(--weft-dim); }
-.weft-retry { background: none; border: none; padding: 0; color: inherit; cursor: pointer;
-  text-decoration: underline; font: inherit; }
+.weft-retry { background: none; border: none; color: inherit; cursor: pointer;
+  text-decoration: underline; }
 
 .weft-head {
   display: flex; align-items: center; gap: 8px;
@@ -161,10 +163,10 @@ export const PANEL_CSS = `
 .weft-q { display: flex; min-width: 20ch; white-space: nowrap; }
 .weft-head .weft-grow { flex: 1; }
 .weft-switch { max-width: 40%; background: var(--weft-bg); color: var(--weft-dim); border: 1px solid var(--weft-line);
-  border-radius: var(--weft-radius-sm); font: inherit; font-size: 11px; }
+  border-radius: var(--weft-radius-sm); font-size: 11px; }
 .weft-btn {
   background: none; border: 1px solid var(--weft-line); border-radius: var(--weft-radius-sm);
-  color: var(--weft-dim); cursor: pointer; padding: 1px 6px; font: inherit; text-decoration: none;
+  color: var(--weft-dim); cursor: pointer; padding: 1px 6px; text-decoration: none;
 }
 .weft-btn:hover { color: var(--weft-fg); background: var(--weft-bg3); }
 .weft-btn.weft-active { color: var(--weft-accent); border-color: var(--weft-accent); }
@@ -180,7 +182,7 @@ export const PANEL_CSS = `
 .weft-turn {
   display: block; width: 100%; text-align: left; background: none; border: none; overflow: hidden;
   border-bottom: 1px solid var(--weft-line); padding: 7px 9px; cursor: pointer;
-  color: var(--weft-fg); font: inherit;
+  color: var(--weft-fg);
 }
 .weft-turn:hover, .weft-tl.weft-sel { background: var(--weft-bg3); }
 .weft-turn:hover .weft-when, .weft-turn.weft-sel .weft-when { color: var(--weft-dim); }
@@ -216,7 +218,6 @@ details.weft-collapsible[open] > summary::before, [aria-expanded=true].weft-fold
 details[data-depth] { margin-left: -10px; }
 .weft-ans { display: grid; grid-template-columns: max-content 1fr; gap: 1px 8px; margin: 0 0 6px; }
 .weft-ans dt { color: var(--weft-faint); }
-.weft-ans dd { margin: 0; }
 .weft-ans [data-bad] { color: var(--weft-err); }
 [data-key=ans] a { margin-right: 8px; color: var(--weft-accent); }
 @media (hover: hover) { .weft-ins:not(:hover):not(:focus-visible) { color: transparent; } }
@@ -265,12 +266,11 @@ ${decisionRules()}
 }
 .weft-tabs { display: flex; gap: 2px; margin: -4px 0 8px; border-bottom: 1px solid var(--weft-line); }
 .weft-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--weft-dim);
-  padding: 3px 8px; cursor: pointer; font: inherit; }
+  padding: 3px 8px; cursor: pointer; }
 .weft-tab:hover { color: var(--weft-fg); }
 .weft-tab.weft-active { color: var(--weft-fg); border-bottom-color: var(--weft-accent); }
 .weft-tq { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
 .weft-tq .weft-turn-q { flex: 1 1 100%; }
-.weft-tq .weft-tq-status { width: auto; }
 .weft-tq-n { padding: 4px 9px; color: var(--weft-dim); }
 .weft-older { display: block; width: calc(100% - 12px); margin: 6px; }
 .weft-raw { color: var(--weft-dim); }
@@ -281,9 +281,9 @@ ${decisionRules()}
 .weft-tn { display: flex; gap: 4px; align-items: baseline; white-space: pre; }
 .weft-tn.weft-hit { background: var(--weft-bg3); box-shadow: inset 2px 0 0 var(--weft-warn); }
 .weft-tn.weft-hit .weft-tk { color: var(--weft-fg); }
-.weft-tt { width: 14px; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; font: inherit; }
+.weft-tt { width: 14px; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; }
 .weft-tk { color: var(--weft-info); flex: none; }
-.weft-tc { margin-left: auto; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; font: inherit; }
+.weft-tc { margin-left: auto; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; }
 .weft-tmore { margin: 1px 0; }
 .weft-rq-head { margin-bottom: 6px; align-items: center; }
 .weft-rq-row { display: flex; gap: 8px; margin-top: 7px; }
@@ -294,6 +294,7 @@ ${decisionRules()}
 .weft-rq-params > div { display: flex; gap: 8px; }
 .weft-rq-pk { width: 84px; flex: none; color: var(--weft-dim); }
 .weft-rq-tool { display: block; margin: 2px 0; }
+.weft-rq-tool:has(:checked) { color: var(--weft-fg); }
 .weft-axis { flex: 1; display: flex; justify-content: space-between; color: var(--weft-dim); font-size: 10px; }
 .weft-keys {
   position: absolute; inset: 0; z-index: 3; background: var(--weft-scrim);
@@ -312,9 +313,9 @@ ${decisionRules()}
 .weft-field { display: block; margin-bottom: 7px; color: var(--weft-dim); }
 .weft-field > span { display: block; margin-bottom: 3px; }
 .weft-input {
-  width: 100%; box-sizing: border-box; background: var(--weft-bg3); color: var(--weft-fg);
+  width: 100%; background: var(--weft-bg3); color: var(--weft-fg);
   border: 1px solid var(--weft-faint); border-radius: var(--weft-radius-sm); padding: 4px 6px;
-  font: inherit; font-size: 11.5px;
+  font-size: 11.5px;
 }
 textarea.weft-input { resize: vertical; }
 select.weft-input { width: auto; min-width: 120px; }
@@ -332,7 +333,7 @@ select.weft-input { width: auto; min-width: 120px; }
 div[data-weft-editable] { display: block; }
 .weft-run-btn {
   background: var(--weft-accent); color: var(--weft-on-accent); border: none; border-radius: var(--weft-radius-sm);
-  padding: 5px 12px; font: inherit; font-weight: 600; cursor: pointer;
+  padding: 5px 12px; font-weight: 600; cursor: pointer;
 }
 .weft-drawer .weft-run-btn { position: sticky; bottom: 4px; }
 .weft-xres { border-color: var(--weft-info); }
@@ -342,7 +343,7 @@ div[data-weft-editable] { display: block; }
 .weft-diff-row { white-space: pre-wrap; word-break: break-word; }
 .weft-diff-add, .weft-diff-b { color: var(--weft-ok); }
 .weft-diff-del { color: var(--weft-err); text-decoration: line-through; }
-.weft-diff-markers { margin: 0 0 4px; padding: 0; list-style: none; color: var(--weft-warn); }
+.weft-diff-markers { margin: 0 0 4px; list-style: none; color: var(--weft-warn); }
 .weft-diff-markers a { color: inherit; }
 .weft-diff-table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .weft-diff-table th, .weft-diff-table td { text-align: left; vertical-align: top; padding: 2px 4px; border-top: 1px solid var(--weft-line); font-weight: normal; }
@@ -352,14 +353,14 @@ div[data-weft-editable] { display: block; }
 .weft-diff-a { color: var(--weft-err); }
 .weft-resolve { width: 25ch; max-width: 100%; margin: 0 4px; }
 .weft-verbs { display: inline-flex; gap: 2px; margin-left: 4px; }
-.weft-verb { background: none; border: none; color: var(--weft-dim); cursor: pointer; padding: 0 3px; font: inherit; clip-path: inset(50%); }
+.weft-verb { background: none; border: none; color: var(--weft-dim); cursor: pointer; padding: 0 3px; clip-path: inset(50%); }
 .weft-verb::before { content: attr(data-g); }
 .weft-step:hover > .weft-step-h .weft-verb, .weft-call:hover > .weft-call-h .weft-verb, .weft-note:hover .weft-verb,
 .weft-verb:focus-visible { clip-path: none; }
 @media (hover: none) { .weft-verb { clip-path: none; } }
 .weft-verb-t { font-weight: 600; margin-bottom: 6px; }
 .weft-ack { border: 1px solid var(--weft-line); border-radius: var(--weft-radius-sm); padding: 5px 8px; margin: 6px 0; }
-.weft-verdicts { list-style: none; margin: 4px 0 0; padding: 0; }
+.weft-verdicts { list-style: none; margin: 4px 0 0; }
 .weft-v { font-weight: 600; }
 .weft-v-runs .weft-v { color: var(--weft-info); }
 .weft-v-parked .weft-v { color: var(--weft-warn); }

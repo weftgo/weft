@@ -77,27 +77,6 @@ export function costView(f: CostFields | null | undefined): CostView {
 export const CACHE_HINT =
   "the adapter reported no cache splits: every input token was priced at the input rate, which may overstate a cached prompt"
 
-/** delegatedView reads a run's delegated block (its subagents'). The
- * API sends no delegated badge, only delegated_cost_reason: the badge
- * is "unknown" when the reason leads with pricing.go's unknown words —
- * a child still running (usage arrives at its end), one whose end never
- * arrived, children that could not be read — even when the list names
- * an unpriced child too; else "unpriced" when it names an unpriced
- * model, else "unknown". The title is the API's reason either way. */
-export function delegatedView(
-  f: DelegatedCostFields | null | undefined
-): CostView {
-  const known = f?.delegated_cost_known
-  const reason = f?.delegated_cost_reason
-  const badge =
-    known === false
-      ? reason && (UNKNOWN_LEAD.test(reason) || !UNPRICED_WORDS.test(reason))
-        ? "unknown"
-        : "unpriced"
-      : undefined
-  return view(f?.delegated_cost_usd, known, reason, badge)
-}
-
 /** A figure as drawn: its words, its tooltip, whether it is known. */
 export interface CostView {
   known: boolean
@@ -304,19 +283,6 @@ export function summarizerView(
   }
 }
 
-/** "$1.23"; under a cent four decimals ("$0.0042"), under that
- * "<$0.0001"; a known zero "$0.00". Only ever called on a known
- * figure — an unknown one is "—" (costView). */
-export function formatUSD(v: number): string {
-  if (!Number.isFinite(v)) return "—"
-  if (v === 0) return "$0.00"
-  const abs = Math.abs(v)
-  const sign = v < 0 ? "-" : ""
-  if (abs < 0.0001) return `${sign}<$0.0001`
-  if (abs < 0.01) return `${sign}$${abs.toFixed(4)}`
-  return `${sign}$${abs.toFixed(2)}`
-}
-
 /** The bill's two parts in words (U21.1, UX-F-15, UX-F-16): "$0.0012
  * own · $0.0040 delegated" — the figure, then its word — on the
  * panel's turn row and Studio's run header alike; delegated is a cost
@@ -330,19 +296,6 @@ export const costLine = (own: string, delegated: string) =>
 /** A whole bill's hover (a replayed run's result, both surfaces). */
 export const BILL_TITLE =
   "the run's whole bill: own + delegated (its model calls and its child runs')"
-
-/** scriptedChip is a scripted run's chip (UX-C-42), the same words on
- * the panel's turn row, Studio's run header and experiment grid:
- * "scripted · 0 tokens" only when the row's usage is zero — a scripted
- * parent's Subagent child on a real model rolls real usage in. */
-export function scriptedChip(
-  r: Pick<RunRow, "model" | "usage">
-): string | undefined {
-  if (!isScripted(r)) return undefined
-  return r.usage.input_tokens + r.usage.output_tokens
-    ? "scripted"
-    : "scripted · 0 tokens"
-}
 
 /** An estimate's badge, mark and word (studio/pricing.go's
  * costEstimate): a known figure priced at a stand-in model's rates — a
@@ -621,4 +574,51 @@ export function costCellWords(
     }
   }
   return { text: CELL_WORDS[state], title: CELL_REASONS[state], why: "" }
+}
+
+/** delegatedView reads a run's delegated block (its subagents'). The
+ * API sends no delegated badge, only delegated_cost_reason: the badge
+ * is "unknown" when the reason leads with pricing.go's unknown words —
+ * a child still running (usage arrives at its end), one whose end never
+ * arrived, children that could not be read — even when the list names
+ * an unpriced child too; else "unpriced" when it names an unpriced
+ * model, else "unknown". The title is the API's reason either way. */
+export function delegatedView(
+  f: DelegatedCostFields | null | undefined
+): CostView {
+  const known = f?.delegated_cost_known
+  const reason = f?.delegated_cost_reason
+  const badge =
+    known === false
+      ? reason && (UNKNOWN_LEAD.test(reason) || !UNPRICED_WORDS.test(reason))
+        ? "unknown"
+        : "unpriced"
+      : undefined
+  return view(f?.delegated_cost_usd, known, reason, badge)
+}
+
+/** "$1.23"; under a cent four decimals ("$0.0042"), under that
+ * "<$0.0001"; a known zero "$0.00". Only ever called on a known
+ * figure — an unknown one is "—" (costView). */
+export function formatUSD(v: number): string {
+  if (!Number.isFinite(v)) return "—"
+  if (v === 0) return "$0.00"
+  const abs = Math.abs(v)
+  const sign = v < 0 ? "-" : ""
+  if (abs < 0.0001) return `${sign}<$0.0001`
+  if (abs < 0.01) return `${sign}$${abs.toFixed(4)}`
+  return `${sign}$${abs.toFixed(2)}`
+}
+
+/** scriptedChip is a scripted run's chip (UX-C-42), the same words on
+ * the panel's turn row, Studio's run header and experiment grid:
+ * "scripted · 0 tokens" only when the row's usage is zero — a scripted
+ * parent's Subagent child on a real model rolls real usage in. */
+export function scriptedChip(
+  r: Pick<RunRow, "model" | "usage">
+): string | undefined {
+  if (!isScripted(r)) return undefined
+  return r.usage.input_tokens + r.usage.output_tokens
+    ? "scripted"
+    : "scripted · 0 tokens"
 }

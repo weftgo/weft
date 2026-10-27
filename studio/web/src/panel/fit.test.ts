@@ -28,6 +28,14 @@ describe("the panel's fit (P020.1)", () => {
       ".weft-tq { display: flex; flex-wrap: wrap; gap: 6px;"
     )
   })
+  it("the chosen engine reads in the foreground colour (P020.1-ui-fix)", () => {
+    expect(PANEL_CSS).toContain(
+      ".weft-rq-tool:has(:checked) { color: var(--weft-fg); }"
+    )
+  })
+  it("every element's font is the panel's, said once", () => {
+    expect(PANEL_CSS.match(/font: inherit/g)).toHaveLength(1)
+  })
   it("the parked card's result field holds its placeholder", () => {
     expect(PANEL_CSS).toContain(".weft-resolve { width: 25ch; max-width: 100%;")
   })

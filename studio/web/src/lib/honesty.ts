@@ -505,18 +505,6 @@ export function appVerbWords(
   }
 }
 
-/** isLive says a run's records may still arrive: it reads running, or
- * it is settling (api.go's runRow.settling, docs/record-contract.md §6
- * — its root span stored, so its status already reads succeeded or
- * failed, its run_finish not, heard from within 30 s). Every tail,
- * poll and done check on both surfaces reads it, never status ===
- * "running" alone: a run opened in that window is still followed. */
-export function isLive(
-  r: { status?: string; settling?: boolean } | null | undefined
-): boolean {
-  return !!r && (r.status === "running" || r.settling === true)
-}
-
 /** USAGE_AT_FINISH is what a running child's usage reads. */
 export const USAGE_AT_FINISH = "usage at finish"
 
@@ -860,35 +848,6 @@ export const linkedRun = (
   row: { parent_run_id?: string; caller_run_id?: string } | null | undefined
 ) => row?.parent_run_id || row?.caller_run_id || ""
 
-/**
- * statusHoles is what a run's header adds to the run document's holes,
- * one rule on both surfaces (the run page's header, the panel's turn):
- * interrupted from the row's status, max_tokens from its stop reason,
- * and the event positions the walk found missing — a gap only once the
- * run is over and settled (status known and not isLive): while it runs
- * or settles a missing position may still be in flight, and the run
- * page says so in a banner instead. The run document's own counted gap
- * (cause events_lost, "N of M events were lost") is listed first by
- * the callers, so its words win the merge.
- */
-export function statusHoles(r: {
-  status?: string
-  stop_reason?: string
-  gaps?: number[]
-  settling?: boolean
-}): HoleMark[] {
-  const out: HoleMark[] = []
-  if (r.status === "interrupted") out.push({ hole: "interrupted" })
-  const gaps = Array.isArray(r.gaps) ? r.gaps : []
-  if (gaps.length && r.status && !isLive(r))
-    out.push({
-      hole: "gap",
-      reason: `${plural(gaps.length, "event")} missing (${gaps.length === 1 ? "position" : "positions"} ${gaps.slice(0, 8).join(", ")}${gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,
-    })
-  if (r.stop_reason === "max_tokens") out.push({ hole: "max_tokens" })
-  return out
-}
-
 /** What the surface knows of the Studio and the session beyond the
  * runtimes: meta's capabilities (absent while unread: no verdict), its
  * capabilities_off, and a failed meta or session read. */
@@ -959,6 +918,47 @@ export const refusalLine = (w: { words: string; fix: string }) =>
  * read-only" — the whole line said once under the calls, not on every
  * verb. */
 export const refusalHead = (w: { words: string }) => w.words.split(/: | — /)[0]
+
+/** isLive says a run's records may still arrive: it reads running, or
+ * it is settling (api.go's runRow.settling, docs/record-contract.md §6
+ * — its root span stored, so its status already reads succeeded or
+ * failed, its run_finish not, heard from within 30 s). Every tail,
+ * poll and done check on both surfaces reads it, never status ===
+ * "running" alone: a run opened in that window is still followed. */
+export function isLive(
+  r: { status?: string; settling?: boolean } | null | undefined
+): boolean {
+  return !!r && (r.status === "running" || r.settling === true)
+}
+
+/**
+ * statusHoles is what a run's header adds to the run document's holes,
+ * one rule on both surfaces (the run page's header, the panel's turn):
+ * interrupted from the row's status, max_tokens from its stop reason,
+ * and the event positions the walk found missing — a gap only once the
+ * run is over and settled (status known and not isLive): while it runs
+ * or settles a missing position may still be in flight, and the run
+ * page says so in a banner instead. The run document's own counted gap
+ * (cause events_lost, "N of M events were lost") is listed first by
+ * the callers, so its words win the merge.
+ */
+export function statusHoles(r: {
+  status?: string
+  stop_reason?: string
+  gaps?: number[]
+  settling?: boolean
+}): HoleMark[] {
+  const out: HoleMark[] = []
+  if (r.status === "interrupted") out.push({ hole: "interrupted" })
+  const gaps = Array.isArray(r.gaps) ? r.gaps : []
+  if (gaps.length && r.status && !isLive(r))
+    out.push({
+      hole: "gap",
+      reason: `${plural(gaps.length, "event")} missing (${gaps.length === 1 ? "position" : "positions"} ${gaps.slice(0, 8).join(", ")}${gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,
+    })
+  if (r.stop_reason === "max_tokens") out.push({ hole: "max_tokens" })
+  return out
+}
 
 /** ownTurn: the row's id is a turn of its own session — thread/turn.go's
  * `<session>-t<n>`, nothing after it. A Subagent child

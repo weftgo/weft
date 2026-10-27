@@ -49,83 +49,6 @@ const KINDS: Record<string, string | undefined> = {
 
 export const CANCELLED = "cancelled"
 
-/** problemBadges lists a run's problems, in one fixed order — none for
- * a clean run (badges only on problems). Parked calls ride ✋ with the
- * denials: both are calls a policy held. status is the row's statusOf
- * key (lib/status.ts): the stored pending count stays after a resume,
- * so a decided park ("resumed") draws no parked part — its status word
- * already says "parked → tN" — and a row whose word is not parked says
- * "held" (W7-prep). */
-export function problemBadges(r: ProblemRow, status?: string): ProblemBadge[] {
-  const out: ProblemBadge[] = []
-  const add = (key: string, glyph: string, label: string) =>
-    out.push({ key, glyph, label })
-  if (n(r.attempts_retried) > 0)
-    add(
-      "retried",
-      `↻${r.attempts_retried}`,
-      `${plural(n(r.attempts_retried), "model attempt")} retried`
-    )
-  if (n(r.fallbacks) > 0)
-    add(
-      "fallback",
-      n(r.fallbacks) > 1 ? `⇄${r.fallbacks}` : "⇄",
-      `${plural(n(r.fallbacks), "model call")} answered by a fallback model`
-    )
-  if (n(r.tool_errors) > 0)
-    add(
-      "tool_errors",
-      `✗${r.tool_errors}`,
-      plural(n(r.tool_errors), "tool error")
-    )
-  const parked = status === "resumed" ? 0 : n(r.pending)
-  const held = n(r.denied) + parked
-  if (held > 0) {
-    const parts = []
-    if (n(r.denied) > 0) parts.push(`${r.denied} denied`)
-    if (parked > 0)
-      parts.push(`${parked} ${status === "parked" ? "parked" : "held"}`)
-    add(
-      "denied",
-      held > 1 ? `✋${held}` : "✋",
-      `${parts.join(", ")} (approval or policy)`
-    )
-  }
-  if (n(r.truncated) > 0)
-    add(
-      "truncated",
-      `✂${r.truncated}`,
-      `${plural(n(r.truncated), "tool result")} cut by the result cap`
-    )
-  if (n(r.repaired) > 0)
-    add(
-      "repaired",
-      `⚒${r.repaired}`,
-      `${plural(n(r.repaired), "tool call")} repaired`
-    )
-  // Past the reader's cap the log counts are floors: "≥" on both.
-  const ge = r.logs_capped ? "≥" : ""
-  if (n(r.tap_panics) > 0)
-    add(
-      "tap_panics",
-      `⚠${r.tap_panics}`,
-      `tap panics: ${r.tap_panics} (observers or providers, contained)`
-    )
-  if (n(r.log_error) > 0)
-    add(
-      "log_error",
-      `E${ge}${r.log_error}`,
-      ge + plural(n(r.log_error), "app log error")
-    )
-  if (n(r.log_warn) > 0)
-    add(
-      "log_warn",
-      `W${ge}${r.log_warn}`,
-      ge + plural(n(r.log_warn), "app log warning")
-    )
-  return out
-}
-
 /** A ModelRetry result's error.type: the intended repair loop (a
  * retry, never a failure — the tool_errors counter leaves it out; the
  * loop graph marks it ↻). */
@@ -455,4 +378,81 @@ export interface ProblemBadge {
   key: string
   glyph: string
   label: string
+}
+
+/** problemBadges lists a run's problems, in one fixed order — none for
+ * a clean run (badges only on problems). Parked calls ride ✋ with the
+ * denials: both are calls a policy held. status is the row's statusOf
+ * key (lib/status.ts): the stored pending count stays after a resume,
+ * so a decided park ("resumed") draws no parked part — its status word
+ * already says "parked → tN" — and a row whose word is not parked says
+ * "held" (W7-prep). */
+export function problemBadges(r: ProblemRow, status?: string): ProblemBadge[] {
+  const out: ProblemBadge[] = []
+  const add = (key: string, glyph: string, label: string) =>
+    out.push({ key, glyph, label })
+  if (n(r.attempts_retried) > 0)
+    add(
+      "retried",
+      `↻${r.attempts_retried}`,
+      `${plural(n(r.attempts_retried), "model attempt")} retried`
+    )
+  if (n(r.fallbacks) > 0)
+    add(
+      "fallback",
+      n(r.fallbacks) > 1 ? `⇄${r.fallbacks}` : "⇄",
+      `${plural(n(r.fallbacks), "model call")} answered by a fallback model`
+    )
+  if (n(r.tool_errors) > 0)
+    add(
+      "tool_errors",
+      `✗${r.tool_errors}`,
+      plural(n(r.tool_errors), "tool error")
+    )
+  const parked = status === "resumed" ? 0 : n(r.pending)
+  const held = n(r.denied) + parked
+  if (held > 0) {
+    const parts = []
+    if (n(r.denied) > 0) parts.push(`${r.denied} denied`)
+    if (parked > 0)
+      parts.push(`${parked} ${status === "parked" ? "parked" : "held"}`)
+    add(
+      "denied",
+      held > 1 ? `✋${held}` : "✋",
+      `${parts.join(", ")} (approval or policy)`
+    )
+  }
+  if (n(r.truncated) > 0)
+    add(
+      "truncated",
+      `✂${r.truncated}`,
+      `${plural(n(r.truncated), "tool result")} cut by the result cap`
+    )
+  if (n(r.repaired) > 0)
+    add(
+      "repaired",
+      `⚒${r.repaired}`,
+      `${plural(n(r.repaired), "tool call")} repaired`
+    )
+  // Past the reader's cap the log counts are floors: "≥" on both.
+  const ge = r.logs_capped ? "≥" : ""
+  if (n(r.tap_panics) > 0)
+    add(
+      "tap_panics",
+      `⚠${r.tap_panics}`,
+      `tap panics: ${r.tap_panics} (observers or providers, contained)`
+    )
+  if (n(r.log_error) > 0)
+    add(
+      "log_error",
+      `E${ge}${r.log_error}`,
+      ge + plural(n(r.log_error), "app log error")
+    )
+  if (n(r.log_warn) > 0)
+    add(
+      "log_warn",
+      `W${ge}${r.log_warn}`,
+      ge + plural(n(r.log_warn), "app log warning")
+    )
+  return out
 }

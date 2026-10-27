@@ -61,6 +61,37 @@ func highestMigration() int {
 	return v[len(v)-1]
 }
 
+// postMigrations are Go steps a migration runs after its SQL: what SQL
+// alone cannot derive. A step must be safe to run twice (two racing
+// Opens may both run it): re-deriving inserts rows the max aggregates
+// fold together.
+var postMigrations = map[int]func(context.Context, ch.Conn) error{
+	31: rederiveStock,
+}
+
+// rederiveStock is migration 0031's Go step: every trace holding a span
+// that obsdb.StockCandidate would re-derive (no weft.run.id, a GenAI
+// operation by attribute or name) re-derived through rederiveTraces.
+func rederiveStock(ctx context.Context, conn ch.Conn) error {
+	rs, err := conn.Query(ctx, `SELECT DISTINCT TraceId FROM otel_traces WHERE `+chStockOp)
+	if err != nil {
+		return err
+	}
+	var traces []string
+	for rs.Next() {
+		var t string
+		if err := rs.Scan(&t); err != nil {
+			_ = rs.Close()
+			return err
+		}
+		traces = append(traces, t)
+	}
+	if err := rs.Close(); err != nil {
+		return err
+	}
+	return (&DB{conn: conn}).rederiveTraces(ctx, traces)
+}
+
 // ErrNewerSchema is returned by Open when the database's
 // obsdb_migrations is ahead of this binary's highest migration: a
 // database written by a newer weft fails loudly instead of silently
@@ -98,6 +129,11 @@ func migrate(ctx context.Context, conn ch.Conn) error {
 		}
 		for _, stmt := range splitStatements(string(body)) {
 			if err := conn.Exec(ctx, stmt); err != nil {
+				return fmt.Errorf("clickhouse: migration %s: %w", migrations[v], err)
+			}
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(ctx, conn); err != nil {
 				return fmt.Errorf("clickhouse: migration %s: %w", migrations[v], err)
 			}
 		}

@@ -16,12 +16,21 @@
 // selector), a follow toggle streams that agent's run frames and
 // refreshes the list as runs start and finish (S4.7's live rows).
 import { useEffect, useRef, useState } from "react"
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type { InfiniteData } from "@tanstack/react-query"
-import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  Link,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router"
 import { ChevronDown, RefreshCw, Radio, Search, X } from "lucide-react"
 
-import { fetchRuns, fetchSearch, nextCursor } from "@/lib/api"
+import { fetchRuns, fetchSearch, fetchTraces, nextCursor } from "@/lib/api"
 import {
   ErrorClassFacet,
   ExperimentOnThese,
@@ -68,7 +77,8 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { nest, RUNS_TREE } from "@/lib/delegation"
-import { runLink } from "@/lib/links"
+import { runLink, tracesLink } from "@/lib/links"
+import { notRunTraces } from "@/lib/honesty"
 import type { RunsSearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { ANY_STATUS, statusPick } from "@/lib/status"
@@ -237,6 +247,26 @@ function RunsPage() {
     : undefined
   const local = localKeys(search, caps)
   const total = page.data?.pages[0]?.total ?? 0
+  // The GenAI traces stored that make no run (UX-H-02): a Python or TS
+  // app's spans that are traces only — counted, linked to the list of
+  // them, where each trace says why.
+  const notRun = useQuery({
+    queryKey: ["traces", "not_run", "count"],
+    staleTime: 30_000,
+    queryFn: () => fetchTraces({ not_run: true, limit: 1 }),
+    enabled: has("traces"),
+  })
+  const notRunCount = notRun.data?.total ?? 0
+  const notRunLink =
+    notRunCount > 0 ? (
+      <Link
+        {...tracesLink({ not_run: true })}
+        className="font-mono text-xs text-thread-ink hover:underline"
+        data-not-run-traces={notRunCount}
+      >
+        {notRunTraces(notRunCount)}
+      </Link>
+    ) : null
   const costCap = searching
     ? searchPage.data?.pages[0]?.cost_sort_cap
     : undefined
@@ -382,6 +412,7 @@ function RunsPage() {
                   ? `${total.toLocaleString()} runs`
                   : `${total.toLocaleString()} top-level`}
         </span>
+        {notRunLink}
         <div className="relative w-full min-w-0 sm:w-72">
           <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-faint" />
           <FilterBox
@@ -774,7 +805,9 @@ function RunsPage() {
             title="No runs yet"
             what={TERMS.run.short}
             next="Runs appear here once your app records one: point it at this Studio."
-          />
+          >
+            {notRunLink}
+          </EmptyState>
         )
       ) : (
         <>

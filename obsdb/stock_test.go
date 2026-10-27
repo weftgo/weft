@@ -77,8 +77,9 @@ func TestStockRunID(t *testing.T) {
 	}
 }
 
-// What makes a root (§9): the operation (attribute, else the name), no
-// weft.run.id, a conversation id.
+// What makes a root on its own (§9): the operation (attribute, else the
+// name), no weft.run.id, a conversation id. Without one, the trace
+// decides (TestDeriveTopLevelWithoutConversation).
 func TestIsStockRootAndCandidate(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -162,5 +163,50 @@ func TestDeriveStockFailedNoDescriptionAndEmptyOp(t *testing.T) {
 	}
 	if r := runs[0].Row; r.Status != obsdb.StatusFailed || r.Err != obsdb.StockErrNoDescription {
 		t.Errorf("failed root without a description = %s %q", r.Status, r.Err)
+	}
+}
+
+// An invoke_agent span without gen_ai.conversation.id (§9, I6): at the
+// top of its trace — under an HTTP span, or with its parent not stored —
+// it is a run with no session; nested under another agent span it folds
+// into the enclosing run, its calls that run's steps, as before.
+func TestDeriveTopLevelWithoutConversation(t *testing.T) {
+	const tr = "0000000000000000000000000000000b"
+	sp := func(id, parent, name string, ms int, attrs map[string]any) obsdb.Span {
+		return obsdb.Span{TraceID: tr, SpanID: id, ParentSpanID: parent, Name: name,
+			Start: stockAt(ms), End: stockAt(ms + 10), Attrs: attrs}
+	}
+	usage := func(in int64) map[string]any {
+		return map[string]any{"gen_ai.operation.name": "chat", "gen_ai.usage.input_tokens": in,
+			"gen_ai.input.messages": `[{"role":"user","parts":[{"type":"text","content":"hi"}]}]`}
+	}
+	http := sp("0000000000000001", "", "POST /plan", 0, nil)
+	outer := sp("0000000000000002", http.SpanID, "invoke_agent planner", 1, map[string]any{"gen_ai.agent.name": "planner"})
+	chat := sp("0000000000000003", outer.SpanID, "chat m", 2, usage(10))
+	inner := sp("0000000000000004", outer.SpanID, "invoke_agent helper", 3, map[string]any{"gen_ai.agent.name": "helper"})
+	chat2 := sp("0000000000000005", inner.SpanID, "chat m", 4, map[string]any{"gen_ai.operation.name": "chat", "gen_ai.usage.input_tokens": int64(5)})
+
+	runs := obsdb.DeriveStockRuns([]obsdb.Span{http, outer, chat, inner, chat2})
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want the top-level planner alone (the helper folds)", len(runs))
+	}
+	r := runs[0].Row
+	if r.ID != obsdb.StockRunID(tr, outer.SpanID) || r.SessionID != "" || r.ParentRunID != "" || r.Steps != 2 ||
+		r.Usage.InputTokens != 15 || r.MessageCount != 1 {
+		t.Errorf("planner = %+v, want no session, two steps (the helper's folded), 15 in, one chat span with messages", r)
+	}
+
+	// Its parent not stored yet: the inner agent alone is top-level for
+	// now — a run of its own — and folds once the planner arrives.
+	early := obsdb.DeriveStockRuns([]obsdb.Span{inner, chat2})
+	if len(early) != 1 || early[0].Row.ID != obsdb.StockRunID(tr, inner.SpanID) {
+		t.Fatalf("inner before its parent = %v, want it a run for now", early)
+	}
+
+	// Under a weft run's span: top-level (weft's rows win), a run.
+	weftTool := sp("0000000000000006", "", "execute_tool delegate", 0, map[string]any{"weft.run.id": "r1"})
+	agent := sp("0000000000000007", weftTool.SpanID, "invoke_agent stock", 1, nil)
+	if got := obsdb.DeriveStockRuns([]obsdb.Span{weftTool, agent}); len(got) != 1 || got[0].Row.ParentRunID != "" {
+		t.Errorf("stock agent under a weft tool = %v, want one top-level run", got)
 	}
 }

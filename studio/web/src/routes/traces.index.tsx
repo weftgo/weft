@@ -26,6 +26,7 @@ import type { TracesSearch } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { CapsUnread } from "@/components/studio/caps-unread"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { DERIVED_HOLE, DERIVED_WORDS, isDerivedRunId } from "@/lib/honesty"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -58,6 +59,10 @@ export const Route = createFileRoute("/traces/")({
     service:
       typeof search.service === "string" && search.service.trim()
         ? search.service.trim()
+        : undefined,
+    not_run:
+      search.not_run === true || search.not_run === 1 || search.not_run === "1"
+        ? true
         : undefined,
   }),
   component: TracesPage,
@@ -110,6 +115,7 @@ function TracesPage() {
     since: since ? rangeTime(since, "since") : undefined,
     until: until ? rangeTime(until, "until") : undefined,
     service: search.service,
+    not_run: search.not_run,
   }
   const q = useInfiniteQuery({
     queryKey: ["traces", "infinite", filters],
@@ -167,6 +173,8 @@ function TracesPage() {
     })
   if (search.service)
     chips.push({ key: "service", label: `service ${search.service}` })
+  if (search.not_run)
+    chips.push({ key: "not_run", label: DERIVED_WORDS.notRunChip })
 
   return (
     <div className="space-y-3">
@@ -346,14 +354,21 @@ function TracesPage() {
                           —
                         </span>
                       ) : (
-                        <Link
-                          {...runLink(t.root_run?.id ?? t.run_ids[0])}
-                          className={`hover:text-thread-ink hover:underline ${t.failed_runs ? `${STATUS_TEXT.bad}` : "text-muted-foreground"}`}
-                          title={t.run_ids.join("\n")}
-                          data-trace-run-count
-                        >
-                          {traceRunsWords(t)}
-                        </Link>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Link
+                            {...runLink(t.root_run?.id ?? t.run_ids[0])}
+                            className={`hover:text-thread-ink hover:underline ${t.failed_runs ? `${STATUS_TEXT.bad}` : "text-muted-foreground"}`}
+                            title={t.run_ids.join("\n")}
+                            data-trace-run-count
+                          >
+                            {traceRunsWords(t)}
+                          </Link>
+                          {/* A run derived from the trace's stock spans
+                              (I6, UX-H-03): the derived chip. */}
+                          {t.run_ids.some(isDerivedRunId) ? (
+                            <HoleBadge {...DERIVED_HOLE} />
+                          ) : null}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">

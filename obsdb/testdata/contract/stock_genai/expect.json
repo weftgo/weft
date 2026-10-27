@@ -1,6 +1,6 @@
 {
   "case": "stock_genai",
-  "description": "a stock OpenTelemetry GenAI app (no weft.* attribute anywhere): two invoke_agent traces sharing gen_ai.conversation.id, the first with two chat spans and one execute_tool, the second failed. Each root invoke_agent span is one derived run (docs/record-contract.md, \"Deriving a run from stock spans\"): no events, transcript or request records, badged derived.",
+  "description": "a stock OpenTelemetry GenAI app (no weft.* attribute anywhere): two invoke_agent traces sharing gen_ai.conversation.id, the first with two chat spans and one execute_tool, the second failed. Each root invoke_agent span is one derived run (docs/record-contract.md, \"Deriving a run from stock spans\"): no events, transcript or request records, badged derived. The first trace's chat spans carry the conventions' message content: message_count 2.",
   "derived": true,
   "runs": [
     {
@@ -22,7 +22,7 @@
         "output_tokens": 78
       },
       "event_count": 0,
-      "message_count": 0,
+      "message_count": 2,
       "delta_count": 0,
       "request_count": 0,
       "chat": [
@@ -109,5 +109,9 @@
         "failed"
       ]
     }
+  ],
+  "traces": [
+    "4bf92f3577b34da6a3ce929d0e0e4736 runs otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7",
+    "5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10 runs otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081"
   ]
 }

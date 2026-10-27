@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1275,5 +1276,107 @@ func TestUpgradeTo0020ReadsRunTrees(t *testing.T) {
 	if err != nil || len(tree.Spans) != 2 || tree.Spans[0].RunID != "r_up" || tree.Spans[1].RunID != "r_up/0/c" ||
 		tree.Spans[1].ParentRunID != "r_up" || tree.Truncated || len(tree.Missing) != 0 {
 		t.Errorf("RunTreeSpans after 0020 = %+v, %v; want r_up's span and its child's under it", tree, err)
+	}
+}
+
+// Migration 0026 (I6, docs/record-contract.md §9): a file written
+// before it holds stock spans the old rule left without a row — a
+// top-level invoke_agent span without gen_ai.conversation.id — and
+// derived rows with no message count. Opening it re-derives every stock
+// trace with the new rule, and DB.Traces' derived lookup uses the new
+// partial index.
+func TestMigration0026RederivesStock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at25.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range sortedVersions() {
+		if v > 25 {
+			break
+		}
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const tr = "7d000000000000000000000000000001"
+	spans := []obsdb.Span{
+		{TraceID: tr, SpanID: "7d00000000000001", Name: "POST /plan", Start: time.Unix(0, 100), End: time.Unix(0, 900)},
+		{TraceID: tr, SpanID: "7d00000000000002", ParentSpanID: "7d00000000000001", Name: "invoke_agent planner",
+			Start: time.Unix(0, 110), End: time.Unix(0, 800),
+			Attrs: map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "planner"}},
+		{TraceID: tr, SpanID: "7d00000000000003", ParentSpanID: "7d00000000000002", Name: "chat m",
+			Start: time.Unix(0, 120), End: time.Unix(0, 200),
+			Attrs: map[string]any{"gen_ai.operation.name": "chat", "gen_ai.input.messages": `[]`}},
+	}
+	tx, err := raw.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range spans {
+		if _, err := insertSpan(context.Background(), tx, s, obsdb.Weft{Step: -1, ToolSeq: -1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0025 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	id := obsdb.StockRunID(tr, "7d00000000000002")
+	run, err := db.Run(ctx, id)
+	if err != nil || !run.Derived || run.SessionID != "" || run.Steps != 1 || run.MessageCount != 1 {
+		t.Fatalf("after 0026 %s = %+v, %v; want a derived run with no session, 1 step, 1 chat span with messages", id, run.RunRow, err)
+	}
+	page, err := db.Traces(ctx, obsdb.TraceQuery{})
+	if err != nil || len(page.Traces) != 1 || len(page.Traces[0].RunIDs) != 1 || page.Traces[0].RunIDs[0] != id {
+		t.Errorf("traces after 0026 = %+v (%v), want the trace naming %s", page.Traces, err, id)
+	}
+	rows, err := db.(*DB).reads.QueryContext(ctx, `EXPLAIN QUERY PLAN SELECT trace_id, run_id FROM runs WHERE derived = 1 AND trace_id IN (?)`, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var a, b, c int
+		var detail string
+		if err := rows.Scan(&a, &b, &c, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if !strings.Contains(strings.Join(plan, "; "), "runs_derived_trace") {
+		t.Errorf("the derived lookup's plan = %q, want it on runs_derived_trace", plan)
 	}
 }

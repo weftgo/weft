@@ -91,13 +91,25 @@ func (d *DB) deriveStock(ctx context.Context, spans []obsdb.Span) error {
 			traces = append(traces, s.TraceID)
 		}
 	}
+	return d.rederiveTraces(ctx, traces)
+}
+
+// rederiveTraces re-derives each trace's runs from its stored spans
+// (deriveStock's body, and migration 0031's Go step): every run's row
+// inserted, MessageCount into DerivedMessages, and the trace's derived
+// rows the derivation no longer makes deleted (dropStaleDerived).
+func (d *DB) rederiveTraces(ctx context.Context, traces []string) error {
 	var rows []obsdb.RunRow
 	for _, t := range traces {
 		stored, err := d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE TraceId = ?"+spanDedup, t)
 		if err != nil {
 			return err
 		}
-		for _, r := range obsdb.DeriveStockRuns(stored) {
+		runs := obsdb.DeriveStockRuns(stored)
+		if err := d.dropStaleDerived(ctx, t, runs); err != nil {
+			return err
+		}
+		for _, r := range runs {
 			rows = append(rows, r.Row)
 		}
 	}
@@ -107,7 +119,8 @@ func (d *DB) deriveStock(ctx context.Context, spans []obsdb.Span) error {
 	batch, err := d.conn.PrepareBatch(ctx, `INSERT INTO weft_runs (
 		RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, Model, Service, SessionID,
 		Started, Finished, LastSeen, FinishedOK, Failed, Err, Steps,
-		InputTokens, OutputTokens, CachedInputTokens, CacheWriteTokens, ReasoningTokens, Derived, RootEnded)`)
+		InputTokens, OutputTokens, CachedInputTokens, CacheWriteTokens, ReasoningTokens, Derived, RootEnded,
+		DerivedMessages)`)
 	if err != nil {
 		return err
 	}
@@ -117,12 +130,47 @@ func (d *DB) deriveStock(ctx context.Context, spans []obsdb.Span) error {
 			r.Started, r.Finished, r.LastSeen,
 			boolUInt8(r.Status == obsdb.StatusSucceeded), boolUInt8(r.Status == obsdb.StatusFailed), r.Err, int32(r.Steps),
 			r.Usage.InputTokens, r.Usage.OutputTokens, r.Usage.CachedInputTokens,
-			r.Usage.CacheWriteTokens, r.Usage.ReasoningTokens, uint8(1), uint8(1),
+			r.Usage.CacheWriteTokens, r.Usage.ReasoningTokens, uint8(1), uint8(1), r.MessageCount,
 		); err != nil {
 			return err
 		}
 	}
 	return batch.Send()
+}
+
+// dropStaleDerived deletes the trace's derived rows the latest
+// derivation no longer makes (§9): an agent without a conversation id
+// stored before its enclosing agent arrived was a run of its own for a
+// while and now folds into the enclosing run. The spans stay (they are
+// the enclosing run's); the lightweight delete runs only when a row is
+// stale, which only that order of exports makes.
+func (d *DB) dropStaleDerived(ctx context.Context, trace string, runs []obsdb.StockRun) error {
+	keep := make(map[string]bool, len(runs))
+	for _, r := range runs {
+		keep[r.Row.ID] = true
+	}
+	rs, err := d.conn.Query(ctx, `SELECT DISTINCT RunId FROM weft_runs WHERE Derived = 1 AND TraceID = ?`, trace)
+	if err != nil {
+		return err
+	}
+	var stale []string
+	for rs.Next() {
+		var id string
+		if err := rs.Scan(&id); err != nil {
+			_ = rs.Close()
+			return err
+		}
+		if !keep[id] {
+			stale = append(stale, id)
+		}
+	}
+	if err := rs.Close(); err != nil {
+		return err
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	return d.conn.Exec(ctx, `DELETE FROM weft_runs WHERE RunId IN ?`, stale)
 }
 
 func boolUInt8(b bool) uint8 {

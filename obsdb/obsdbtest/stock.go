@@ -2,6 +2,7 @@ package obsdbtest
 
 import (
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -193,6 +194,14 @@ func derivedStock(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("worker spans = %d (%v), want its root and its chat", len(ws), err)
 		}
 
+		// The trace list names every run the trace makes, derived ones
+		// included (no span carries their id) — the helper folded, no
+		// row of its own (I6 keeps a nested agent folded).
+		if tp, err := db.Traces(ctx(), obsdb.TraceQuery{}); err != nil || len(tp.Traces) != 1 ||
+			!equalStrings(tp.Traces[0].RunIDs, sortedStrings(plannerID, workerID)) {
+			t.Errorf("traces = %+v (%v), want the stock trace naming its two derived runs", tp.Traces, err)
+		}
+
 		// Nothing else exists for it, and saying so is not an error.
 		ev, err := db.Events(ctx(), plannerID, -1, 10)
 		if err != nil || len(ev.Events) != 0 || !ev.Done {
@@ -268,6 +277,13 @@ func num(v any) int64 {
 		return int64(x)
 	}
 	return -1
+}
+
+// sortedStrings is its arguments, sorted.
+func sortedStrings(v ...string) []string {
+	out := append([]string(nil), v...)
+	sort.Strings(out)
+	return out
 }
 
 func equalStrings(a, b []string) bool {
@@ -449,6 +465,84 @@ func derivedSweep(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if tr, err := db.Trace(ctx(), trace); err != nil || len(tr) != 0 {
 			t.Errorf("swept trace = %d spans (%v), want none", len(tr), err)
+		}
+	}
+}
+
+// derivedTopLevel (I6, docs/record-contract.md §9): a top-level
+// invoke_agent span without gen_ai.conversation.id is a derived run
+// with no session on every backend; one nested under it folds into it.
+// Exported inner agent first (its parent not stored yet), the inner one
+// is a run for a while, and its row goes once the outer agent arrives —
+// the trace re-derived whole, no stale row left. The run counts its
+// chat spans carrying message content (MessageCount), and a trace of
+// GenAI spans making no run is listed by TraceQuery.NotRun.
+func derivedTopLevel(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const tr = "6c0c0ffee0000000000000000000c001"
+		sp := func(id, parent, name string, start time.Duration, attrs map[string]any) obsdb.Span {
+			s := stockSpan(id, parent, name, start, start+time.Second, attrs)
+			s.TraceID = tr
+			return s
+		}
+		chat := func(id, parent string, start time.Duration, content bool) obsdb.Span {
+			a := map[string]any{"gen_ai.operation.name": "chat", "gen_ai.usage.input_tokens": int64(10)}
+			if content {
+				a["gen_ai.input.messages"] = `[{"role":"user","parts":[{"type":"text","content":"hi"}]}]`
+			}
+			return sp(id, parent, "chat m", start, a)
+		}
+		http := sp("6c00000000000001", "", "POST /plan", 0, nil)
+		outer := sp("6c00000000000002", http.SpanID, "invoke_agent planner", 0, map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "planner"})
+		outer.End = at(10 * time.Second)
+		inner := sp("6c00000000000004", outer.SpanID, "invoke_agent helper", 2*time.Second, map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "helper"})
+		outerID, innerID := obsdb.StockRunID(tr, outer.SpanID), obsdb.StockRunID(tr, inner.SpanID)
+
+		// The inner agent and its call first: its parent not stored, it
+		// is top-level for now.
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{chat("6c00000000000005", inner.SpanID, 2*time.Second, false), inner}}); err != nil {
+			t.Fatal(err)
+		}
+		if r, err := db.Run(ctx(), innerID); err != nil || !r.Derived || r.SessionID != "" {
+			t.Fatalf("inner before its parent = %+v, %v; want a derived run with no session", r.RunRow, err)
+		}
+		// The rest: the inner agent folds; its row goes.
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{chat("6c00000000000003", outer.SpanID, time.Second, true), outer, http}}); err != nil {
+			t.Fatal(err)
+		}
+		page, err := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "*"})
+		if err != nil || len(page.Runs) != 1 || page.Runs[0].ID != outerID {
+			t.Fatalf("runs = %v (%v), want the planner alone (the helper folded)", idsOf(page.Runs), err)
+		}
+		if _, err := db.Run(ctx(), innerID); !errors.Is(err, obsdb.ErrNotFound) {
+			t.Errorf("inner after its parent: %v, want not found (its stale row dropped)", err)
+		}
+		p := page.Runs[0]
+		if p.SessionID != "" || p.Steps != 2 || p.Usage.InputTokens != 20 || p.MessageCount != 1 {
+			t.Errorf("planner = steps %d usage %+v session %q messages %d; want 2 steps (the helper's folded), 20 in, no session, 1 chat span with messages",
+				p.Steps, p.Usage, p.SessionID, p.MessageCount)
+		}
+		if det, err := db.Run(ctx(), outerID); err != nil || det.MessageCount != 1 {
+			t.Errorf("planner run messages = %d (%v), want 1", det.MessageCount, err)
+		}
+		if tp, err := db.Traces(ctx(), obsdb.TraceQuery{}); err != nil || len(tp.Traces) != 1 || !equalStrings(tp.Traces[0].RunIDs, []string{outerID}) {
+			t.Errorf("traces = %+v (%v), want the planner's", tp.Traces, err)
+		}
+
+		// A chat-only trace makes no run: NotRun lists it, and only it.
+		const tr2 = "6c0c0ffee0000000000000000000c002"
+		h2 := sp("6c00000000000011", "", "POST /chat", 20*time.Second, nil)
+		c2 := sp("6c00000000000012", h2.SpanID, "chat gpt", 20*time.Second, map[string]any{"gen_ai.system": "openai"})
+		h2.TraceID, c2.TraceID = tr2, tr2
+		plain := sp("6c00000000000021", "", "GET /health", 30*time.Second, nil)
+		plain.TraceID = "6c0c0ffee0000000000000000000c003"
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{h2, c2, plain}}); err != nil {
+			t.Fatal(err)
+		}
+		np, err := db.Traces(ctx(), obsdb.TraceQuery{NotRun: true})
+		if err != nil || np.Total != 1 || len(np.Traces) != 1 || np.Traces[0].TraceID != tr2 {
+			t.Errorf("NotRun traces = %+v (%v), want the chat-only trace alone", np, err)
 		}
 	}
 }

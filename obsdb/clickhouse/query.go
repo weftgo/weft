@@ -34,7 +34,7 @@ const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, 
 	CachedInputTokens, CacheWriteTokens, ReasoningTokens, DeltaCount,
 	InstructionsHash, CatalogHash, RequestCount, Derived, RootEnded,
 	StoppedBy, CancelCause, EventsEmitted, MessagesEmitted, ErrorType, Problems,
-	ResumedFrom, CallerRunID, CallerCallID`
+	ResumedFrom, CallerRunID, CallerCallID, DerivedMessages`
 
 // runAggregates is the same list as a GROUP BY RunId select: max for
 // identity strings, flags, usage and last-seen; min for started — the
@@ -55,7 +55,8 @@ const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID)
 	max(StoppedBy) AS StoppedBy, max(CancelCause) AS CancelCause,
 	max(EventsEmitted) AS EventsEmitted, max(MessagesEmitted) AS MessagesEmitted,
 	max(ErrorType) AS ErrorType, groupUniqArrayArray(Problems) AS Problems,
-	max(ResumedFrom) AS ResumedFrom, max(CallerRunID) AS CallerRunID, max(CallerCallID) AS CallerCallID`
+	max(ResumedFrom) AS ResumedFrom, max(CallerRunID) AS CallerRunID, max(CallerCallID) AS CallerCallID,
+	max(DerivedMessages) AS DerivedMessages`
 
 // statusCase is the four-row table in SQL over weft_runs' columns: it
 // must agree with obsdb.DeriveStatus, whose test pins the boundaries —
@@ -408,7 +409,7 @@ func (d *DB) queryRunRows(ctx context.Context, now time.Time, sql string, args .
 			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
 			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &s.Derived, &s.RootEnded,
 			&s.StoppedBy, &s.CancelCause, &s.EventsEmitted, &s.MessagesEmitted,
-			&s.ErrorType, &s.Problems, &s.ResumedFrom, &s.CallerRunID, &s.CallerCallID); err != nil {
+			&s.ErrorType, &s.Problems, &s.ResumedFrom, &s.CallerRunID, &s.CallerCallID, &s.DerivedMessages); err != nil {
 			return nil, err
 		}
 		row, err := s.row(now)
@@ -443,6 +444,9 @@ type runScan struct {
 	Problems                                           []string
 	ResumedFrom                                        string
 	CallerRunID, CallerCallID                          string
+	// DerivedMessages is a derived run's MessageCount (§9): its chat
+	// spans carrying message content; it has no messages record.
+	DerivedMessages int64
 }
 
 func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
@@ -466,6 +470,9 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		StoppedBy: s.StoppedBy, CancelCause: s.CancelCause,
 		EventsEmitted: s.EventsEmitted, MessagesEmitted: s.MessagesEmitted,
 		ErrorType: s.ErrorType, Problems: obsdb.CountProblems(s.Problems),
+	}
+	if s.Derived {
+		row.MessageCount = s.DerivedMessages
 	}
 	if s.Finished != nil {
 		f := s.Finished.UTC()
@@ -1384,6 +1391,10 @@ func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage,
 	if len(q.ScopeMeta) > 0 {
 		conds = append(conds, "ForeignMeta = 0")
 	}
+	if q.NotRun {
+		conds = append(conds, "GenAIHits > 0", "WeftHits = 0",
+			"TraceId NOT IN (SELECT TraceID FROM weft_runs WHERE Derived = 1)")
+	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "StartNs >= ?")
 		args = append(args, q.Since.UnixNano())
@@ -1442,12 +1453,59 @@ func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage,
 	if err := rs.Err(); err != nil {
 		return obsdb.TracePage{}, err
 	}
+	if err := d.fillDerivedTraceRuns(ctx, page.Traces); err != nil {
+		return obsdb.TracePage{}, err
+	}
 	if len(page.Traces) >= limit {
 		end := page.Traces[len(page.Traces)-1]
 		page.NextBefore, page.NextBeforeID = &end.Start, end.TraceID
 	}
 	return page, nil
 }
+
+// fillDerivedTraceRuns adds to each trace row the runs derived from its
+// stock GenAI spans (§9): no span names them by run id — their rows in
+// weft_runs carry the trace id — so they are read by trace id, merged
+// into RunIDs sorted, each once.
+func (d *DB) fillDerivedTraceRuns(ctx context.Context, rows []obsdb.TraceRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]string, len(rows))
+	byID := make(map[string]*obsdb.TraceRow, len(rows))
+	for i := range rows {
+		ids[i] = rows[i].TraceID
+		byID[rows[i].TraceID] = &rows[i]
+	}
+	rs, err := d.conn.Query(ctx, `SELECT DISTINCT TraceID, RunId FROM weft_runs
+		WHERE Derived = 1 AND TraceID IN ? ORDER BY TraceID, RunId`, ids)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rs.Close() }()
+	touched := map[*obsdb.TraceRow]bool{}
+	for rs.Next() {
+		var trace, run string
+		if err := rs.Scan(&trace, &run); err != nil {
+			return err
+		}
+		if r := byID[trace]; r != nil && !slices.Contains(r.RunIDs, run) {
+			r.RunIDs = append(r.RunIDs, run)
+			touched[r] = true
+		}
+	}
+	for r := range touched {
+		slices.Sort(r.RunIDs)
+	}
+	return rs.Err()
+}
+
+// chStockOp is obsdb.StockCandidate's operation rule over an
+// otel_traces row: no weft.run.id, gen_ai.operation.name one of the
+// three, or, without it, the span name's prefix.
+const chStockOp = `(RunId = '' AND (SpanAttributes['gen_ai.operation.name'] IN ('invoke_agent', 'chat', 'execute_tool')
+	OR (SpanAttributes['gen_ai.operation.name'] = '' AND (startsWith(SpanName, 'invoke_agent')
+		OR startsWith(SpanName, 'execute_tool') OR SpanName = 'chat' OR startsWith(SpanName, 'chat ')))))`
 
 // traceInner is the grouped trace list with its bind arguments, in text
 // order: the select list's two filter counts first, then the narrowing.
@@ -1479,6 +1537,12 @@ func traceInner(q obsdb.TraceQuery) (string, []any) {
 		args = append(args, q.Service)
 		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE t.ServiceName = ?)")
 		narrowArgs = append(narrowArgs, q.Service)
+	}
+	if q.NotRun {
+		// GenAI spans, no weft run (TraceQuery.NotRun); the derived rows
+		// are the outer condition's.
+		cols = append(cols, "countIf("+chStockOp+") AS GenAIHits", "countIf(RunId != '') AS WeftHits")
+		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE "+strings.ReplaceAll(chStockOp, "SpanAttributes", "t.SpanAttributes")+")")
 	}
 	if q.PublicID != "" {
 		cols = append(cols, "countIf(PublicId != ?) AS Foreign")

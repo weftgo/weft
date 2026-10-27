@@ -12,7 +12,7 @@
   "request": {
     "badge": "derived",
     "reason": "derived from spans · no events",
-    "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+    "fix": "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session (docs/record-contract.md §9); weft's own records need a weft SDK (Go today)"
   },
   "attempts": [
     {
@@ -29,7 +29,7 @@
     "count": 0,
     "badge": "derived",
     "reason": "derived from spans · no events",
-    "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+    "fix": "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session (docs/record-contract.md §9); weft's own records need a weft SDK (Go today)"
   },
   "events": [],
   "tool_calls": [],
@@ -46,7 +46,8 @@
     {
       "hole": "derived",
       "reason": "derived from spans · no events",
-      "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+      "fix": "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session (docs/record-contract.md §9); weft's own records need a weft SDK (Go today)"
     }
   ]
 }
+

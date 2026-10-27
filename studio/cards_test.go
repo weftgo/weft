@@ -296,7 +296,12 @@ var cardNorm = []struct {
 	with string
 }{
 	{regexp.MustCompile(`"\d{4}-\d\d-\d\dT[0-9:.]+(Z|[+-]\d\d:\d\d)"`), `"2026-10-01T09:00:00Z"`},
-	{regexp.MustCompile(`"(latency_ms|ttft_ms|duration_ms|weft\.ttft_ms|weft\.latency_ms|weft\.attempt\.wait_ms|wait_ms|weft\.tool\.queue_ms)": ?"?[0-9]+"?`), `"$1": 1`},
+	{regexp.MustCompile(`"(latency_ms|ttft_ms|duration_ms|weft\.ttft_ms|weft\.latency_ms|weft\.attempt\.wait_ms|wait_ms)": ?"?[0-9]+"?`), `"$1": 1`},
+	// weft.tool.queue_ms is on the span only when a call queued (a
+	// timing fact): its presence moves with the scheduler, so the key is
+	// dropped whole, then the comma it leaves before a closing bracket.
+	{regexp.MustCompile(`(?m)^\s*"weft\.tool\.queue_ms": ?"?[0-9]+"?,?\n`), ``},
+	{regexp.MustCompile(`,(\n\s*[}\]])`), `$1`},
 	{regexp.MustCompile(`"(retry_after_ms)": ?[0-9]+`), `"$1": 1`},
 	{regexp.MustCompile(`"(weft\.version|weft_version|service)": ?"[^"]*"`), `"$1": "(test)"`},
 	{regexp.MustCompile(`"(weft\.manifest\.hash|manifest_hash)": ?"[0-9a-f]{64}"`), `"$1": "(manifest)"`},

@@ -415,6 +415,8 @@ export interface TracesSearch {
   since?: string
   until?: string
   service?: string
+  /** The GenAI traces that make no run (api's not_run=1, I6). */
+  not_run?: boolean
 }
 
 export interface TracesLink {
@@ -656,6 +658,7 @@ export function tracesLink(search: TracesSearch = {}): TracesLink {
   if (search.since) out.since = search.since
   if (search.until) out.until = search.until
   if (search.service) out.service = search.service
+  if (search.not_run) out.not_run = true
   return { to: "/traces", search: out }
 }
 

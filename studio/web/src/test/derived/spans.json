@@ -18,7 +18,8 @@
         "gen_ai.provider.name": "openai",
         "gen_ai.request.model": "gpt-5"
       },
-      "events": []
+      "events": [],
+      "run_id": "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7"
     },
     {
       "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -33,18 +34,22 @@
       "service": "py-support",
       "attrs": {
         "gen_ai.conversation.id": "conv_7f3a",
+        "gen_ai.input.messages": "[{\"role\": \"user\", \"parts\": [{\"type\": \"text\", \"content\": \"Where is my order 4411?\"}]}]",
         "gen_ai.operation.name": "chat",
+        "gen_ai.output.messages": "[{\"role\": \"assistant\", \"parts\": [{\"type\": \"tool_call\", \"id\": \"call_abc\", \"name\": \"lookup_order\", \"arguments\": {\"id\": \"4411\"}}], \"finish_reason\": \"tool_calls\"}]",
         "gen_ai.provider.name": "openai",
         "gen_ai.request.model": "gpt-5",
         "gen_ai.response.finish_reasons": [
           "tool_calls"
         ],
         "gen_ai.response.model": "gpt-5-2025-08-07",
+        "gen_ai.system_instructions": "[{\"type\": \"text\", \"content\": \"You are a helpful support agent for ACME.\"}]",
         "gen_ai.usage.input_tokens": 812,
         "gen_ai.usage.output_tokens": 41,
         "weft.step.index": 0
       },
-      "events": []
+      "events": [],
+      "run_id": "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7"
     },
     {
       "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -60,12 +65,15 @@
       "attrs": {
         "gen_ai.conversation.id": "conv_7f3a",
         "gen_ai.operation.name": "execute_tool",
+        "gen_ai.tool.call.arguments": "{\"id\":\"4411\"}",
         "gen_ai.tool.call.id": "call_abc",
+        "gen_ai.tool.call.result": "{\"status\":\"shipped\"}",
         "gen_ai.tool.name": "lookup_order",
         "weft.step.index": 0,
         "weft.tool.seq": 1
       },
-      "events": []
+      "events": [],
+      "run_id": "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7"
     },
     {
       "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -80,18 +88,23 @@
       "service": "py-support",
       "attrs": {
         "gen_ai.conversation.id": "conv_7f3a",
+        "gen_ai.input.messages": "[{\"role\": \"user\", \"parts\": [{\"type\": \"text\", \"content\": \"Where is my order 4411?\"}]}, {\"role\": \"assistant\", \"parts\": [{\"type\": \"tool_call\", \"id\": \"call_abc\", \"name\": \"lookup_order\", \"arguments\": {\"id\": \"4411\"}}]}, {\"role\": \"tool\", \"parts\": [{\"type\": \"tool_call_response\", \"id\": \"call_abc\", \"response\": {\"status\": \"shipped\"}}]}]",
         "gen_ai.operation.name": "chat",
+        "gen_ai.output.messages": "[{\"role\": \"assistant\", \"parts\": [{\"type\": \"text\", \"content\": \"Your order 4411 has shipped.\"}], \"finish_reason\": \"stop\"}]",
         "gen_ai.provider.name": "openai",
         "gen_ai.request.model": "gpt-5",
         "gen_ai.response.finish_reasons": [
           "stop"
         ],
         "gen_ai.response.model": "gpt-5-2025-08-07",
+        "gen_ai.system_instructions": "[{\"type\": \"text\", \"content\": \"You are a helpful support agent for ACME.\"}]",
         "gen_ai.usage.input_tokens": 905,
         "gen_ai.usage.output_tokens": 37,
         "weft.step.index": 1
       },
-      "events": []
+      "events": [],
+      "run_id": "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7"
     }
   ]
 }
+

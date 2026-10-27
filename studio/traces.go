@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,9 @@ import (
 //	until      RFC 3339: the trace started before
 //	service    a resource service name, exact: traces holding a span of it
 //	public_id  traces every span of which carries this weft.public_id
+//	not_run    1: the GenAI traces that make no run — a GenAI span, no
+//	           weft run, no derived run (obsdb.TraceQuery.NotRun; the
+//	           runs page's count of them, UX-H-02)
 //	before     RFC 3339 paging cursor on start, with before_id (the
 //	           cursor's trace id: exact inside a tie) — next_before /
 //	           next_before_id, null on the last page
@@ -50,8 +54,9 @@ type traceRoot struct {
 // traceRow is one trace: its root (null with the gap badge when only
 // child spans were stored), the root's service (the earliest span's
 // without one), the time its spans cover, how many, whether any ended
-// in error, and the weft runs it holds — a subagent child beside its
-// parent, [] for a trace of non-weft spans only.
+// in error, and the runs it holds — weft's (a subagent child beside
+// its parent) and the runs derived from its stock GenAI spans
+// (docs/record-contract.md §9), [] for a trace that makes none.
 type traceRow struct {
 	TraceID    string     `json:"trace_id"`
 	Root       *traceRoot `json:"root"`
@@ -100,14 +105,50 @@ func rootRunOf(ids []string) string {
 	return root
 }
 
-// traceRuns reads a trace row's root run and failed count: the root by
-// its id (a trace of more than a page of runs still names it), the
-// failures by a failed-only read of the root's id prefix (its core
-// children with it), each in the list's scope (public id, tags). Past one
-// page of failures the count is a floor (FailedRunsCapped).
+// traceRuns reads a trace row's root run and failed count. Weft's runs
+// first: the root by its id (rootRunOf over the weft ids — a trace of
+// more than a page of runs still names it), the failures by a
+// failed-only read of the root's id prefix (its core children with
+// it), each in the list's scope (public id, tags); past one page of
+// failures the count is a floor (FailedRunsCapped). The runs derived
+// from the trace's stock spans (docs/record-contract.md §9) are read by
+// id: their failures counted, and — when the trace holds no weft run —
+// the root the derived run with no parent (its id's order says nothing
+// of the tree: a nested agent's span id may sort first), else the
+// first by start.
 func (s *Server) traceRuns(ctx context.Context, row *traceRow, sc readScope) error {
-	root := rootRunOf(row.RunIDs)
+	var weft, derived []string
+	for _, id := range row.RunIDs {
+		if _, _, ok := obsdb.ParseStockRunID(id); ok {
+			derived = append(derived, id)
+		} else {
+			weft = append(weft, id)
+		}
+	}
+	var derivedRoot *obsdb.RunRow
+	for _, id := range derived {
+		det, err := s.db.Run(ctx, id)
+		switch {
+		case errors.Is(err, obsdb.ErrNotFound):
+			continue
+		case err != nil:
+			return err
+		case !sc.admits(det.RunRow):
+			continue
+		}
+		if det.Status == obsdb.StatusFailed {
+			row.FailedRuns++
+		}
+		r := det.RunRow
+		if derivedRoot == nil || (r.ParentRunID == "" && (derivedRoot.ParentRunID != "" || r.Started.Before(derivedRoot.Started))) {
+			derivedRoot = &r
+		}
+	}
+	root := rootRunOf(weft)
 	if root == "" {
+		if derivedRoot != nil {
+			row.RootRun = &traceRun{ID: derivedRoot.ID, Agent: derivedRoot.Agent, PromptPreview: derivedRoot.PromptPreview, Status: string(derivedRoot.Status)}
+		}
 		return nil
 	}
 	det, err := s.db.Run(ctx, root)
@@ -123,8 +164,8 @@ func (s *Server) traceRuns(ctx context.Context, row *traceRow, sc readScope) err
 	if err != nil {
 		return err
 	}
-	in := make(map[string]bool, len(row.RunIDs))
-	for _, id := range row.RunIDs {
+	in := make(map[string]bool, len(weft))
+	for _, id := range weft {
 		in[id] = true
 	}
 	for _, rec := range page.Runs {
@@ -159,6 +200,14 @@ var rootMissing = badgeFields{
 func (s *Server) serveTraces(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.TraceQuery{Service: q.Get("service"), PublicID: q.Get("public_id"), Meta: tagParams(q)}
+	if v := q.Get("not_run"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			badRequest(w, r, "not_run must be true or false (1 or 0)")
+			return
+		}
+		query.NotRun = b
+	}
 	// The scope first: a foreign public id's 403 wins over any 400 —
 	// another value of a token's tag key's too (scopeRunsQuery).
 	scope := obsdb.RunQuery{PublicID: query.PublicID, Meta: query.Meta}

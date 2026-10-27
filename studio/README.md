@@ -1239,8 +1239,8 @@ retries one `/api/meta` read a minute, while the page is visible,
 brings it back by itself. The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 292,834 B raw / 99,239 B gzip
-(96.9 KiB, the bundle of the ledger's row "U28"; 7,257 B — 7.1 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 292,779 B raw / 99,290 B gzip
+(97.0 KiB, the bundle of the ledger's row "I6"; 7,206 B — 7.0 KiB — of headroom under
 the 106,496 B, 104 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; P10-cap raised it from 96 KiB at 91,032 B, the row "P9-pre-web-fix7", 7,272 B under the old cap; A5.4 from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1672,20 +1672,33 @@ Why no runtime acts, in four cases, first match wins (U20.2; `appturn.go`'s `app
 `GET /api/runs/{id}/commands` (capability `run_commands`, with the playground; U20.2) lists the commands acting on one run, oldest first — `{"commands":[{command_id, state, run_id, status?, error, reason?, created, updated, verb: decide|steer|cancel, call_id?, decision?}]}`, each the command's lifecycle row plus what it did (`testdata/api/run-commands.golden.json`). A decision lost before it landed (`state: "lost"`: no ack in time, the runtime disconnected, Studio restarted) stays on the run: the run page marks the parked call `your approve at … was lost: <why> — decide again`, and the panel reads the route once when it draws the parked turn and marks the call `lost: <why>`, after a reload, not only while the page that sent it polls. A panel token reads a run inside its public id, and only its own public id's commands; a run never stored with no command is 404. A Studio restarted over a command store logs one INFO line, `studio/runtime: restored from the store runtimes=N open_commands=M lost_commands=K`.
 
 
-**Derived runs.** A stock OTel app (no weft) that exports GenAI spans with
-`gen_ai.conversation.id` gets run rows (docs/record-contract.md §9): one per
-root `invoke_agent` span, id `otel-<trace id>-<root span id>`, `derived: true`
-on every run row (list, page, search, session), `requests_badge: "derived"`.
-Its page's `holes` is `[{"hole":"derived","reason":"derived from spans · no
-events","fix":"the producer exports stock OTel GenAI spans only: emit weft's
-records (docs/record-contract.md) for events, the transcript and requests"}]`.
+**Derived runs.** A stock OTel app (no weft) that exports GenAI spans gets
+run rows (docs/record-contract.md §9): one per `invoke_agent` span that
+carries `gen_ai.conversation.id` (its session) or has no other agent span
+above it (a top-level agent: no session; a nested one folds into its
+run), id `otel-<trace id>-<root span id>`, `message_count` its chat spans
+carrying message content, `derived: true` on every run
+row (list, page, search, session), `requests_badge: "derived"`. Its page's
+`holes` is `[{"hole":"derived","reason":"derived from spans · no
+events","fix":"stock OTel GenAI spans carry no weft events or request records:
+set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages
+and tool arguments … weft's own records need a weft SDK (Go today)"}]`. The
+run page says it once, in the header; its story draws each step's messages
+from the chat span's `gen_ai.*.messages` attributes and each call's arguments
+and result from `gen_ai.tool.call.*` (when the producer captured content),
+every such block chipped "derived · from span attributes"; replay, save as
+test, open in app and compare are hidden. `/api/traces` and
+`/api/traces/{id}` name a trace's derived runs in `run_ids`, and
+`/api/traces/{id}` says `not_run` `{reason, fix}` when the trace makes none. `/api/traces?not_run=1` lists the GenAI traces that make no run; the
+runs page counts them and links the list. A read-scoped token reads stock
+spans without their system prompt.
 What each route answers for it: `runs/{id}/events` — `events: []`, `done:
 true` and that badge; `runs/{id}/transcript` — `batches: []` and the badge
 (`?step=N`: 409 with it); `runs/{id}/spans` — the real spans (the waterfall),
 `weft.step.index` / `weft.tool.seq` filled by the reader; `runs/{id}/requests`
 and `/tools` — empty, badge `derived`; `runs/{id}/steps/{n}` — the step
-assembled from its `chat` span (its holes include `derived`; steps.go is not
-yet derived-aware, see I1.2's open items); `runs/{id}/logs` — the app
+assembled from its `chat` span (its holes `derived`), its calls' `args` and
+`result` from the `execute_tool` spans' `gen_ai.tool.call.*`; `runs/{id}/logs` — the app
 logs under its spans; `runs/{id}/export` — json/jsonl/otlp carry the row
 and spans with every other block badged, `wefttest` is 400 with the badge;
 `diff` — every column `unknown` against a derived side; the playground's

@@ -1,0 +1,51 @@
+{
+  "total": 2,
+  "traces": [
+    {
+      "trace_id": "5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10",
+      "root": {
+        "span_id": "1a2b3c4d5e6f7081",
+        "name": "invoke_agent support"
+      },
+      "service": "py-support",
+      "start": "2026-10-01T10:01:00Z",
+      "end": "2026-10-01T10:01:02Z",
+      "duration_ms": 2000,
+      "span_count": 2,
+      "error": true,
+      "run_ids": [
+        "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081"
+      ],
+      "root_run": {
+        "id": "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081",
+        "agent": "support",
+        "status": "failed"
+      },
+      "failed_runs": 1
+    },
+    {
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "root": {
+        "span_id": "00f067aa0ba902b7",
+        "name": "invoke_agent support"
+      },
+      "service": "py-support",
+      "start": "2026-10-01T10:00:00Z",
+      "end": "2026-10-01T10:00:03.2Z",
+      "duration_ms": 3200,
+      "span_count": 4,
+      "error": false,
+      "run_ids": [
+        "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7"
+      ],
+      "root_run": {
+        "id": "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7",
+        "agent": "support",
+        "status": "succeeded"
+      }
+    }
+  ],
+  "next_before": null,
+  "next_before_id": null
+}
+

@@ -21,7 +21,9 @@ import type { RunDoc } from "@/lib/api"
 import {
   CAUSES,
   DERIVED_HOLE,
+  DERIVED_WORDS,
   derivedWords,
+  notRunTraces,
   holeWords,
   rowHoles,
 } from "@/lib/honesty"
@@ -31,8 +33,10 @@ import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, apiError, golden, pagedEvents } from "@/test/fake-studio"
 import type { FakePosEvent } from "@/test/fake-studio"
 import {
+  CHAT_ONLY_TRACE,
   DERIVED,
   DERIVED_FAILED,
+  DERIVED_TRACE,
   DERIVED_SESSION,
   STOCK,
   derivedBodies,
@@ -101,73 +105,98 @@ describe("the stock_spans words (one closed table)", () => {
 })
 
 describe("a derived run's page (the Done line)", () => {
-  it("the header, every step card, its request and messages, and the story say derived in the stock words — no pane empty", async () => {
+  it("the stock_genai run page (I6): USER / ASSISTANT / tool-call rows from the span attributes, the stock words once in the header, each block only the derived chip, the dead verbs hidden", async () => {
     serve()
     renderApp(`/runs/${DERIVED}?view=story`)
     await waitFor(() =>
       expect(
-        document.querySelectorAll("[data-step] [data-request]").length
+        document.querySelectorAll("[data-step] [data-derived-messages]").length
       ).toBe(2)
     )
 
-    // The header: the hole in full (badge, reason, fix), no "0 events".
+    // The header: the hole in full (badge, reason, fix) — the one place
+    // the sentence is said (UX-S4-02) — and why the verbs are gone.
     const header = document.querySelector<HTMLElement>("[data-run-holes]")!
     expect(header.querySelector("[data-hole='derived']")).toBeTruthy()
     saysStock(header.textContent, "header")
+    expect(header.querySelector("[data-derived-verbs]")!.textContent).toBe(
+      DERIVED_WORDS.verbs
+    )
     const top = document
       .querySelector("h1")!
       .closest(".space-y-2\\.5")!.textContent
     expect(top).not.toMatch(/\b0 events\b/)
     expect(top).toContain("2 steps")
     expect(top).toContain("1,717 in · 78 out")
+    // Said once on the page — to the eye and to a screen reader: every
+    // block chip's accessible words are the short pointer to it.
+    expect(
+      document.body.textContent.split(STOCK.fix).length - 1,
+      "the fix said once"
+    ).toBe(1)
+    for (const w of document.querySelectorAll(
+      "[data-derived-story] [data-hole-words]"
+    ))
+      expect(w.textContent).toBe(` — ${DERIVED_WORDS.srBrief}`)
 
-    // The story: the banner says why there is no transcript, and the fix.
-    const note = document.querySelector<HTMLElement>(
-      "[data-derived-note='story']"
-    )!
-    expect(note.querySelector("[data-hole='derived']")).toBeTruthy()
-    saysStock(note.textContent, "story banner")
-    expect(document.body.textContent).not.toContain(
-      "no events were recorded for this run"
-    )
-
-    // Every step card: the one derived hole (the stock words), its
-    // usage and price as served, its request and messages badged.
+    // Every step card: its usage and price as served, the derived chip
+    // (its tooltip the stock words), no request (one stub line).
     const usage: Record<string, string> = {
       "0": "812 in · 41 out",
       "1": "905 in · 37 out",
     }
     for (const n of ["0", "1"]) {
       const card = document.querySelector<HTMLElement>(`[data-step="${n}"]`)!
-      const holes = [...card.querySelectorAll("[data-holes] [data-hole]")].map(
-        (b) => b.getAttribute("data-hole")
-      )
-      expect(holes, `step ${n}`).toEqual(["derived"])
-      saysStock(
-        card
-          .querySelector("[data-holes] [data-hole='derived']")!
-          .getAttribute("title"),
-        `step ${n} badge`
-      )
       expect(card.textContent).toContain(usage[n])
       expect(
         card.querySelector("[data-cost]")!.getAttribute("data-cost")
       ).not.toBe("unknown")
-      for (const block of ["request", "messages"]) {
-        const b = card.querySelector<HTMLElement>(
-          `[data-derived-block="${block}"]`
-        )!
-        expect(
-          b.querySelector("[data-hole='derived']"),
-          `step ${n} ${block}`
-        ).toBeTruthy()
-        saysStock(b.textContent, `step ${n} ${block}`)
-      }
+      const chip = card.querySelector<HTMLElement>("[data-hole='derived']")!
+      expect(chip.textContent).toContain(DERIVED_WORDS.chip)
+      saysStock(chip.getAttribute("title"), `step ${n} chip`)
+      expect(
+        card.querySelector("[data-derived-block='request']")!.textContent
+      ).toContain(DERIVED_WORDS.noRequest)
+      // The sentence is the header's: the card's visible text never says
+      // it (the chips carry it as title and screen-reader text).
+      const shown = card.cloneNode(true) as HTMLElement
+      shown.querySelectorAll("[data-hole-words]").forEach((w) => w.remove())
+      expect(shown.textContent).not.toContain(STOCK.fix)
     }
-    // The call the execute_tool span names, badged derived (no args or result).
+
+    // The messages, from the chat spans' gen_ai.*.messages (UX-H-01):
+    // step 0 the user's question and the assistant's tool call; step 1
+    // the tool's answer and the assistant's reply.
+    const roles = (n: string) =>
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          `[data-step="${n}"] [data-chat-role]`
+        ),
+      ].map((m) => `${m.dataset.chatRole}:${m.dataset.chatSide}`)
+    expect(roles("0")).toEqual(["user:input", "assistant:output"])
+    expect(
+      document.querySelector("[data-step='0'] [data-chat-role='user']")!
+        .textContent
+    ).toContain("Where is my order 4411?")
+    expect(
+      document.querySelector(
+        "[data-step='0'] [data-chat-role='assistant'] [data-chat-tool-call='lookup_order']"
+      )
+    ).toBeTruthy()
+    expect(roles("1")).toEqual(["tool:input", "assistant:output"])
+    expect(
+      document.querySelector("[data-step='1'] [data-chat-role='assistant']")!
+        .textContent
+    ).toContain("Your order 4411 has shipped.")
+
+    // The call the execute_tool span names: its arguments and result
+    // from gen_ai.tool.call.* (the steps route's), badged derived.
     const call = document.querySelector<HTMLElement>(
       "[data-step='0'] [data-call='call_abc']"
     )!
+    expect(call.querySelector("[data-call-content]")!.textContent).toBe(
+      '({"id":"4411"}) = {"status":"shipped"}'
+    )
     expect(call.textContent).toContain("lookup_order")
     expect(call.querySelector("[data-hole='derived']")).toBeTruthy()
     expect(document.querySelector("[data-step='1'] [data-call]")).toBeNull()
@@ -183,36 +212,41 @@ describe("a derived run's page (the Done line)", () => {
       ].map((c) => c.getAttribute("aria-label"))
     ).toEqual(["step 0", "step 1"])
 
-    // Nothing replays a derived run: no verb, no drawer — the refusal
-    // is said where the verbs would be, in the badge's words.
-    expect(document.querySelector("[data-replay-verb]")).toBeNull()
-    const refused = document.querySelector<HTMLButtonElement>(
-      "[data-replay-refused='derived']"
-    )!
-    expect(refused.disabled).toBe(true)
-    saysStock(refused.getAttribute("title"), "replay refusal")
-    // The wefttest export is greyed with the same words (the server
-    // would answer 400 with the badge).
-    const save = document.querySelector<HTMLButtonElement>("[data-save-test]")!
-    expect(save.getAttribute("data-save-test")).toBe("derived")
-    expect(save.disabled).toBe(true)
-    saysStock(save.getAttribute("title"), "save as test")
+    // The verbs that need weft's records are hidden (UX-S4-03): no
+    // replay, refusal, save as test, open in app or compare.
+    for (const sel of [
+      "[data-replay-verb]",
+      "[data-replay-refused]",
+      "[data-save-test]",
+      "[data-open-in-app]",
+      "[data-compare-with]",
+    ])
+      expect(document.querySelector(sel), sel).toBeNull()
     expect(studio.calls(`GET runs/${DERIVED}/export`)).toHaveLength(0)
 
-    // The axe budget over what this item drew: the story's banner and
-    // cards, and the header's greyed export.
-    for (const el of [
-      document.querySelector<HTMLElement>("[data-derived-story]")!,
-      save,
-    ]) {
-      const res = await axe.run(el)
-      expect(
-        res.violations.map(
-          (v) =>
-            `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
-        )
-      ).toEqual([])
-    }
+    // The axe budget over what this item drew: the story's cards.
+    const res = await axe.run(
+      document.querySelector<HTMLElement>("[data-derived-story]")!
+    )
+    expect(
+      res.violations.map(
+        (v) =>
+          `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
+      )
+    ).toEqual([])
+  })
+
+  it("a chat span without content keeps the note: no messages, the content-capture fix", async () => {
+    serve()
+    renderApp(`/runs/${DERIVED_FAILED}?view=story`)
+    const none = await waitFor(() => {
+      const n = document.querySelector<HTMLElement>(
+        "[data-step='0'] [data-derived-messages='none']"
+      )
+      expect(n).toBeTruthy()
+      return n!
+    })
+    expect(none.textContent).toBe(DERIVED_WORDS.noContent)
   })
 
   it("no usage reported: the step and the row read unknown with the API's reason, never 0 as known", async () => {
@@ -316,11 +350,10 @@ describe("a derived run's page (the Done line)", () => {
       )
     )
     expect(line("replied")).toBe(DRAWER.derivedNoEvents)
-    // Nothing replays it: the verbs' place says why, in the stock words.
-    saysStock(
-      document.querySelector("[data-drawer-verbs-off]")!.textContent,
-      "drawer verbs"
-    )
+    // Nothing replays or compares it: the verbs are hidden (I6), the
+    // header says why once.
+    expect(document.querySelector("[data-drawer-verbs-off]")).toBeNull()
+    expect(document.querySelector("[data-drawer-verb='compare']")).toBeNull()
   })
 
   it("the raw view says derived above the empty event list", async () => {
@@ -331,10 +364,10 @@ describe("a derived run's page (the Done line)", () => {
         document.querySelector("[data-derived-note='events']")
       ).toBeTruthy()
     )
-    saysStock(
-      document.querySelector("[data-derived-note='events']")!.textContent,
-      "raw"
-    )
+    expect(
+      document.querySelector("[data-derived-note='events']")!.textContent
+    ).toContain(DERIVED_WORDS.events)
+    saysStock(document.querySelector("[data-run-holes]")!.textContent, "header")
     // The empty list under the note says nothing of its own.
     expect(document.body.textContent).not.toContain("no events yet")
   })
@@ -429,10 +462,7 @@ describe("the failed derived run (one step, its root span in error)", () => {
     expect(document.querySelector("[data-step='0']")!.textContent).toContain(
       "error"
     )
-    saysStock(
-      document.querySelector("[data-derived-note='story']")!.textContent,
-      "story"
-    )
+    saysStock(document.querySelector("[data-run-holes]")!.textContent, "header")
   })
 
   it("spans not (yet) readable: the waterfall tab is the derived note, never the order scale's words", async () => {
@@ -446,13 +476,101 @@ describe("the failed derived run (one step, its root span in error)", () => {
         document.querySelector("[data-derived-note='waterfall']")
       ).toBeTruthy()
     )
+    // The note is the chip and its words; the sentence is the header's
+    // (said once, UX-S4-02), the chip's tooltip carries it.
+    const note = document.querySelector("[data-derived-note='waterfall']")!
+    expect(note.textContent).toContain(DERIVED_WORDS.waterfall)
     saysStock(
-      document.querySelector("[data-derived-note='waterfall']")!.textContent,
-      "trace note"
+      note.querySelector("[data-hole='derived']")!.getAttribute("title"),
+      "trace note chip"
     )
     expect(document.querySelector("[data-span]")).toBeNull()
     for (const words of ["did not finish", "no steps yet", "steps 0"])
       expect(document.body.textContent, words).not.toContain(words)
+  })
+})
+
+describe("a derived run from its trace (I6: UX-H-02, UX-H-03)", () => {
+  it("the trace page links its derived run with the derived chip", async () => {
+    serve([...CAPS, "traces"])
+    renderApp(`/traces/${DERIVED_TRACE}`)
+    const a = await waitFor(() => {
+      const l = document.querySelector<HTMLAnchorElement>(
+        `[data-trace-run="${DERIVED}"]`
+      )
+      expect(l).toBeTruthy()
+      return l!
+    })
+    expect(a.getAttribute("href")).toBe(`/runs/${DERIVED}`)
+    const chip = a.parentElement!.querySelector("[data-hole='derived']")!
+    saysStock(chip.getAttribute("title"), "trace run chip")
+    expect(document.querySelector("[data-not-run]")).toBeNull()
+  })
+
+  it("a trace that makes no run says why, and what to set on the spans", async () => {
+    serve([...CAPS, "traces"])
+    renderApp(`/traces/${CHAT_ONLY_TRACE}`)
+    const note = await waitFor(() => {
+      const n = document.querySelector<HTMLElement>("[data-not-run]")
+      expect(n).toBeTruthy()
+      return n!
+    })
+    const why = derivedBodies.traceNotRun as {
+      not_run: { reason: string; fix: string }
+    }
+    expect(note.textContent).toBe(
+      `${DERIVED_WORDS.notRun}: ${why.not_run.reason} · fix: ${why.not_run.fix}`
+    )
+    expect(document.querySelector("[data-trace-run]")).toBeNull()
+  })
+
+  it("the runs page counts the GenAI traces that make no run and links the list of them", async () => {
+    serve([...CAPS, "traces"])
+    renderApp("/runs")
+    const a = await waitFor(() => {
+      const l = document.querySelector<HTMLAnchorElement>(
+        "[data-not-run-traces]"
+      )
+      expect(l).toBeTruthy()
+      return l!
+    })
+    expect(a.textContent).toBe(notRunTraces(1))
+    expect(new URL(a.href).searchParams.get("not_run")).toBe("true")
+    // The list it lands on asks for them.
+    cleanup()
+    renderApp("/traces?not_run=true")
+    await waitFor(() =>
+      expect(
+        studio
+          .calls("GET traces")
+          .some(
+            (c) =>
+              c.query.get("not_run") === "1" && c.query.get("limit") !== "1"
+          )
+      ).toBe(true)
+    )
+    await waitFor(() =>
+      expect(
+        document.querySelector(`[data-chip="not_run"]`)?.textContent
+      ).toContain(DERIVED_WORDS.notRunChip)
+    )
+  })
+
+  it("the trace list counts the derived runs and marks them derived", async () => {
+    serve([...CAPS, "traces"])
+    renderApp("/traces")
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-trace-run-count]").length).toBe(2)
+    )
+    for (const cell of document.querySelectorAll("[data-trace-run-count]")) {
+      expect(cell.textContent).toMatch(/^1 run/)
+      saysStock(
+        cell
+          .parentElement!.querySelector("[data-hole='derived']")!
+          .getAttribute("title"),
+        "trace list chip"
+      )
+    }
   })
 })
 

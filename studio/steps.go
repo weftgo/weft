@@ -820,8 +820,11 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	if derived {
 		// No tool event names the step's calls: its execute_tool spans
 		// do, in the reader's seq order (their weft.tool.seq, stamped by
-		// obsdb.StockRunSpans). Arguments and results were never
-		// recorded: each call is badged derived.
+		// obsdb.StockRunSpans). Each call is badged derived; its
+		// arguments and result are the span's gen_ai.tool.call.arguments
+		// and gen_ai.tool.call.result when the producer captured content
+		// (obsdb.StockToolContent, §9), else unknown (args null, no
+		// result) — never an empty value.
 		var spans []obsdb.Span
 		for _, sp := range toolSpans {
 			spans = append(spans, sp)
@@ -842,6 +845,13 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 			c.CallID = cid
 			c.Seq, _ = attrInt64(sp.Attrs["weft.tool.seq"])
 			c.Badge = string(obsdb.HoleDerived)
+			args, result, hasArgs, hasResult := obsdb.StockToolContent(sp.Attrs)
+			if hasArgs {
+				c.Args = args
+			}
+			if hasResult {
+				c.Result = &stepToolResult{Content: result, IsError: sp.StatusCode == 2, Bytes: int64(len(result))}
+			}
 		}
 	}
 	for _, cid := range order {

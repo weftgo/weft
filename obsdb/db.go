@@ -286,9 +286,16 @@ type TraceQuery struct {
 	// span without the pair, a non-weft span included, excludes it).
 	// Empty: no filter.
 	ScopeMeta map[string]string
-	Since     time.Time // Start at or after; zero = no bound
-	Until     time.Time // Start before; zero = no bound
-	Before    time.Time // cursor on Start; zero = newest
+	// NotRun keeps the GenAI traces that make no run
+	// (docs/record-contract.md §9, UX-H-02): a span without
+	// weft.run.id whose GenAI operation StockCandidate reads
+	// (invoke_agent, chat, execute_tool, by attribute or name), no span
+	// carrying weft.run.id, and no derived run row of the trace — what
+	// Studio's /runs counts as "GenAI traces that are not runs".
+	NotRun bool
+	Since  time.Time // Start at or after; zero = no bound
+	Until  time.Time // Start before; zero = no bound
+	Before time.Time // cursor on Start; zero = newest
 	// BeforeID, with Before, makes the cursor the pair (Start, TraceID),
 	// as RunQuery.BeforeID: pass TracePage.NextBeforeID. A late earlier
 	// span can re-list a trace on a later page (TracePage).
@@ -299,8 +306,10 @@ type TraceQuery struct {
 // TraceRow is one trace in a list, computed from its spans: the time
 // range they cover, how many there are (each (trace, span) once,
 // whatever a retried batch duplicated), whether any ended with status
-// error, the distinct weft.run.id values they carry (sorted: a subagent
-// child shares its parent's trace, so both are here) and the root —
+// error, the distinct weft.run.id values they carry and the ids of the
+// runs derived from its stock GenAI spans (docs/record-contract.md §9;
+// sorted: a subagent child shares its parent's trace, so both are
+// here) and the root —
 // the earliest span with no parent span id, nil when none arrived (only
 // child spans were stored: a hole the reader badges). Service is the
 // root's, or the earliest span's when the root is missing.

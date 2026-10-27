@@ -76,6 +76,7 @@ import {
   lostWords,
   childRun,
   DERIVED_HOLE,
+  DERIVED_VERBS,
   derivedUsageUnknown,
   isDerived,
   mergeHoles,
@@ -235,7 +236,6 @@ import {
   capLine,
   costText,
   turnCost,
-  refusedVerb,
   catalogCapped,
   catalogNotRecorded,
   catalogNotStored,
@@ -5271,9 +5271,8 @@ export class WeftDevtools extends HTMLElement {
     const save = mayExportTestWith(s.meta?.capabilities ?? [], this.cfg.token)
     if (!session && !trace && !save) return null
     const box = el("div", "weft-row2")
-    if (save && this.derived(t))
-      box.append(refusedVerb(SAVE_TEST_LABEL, "span"))
-    else if (save) {
+    // A derived turn hides it (I6): the turn's derived note says why.
+    if (save && !this.derived(t)) {
       // A hand-off (G1 style): Studio's run page downloads it with its
       // own bearer — the measured in-panel fetch-and-save cost ~0.8 KiB.
       // .weft-chip carries text-decoration: none (styles.ts).
@@ -5832,7 +5831,11 @@ export class WeftDevtools extends HTMLElement {
         ...NEW_TAB,
         "data-weft-derived-handoff": t.id,
       })
-      wrap.append(el("div", "weft-note", [a]))
+      // The verbs it hides, and why (I6: Studio's header says the same).
+      wrap.append(
+        el("div", "weft-note", [a]),
+        el("div", "weft-reason", DERIVED_VERBS)
+      )
     }
     const ids = this.turnLinks(t, s)
     if (ids) wrap.append(ids)
@@ -6017,15 +6020,9 @@ export class WeftDevtools extends HTMLElement {
           this.appSaid(s.app[`${t.id}:steer`], t.id)
         )
       )
-    if (this.canAct(s))
-      wrap.append(
-        this.derived(t)
-          ? el("div", "weft-actions", [
-              refusedVerb(REPLAY_OPEN),
-              refusedVerb("↻ Re-run"),
-            ])
-          : this.actions(s)
-      )
+    // A derived turn hides the replay verbs (I6, Studio's rule): its
+    // derived note says why.
+    if (this.canAct(s) && !this.derived(t)) wrap.append(this.actions(s))
     return wrap
   }
 

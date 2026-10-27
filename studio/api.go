@@ -716,7 +716,8 @@ func namesTools(attrs map[string]any) bool {
 // spansFor is the spans the request's identity may read: all of them
 // for one that reads prompts (readsPrompts); for a read-scoped panel
 // token, copies without the tool names (toolNameAttrs, a named tool
-// choice cut to its mode). Every route that serves spans goes through
+// choice cut to its mode) and without a stock span's system prompt
+// (withoutSystemPrompt, §9). Every route that serves spans goes through
 // it: spans, traces, the export.
 func spansFor(r *http.Request, list []obsdb.Span) []obsdb.Span {
 	if readsPrompts(r) {
@@ -724,6 +725,9 @@ func spansFor(r *http.Request, list []obsdb.Span) []obsdb.Span {
 	}
 	out := make([]obsdb.Span, len(list))
 	for i, sp := range list {
+		if a, ok := withoutSystemPrompt(sp.Attrs); ok {
+			sp.Attrs = a
+		}
 		if namesTools(sp.Attrs) {
 			sp.Attrs = maps.Clone(sp.Attrs)
 			for _, k := range toolNameAttrs {
@@ -736,6 +740,69 @@ func spansFor(r *http.Request, list []obsdb.Span) []obsdb.Span {
 		out[i] = sp
 	}
 	return out
+}
+
+// withoutSystemPrompt is a stock span's attributes without the system
+// prompt the GenAI conventions' content attributes carry
+// (docs/record-contract.md §9): gen_ai.system_instructions, the
+// system-role messages of gen_ai.input.messages (the whole value when it
+// does not parse — it may hold one) and the legacy indexed
+// gen_ai.prompt.N.* of a system-role slot. ok is false when there was
+// nothing to remove (attrs returned as is, never copied).
+func withoutSystemPrompt(attrs map[string]any) (map[string]any, bool) {
+	var drop []string
+	var input any
+	setInput := false
+	if _, ok := attrs["gen_ai.system_instructions"]; ok {
+		drop = append(drop, "gen_ai.system_instructions")
+	}
+	if v, ok := attrs["gen_ai.input.messages"]; ok {
+		var msgs []map[string]any
+		raw, isStr := v.(string)
+		if !isStr {
+			b, _ := json.Marshal(v)
+			raw = string(b)
+		}
+		if err := json.Unmarshal([]byte(raw), &msgs); err != nil {
+			drop = append(drop, "gen_ai.input.messages")
+		} else {
+			kept := msgs[:0]
+			for _, m := range msgs {
+				if role, _ := m["role"].(string); role != "system" {
+					kept = append(kept, m)
+				}
+			}
+			if len(kept) != len(msgs) {
+				b, _ := json.Marshal(kept)
+				input, setInput = string(b), true
+			}
+		}
+	}
+	for k, v := range attrs {
+		rest, ok := strings.CutPrefix(k, "gen_ai.prompt.")
+		if !ok {
+			continue
+		}
+		n, field, ok := strings.Cut(rest, ".")
+		if ok && field == "role" && v == "system" {
+			for k2 := range attrs {
+				if strings.HasPrefix(k2, "gen_ai.prompt."+n+".") {
+					drop = append(drop, k2)
+				}
+			}
+		}
+	}
+	if len(drop) == 0 && !setInput {
+		return attrs, false
+	}
+	out := maps.Clone(attrs)
+	for _, k := range drop {
+		delete(out, k)
+	}
+	if setInput {
+		out["gen_ai.input.messages"] = input
+	}
+	return out, true
 }
 
 func spans(in []obsdb.Span) spansDoc {
@@ -2030,9 +2097,57 @@ func missingRunsReason(n, named int) string {
 	return out
 }
 
+// traceDoc is api/traces/{trace_id}'s body: the trace's spans, the runs
+// they make — run_ids, the weft runs their weft.run.id names and the
+// runs derived from stock GenAI spans (docs/record-contract.md §9,
+// obsdb.DeriveStockRuns: otel-<trace>-<root span>), sorted; [] for
+// none — and, when they make none, not_run: why (obsdb.StockNotRun),
+// with the fix a stock producer applies.
+type traceDoc struct {
+	spansDoc
+	RunIDs []string `json:"run_ids"`
+	NotRun *notRun  `json:"not_run,omitempty"`
+}
+
+// notRun is why a trace is not a run, and what to set on its spans.
+type notRun struct {
+	Reason string `json:"reason"`
+	Fix    string `json:"fix"`
+}
+
+// traceRunIDs is the runs a trace's spans make: the weft run ids they
+// carry and the ids of the derived runs whose rows are stored (as
+// DB.Traces names them: the spans' derivation checked against the rows,
+// so a link never points at a run with no row), sorted, each once.
+func (s *Server) traceRunIDs(ctx context.Context, list []obsdb.Span) ([]string, error) {
+	set := map[string]bool{}
+	for _, sp := range list {
+		if id, _ := sp.Attrs["weft.run.id"].(string); id != "" {
+			set[id] = true
+		}
+	}
+	for _, d := range obsdb.DeriveStockRuns(list) {
+		_, err := s.db.Run(ctx, d.Row.ID)
+		switch {
+		case errors.Is(err, obsdb.ErrNotFound):
+			continue
+		case err != nil:
+			return nil, err
+		}
+		set[d.Row.ID] = true
+	}
+	out := make([]string, 0, len(set))
+	for id := range set {
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 // serveTrace answers api/traces/{trace_id} (S4.3): any trace, weft or
 // not — a stock OTel application's spans pass through obsdb whole,
-// which is the polyglot promise.
+// which is the polyglot promise — with the runs they make and, when
+// none, why (traceDoc).
 func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/traces/")
 	if id == "" {
@@ -2050,9 +2165,18 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 		notFound(w, r, "no trace "+id)
 		return
 	}
-	doc := spans(spansFor(r, list))
-	if !scopeSpans(w, r, doc.Spans) {
+	sd := spans(spansFor(r, list))
+	if !scopeSpans(w, r, sd.Spans) {
 		return
+	}
+	ids, err := s.traceRunIDs(r.Context(), list)
+	if err != nil {
+		dbError(w, r, "trace", id, err)
+		return
+	}
+	doc := traceDoc{spansDoc: sd, RunIDs: ids}
+	if reason, fix := obsdb.StockNotRun(list); reason != "" && len(ids) == 0 {
+		doc.NotRun = &notRun{Reason: reason, Fix: fix}
 	}
 	writeJSON(w, r, http.StatusOK, doc)
 }

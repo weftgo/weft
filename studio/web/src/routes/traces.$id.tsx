@@ -13,22 +13,22 @@ import {
   useNavigate,
   useRouter,
 } from "@tanstack/react-router"
-import { ChevronRight } from "lucide-react"
 import { useCallback, useMemo, useState } from "react"
 
 import { runQuery, studioToken, traceQuery } from "@/lib/api"
 import type { Span as TimedSpan } from "@/lib/api"
 import { absoluteTime, relativeTime, spanMs } from "@/lib/format"
 import { genaiChat, isModelCall, NO_MESSAGES_REASON } from "@/lib/genai"
-import type { ChatMessage, ChatPart } from "@/lib/genai"
 import { canReplay, replayFromStep } from "@/lib/replay"
 import { isGenAISpan, spansFromTimed, timeDomain } from "@/lib/trace"
 import type { Span as TraceRow } from "@/lib/trace"
 import { keyRows, OLD_KEY_NOTE, resolveSel, traceRuns } from "@/lib/trace-sel"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { DERIVED_HOLE, DERIVED_WORDS, isDerivedRunId } from "@/lib/honesty"
+import { ChatMessages } from "@/components/studio/genai-chat"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { LoadFailed } from "@/components/studio/empty-state"
-import { CODE_SURFACE, JsonTree } from "@/components/studio/json-tree"
+import { JsonTree } from "@/components/studio/json-tree"
 import { ReplayDrawer } from "@/components/studio/replay-drawer"
 import type { ReplayRequest } from "@/components/studio/replay-drawer"
 import { Waterfall } from "@/components/studio/waterfall"
@@ -137,7 +137,10 @@ function TracePage() {
   }
   const genai = spans.filter(isGenAISpan)
   const facts = traceFacts(spans)
-  const runs = traceRuns(spans)
+  // The runs the trace makes (api.go's traceDoc): weft's and the
+  // derived ones (I6, UX-H-03); a Studio before it names weft's alone.
+  const runs = q.data.run_ids ?? traceRuns(spans)
+  const notRun = runs.length === 0 ? q.data.not_run : undefined
   const selected = resolved.id
     ? rows.find((r) => r.id === resolved.id)?.timed?.span
     : undefined
@@ -224,22 +227,32 @@ function TracePage() {
         >
           <span className="text-faint">runs</span>
           {runs.length === 0 ? (
-            <span
-              className="text-faint"
-              title="no weft run: a trace of non-weft spans only"
-            >
-              —
-            </span>
+            notRun ? (
+              // Why the spans make no run (UX-H-02), and what to set.
+              <span className="text-muted-foreground" data-not-run>
+                {DERIVED_WORDS.notRun}: {notRun.reason}
+                <span className="text-faint"> · fix: {notRun.fix}</span>
+              </span>
+            ) : (
+              <span
+                className="text-faint"
+                title="no weft run: a trace of non-weft spans only"
+              >
+                —
+              </span>
+            )
           ) : (
             runs.map((r) => (
-              <Link
-                key={r}
-                {...runLink(r)}
-                data-trace-run={r}
-                className="text-muted-foreground hover:text-thread-ink hover:underline"
-              >
-                {r}
-              </Link>
+              <span key={r} className="inline-flex items-center gap-1.5">
+                <Link
+                  {...runLink(r)}
+                  data-trace-run={r}
+                  className="text-muted-foreground hover:text-thread-ink hover:underline"
+                >
+                  {r}
+                </Link>
+                {isDerivedRunId(r) ? <HoleBadge {...DERIVED_HOLE} /> : null}
+              </span>
             ))
           )}
         </nav>
@@ -450,135 +463,6 @@ function SelectedSpan({
           </div>
         </div>
       ) : null}
-    </div>
-  )
-}
-
-const ROLE_TONE: Record<string, string> = {
-  system: "border-dashed bg-secondary/30",
-  user: "bg-secondary/50",
-  assistant: "border-thread/30 bg-thread/5",
-  tool: "bg-background",
-}
-
-function PartView({ part }: { part: ChatPart }) {
-  switch (part.kind) {
-    case "text":
-      return <div className="text-xs whitespace-pre-wrap">{part.text}</div>
-    case "reasoning":
-      return (
-        <div className="text-xs whitespace-pre-wrap text-muted-foreground italic">
-          {part.text}
-        </div>
-      )
-    case "tool_call":
-      // As the run page's calls: the name, the arguments folded.
-      return (
-        <details
-          className="font-mono text-[11px]"
-          data-chat-tool-call={part.name}
-        >
-          <summary className="cursor-pointer">
-            <span className={`${STATUS_TEXT.tool}`}>
-              ⚙ {part.name || "(unnamed tool)"}
-            </span>
-            {part.id ? <span className="text-faint"> · {part.id}</span> : null}
-          </summary>
-          <div className="pt-1">
-            <JsonTree
-              value={part.arguments ?? null}
-              openDepth={2}
-              className={CODE_SURFACE}
-            />
-          </div>
-        </details>
-      )
-    case "tool_result":
-      return (
-        <div className="font-mono text-[11px]">
-          <span className="text-faint">
-            result{part.id ? ` · ${part.id}` : ""}
-          </span>
-          {typeof part.response === "string" ? (
-            <div className="text-xs whitespace-pre-wrap">{part.response}</div>
-          ) : (
-            <JsonTree
-              value={part.response ?? null}
-              openDepth={2}
-              className={CODE_SURFACE}
-            />
-          )}
-        </div>
-      )
-    default:
-      return (
-        <div className="font-mono text-[11px]">
-          <span className="text-faint">{part.type}</span>
-          <JsonTree value={part.value} openDepth={1} />
-        </div>
-      )
-  }
-}
-
-/** Role-labelled messages; with `fold`, the earlier inputs behind one
- * toggle (each model call's input repeats the conversation so far). */
-function ChatMessages({
-  messages,
-  problems = [],
-  fold = false,
-}: {
-  messages: ChatMessage[]
-  problems?: string[]
-  fold?: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const lastInput = messages.reduce(
-    (n, m, i) => (m.side === "input" ? i : n),
-    -1
-  )
-  const hidden = fold && !open ? Math.max(0, lastInput) : 0
-  return (
-    <div className="space-y-2">
-      {hidden > 0 ? (
-        <button
-          type="button"
-          className="flex items-center gap-1 font-mono text-[11px] text-thread-ink hover:underline"
-          aria-expanded={false}
-          onClick={() => setOpen(true)}
-        >
-          <ChevronRight className="size-3" data-slot="icon" />
-          {hidden} earlier {hidden === 1 ? "message" : "messages"}
-        </button>
-      ) : null}
-      <ol className="space-y-2" aria-label="messages">
-        {messages.slice(hidden).map((m, i) => (
-          <li
-            key={i + hidden}
-            data-chat-role={m.role}
-            data-chat-side={m.side}
-            className={`max-w-2xl space-y-1 rounded-lg border px-3 py-2 ${ROLE_TONE[m.role] ?? "bg-background"}`}
-          >
-            <div className="flex items-center gap-2 font-mono text-[10px] tracking-wide text-muted-foreground uppercase">
-              <span>{m.role}</span>
-              {m.finishReason ? (
-                <span className="normal-case">· {m.finishReason}</span>
-              ) : null}
-            </div>
-            {m.parts.length ? (
-              m.parts.map((p, j) => <PartView key={j} part={p} />)
-            ) : (
-              <span className="font-mono text-[11px] text-faint">
-                (no parts)
-              </span>
-            )}
-          </li>
-        ))}
-      </ol>
-      {problems.map((p) => (
-        <p key={p} className={`font-mono text-[11px] ${STATUS_TEXT.bad}`}>
-          {p} — the raw value is in the attributes
-        </p>
-      ))}
     </div>
   )
 }

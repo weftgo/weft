@@ -1,0 +1,54 @@
+{
+  "case": "stock_genai_nested",
+  "description": "stock OpenTelemetry GenAI spans without gen_ai.conversation.id, one agent nested in another (docs/record-contract.md §9, I6): the top-level invoke_agent span under an HTTP root is a derived run with no session; the nested invoke_agent span folds into it — its chat span is the run's second step, its usage the run's, no child run. One chat span carries message content: message_count 1.",
+  "derived": true,
+  "runs": [
+    {
+      "id": "otel-9e3f4a5b6c7d8e9f0a1b2c3d4e5f6071-9e00000000000002",
+      "derived": true,
+      "trace_id": "9e3f4a5b6c7d8e9f0a1b2c3d4e5f6071",
+      "service": "ts-planner",
+      "agent": "planner",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "started": "2026-10-01T10:04:00.01Z",
+      "finished": "2026-10-01T10:04:02.9Z",
+      "last_seen": "2026-10-01T10:04:02.9Z",
+      "status": "succeeded",
+      "steps": 2,
+      "usage": {
+        "input_tokens": 140,
+        "output_tokens": 15
+      },
+      "event_count": 0,
+      "message_count": 1,
+      "delta_count": 0,
+      "request_count": 0,
+      "chat": [
+        {
+          "step": 0,
+          "model": "gpt-4o-mini",
+          "finish_reason": "stop",
+          "input_tokens": 100,
+          "output_tokens": 10,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "gpt-4o-mini",
+          "finish_reason": "stop",
+          "input_tokens": 40,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": [
+        "derived"
+      ]
+    }
+  ],
+  "traces": [
+    "9e3f4a5b6c7d8e9f0a1b2c3d4e5f6071 runs otel-9e3f4a5b6c7d8e9f0a1b2c3d4e5f6071-9e00000000000002"
+  ]
+}

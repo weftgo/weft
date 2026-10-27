@@ -1600,22 +1600,39 @@ An application that exports **stock** GenAI spans — a Python or
 TypeScript agent instrumented by the OTel GenAI conventions, with no
 `weft.*` attribute anywhere — gets runs too. This section is the contract
 devtools-plan item I1.2 implemented: `obsdb.DeriveStockRuns` is the one
-derivation both backends write through, the `stock_genai` fixture its
-executable form and `obsdbtest`'s `DerivedStock` case its edges (nested
-roots, an agent without a conversation id, exports arriving children
-first, a retried export, deletion).
+derivation both backends write through, the `stock_genai`,
+`stock_genai_noconv` and `stock_genai_nested` fixtures its executable
+form and `obsdbtest`'s
+`DerivedStock` case its edges (nested roots, a nested agent without a
+conversation id, a top-level agent without one whose parent arrives
+late, exports arriving children first, a retried export, deletion).
 
 **Which spans make a run.** A *root* is a span that has
 `gen_ai.operation.name = invoke_agent` (or, without the attribute, a name
-starting with `invoke_agent`), has no `weft.run.id`, and carries
-`gen_ai.conversation.id`. Each root is one derived run. Its *subtree* is
-the spans under it by parent span id, down to (not into) any nested root.
-An `invoke_agent` span **without** `gen_ai.conversation.id` is not a
-root, wherever it sits: it opens no run, and the `chat` and
-`execute_tool` spans under it count toward the enclosing root's run
-(its steps, its tools, its usage fallback) as if the inner agent were
-part of it. A stock span tree with no conversation id anywhere stays a
-trace only (`/api/traces/{id}`), as today. A span that carries `weft.run.id` is never
+starting with `invoke_agent`), has no `weft.run.id`, and either carries
+`gen_ai.conversation.id` — the run's session — or has no other
+`invoke_agent` span stored above it in its trace (a *top-level* agent;
+I6): a run with **no session**, like a weft run outside a `thread`
+(most instrumentations set the conversation id only when the app names
+a conversation: the conventions make it conditional). Each root is one
+derived run. Its *subtree* is the spans under it by parent span id, down
+to (not into) any nested root. An `invoke_agent` span **without**
+`gen_ai.conversation.id` *nested* under another agent span is not a
+root: it opens no run, and the `chat` and `execute_tool` spans under it
+count toward the enclosing root's run (its steps, its tools, its usage
+fallback) as if the inner agent were part of it. Whether an agent is
+top-level is read from the stored spans: its parent not stored yet, it
+is top-level for now — should an enclosing agent arrive in a later
+export (a `BatchSpanProcessor` exports an inner agent before the outer
+one that ends after it), the trace re-derived folds it, and the writers
+delete the row it had (its spans stay: they are the enclosing run's;
+`stock_genai_nested` pins the fold, `DerivedTopLevel` the late parent on
+both backends). A stock agent under a weft span is top-level (the climb
+stops at weft's spans). A trace whose GenAI spans include no
+`invoke_agent` span — a model-call instrumentation such as
+`opentelemetry-instrumentation-openai-v2` under an HTTP handler — makes
+no run: it stays a trace (`/api/traces/{id}`), which says why
+(`not_run`, below). A span that carries `weft.run.id` is never
 derived, and the subtree stops at it as at a nested root: weft's own rows
 always win, so a weft run's spans — which carry the GenAI mirrors,
 `gen_ai.conversation.id` among them — never make a derived twin.
@@ -1647,7 +1664,7 @@ whose operation is one of the three; a trace of other spans costs no read.
 | `trace_id`, `service` | the root's trace id and resource `service.name` |
 | `agent` | the root's `gen_ai.agent.name` |
 | `provider`, `model` | the root's `gen_ai.provider.name` and `gen_ai.request.model`, else the first `chat` span's |
-| `session_id` | the root's `gen_ai.conversation.id`: the conversation is the session, its derived runs its turns |
+| `session_id` | the root's `gen_ai.conversation.id`: the conversation is the session, its derived runs its turns; `""` (no session) for a root without one |
 | `parent_run_id`, `parent_call_id` | for a root nested under another root's subtree: that root's derived id, and the `gen_ai.tool.call.id` of the nearest `execute_tool` span above it. A stock root under a weft run's tool is top-level — the walk stops at weft spans, so it has no parent — and its session is its own `gen_ai.conversation.id`, not the weft run's: Studio lists it as a conversation of its own |
 | `started`, `finished` | the root's start and end |
 | `last_seen` | the latest time of anything in the subtree: the root's end for a well-formed tree |
@@ -1697,9 +1714,35 @@ I1.2 implements:
 3. No correction is applied in either direction: no subtraction of
    children from a parent, no roll-up of children into it.
 
+**Content from the span attributes.** A producer that captures content
+(`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` in the Python
+and JavaScript instrumentations) puts the conventions' opt-in content
+attributes on its spans: `gen_ai.system_instructions`,
+`gen_ai.input.messages` and `gen_ai.output.messages` on a `chat` span
+(or the legacy `gen_ai.prompt` / `gen_ai.completion` families), and
+`gen_ai.tool.call.arguments` and `gen_ai.tool.call.result` on an
+`execute_tool` span. They are stored as exported and read at read time,
+never copied into records: `steps/{n}` serves a derived call's `args`
+from `gen_ai.tool.call.arguments` (a JSON string as the JSON it holds,
+other text as a JSON string; `obsdb.StockToolContent`) and its `result`
+from `gen_ai.tool.call.result` (`is_error` when the tool span's status
+is `Error`); Studio's story draws each step's messages from its `chat`
+span's attributes. Every such block is badged `derived` ("derived · from
+span attributes"): the reader read it off the producer's spans, never a
+weft record. A span without them keeps the call's `args` `null` and no
+`result` — unknown, never empty. A derived row's `message_count` counts
+its subtree's `chat` spans that carry message content (any key of the
+current or the legacy families; `obsdb.StockHasMessages`): each a batch
+of the messages that call was sent and answered, as a `messages` record
+is a weft run's (0 when the producer captured no content). A reader
+that may not read system prompts (a read-scoped panel token) is served
+the spans without `gen_ai.system_instructions`, the system-role
+messages and the legacy system prompts.
+
 **Not derivable** — and shown so, never as an empty pane: events (no
-`event` records: `event_count` 0 and `delta_count` 0, no event stream), the transcript and
-the chat view's message bodies (no `messages` records: `message_count` 0),
+`event` records: `event_count` 0 and `delta_count` 0, no event stream), the transcript
+(no `messages` records; the messages a producer put on its spans are
+read from them, above),
 the request, prompt and catalog (no `request`/`prompt`/`tools` records:
 `request_count` 0, `instructions_hash` and `catalog_hash` `""`), `turn`,
 `public_id`, `stop_reason`, `pending`. The run carries the `derived` badge
@@ -1713,7 +1756,17 @@ badges it so.
 
 **What Studio answers for a derived run.** `/api/runs` and `/api/search`
 list it (`derived: true`, `requests_badge: derived`; searchable by agent,
-model and error text); `/api/sessions` groups it under its conversation
+model and error text); `/api/traces` names it in its trace's `run_ids`
+beside the weft runs (`DB.Traces` reads the derived rows by trace id:
+no span carries their id), and `/api/traces/{id}` answers `run_ids` the
+same way (each id a stored row) — and, when the trace makes no run at
+all, `not_run` `{reason, fix}` (`obsdb.StockNotRun`): "its agent span
+has not arrived" for a GenAI span whose parent is not stored, "model or
+tool calls only: no invoke_agent span opens a run" for GenAI spans with
+no agent span, "no GenAI span" for a trace with none, each fix saying
+what to set on the spans; `/api/traces?not_run=1` lists the GenAI
+traces that make no run (`obsdb.TraceQuery.NotRun`), which Studio's
+runs page counts; `/api/sessions` groups it under its conversation
 id; `/api/runs/{id}` is the row with one hole, `derived`, in the words
 above; `events` and `transcript` are empty with that badge (`transcript?step=N`
 is 409 with it); `spans` are the real spans (the waterfall);
@@ -1727,7 +1780,9 @@ content — its ids included — so one body gets one answer): there is no trans
 change except unequal step counts (`missing`).
 `steps/{n}` is the step's `chat` span: its times and usage (priced like
 any step's; unknown when the span carries no `gen_ai.usage.*`), its
-`execute_tool` spans as calls badged `derived` (no arguments or results;
+`execute_tool` spans as calls badged `derived` (their arguments and
+results from the span attributes when the producer captured content,
+above, else `args` `null` and no `result`;
 `call_id` `""` for a span without `gen_ai.tool.call.id`, which is only
 recommended), `request` and `messages_in` the badge, and one hole,
 `derived` — never a `gap` or `not_recorded`. A Studio over ClickHouse
@@ -1797,7 +1852,9 @@ when a directory has no row here or a row no directory.
 | `approval_denied` | two `RequireApproval` calls parked (`pending` 2), then the resume (`core.ResumeOf` the parked run) denies one (`Deny`) and leaves the other undecided: each gets a zero-length `execute_tool` span marked `weft.tool.denied` (`denied_kind` `denied`, `no_decision`; `error.type` `DENIED`, status `Error`), the root's `weft.resume.calls` names both and its `weft.run.denied` 2 — `problems.denied` 2, the spans not counted again; `resumed_from` on the resume, `resumed_by` on the parked run |
 | `retries_taps` | a tool answering `core.ModelRetry` under `MaxModelRetries(1)` twice: `execute_tool` spans with `weft.tool.retry` 1 and 2 (none on the `tool_finish` records), `weft.tool.retry_budget` 1, the run failing `model_retries_exceeded` (`tool "flaky" retried 2 times, past MaxModelRetries(1)`) — `RETRY` is no `tool_errors`; a panicking `Tap` (`weft.tap.panics` on the root, `problems.tap_panics`); 65 metadata pairs (`weft.metadata.dropped` 1: `metadata_dropped` 1, the `truncated` hole cause `metadata_cap`); a tool's `PromptSnippet` (the prompt record's `segments`) |
 | `resumed` | rw.support-desk's shape: a `RequireApproval` refund and a note parked (`pending` 2), then a `GenerateAs` resumes them with `Approve`, `Resolve`, `core.ResumeOf` the parked run and `weft.approval.actor` metadata: the approved call's span carries `weft.tool.approved`, the resolved one has none; the root's `weft.resume.calls` `…=approved,…=resolved`; the actor in the resume's `meta`; `resumed_from` on the resume, `resumed_by` on the parked run |
-| `stock_genai` | §9: stock spans, no `weft.*` (hand-written: the one case no weft code generates); two derived runs in one conversation, one with a tool call, one failed; `derived` |
+| `stock_genai` | §9: stock spans, no `weft.*` (hand-written: the one case no weft code generates); two derived runs in one conversation, one with a tool call, one failed; `derived`; the first trace's spans carry the conventions' content attributes (system instructions, input and output messages, the tool call's arguments and result: `message_count` 2), the second's none; `traces` |
+| `stock_genai_nested` | §9 (I6): hand-written stock spans with no `gen_ai.conversation.id` — a top-level `invoke_agent` span is a run with no session, the `invoke_agent` span nested in it folds into it (its chat span the run's second step, no child run); one chat span with message content: `message_count` 1 |
+| `stock_genai_noconv` | §9 (I6): hand-written stock spans with no `gen_ai.conversation.id` — a TypeScript `invoke_agent` span under an HTTP root is a derived run with no session; a Python openai-v2 `chat` span under an HTTP root, no agent span, is no run, its trace's `not_run` reason pinned (`traces`) |
 | `tracer_only` | the `tool_calls` run from an app that wired a tracer and no logger: spans only — `succeeded` from the `Ok` root alone, `steps`/`usage`/`stop_reason` from the span, `weft_version` and `manifest_hash` from the span; the root's `weft.run.events` 0 (`events_emitted` 0: nothing was emitted); `not_recorded` (cause `no_logger`) |
 | `tracer_only_failed` | the `failed` run, spans only: `failed` with the span's description from the `Error` root alone; `events_emitted` 0; `not_recorded` (cause `no_logger`) |
 | `tail_lost` | the `tool_calls` run with every record after its `tool_finish` dropped by the generator (step 1's records and `run_finish`), every span kept: `succeeded` from the `Ok` root, not `interrupted`; `events_emitted` above `event_count`: `gap` (cause `events_lost`, "N of M events were lost — the last K events were lost"), and with `messages_emitted` above a non-zero `message_count` the same badge's cause `messages_lost` ("2 of 4 transcript batches were lost") — the lost tail visible and counted, never a clean success |

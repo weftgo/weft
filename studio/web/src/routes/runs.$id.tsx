@@ -2255,7 +2255,7 @@ function RunPage() {
             </TabsContent>
             <TabsContent value="story" className="mt-3">
               {derived ? (
-                <DerivedStory doc={doc} replayable={replayable} />
+                <DerivedStory doc={doc} />
               ) : (
                 <StepList
                   events={stream.events}

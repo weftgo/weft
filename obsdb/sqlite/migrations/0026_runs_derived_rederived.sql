@@ -1,0 +1,11 @@
+-- 0026 · derived runs re-derived (docs/record-contract.md §9; UX plan
+-- I6), one logical schema with obsdb/clickhouse's 0031. A top-level
+-- invoke_agent span without gen_ai.conversation.id is now a derived run
+-- with no session, and a derived row counts its chat spans that carry
+-- the conventions' message content (message_count). The Go step
+-- (rederiveStock) re-derives every trace holding a stock candidate span
+-- through obsdb.DeriveStockRuns — the writer's rule from this version
+-- on — so a trace stored before it gets the rows a new export would.
+-- The index serves DB.Traces' read of a trace's derived runs (no span
+-- names them by run id) and the writer's stale-row check.
+CREATE INDEX IF NOT EXISTS runs_derived_trace ON runs(trace_id) WHERE derived = 1;

@@ -93,6 +93,13 @@ type expectDoc struct {
 	// U12.1) as its logs.json carries them (threadRecordsOf): the
 	// record family's shape, pinned. Omitted for a case with none.
 	ThreadRecords []string `json:"thread_records,omitempty"`
+	// Traces is each trace the case's spans make, by trace id (§9,
+	// UX-H-02/03): "<trace id> runs <run id>,…" — the trace list's
+	// run_ids, the weft runs its spans name and the runs derived from
+	// them — or, making none, "<trace id> not a run: <reason>"
+	// (obsdb.StockNotRun on the trace's spans). Omitted: not asserted
+	// (the generated cases pin their runs through runs).
+	Traces []string `json:"traces,omitempty"`
 }
 
 // contractSession is one session row as the contract states it.
@@ -359,6 +366,11 @@ func runContract(t *testing.T, backend string, open func(*testing.T) obsdb.DB) {
 				w, _ := json.MarshalIndent(want.Sessions, "", "  ")
 				t.Errorf("%s: session rows differ from %s/expect.json\n got: %s\nwant: %s", backend, dir, g, w)
 			}
+			if want.Traces != nil {
+				if gt := observeTraces(t, db); !slices.Equal(gt, want.Traces) {
+					t.Errorf("%s: traces differ from %s/expect.json\n got: %q\nwant: %q", backend, dir, gt, want.Traces)
+				}
+			}
 			// The thread records as the backend stored them, read back per
 			// session through obsdb.SessionEventReader (U12.2's index, the
 			// authority for them; U12.1-fix: never the fixture's input).
@@ -488,6 +500,32 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 		c.Holes, c.HoleCauses = runHoles(t, db, r, len(spans) > 0)
 		out = append(out, c)
 	}
+	return out
+}
+
+// observeTraces is expectDoc.Traces as the backend answers it: its
+// trace list's run ids, else why the trace's spans make no run.
+func observeTraces(t *testing.T, db obsdb.DB) []string {
+	t.Helper()
+	ctx := context.Background()
+	page, err := db.Traces(ctx, obsdb.TraceQuery{Limit: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, tr := range page.Traces {
+		if len(tr.RunIDs) > 0 {
+			out = append(out, tr.TraceID+" runs "+strings.Join(tr.RunIDs, ","))
+			continue
+		}
+		spans, err := db.Trace(ctx, tr.TraceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reason, _ := obsdb.StockNotRun(spans)
+		out = append(out, tr.TraceID+" not a run: "+reason)
+	}
+	slices.Sort(out)
 	return out
 }
 

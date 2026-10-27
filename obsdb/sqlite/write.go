@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -223,7 +224,11 @@ func deriveStock(ctx context.Context, tx *sql.Tx, traces []string) ([]string, er
 		if err != nil {
 			return nil, err
 		}
-		for _, r := range obsdb.DeriveStockRuns(spans) {
+		runs := obsdb.DeriveStockRuns(spans)
+		if err := dropStaleDerived(ctx, tx, trace, runs); err != nil {
+			return nil, err
+		}
+		for _, r := range runs {
 			if err := upsertDerived(ctx, tx, r.Row); err != nil {
 				return nil, err
 			}
@@ -234,6 +239,77 @@ func deriveStock(ctx context.Context, tx *sql.Tx, traces []string) ([]string, er
 		}
 	}
 	return ids, nil
+}
+
+// rederiveStock is migration 0026's Go step: every trace holding a span
+// that StockCandidate would re-derive — no weft.run.id, a GenAI
+// operation by attribute or name — re-derived through deriveStock, in
+// the migration's transaction.
+func rederiveStock(tx *sql.Tx) error {
+	ctx := context.Background()
+	rs, err := tx.QueryContext(ctx, `SELECT DISTINCT trace_id FROM spans WHERE `+sqlStockOp)
+	if err != nil {
+		return err
+	}
+	var traces []string
+	for rs.Next() {
+		var t string
+		if err := rs.Scan(&t); err != nil {
+			_ = rs.Close()
+			return err
+		}
+		traces = append(traces, t)
+	}
+	if err := rs.Close(); err != nil {
+		return err
+	}
+	_, err = deriveStock(ctx, tx, traces)
+	return err
+}
+
+// dropStaleDerived deletes the trace's derived rows the latest
+// derivation no longer makes (§9): an agent without a conversation id
+// stored before its enclosing agent arrived was a run of its own for a
+// while and now folds into the enclosing run. Only the row and its
+// search entries go — the spans stay, they are the enclosing run's.
+func dropStaleDerived(ctx context.Context, tx *sql.Tx, trace string, runs []obsdb.StockRun) error {
+	keep := make(map[string]bool, len(runs))
+	for _, r := range runs {
+		keep[r.Row.ID] = true
+	}
+	rs, err := tx.QueryContext(ctx, `SELECT run_id FROM runs WHERE trace_id = ? AND derived = 1`, trace)
+	if err != nil {
+		return err
+	}
+	var stale []any
+	for rs.Next() {
+		var id string
+		if err := rs.Scan(&id); err != nil {
+			_ = rs.Close()
+			return err
+		}
+		if !keep[id] {
+			stale = append(stale, id)
+		}
+	}
+	if err := rs.Close(); err != nil {
+		return err
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(stale)), ",")
+	for _, q := range []string{
+		`DELETE FROM runs_fts WHERE rowid IN (SELECT id FROM run_search WHERE run_id IN (` + ph + `))`,
+		`DELETE FROM run_search WHERE run_id IN (` + ph + `)`,
+		`DELETE FROM run_tools WHERE run_id IN (` + ph + `)`,
+		`DELETE FROM runs WHERE run_id IN (` + ph + `)`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, stale...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // upsertDerived writes a derived run's row whole: every column
@@ -248,8 +324,8 @@ func upsertDerived(ctx context.Context, tx *sql.Tx, r obsdb.RunRow) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO runs
 		(run_id, parent_run_id, parent_call_id, trace_id, agent, provider, model, service, session_id,
 		 started_ns, finished_ns, last_seen_ns, finished_ok, failed, err, steps,
-		 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens, derived, root_ended)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)
+		 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens, message_count, derived, root_ended)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)
 		ON CONFLICT (run_id) DO UPDATE SET
 		  parent_run_id = excluded.parent_run_id, parent_call_id = excluded.parent_call_id,
 		  trace_id = excluded.trace_id, agent = excluded.agent, provider = excluded.provider,
@@ -260,12 +336,13 @@ func upsertDerived(ctx context.Context, tx *sql.Tx, r obsdb.RunRow) error {
 		  input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens,
 		  cached_input_tokens = excluded.cached_input_tokens,
 		  cache_write_tokens = excluded.cache_write_tokens,
-		  reasoning_tokens = excluded.reasoning_tokens, derived = 1, root_ended = 1`,
+		  reasoning_tokens = excluded.reasoning_tokens, message_count = excluded.message_count,
+		  derived = 1, root_ended = 1`,
 		r.ID, r.ParentRunID, r.ParentCallID, r.TraceID, r.Agent, r.Provider, r.Model, r.Service, r.SessionID,
 		unixNS(r.Started), finished, unixNS(r.LastSeen),
 		boolInt(r.Status == obsdb.StatusSucceeded), boolInt(r.Status == obsdb.StatusFailed), r.Err, r.Steps,
 		r.Usage.InputTokens, r.Usage.OutputTokens, r.Usage.CachedInputTokens,
-		r.Usage.CacheWriteTokens, r.Usage.ReasoningTokens)
+		r.Usage.CacheWriteTokens, r.Usage.ReasoningTokens, r.MessageCount)
 	return err
 }
 

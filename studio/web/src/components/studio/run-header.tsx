@@ -33,6 +33,7 @@ import { summarizerView } from "@/lib/cost"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
 import {
+  DERIVED_WORDS,
   derivedUsageUnknown,
   isDerived,
   mergeHoles,
@@ -606,6 +607,7 @@ export function RunHeader({
   // this run, and why — never a pane left silently empty.
   // The shared rule (statusHoles, as the panel's turn): the row's
   // status and stop reason, and the walk's gaps once the run is over.
+  const derived = isDerived(doc)
   const holes = mergeHoles(
     runHoles(doc, folded),
     statusHoles({
@@ -703,10 +705,12 @@ export function RunHeader({
           </span>
         ) : null}
         <ReplayOf doc={doc} />
-        <CompareWith doc={doc} />
+        {/* A derived run hides the verbs that need weft's records
+            (I6, UX-S4-03): the holes below say why, once. */}
+        {derived ? null : <CompareWith doc={doc} />}
         <span className="ml-auto flex flex-wrap items-center gap-2">
-          <OpenInApp doc={doc} at={openAt} />
-          <SaveAsTest runID={doc.id} derived={isDerived(doc)} />
+          {derived ? null : <OpenInApp doc={doc} at={openAt} />}
+          {derived ? null : <SaveAsTest runID={doc.id} />}
           {/* The run's other downloads and its delete (U26). */}
           <ExportVerbs runID={doc.id} subagents={doc.children.length} />
           <CopyLink />
@@ -794,6 +798,11 @@ export function RunHeader({
           {holes.map((h) => (
             <HoleBadge key={h.hole} {...h} detail />
           ))}
+          {derived ? (
+            <p className="font-mono text-[11px] text-faint" data-derived-verbs>
+              {DERIVED_WORDS.verbs}
+            </p>
+          ) : null}
         </div>
       ) : null}
 

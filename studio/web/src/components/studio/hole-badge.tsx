@@ -36,6 +36,7 @@ export function HoleBadge({
   cause,
   note,
   count,
+  srText,
   detail = false,
 }: {
   hole: string
@@ -49,6 +50,10 @@ export function HoleBadge({
   note?: string
   /** hidden: the runs it stands for — holeWords' note when no note. */
   count?: number
+  /** Short screen-reader words in place of the reason and fix — a
+   * block chip whose sentence a header on the page says once (I6);
+   * the title keeps the full words for the pointer. */
+  srText?: string
   detail?: boolean
 }) {
   const w = holeWords({ hole, reason, fix, bytes, cause, count })
@@ -73,7 +78,7 @@ export function HoleBadge({
           never. With detail they are visible beside the badge instead. */}
       {detail ? null : (
         <span className="sr-only" data-hole-words>
-          {` — ${words}`}
+          {` — ${srText ?? words}`}
         </span>
       )}
     </Badge>

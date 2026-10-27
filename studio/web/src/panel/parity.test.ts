@@ -48,6 +48,7 @@ import {
 import { badgeLabel } from "./badges"
 import {
   CAUSES,
+  DERIVED_VERBS,
   HOLES,
   isHole,
   isLive,
@@ -1570,7 +1571,7 @@ describe("a derived run on both surfaces (I1.3)", () => {
       )
     ).install()
 
-  it("the same holes, chips and refusals, the same words", async () => {
+  it("the same holes and chips, the same words, the same verbs hidden", async () => {
     // The panel: dev mode (a derived run has no public id), the turn opened.
     fake(false)
     const el = await mount({
@@ -1608,7 +1609,11 @@ describe("a derived run on both surfaces (I1.3)", () => {
       request: $(el, "#weft-tp-request")!.textContent,
       verbs: all(el, "[data-weft-verb]").length,
       saveLink: all(el, "a[data-weft-save-test]").length,
-      refused: all(el, '[data-weft-refused="derived"]').length,
+      refused: all(el, "[data-weft-refused]").length,
+      saveVerb: all(el, "[data-weft-save-test]").length,
+      verbsWhy: [...all(el, ".weft-reason")]
+        .map((n) => n.textContent)
+        .find((t) => t === DERIVED_VERBS),
       handoff: $(el, "[data-weft-derived-handoff]")!.textContent,
       // P8-fix-a #12, the documented difference: the panel draws no
       // Story steps for a derived turn (no events to fold), so no
@@ -1640,12 +1645,18 @@ describe("a derived run on both surfaces (I1.3)", () => {
     const studio = {
       holes: holeSet(Array.from(document.querySelectorAll("[data-hole]"))),
       header: document.querySelector("[data-run-holes]")!.textContent,
-      request: document.querySelector("[data-request]")!.textContent,
+      // The step's request chip: its title the stock words (the
+      // sentence is the header's; the chip's screen-reader words point
+      // there, I6).
+      request: document
+        .querySelector("[data-request] [data-hole='derived']")!
+        .getAttribute("title"),
       verbs: document.querySelectorAll("[data-replay-verb]").length,
+      verbsWhy: document.querySelector("[data-derived-verbs]")?.textContent,
       steps: document.querySelectorAll("[data-derived-story] [data-step]")
         .length,
       refused: document.querySelectorAll(
-        "[data-replay-refused='derived'], [data-save-test='derived']"
+        "[data-replay-refused], [data-save-test], [data-open-in-app], [data-compare-with]"
       ).length,
     }
     renderApp("/runs")
@@ -1670,12 +1681,17 @@ describe("a derived run on both surfaces (I1.3)", () => {
     ])
       stock(s)
     expect(panel.chip).toBe(studioChip)
-    // Neither offers what the server would refuse; both say why.
+    // Neither offers what needs weft's records — one rule, both
+    // surfaces (I6, UX-S4-03): the verbs are hidden, never greyed.
     expect(panel.verbs).toBe(0)
     expect(studio.verbs).toBe(0)
     expect(panel.saveLink).toBe(0)
-    expect(panel.refused).toBe(3) // ✎ Replay…, ↻ Re-run, save as test
-    expect(studio.refused).toBe(2) // replay, save as test
+    expect(panel.saveVerb).toBe(0)
+    expect(panel.refused).toBe(0)
+    expect(studio.refused).toBe(0)
+    // … and both say why, in the one line (lib/honesty DERIVED_VERBS).
+    expect(panel.verbsWhy).toBe(DERIVED_VERBS)
+    expect(studio.verbsWhy).toBe(DERIVED_VERBS)
     // The steps: the panel hands off with the count the page draws cards for.
     expect(panel.handoff).toBe(`${studio.steps} steps · open in Studio ⤢`)
     expect(panel.answers).toBe(0)

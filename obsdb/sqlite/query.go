@@ -974,6 +974,14 @@ func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage,
 	return page, nil
 }
 
+// sqlStockOp is obsdb.StockCandidate's operation rule over a spans row
+// (its run_id checked apart): gen_ai.operation.name one of the three,
+// or, without it, the span name's prefix.
+const sqlStockOp = `(run_id = '' AND (
+	COALESCE(json_extract(attrs, '$."gen_ai.operation.name"'), '') IN ('invoke_agent', 'chat', 'execute_tool')
+	OR (COALESCE(json_extract(attrs, '$."gen_ai.operation.name"'), '') = '' AND (
+		name LIKE 'invoke\_agent%' ESCAPE '\' OR name LIKE 'execute\_tool%' ESCAPE '\' OR name = 'chat' OR name LIKE 'chat %'))))`
+
 // traceGroup builds Traces' grouped select up to its HAVING keyword
 // and the HAVING fragment over one trace's group of spans, with their
 // bind arguments in text order.
@@ -999,6 +1007,11 @@ func traceGroup(q obsdb.TraceQuery) (group, having string, args []any) {
 	if q.Service != "" {
 		conds = append(conds, "SUM(service = ?) > 0")
 		args = append(args, q.Service)
+	}
+	if q.NotRun {
+		// GenAI spans, no weft run, no derived row (TraceQuery.NotRun).
+		conds = append(conds, `SUM(`+sqlStockOp+`) > 0`, `SUM(run_id <> '') = 0`,
+			`trace_id NOT IN (SELECT trace_id FROM runs WHERE derived = 1)`)
 	}
 	if q.PublicID != "" {
 		conds = append(conds, `SUM(COALESCE(json_extract(attrs, '$."weft.public_id"'), '') <> ?) = 0`)
@@ -1044,7 +1057,7 @@ func (d *DB) queryTraceRows(ctx context.Context, query string, args []any) ([]ob
 
 // fillTraces completes a page's rows by trace id: the root (the
 // earliest parentless span), the service (the root's, else the
-// earliest span's) and the distinct run ids.
+// earliest span's) and the distinct run ids, derived runs' included.
 func (d *DB) fillTraces(ctx context.Context, rows []obsdb.TraceRow) error {
 	if len(rows) == 0 {
 		return nil
@@ -1082,8 +1095,13 @@ func (d *DB) fillTraces(ctx context.Context, rows []obsdb.TraceRow) error {
 	if err := rs.Close(); err != nil {
 		return err
 	}
-	rs, err = d.reads.QueryContext(ctx, `SELECT DISTINCT trace_id, run_id FROM spans
-		WHERE run_id <> '' AND trace_id IN `+in+` ORDER BY trace_id, run_id`, ids...)
+	// The weft runs the spans name, and the runs derived from the
+	// trace's stock GenAI spans (§9: their rows carry the trace id, no
+	// span names them).
+	rs, err = d.reads.QueryContext(ctx, `SELECT trace_id, run_id FROM spans
+		WHERE run_id <> '' AND trace_id IN `+in+`
+		UNION SELECT trace_id, run_id FROM runs WHERE derived = 1 AND trace_id IN `+in+`
+		ORDER BY 1, 2`, append(append([]any{}, ids...), ids...)...)
 	if err != nil {
 		return err
 	}

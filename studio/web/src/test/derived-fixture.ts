@@ -46,6 +46,14 @@ const failed = {
   tools: capture("failed-tools"),
 }
 const runNoUsage = capture("run-nousage")
+const trace = capture("trace")
+const traces = capture("traces")
+/** The stock_genai_noconv fixture's Flask trace (I6): a chat span from
+ * the openai-v2 instrumentation, no invoke_agent — no run, not_run says
+ * why. */
+const traceNotRun = capture("trace-not-run")
+/** /api/traces?not_run=1 over the same fixture: its one chat-only trace. */
+const tracesNotRun = capture("traces-not-run")
 const step0NoUsage = capture("step-0-nousage")
 
 /** The succeeded derived run: two chat spans, a tool call. */
@@ -54,12 +62,15 @@ export const DERIVED = "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7"
 export const DERIVED_FAILED =
   "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081"
 export const DERIVED_SESSION = "conv_7f3a"
+/** The succeeded run's trace, and the chat-only trace that makes none. */
+export const DERIVED_TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
+export const CHAT_ONLY_TRACE = "8d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60"
 
 /** The stock_spans words (obsdb.HoleNoteFor(HoleDerived, CauseStockSpans)),
  * as the goldens carry them. */
 export const STOCK = {
   reason: "derived from spans · no events",
-  fix: "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests",
+  fix: "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session (docs/record-contract.md §9); weft's own records need a weft SDK (Go today)",
 }
 
 export const derivedDoc = () => golden<RunDoc>("run-derived")
@@ -85,6 +96,10 @@ export const derivedBodies = {
    * them — zero usage, cost unknown with pricing.go's reason. */
   runNoUsage,
   step0NoUsage,
+  trace,
+  traces,
+  traceNotRun,
+  tracesNotRun,
 }
 
 /** serveDerived registers every route a derived run's page reads, as
@@ -128,6 +143,11 @@ export function serveDerived(fake: FakeStudio): FakeStudio {
         : { run: derivedDoc() }
     )
     .on("GET diff", diff)
+    .on("GET traces", (req) =>
+      req.query.get("not_run") === "1" ? tracesNotRun : traces
+    )
+    .on(`GET traces/${DERIVED_TRACE}`, trace)
+    .on(`GET traces/${CHAT_ONLY_TRACE}`, traceNotRun)
 }
 
 function jsonAt(status: number, body: unknown): Response {

@@ -50,6 +50,7 @@ var postMigrations = map[int]func(*sql.Tx) error{
 	4:  backfillSearch,
 	22: backfillRunlessSessionEvents,
 	23: backfillSpanStats,
+	26: rederiveStock,
 }
 
 func highestMigration() int {

@@ -1,12 +1,18 @@
 package studio
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/sqlite"
 )
 
 // The stock_genai fixture's two derived runs (docs/record-contract.md
@@ -20,7 +26,7 @@ const (
 // HoleDerived, CauseStockSpans)) — pinned here so a change is seen.
 const (
 	derivedReason = "derived from spans · no events"
-	derivedFix    = "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+	derivedFix    = "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session (docs/record-contract.md §9); weft's own records need a weft SDK (Go today)"
 )
 
 // derivedFixture is a setup-A server over a fresh file database that
@@ -407,10 +413,15 @@ func TestDerivedSteps(t *testing.T) {
 			MessagesIn    badged   `json:"messages_in"`
 			AttemptsBadge *badged  `json:"attempts_badge"`
 			ToolCalls     []struct {
-				CallID string `json:"call_id"`
-				Name   string `json:"name"`
-				Seq    int64  `json:"seq"`
-				Badge  string `json:"badge"`
+				CallID string          `json:"call_id"`
+				Name   string          `json:"name"`
+				Seq    int64           `json:"seq"`
+				Badge  string          `json:"badge"`
+				Args   json.RawMessage `json:"args"`
+				Result *struct {
+					Content string `json:"content"`
+					IsError bool   `json:"is_error"`
+				} `json:"result"`
 			} `json:"tool_calls"`
 			Holes []badge `json:"holes"`
 		}
@@ -430,6 +441,14 @@ func TestDerivedSteps(t *testing.T) {
 		if len(st.ToolCalls) != c.calls || (c.calls == 1 && (st.ToolCalls[0].CallID != "call_abc" || st.ToolCalls[0].Name != "lookup_order" ||
 			st.ToolCalls[0].Seq != 1 || st.ToolCalls[0].Badge != "derived")) {
 			t.Errorf("steps/%s tool calls = %+v, want %d (call_abc, lookup_order, seq 1, derived)", c.n, st.ToolCalls, c.calls)
+		}
+		// I6 (UX-H-01): the producer captured content — the call's
+		// arguments and result are its span's gen_ai.tool.call.*.
+		if c.calls == 1 {
+			if tc := st.ToolCalls[0]; string(tc.Args) != `{"id":"4411"}` || tc.Result == nil ||
+				tc.Result.Content != `{"status":"shipped"}` || tc.Result.IsError {
+				t.Errorf("steps/%s call content = %s %+v, want the span's arguments and result", c.n, tc.Args, tc.Result)
+			}
 		}
 	}
 	// The failed run's one step: its chat span ended ok, the run failed —
@@ -634,5 +653,213 @@ func TestDerivedRefusalParity(t *testing.T) {
 	errObj, _ := shape["error"].(map[string]any)
 	if code != http.StatusBadRequest || len(shape) != 1 || len(errObj) != 2 || errObj["code"] != "bad_request" || errObj["message"] == nil {
 		t.Errorf("a command refusal = %d %s, want the bare {error: {code, message}} shape", code, out)
+	}
+}
+
+// A producer that captured no content (no gen_ai.tool.call.* on the
+// tool span): the derived call's arguments and result stay unknown —
+// args null, no result — never an empty value (§9, I6).
+func TestDerivedStepsNoContent(t *testing.T) {
+	h := variantFixture(t, stockVariant(t, func(k string) bool {
+		return strings.HasPrefix(k, "gen_ai.tool.call.a") || strings.HasPrefix(k, "gen_ai.tool.call.r")
+	}, false))
+	_, _, body := get(t, h, "/studio/api/runs/"+derivedOK+"/steps/0")
+	var st struct {
+		ToolCalls []struct {
+			Args   json.RawMessage  `json:"args"`
+			Result *json.RawMessage `json:"result"`
+			Badge  string           `json:"badge"`
+		} `json:"tool_calls"`
+	}
+	decode(t, body, &st)
+	if len(st.ToolCalls) != 1 || string(st.ToolCalls[0].Args) != "null" || st.ToolCalls[0].Result != nil || st.ToolCalls[0].Badge != "derived" {
+		t.Errorf("steps/0 calls = %s, want one derived call with args null and no result", body)
+	}
+}
+
+// The trace routes name the runs a trace makes, derived ones included
+// (UX-H-03), and a trace that makes none says why (UX-H-02): the
+// stock_genai_noconv fixture's TypeScript agent with no conversation
+// id is a run with no session; its Flask app's lone chat span is not a
+// run.
+func TestDerivedTraceRuns(t *testing.T) {
+	h := derivedFixture(t)
+	ingestFile(t, h, "/studio/v1/traces", "../obsdb/testdata/contract/stock_genai_noconv/traces.json")
+	const (
+		agentTrace = "7c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f"
+		chatTrace  = "8d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60"
+		noconv     = "otel-" + agentTrace + "-7c00000000000002"
+	)
+	type traceDoc struct {
+		RunIDs []string `json:"run_ids"`
+		NotRun *struct {
+			Reason string `json:"reason"`
+			Fix    string `json:"fix"`
+		} `json:"not_run"`
+	}
+	for _, c := range []struct {
+		trace  string
+		runs   []string
+		notRun string
+	}{
+		{"4bf92f3577b34da6a3ce929d0e0e4736", []string{derivedOK}, ""},
+		{agentTrace, []string{noconv}, ""},
+		{chatTrace, []string{}, "model or tool calls only: no invoke_agent span opens a run"},
+	} {
+		code, _, body := get(t, h, "/studio/api/traces/"+c.trace)
+		if code != http.StatusOK {
+			t.Fatalf("traces/%s: %d %s", c.trace, code, body)
+		}
+		var d traceDoc
+		decode(t, body, &d)
+		if !slices.Equal(d.RunIDs, c.runs) {
+			t.Errorf("traces/%s run_ids = %v, want %v", c.trace, d.RunIDs, c.runs)
+		}
+		switch {
+		case c.notRun == "" && d.NotRun != nil:
+			t.Errorf("traces/%s not_run = %+v, want none: it makes a run", c.trace, d.NotRun)
+		case c.notRun != "" && (d.NotRun == nil || !strings.HasPrefix(d.NotRun.Reason, c.notRun) || !strings.Contains(d.NotRun.Fix, "invoke_agent")):
+			t.Errorf("traces/%s not_run = %+v, want %q with a fix naming invoke_agent", c.trace, d.NotRun, c.notRun)
+		}
+	}
+	// The list: the derived runs in run_ids, the chat-only trace none.
+	_, _, body := get(t, h, "/studio/api/traces")
+	var page struct {
+		Traces []struct {
+			TraceID string   `json:"trace_id"`
+			RunIDs  []string `json:"run_ids"`
+			RootRun *struct {
+				ID string `json:"id"`
+			} `json:"root_run"`
+		} `json:"traces"`
+	}
+	decode(t, body, &page)
+	got := map[string][]string{}
+	for _, tr := range page.Traces {
+		got[tr.TraceID] = tr.RunIDs
+		if len(tr.RunIDs) > 0 && (tr.RootRun == nil || tr.RootRun.ID != tr.RunIDs[0]) {
+			t.Errorf("trace %s root_run = %+v, want its derived run", tr.TraceID, tr.RootRun)
+		}
+	}
+	if !slices.Equal(got[agentTrace], []string{noconv}) || !slices.Equal(got["4bf92f3577b34da6a3ce929d0e0e4736"], []string{derivedOK}) ||
+		len(got[chatTrace]) != 0 {
+		t.Errorf("traces list run_ids = %v", got)
+	}
+	// The conversation-id-less agent has a run page: derived, no session.
+	code, _, body := get(t, h, "/studio/api/runs/"+noconv)
+	var run struct {
+		Derived   bool   `json:"derived"`
+		SessionID string `json:"session_id"`
+		Agent     string `json:"agent"`
+		Steps     int    `json:"steps"`
+	}
+	decode(t, body, &run)
+	if code != http.StatusOK || !run.Derived || run.SessionID != "" || run.Agent != "planner" || run.Steps != 1 {
+		t.Errorf("runs/%s = %d %s, want derived, no session, planner, 1 step", noconv, code, body)
+	}
+}
+
+// A token that may not read system prompts (a read-scoped panel token,
+// here a tag token whose tag every stock span carries) reads a stock
+// trace's spans without the system prompt its content attributes carry
+// (docs/record-contract.md §9, the I6 review): no
+// gen_ai.system_instructions, no system-role input message, no legacy
+// system slot — the user's messages stay. The server token reads them
+// all.
+func TestDerivedSpansHideSystemPromptFromReadTokens(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	const tr = "7f000000000000000000000000000001"
+	at := time.Now().Add(-time.Minute)
+	tag := func(a map[string]any) map[string]any { a["arena.batch"] = "b1"; return a }
+	spans := []obsdb.Span{
+		{TraceID: tr, SpanID: "7f00000000000001", Name: "invoke_agent planner", Start: at, End: at.Add(time.Second),
+			Attrs: tag(map[string]any{"gen_ai.operation.name": "invoke_agent"})},
+		{TraceID: tr, SpanID: "7f00000000000002", ParentSpanID: "7f00000000000001", Name: "chat m", Start: at, End: at.Add(time.Second),
+			Attrs: tag(map[string]any{"gen_ai.operation.name": "chat",
+				"gen_ai.system_instructions": `[{"type":"text","content":"SECRET SYSTEM"}]`,
+				"gen_ai.input.messages":      `[{"role":"system","parts":[{"type":"text","content":"SECRET INLINE"}]},{"role":"user","parts":[{"type":"text","content":"hello there"}]}]`,
+				"gen_ai.prompt.0.role":       "system", "gen_ai.prompt.0.content": "SECRET LEGACY",
+				"gen_ai.prompt.1.role": "user", "gen_ai.prompt.1.content": "legacy user"})},
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+	srv := New(DB(db), Token("srv"))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	tok := mintTag(t, ts, `{"tags":{"arena.batch":"b1"}}`)
+
+	code, body := tcall(t, ts, http.MethodGet, "/api/traces/"+tr, tok, "")
+	if code != http.StatusOK {
+		t.Fatalf("tag token's trace read: %d %s", code, body)
+	}
+	for _, secret := range []string{"SECRET SYSTEM", "SECRET INLINE", "SECRET LEGACY", "gen_ai.system_instructions"} {
+		if strings.Contains(body, secret) {
+			t.Errorf("a read token's trace carries %q: %s", secret, body)
+		}
+	}
+	for _, kept := range []string{"hello there", "legacy user"} {
+		if !strings.Contains(body, kept) {
+			t.Errorf("a read token's trace lost %q: %s", kept, body)
+		}
+	}
+	if _, full := tcall(t, ts, http.MethodGet, "/api/traces/"+tr, "srv", ""); !strings.Contains(full, "SECRET SYSTEM") ||
+		!strings.Contains(full, "SECRET INLINE") || !strings.Contains(full, "SECRET LEGACY") {
+		t.Errorf("the server token's trace lost the system prompt: %s", full)
+	}
+}
+
+// The trace list names a derived trace's root run by its row (the I6
+// review): a nested derived run whose span id sorts before its parent's
+// is never the root; the failures count every derived run of the trace.
+func TestDerivedTraceRootRun(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	const tr = "7f000000000000000000000000000002"
+	at := time.Now().Add(-time.Minute)
+	sp := func(id, parent, name string, attrs map[string]any, status int) obsdb.Span {
+		return obsdb.Span{TraceID: tr, SpanID: id, ParentSpanID: parent, Name: name, Start: at, End: at.Add(time.Second),
+			StatusCode: status, Attrs: attrs}
+	}
+	// The root's span id sorts last; its child (a conversation of its
+	// own, under the root's tool) first, and failed.
+	spans := []obsdb.Span{
+		sp("ff00000000000001", "", "invoke_agent planner", map[string]any{"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "planner"}, 1),
+		sp("ff00000000000002", "ff00000000000001", "execute_tool delegate", map[string]any{"gen_ai.operation.name": "execute_tool", "gen_ai.tool.call.id": "c1"}, 1),
+		sp("0000000000000003", "ff00000000000002", "invoke_agent worker", map[string]any{"gen_ai.operation.name": "invoke_agent",
+			"gen_ai.agent.name": "worker", "gen_ai.conversation.id": "conv_w"}, 2),
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+	srv := New(DB(db))
+	t.Cleanup(func() { _ = srv.Close() })
+	h := srv.Handler()
+	_, _, body := get(t, h, "/studio/api/traces")
+	var page struct {
+		Traces []struct {
+			RunIDs  []string `json:"run_ids"`
+			RootRun *struct {
+				ID    string `json:"id"`
+				Agent string `json:"agent"`
+			} `json:"root_run"`
+			FailedRuns int `json:"failed_runs"`
+		} `json:"traces"`
+	}
+	decode(t, body, &page)
+	if len(page.Traces) != 1 || len(page.Traces[0].RunIDs) != 2 {
+		t.Fatalf("traces = %s, want one trace with two derived runs", body)
+	}
+	got := page.Traces[0]
+	if got.RootRun == nil || got.RootRun.ID != "otel-"+tr+"-ff00000000000001" || got.RootRun.Agent != "planner" || got.FailedRuns != 1 {
+		t.Errorf("root run %+v failed %d, want the planner (no parent) and the worker's failure counted", got.RootRun, got.FailedRuns)
 	}
 }

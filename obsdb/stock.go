@@ -41,8 +41,7 @@ const (
 )
 
 // attrConversationID is the GenAI conventions' conversation id: on a
-// stock root it is what makes the span a run, and it is the run's
-// session.
+// stock root it is the run's session (none without it).
 const attrConversationID = "gen_ai.conversation.id"
 
 // stockIDPattern is a derived run id's exact shape: 32 and 16 lowercase
@@ -107,11 +106,14 @@ func stockOp(s Span) string {
 	return ""
 }
 
-// IsStockRoot reports whether a span opens a derived run (§9): an
-// invoke_agent span (by gen_ai.operation.name, or without it by a name
-// starting with invoke_agent) with no weft.run.id and a
-// gen_ai.conversation.id. An invoke_agent span without a conversation
-// id is not a root: its spans count toward the enclosing root's run.
+// IsStockRoot reports whether a span opens a derived run on its own
+// (§9): an invoke_agent span (by gen_ai.operation.name, or without it
+// by a name starting with invoke_agent) with no weft.run.id and a
+// gen_ai.conversation.id — the run's session. An invoke_agent span
+// without a conversation id opens a run (with no session) only when no
+// other invoke_agent span is stored above it in its trace — a
+// top-level agent — which DeriveStockRuns decides from the trace; a
+// nested one folds into the enclosing run.
 func IsStockRoot(s Span) bool {
 	return stockOp(s) == opInvokeAgent && attr(s.Attrs, attrRunID) == "" && attr(s.Attrs, attrConversationID) != ""
 }
@@ -138,7 +140,7 @@ func StockCandidate(s Span) bool {
 // StockRun is one run derived from stock spans: its row and its spans.
 //
 // Row is the run row of §9: Derived true; ID StockRunID's; TraceID,
-// Service, Agent and SessionID (the conversation id) the root's;
+// Service, Agent and SessionID (the conversation id, "" when the root carries none) the root's;
 // Provider and Model the root's gen_ai.provider.name and
 // gen_ai.request.model, else the first chat span's; Started and
 // Finished the root's start and end; LastSeen the latest time in the
@@ -147,13 +149,16 @@ func StockCandidate(s Span) bool {
 // is Error, else StatusSucceeded — never
 // running or interrupted: a span is exported only once it ended, so a
 // stored root is a finished run, and there is no heartbeat to read a
-// liveness from; Steps the subtree's chat span count; Usage the root's
+// liveness from; Steps the subtree's chat span count; MessageCount the
+// subtree's chat spans that carry the conventions' message content
+// (StockHasMessages: each a batch of the messages the model was sent and
+// answered, as a messages record is a weft run's); Usage the root's
 // gen_ai.usage.* when it carries any (verbatim, taken as its own
 // figure), else the sum over the subtree's chat spans; ParentRunID and
 // ParentCallID, for a root nested in another root's subtree, that
 // root's derived id and the gen_ai.tool.call.id of the nearest
 // execute_tool span above it. Turn, PublicID, StopReason, Pending,
-// Meta, the counts and the hashes are not derived (zero).
+// Meta, the other counts and the hashes are not derived (zero).
 //
 // Spans is the run's subtree — the root and every span under it by
 // parent span id, down to (not into) a nested root or a span carrying
@@ -174,7 +179,8 @@ type StockRun struct {
 }
 
 // DeriveStockRuns derives every run the spans hold (§9): one per stock
-// root (IsStockRoot), its subtree the spans under it down to a nested
+// root (IsStockRoot, or a top-level invoke_agent span without a
+// conversation id), its subtree the spans under it down to a nested
 // root. A span is counted toward a root only through a complete chain
 // of stored parents: one whose chain reaches a span not (yet) stored,
 // a span with no parent, or a span carrying weft.run.id belongs to no
@@ -241,11 +247,70 @@ type stockWalker struct {
 	idx   map[string]*Span
 	memo  map[*Span]stockWalk
 	busy  map[*Span]bool
+	above map[*Span]bool
 	steps int
 }
 
 func newStockWalker(idx map[string]*Span) *stockWalker {
-	return &stockWalker{idx: idx, memo: make(map[*Span]stockWalk, len(idx)), busy: map[*Span]bool{}}
+	return &stockWalker{idx: idx, memo: make(map[*Span]stockWalk, len(idx)), busy: map[*Span]bool{},
+		above: map[*Span]bool{}}
+}
+
+// isRoot reports whether s opens a derived run in this trace (§9):
+// IsStockRoot's, or a non-weft invoke_agent span without a conversation
+// id that has no invoke_agent span stored above it (agentAbove) — a
+// top-level agent, a run with no session. Its parent not stored (yet),
+// such an agent is top-level for now: should an enclosing agent arrive
+// later, the agent folds into its run and the writers drop the row it
+// had (the trace re-derived whole).
+func (w *stockWalker) isRoot(s *Span) bool {
+	if stockOp(*s) != opInvokeAgent || attr(s.Attrs, attrRunID) != "" {
+		return false
+	}
+	return attr(s.Attrs, attrConversationID) != "" || !w.agentAbove(s)
+}
+
+// agentAbove reports whether a non-weft invoke_agent span is among s's
+// stored ancestors. The climb stops at a missing parent, a span with no
+// parent, a span carrying weft.run.id (weft's own rows win: a stock
+// agent under a weft run's tool is top-level) or a cycle; every span on
+// the path shares the answer (its nearest agent above is the same), so
+// each is memoised and a trace costs O(n) hops.
+func (w *stockWalker) agentAbove(s *Span) bool {
+	if r, ok := w.above[s]; ok {
+		return r
+	}
+	path := []*Span{s}
+	seen := map[*Span]bool{s: true}
+	found := false
+	for cur := s; ; {
+		if cur.ParentSpanID == "" {
+			break
+		}
+		p, ok := w.idx[cur.ParentSpanID]
+		if !ok || attr(p.Attrs, attrRunID) != "" {
+			break
+		}
+		w.steps++
+		if stockOp(*p) == opInvokeAgent {
+			found = true
+			break
+		}
+		if r, ok := w.above[p]; ok {
+			found = r
+			break
+		}
+		if seen[p] {
+			break // a cycle: no agent above
+		}
+		seen[p] = true
+		path = append(path, p)
+		cur = p
+	}
+	for _, sp := range path {
+		w.above[sp] = found
+	}
+	return found
 }
 
 // walkUp follows s's parents to the nearest root. It stops, with no
@@ -271,7 +336,7 @@ func (w *stockWalker) walkUp(s *Span) stockWalk {
 			break
 		}
 		w.steps++
-		if IsStockRoot(*p) {
+		if w.isRoot(p) {
 			last = stockWalk{root: p}
 			break
 		}
@@ -319,7 +384,7 @@ func deriveTraceCounted(idx map[string]*Span) ([]StockRun, int) {
 	members := map[*Span][]*Span{}
 	var roots []*Span
 	for _, s := range idx {
-		if IsStockRoot(*s) {
+		if w.isRoot(s) {
 			roots = append(roots, s)
 			continue
 		}
@@ -397,6 +462,9 @@ func deriveRun(w *stockWalker, root *Span, members []*Span) StockRun {
 			c.Attrs = withAttrs(s.Attrs, map[string]any{attrStepIndex: int64(len(chats)), attrOperation: opChat})
 			chats = append(chats, s.Start)
 			addUsage(&sum, s.Attrs)
+			if StockHasMessages(s.Attrs) {
+				row.MessageCount++
+			}
 		case opExecuteTool:
 			tools++
 			stamp := map[string]any{attrToolSeq: tools, attrOperation: opExecuteTool}

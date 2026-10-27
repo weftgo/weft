@@ -15,7 +15,8 @@ import { useCapabilities } from "@/hooks/use-capabilities"
 import { storyRunID, useRunEvents } from "@/hooks/use-run-events"
 import { StepList } from "@/components/studio/step-list"
 import { DerivedStory } from "@/components/studio/derived-story"
-import { isDerived } from "@/lib/honesty"
+import { DERIVED_HOLE, isDerived } from "@/lib/honesty"
+import { HoleBadge } from "@/components/studio/hole-badge"
 import { StatusChip } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
 import { STATUS_TEXT } from "@/lib/status-class"
@@ -89,9 +90,13 @@ export function LivePeek({ id, onClose }: { id: string; onClose: () => void }) {
             </p>
           ) : null}
           {/* A derived run (plan I1.3): no events to fold — its story
-              is the steps route's, under the derived badge. */}
+              is the steps route's, under the derived badge said once
+              (the peek has no run header). */}
           {isDerived(run.data) ? (
-            <DerivedStory doc={run.data} replayable={false} />
+            <div className="space-y-3">
+              <HoleBadge {...DERIVED_HOLE} detail />
+              <DerivedStory doc={run.data} />
+            </div>
           ) : (
             <StepList
               events={stream.events}

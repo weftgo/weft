@@ -15,7 +15,7 @@ import { ArrowUpRight } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
 
-import { derivedWords, isDerived } from "@/lib/honesty"
+import { isDerived } from "@/lib/honesty"
 import { allLogsQuery, LOGS } from "@/lib/logs"
 import { studioToken } from "@/lib/api"
 import type { RunDoc, Span as TimedSpan, WireEvent } from "@/lib/api"
@@ -459,22 +459,24 @@ function Verbs({
         )
       )
   }
-  const compare = has("diff") ? (
-    <Link
-      {...compareLink(doc.id, [], step)}
-      className="inline-flex min-h-6 items-center font-mono text-[11px] text-thread-ink hover:underline"
-      title={DRAWER.compareHint}
-      data-drawer-verb="compare"
-    >
-      {DRAWER.compare}
-    </Link>
-  ) : null
+  // A derived run hides the verbs that need weft's records (I6,
+  // UX-S4-03): no compare, no replay line — the run header says why once.
+  const derived = isDerived(doc)
+  const compare =
+    has("diff") && !derived ? (
+      <Link
+        {...compareLink(doc.id, [], step)}
+        className="inline-flex min-h-6 items-center font-mono text-[11px] text-thread-ink hover:underline"
+        title={DRAWER.compareHint}
+        data-drawer-verb="compare"
+      >
+        {DRAWER.compare}
+      </Link>
+    ) : null
   // Where a replay verb would stand and none is offered: why, faintly.
   const off =
-    !verbs.length && (child || step !== undefined)
-      ? isDerived(doc)
-        ? derivedWords()
-        : replayOffWhy(caps, studioToken(), live, why("playground"))
+    !verbs.length && !derived && (child || step !== undefined)
+      ? replayOffWhy(caps, studioToken(), live, why("playground"))
       : undefined
   if (!verbs.length && !off && !compare && !onStory) return null
   return (

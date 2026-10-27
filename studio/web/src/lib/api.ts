@@ -1416,7 +1416,8 @@ export function fetchSearch(filters: SearchFilters = {}): Promise<SearchPage> {
 /** One row of GET /api/traces (studio/traces.go's traceRow): the
  * trace's root span (null, with the gap badge, when only child spans
  * were stored), its service, the time its spans cover, how many,
- * whether any ended in error, and the weft runs it holds. */
+ * whether any ended in error, and the runs it holds — weft's and the
+ * runs derived from its stock GenAI spans (isDerivedRunId, I6). */
 export interface TraceRow {
   trace_id: string
   root: { span_id: string; name: string } | null
@@ -1460,6 +1461,8 @@ export interface TracesFilters {
   until?: string
   /** A resource service name, exact. */
   service?: string
+  /** The GenAI traces that make no run (obsdb.TraceQuery.NotRun, I6). */
+  not_run?: boolean
   public_id?: string
   before?: string
   before_id?: string
@@ -1472,6 +1475,7 @@ export function fetchTraces(filters: TracesFilters = {}): Promise<TracesPage> {
   if (filters.since) params.set("since", filters.since)
   if (filters.until) params.set("until", filters.until)
   if (filters.service) params.set("service", filters.service)
+  if (filters.not_run) params.set("not_run", "1")
   if (filters.public_id) params.set("public_id", filters.public_id)
   if (filters.before) params.set("before", filters.before)
   if (filters.before && filters.before_id)
@@ -1956,7 +1960,8 @@ export interface StepToolCall {
   call_id: string
   name: string
   seq?: number
-  /** null when content-off stripped it (badge "stripped"). */
+  /** null when content-off stripped it (badge "stripped"), or for a
+   * derived call whose span carries no gen_ai.tool.call.arguments. */
   args: unknown
   /** Absent while running or parked. */
   result?: {
@@ -1969,8 +1974,11 @@ export interface StepToolCall {
   child_run_id?: string
   pending?: boolean
   /** max_tokens: not executed, the step hit the output limit (rule 11);
-   * stripped: a content-off chain removed the args or the result. */
-  badge?: "max_tokens" | "stripped"
+   * stripped: a content-off chain removed the args or the result;
+   * derived: read off a stock execute_tool span (docs/record-contract.md
+   * §9) — its args and result the span's gen_ai.tool.call.* when the
+   * producer captured content. */
+  badge?: "max_tokens" | "stripped" | "derived"
 }
 
 /** A child run a step's call started (A10), with its cost as its run
@@ -2303,10 +2311,19 @@ export function spansQuery(id: string, tree = false) {
   })
 }
 
+/** GET /api/traces/{id} (api.go's traceDoc): the trace's spans, the
+ * runs they make — run_ids, weft's and the derived runs' (§9), sorted
+ * (absent from a Studio before I6) — and, when they make none, not_run:
+ * why, with what to set on the spans. */
+export interface TraceDoc extends SpansDoc {
+  run_ids?: string[]
+  not_run?: { reason: string; fix: string }
+}
+
 export function traceQuery(traceId: string) {
   return queryOptions({
     queryKey: ["trace", traceId],
-    queryFn: () => get<SpansDoc>(`traces/${encodeURIComponent(traceId)}`),
+    queryFn: () => get<TraceDoc>(`traces/${encodeURIComponent(traceId)}`),
   })
 }
 

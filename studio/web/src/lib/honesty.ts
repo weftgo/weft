@@ -180,7 +180,7 @@ export const CAUSES: Partial<
   derived: {
     stock_spans: {
       reason: "derived from spans · no events",
-      fix: "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests",
+      fix: "stock OTel GenAI spans carry no weft events or request records: set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true for the messages and tool arguments (Studio reads them from the span attributes) and gen_ai.conversation.id on the invoke_agent span for a session (docs/record-contract.md §9); weft's own records need a weft SDK (Go today)",
     },
   },
   hidden: {
@@ -315,6 +315,56 @@ export function holeWords(m: HoleMark): {
  * events", its fix naming the record contract. A list row carries no
  * holes[]; its `derived: true` is this mark. */
 export const DERIVED_HOLE: HoleMark = { hole: "derived", cause: "stock_spans" }
+
+/** DERIVED_VERBS is why a derived run offers no replay, save as test,
+ * open in app or compare (I6, UX-S4-03): hidden on both surfaces, said
+ * once — its own export, so the panel bundles this line alone. */
+export const DERIVED_VERBS =
+  "replay, save as test, open in app and compare are hidden: they need weft's records"
+
+/** The words a derived run's page says beside the one header note
+ * (I6; UX-H-01, UX-S4-02, UX-S4-03): the header says DERIVED_HOLE's
+ * reason and fix once; every block read off the producer's spans
+ * carries only DERIVED_CHIP (its tooltip the header's words). */
+export const DERIVED_WORDS = {
+  /** A block drawn from the span attributes (gen_ai.input.messages, a
+   * tool call's arguments and result). */
+  chip: "derived · from span attributes",
+  /** A step's chat span that carries no content attributes. */
+  noContent:
+    "no messages on this span: the producer captured no content (OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true puts them on its spans)",
+  /** A derived tool call whose span carries no gen_ai.tool.call.*. */
+  noCall: "arguments and result not captured on the span",
+  /** The raw view: a derived run has no event stream. */
+  events: "no weft events: the run was read off its spans",
+  /** The waterfall before the spans are read (or when they cannot be). */
+  waterfall: "the run's spans are not read yet",
+  /** The request (prompt, params, catalog): never on stock spans. */
+  noRequest: "request: not recorded for derived runs",
+  /** A per-block chip's screen-reader words: the sentence is the
+   * header's, said once (the chip's title keeps it for the pointer). */
+  srBrief: "derived, see the header",
+  /** The verbs a derived run hides — one rule on both surfaces. */
+  verbs: DERIVED_VERBS,
+  /** A trace whose spans make no run (api.go's not_run). */
+  notRun: "not a run",
+  /** The trace list's filter to those traces (?not_run=1). */
+  notRunChip: "GenAI traces that are not runs",
+} as const
+
+/** notRunTraces is the runs page's count of the GenAI traces stored
+ * that make no run (UX-H-02): a chat-only instrumentation, an agent
+ * span not arrived — the trace page says why for each. */
+export function notRunTraces(n: number): string {
+  return `${plural(n, "GenAI trace")} not runs — why`
+}
+
+/** isDerivedRunId: a derived run's id shape (docs/record-contract.md
+ * §9: otel-<32 hex trace id>-<16 hex root span id>) — the trace list
+ * names derived runs in run_ids beside weft's own. */
+export function isDerivedRunId(id: string): boolean {
+  return /^otel-[0-9a-f]{32}-[0-9a-f]{16}$/.test(id)
+}
 
 /** isDerived says a run row was built by the reader from stock OTel
  * GenAI spans (api.go's runRow.Derived): no events, transcript or

@@ -1,62 +1,57 @@
-// A derived run's story (plan I1.3, docs/record-contract.md §9): a run
-// the reader built from stock OTel GenAI spans has no events, no
+// A derived run's story (plan I1.3, I6; docs/record-contract.md §9): a
+// run the reader built from stock OTel GenAI spans has no events, no
 // transcript and no request records, so the fold has nothing to draw.
-// The story says so — the derived badge with the stock_spans words and
-// the fix, never an empty pane — and draws what the spans do say: one
+// The run header says so once — the derived badge with the stock_spans
+// reason and fix, and why the replay, save, open-in-app and compare
+// verbs are hidden — and the story draws what the spans do say: one
 // card per step from the steps route (its chat span's model, status,
 // usage and cost as Studio served them, priced or unknown with the
-// API's reason; its execute_tool spans as calls, each badged derived),
-// the request and messages-in blocks as their badges. No replay verbs:
-// there is no transcript to replay (the playground refuses the source
-// 400), and the page says why where the verbs would be.
+// API's reason), the step's messages from its chat span's GenAI
+// content attributes (lib/genai.ts genaiChat — the trace page's chat
+// view, one renderer), and its execute_tool spans as calls with their
+// arguments and results when the producer captured content. Each block
+// read off the spans carries the derived chip alone (its tooltip the
+// header's words), never the sentence again (UX-S4-02).
 import { useQuery } from "@tanstack/react-query"
 
-import { isRequestRow, stepQuery } from "@/lib/api"
-import type { Holed, RunDoc, StepDoc } from "@/lib/api"
-import { DERIVED_HOLE, derivedUsageUnknown, derivedWords } from "@/lib/honesty"
+import { spansQuery, stepQuery } from "@/lib/api"
+import type { RunDoc, Span, StepDoc, StepToolCall } from "@/lib/api"
+import { genaiChat } from "@/lib/genai"
+import { DERIVED_HOLE, DERIVED_WORDS, derivedUsageUnknown } from "@/lib/honesty"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { Cost, useCostCapable } from "@/components/studio/cost"
-import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
+import { ChatMessages } from "@/components/studio/genai-chat"
+import { HoleBadge } from "@/components/studio/hole-badge"
 import { UnknownTokens } from "@/components/studio/runs-table"
 import { Usage } from "@/components/studio/step-list"
-import { Button } from "@/components/ui/button"
 import { STATUS_TEXT } from "@/lib/status-class"
 
-/** DerivedNote is the banner a pane draws in place of what a derived
- * run cannot have: the badge, its reason and its fix, in full. */
-export function DerivedNote({
-  what,
-}: {
-  what: "story" | "events" | "waterfall"
-}) {
+/** SpanAttrsChip is the mark on a block read off a derived run's spans:
+ * the derived badge labelled "derived · from span attributes", the
+ * stock_spans reason and fix its tooltip and accessible text. */
+export function SpanAttrsChip() {
   return (
-    <div
-      role="note"
-      className="rounded-md border border-dashed border-thread/40 px-3 py-2"
-      data-derived-note={what}
-    >
-      <HoleBadge {...DERIVED_HOLE} detail />
-    </div>
+    <HoleBadge
+      {...DERIVED_HOLE}
+      label={DERIVED_WORDS.chip}
+      srText={DERIVED_WORDS.srBrief}
+    />
   )
 }
 
-/** ReplayRefused stands where the replay verbs would be on a run the
- * playground cannot replay: disabled, the badge's words as its reason
- * (the server would refuse it 400 with the same badge). */
-export function ReplayRefused() {
-  const words = derivedWords()
+/** DerivedNote stands in a pane a derived run cannot fill (the raw
+ * view's events, the waterfall before its spans are read): the chip and
+ * what is absent in a few words — the sentence is the header's. */
+export function DerivedNote({ what }: { what: "events" | "waterfall" }) {
   return (
-    <Button
-      variant="outline"
-      size="xs"
-      className="font-mono"
-      disabled
-      title={words}
-      data-replay-refused="derived"
+    <div
+      role="note"
+      className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-thread/40 px-3 py-2 font-mono text-[11px] text-muted-foreground"
+      data-derived-note={what}
     >
-      replay
-      <span className="sr-only">{` — ${words}`}</span>
-    </Button>
+      <HoleBadge {...DERIVED_HOLE} srText={DERIVED_WORDS.srBrief} />
+      {DERIVED_WORDS[what]}
+    </div>
   )
 }
 
@@ -77,29 +72,50 @@ export function UsageOrUnknown({
   return <Usage usage={fields.usage} />
 }
 
-function Block({
-  label,
-  hole,
-  n,
-}: {
-  label: string
-  hole: Holed | undefined
-  n: number
-}) {
-  const h = hole?.badge ? hole : undefined
+/** json is a value as one line of JSON (a string as itself). */
+function json(v: unknown): string {
+  return typeof v === "string" ? v : JSON.stringify(v)
+}
+
+/** A derived call: name(args) = result when the span carried them, else
+ * the words that say they were not captured. */
+function DerivedCall({ c }: { c: StepToolCall }) {
+  const captured = c.args !== null || c.result !== undefined
   return (
-    <div
-      className="space-y-1"
-      data-derived-block={label}
-      {...(label === "request" ? { "data-request": n } : {})}
+    <li
+      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-xs"
+      data-call={c.call_id || undefined}
     >
-      <div className="eyebrow">{label}</div>
-      {h ? (
-        <HoleBadge hole={h.badge!} reason={h.reason} fix={h.fix} detail />
+      <span className={`${STATUS_TEXT.tool}`}>⚙ {c.name}</span>
+      {captured ? (
+        <span className="[overflow-wrap:anywhere]" data-call-content>
+          ({c.args === null ? "…" : json(c.args)})
+          {c.result ? (
+            <span
+              className={c.result.is_error ? `${STATUS_TEXT.bad}` : undefined}
+            >
+              {` = ${c.result.content}`}
+            </span>
+          ) : null}
+        </span>
       ) : (
-        <HoleBadge {...DERIVED_HOLE} detail />
+        <span className="text-faint" data-call-content="none">
+          {DERIVED_WORDS.noCall}
+        </span>
       )}
-    </div>
+      <span className="text-faint">{c.call_id || "—"}</span>
+      {c.span ? <span className="text-faint">{c.span.status}</span> : null}
+      <SpanAttrsChip />
+    </li>
+  )
+}
+
+/** A step's chat span: the reader stamps weft.step.index on it. */
+function chatSpanOf(spans: Span[] | undefined, n: number): Span | undefined {
+  return spans?.find(
+    (s) =>
+      s.attrs["gen_ai.operation.name"] === "chat" &&
+      Number(s.attrs["weft.step.index"]) === n
   )
 }
 
@@ -107,15 +123,17 @@ function DerivedStepCard({
   runId,
   n,
   enabled,
+  chat,
 }: {
   runId: string
   n: number
   enabled: boolean
+  chat: Span | undefined
 }) {
   const q = useQuery({ ...stepQuery(runId, n), enabled, retry: false })
   const costCapable = useCostCapable()
   const st = q.data
-  const holes = st?.holes.length ? st.holes : [DERIVED_HOLE]
+  const msgs = chat ? genaiChat(chat.attrs) : undefined
   return (
     <section
       className="space-y-2.5 rounded-lg border px-4 py-3"
@@ -146,62 +164,60 @@ function DerivedStepCard({
         ) : enabled ? (
           <span className="text-faint">loading…</span>
         ) : null}
+        <SpanAttrsChip />
       </div>
-      <HoleBadges holes={holes} />
+      {msgs?.family ? (
+        <div data-derived-messages={msgs.family}>
+          <ChatMessages
+            messages={msgs.messages}
+            problems={msgs.problems}
+            fold
+          />
+        </div>
+      ) : chat ? (
+        <p
+          className="font-mono text-[11px] text-faint"
+          data-derived-messages="none"
+        >
+          {DERIVED_WORDS.noContent}
+        </p>
+      ) : null}
       {st && st.tool_calls.length > 0 ? (
         <ul className="space-y-1" data-tool-calls>
           {st.tool_calls.map((c, i) => (
-            <li
-              key={`${c.seq ?? i}`}
-              className="flex flex-wrap items-center gap-2 font-mono text-xs"
-              data-call={c.call_id || undefined}
-            >
-              <span className="text-foreground">{c.name}</span>
-              <span className="text-faint">{c.call_id || "—"}</span>
-              {c.span ? (
-                <span className="text-faint">{c.span.status}</span>
-              ) : null}
-              <HoleBadge {...DERIVED_HOLE} />
-            </li>
+            <DerivedCall key={`${c.seq ?? i}`} c={c} />
           ))}
         </ul>
       ) : null}
       {st ? (
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Block
-            label="request"
-            hole={
-              st.request && !isRequestRow(st.request) ? st.request : undefined
-            }
-            n={n}
-          />
-          <Block label="messages" hole={st.messages_in} n={n} />
-        </div>
+        <p
+          className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-faint"
+          data-derived-block="request"
+          data-request={n}
+        >
+          <HoleBadge {...DERIVED_HOLE} srText={DERIVED_WORDS.srBrief} />
+          {DERIVED_WORDS.noRequest}
+        </p>
       ) : null}
     </section>
   )
 }
 
 /** DerivedStory is the story tab of a derived run. */
-export function DerivedStory({
-  doc,
-  replayable,
-}: {
-  doc: RunDoc
-  replayable: boolean
-}) {
+export function DerivedStory({ doc }: { doc: RunDoc }) {
   const { has } = useCapabilities()
+  const spans = useQuery(spansQuery(doc.id))
   const steps = Array.from({ length: Math.max(0, doc.steps) }, (_, i) => i)
   return (
     <div className="space-y-3" data-derived-story>
-      <div className="flex flex-wrap items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <DerivedNote what="story" />
-        </div>
-        {replayable ? <ReplayRefused /> : null}
-      </div>
       {steps.map((n) => (
-        <DerivedStepCard key={n} runId={doc.id} n={n} enabled={has("steps")} />
+        <DerivedStepCard
+          key={n}
+          runId={doc.id}
+          n={n}
+          enabled={has("steps")}
+          chat={chatSpanOf(spans.data?.spans, n)}
+        />
       ))}
     </div>
   )

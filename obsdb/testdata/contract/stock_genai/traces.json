@@ -129,6 +129,24 @@
                   "value": {
                     "stringValue": "conv_7f3a"
                   }
+                },
+                {
+                  "key": "gen_ai.system_instructions",
+                  "value": {
+                    "stringValue": "[{\"type\": \"text\", \"content\": \"You are a helpful support agent for ACME.\"}]"
+                  }
+                },
+                {
+                  "key": "gen_ai.input.messages",
+                  "value": {
+                    "stringValue": "[{\"role\": \"user\", \"parts\": [{\"type\": \"text\", \"content\": \"Where is my order 4411?\"}]}]"
+                  }
+                },
+                {
+                  "key": "gen_ai.output.messages",
+                  "value": {
+                    "stringValue": "[{\"role\": \"assistant\", \"parts\": [{\"type\": \"tool_call\", \"id\": \"call_abc\", \"name\": \"lookup_order\", \"arguments\": {\"id\": \"4411\"}}], \"finish_reason\": \"tool_calls\"}]"
+                  }
                 }
               ],
               "status": {
@@ -166,6 +184,18 @@
                   "key": "gen_ai.conversation.id",
                   "value": {
                     "stringValue": "conv_7f3a"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.arguments",
+                  "value": {
+                    "stringValue": "{\"id\":\"4411\"}"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.result",
+                  "value": {
+                    "stringValue": "{\"status\":\"shipped\"}"
                   }
                 }
               ],
@@ -234,6 +264,24 @@
                   "key": "gen_ai.conversation.id",
                   "value": {
                     "stringValue": "conv_7f3a"
+                  }
+                },
+                {
+                  "key": "gen_ai.system_instructions",
+                  "value": {
+                    "stringValue": "[{\"type\": \"text\", \"content\": \"You are a helpful support agent for ACME.\"}]"
+                  }
+                },
+                {
+                  "key": "gen_ai.input.messages",
+                  "value": {
+                    "stringValue": "[{\"role\": \"user\", \"parts\": [{\"type\": \"text\", \"content\": \"Where is my order 4411?\"}]}, {\"role\": \"assistant\", \"parts\": [{\"type\": \"tool_call\", \"id\": \"call_abc\", \"name\": \"lookup_order\", \"arguments\": {\"id\": \"4411\"}}]}, {\"role\": \"tool\", \"parts\": [{\"type\": \"tool_call_response\", \"id\": \"call_abc\", \"response\": {\"status\": \"shipped\"}}]}]"
+                  }
+                },
+                {
+                  "key": "gen_ai.output.messages",
+                  "value": {
+                    "stringValue": "[{\"role\": \"assistant\", \"parts\": [{\"type\": \"text\", \"content\": \"Your order 4411 has shipped.\"}], \"finish_reason\": \"stop\"}]"
                   }
                 }
               ],

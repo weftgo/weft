@@ -8,8 +8,7 @@
 import { cleanup } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { derivedWords } from "../lib/honesty"
-import { SAVE_TEST_LABEL } from "../lib/saves"
+import { DERIVED_VERBS } from "../lib/honesty"
 import { FakeStudio } from "../test/fake-studio"
 import {
   DERIVED,
@@ -94,7 +93,7 @@ describe("a derived turn in the panel", () => {
     }
   })
 
-  it("Story: the turn's hole said in full; the replay verbs, edits and save as test refused with the badge's words", async () => {
+  it("Story: the turn's hole said in full; the replay verbs, edits and save as test hidden (I6)", async () => {
     const el = await open()
     const story = await tab(el, "story")
     const holes = story.querySelector<HTMLElement>("[data-weft-turn-holes]")!
@@ -104,26 +103,14 @@ describe("a derived turn in the panel", () => {
       )
     ).toEqual(["derived"])
     saysStock(holes.textContent, "story notes")
-    // No verb that would replay or edit it …
+    // No verb that would replay, edit or save it: hidden, never greyed
+    // (I6 — one rule with the run page), the notes above say why.
     expect(story.querySelector("[data-weft-verb]")).toBeNull()
     expect(story.querySelector("textarea")).toBeNull()
-    for (const label of ["✎ Replay…", "↻ Re-run"]) {
-      const b = all(el, "#weft-tp-story button[data-weft-refused]").find(
-        (n) => n.firstChild?.textContent === label
-      ) as HTMLButtonElement
-      expect(b, label).toBeTruthy()
-      expect(b.disabled).toBe(true)
-      expect(b.getAttribute("title")).toBe(derivedWords())
-    }
-    // … and the wefttest export greyed, not a link.
-    const save = story.querySelector<HTMLElement>(
-      '[data-weft-refused="derived"]:not(button)'
-    )!
-    expect(save.firstChild?.textContent).toBe(SAVE_TEST_LABEL)
-    expect(save.getAttribute("aria-disabled")).toBe("true")
-    expect(save.tagName).not.toBe("A")
-    saysStock(save.getAttribute("title"), "save as test")
-    expect(story.querySelector("a[data-weft-save-test]")).toBeNull()
+    expect(all(el, "[data-weft-refused]")).toHaveLength(0)
+    expect(story.querySelector("[data-weft-save-test]")).toBeNull()
+    // Hidden, and said why: the run page's header words.
+    expect(story.textContent).toContain(DERIVED_VERBS)
     // The steps the spans tell are Studio's story: the hand-off says how
     // many and lands on the run page's story at step 0.
     const off = story.querySelector<HTMLAnchorElement>(

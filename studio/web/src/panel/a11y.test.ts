@@ -347,7 +347,7 @@ async function editableAtRest(el: WeftDevtools) {
 }
 
 /** I1.3: a run derived from stock spans — its turn chip, its hole said
- * in full, the refused verbs and save as test — on the server's own
+ * in full, its steps' hand-off (its verbs hidden, I6) — on the server's own
  * bodies (src/test/derived-fixture.ts). */
 function derivedRoutes(): Record<string, Route> {
   const r = baseRoutes()
@@ -537,7 +537,7 @@ const MODES: {
     },
   },
   {
-    name: "a derived turn: its chip, its hole, the refused verbs",
+    name: "a derived turn: its chip, its hole, the hand-off (its verbs hidden, I6)",
     width: 1024,
     attrs: { "data-open": "true", "data-position": "right-dock" },
     sel: '[data-weft-chip="derived"]',
@@ -549,7 +549,7 @@ const MODES: {
     act: async (el) => {
       await vi.waitFor(() =>
         expect(
-          el.shadowRoot!.querySelector('button[data-weft-refused="derived"]')
+          el.shadowRoot!.querySelector("[data-weft-derived-handoff]")
         ).not.toBeNull()
       )
     },

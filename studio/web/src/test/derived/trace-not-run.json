@@ -1,0 +1,50 @@
+{
+  "spans": [
+    {
+      "trace_id": "8d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60",
+      "span_id": "8d00000000000001",
+      "parent_span_id": "",
+      "name": "POST /chat",
+      "kind": "server",
+      "start": "2026-10-01T10:03:00Z",
+      "end": "2026-10-01T10:03:01Z",
+      "status": "unset",
+      "status_message": "",
+      "service": "flask-chat",
+      "attrs": {
+        "http.request.method": "POST",
+        "http.route": "/chat"
+      },
+      "events": []
+    },
+    {
+      "trace_id": "8d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60",
+      "span_id": "8d00000000000002",
+      "parent_span_id": "8d00000000000001",
+      "name": "chat gpt-4o",
+      "kind": "client",
+      "start": "2026-10-01T10:03:00.1Z",
+      "end": "2026-10-01T10:03:00.9Z",
+      "status": "unset",
+      "status_message": "",
+      "service": "flask-chat",
+      "attrs": {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.request.model": "gpt-4o",
+        "gen_ai.response.finish_reasons": [
+          "stop"
+        ],
+        "gen_ai.system": "openai",
+        "gen_ai.usage.input_tokens": 40,
+        "gen_ai.usage.output_tokens": 9
+      },
+      "events": []
+    }
+  ],
+  "run_ids": [],
+  "not_run": {
+    "reason": "model or tool calls only: no invoke_agent span opens a run (docs/record-contract.md §9) — the instrumentation records the calls, not an agent",
+    "fix": "wrap the agent's turn in an invoke_agent span (gen_ai.operation.name = invoke_agent) to get a run page; set gen_ai.conversation.id on it for a session"
+  }
+}
+

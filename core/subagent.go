@@ -24,7 +24,9 @@ const (
 	// approval decision. Approvals belong in the orchestrator, not in a
 	// child: the parent's transcript has nowhere to carry the child's
 	// pending call, so the delegation is refused loudly instead of
-	// silently (ADR 0014).
+	// silently (ADR 0014). To let a child — at any depth — park for
+	// approval and resume on a decision made at the top session, wrap
+	// the delegation with weft/thread/pool (ADR 0022 §7).
 	CodeSubagentPending = "SUBAGENT_PENDING"
 	// CodeSubagentCycle marks a delegation to an agent already running
 	// in this call chain — refused before any model call.
@@ -299,7 +301,8 @@ type subagentInput struct {
 //
 // A child run that fails is a tool error the parent model sees
 // (SUBAGENT_FAILED), never a parent run error; a child that ends
-// awaiting approval is SUBAGENT_PENDING; a child that is already
+// awaiting approval is SUBAGENT_PENDING (weft/thread/pool propagates
+// it to the parent session instead, ADR 0022); a child that is already
 // running above this call is refused with SUBAGENT_CYCLE. Subagent
 // panics if child is nil.
 func Subagent(name, description string, child *Agent, opts ...ToolOption) *ToolDef {

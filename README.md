@@ -229,7 +229,10 @@ one step run four children), `RequireApproval` gates the delegation
 itself. A failed child is data the parent model sees
 (`SUBAGENT_FAILED: …`, the child's `*RunError` on `ToolError.Err`), a
 child that ends awaiting approval is `SUBAGENT_PENDING` — approval-gated
-tools belong in the orchestrator, not in a child — and a delegation to
+tools belong in the orchestrator, not in a child, unless the delegation
+is wrapped with `weft/thread/pool`, which surfaces a child's approvals
+at any depth on the parent session's `Pending()` and resumes the child
+on the decision ([ADR 0022](docs/adr/0022-thread-pool.md)) — and a delegation to
 an agent already running in the call chain is refused
 (`SUBAGENT_CYCLE`). [ADR 0014](docs/adr/0014-subagents-as-tools.md)
 records the mechanics, the lineage ids, and pi's AgentLanes

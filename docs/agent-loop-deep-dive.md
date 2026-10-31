@@ -1474,11 +1474,13 @@ taken by the wire-format decision): **a child run that ends
 with pending calls is a loud tool error at the parent**,
 `SUBAGENT_PENDING: agent "research" ended awaiting approval of 1
 call(s)`, visible to the parent model and to `Audit`, never silent.
-Full propagation belongs to `runtime`, which owns sessions and
-persistence, can store the child transcript under the lineage id
-(Chapter 11), and can resume it on decision, the LangGraph shape built
-above the loop instead of under it. The practical guidance until then:
-approval-gated tools belong in the orchestrator, not in a child.
+Full propagation belongs above the loop, in the layer that owns
+sessions and persistence: `weft/thread/pool` (ADR 0022 §7) stores the
+child transcript under the lineage id (Chapter 11), surfaces the
+child's requests on the parent session's `Pending()`, and resumes the
+child on decision, the LangGraph shape built above the loop instead of
+under it. Without a pool: approval-gated tools belong in the
+orchestrator, not in a child.
 
 ### Security, stated honestly
 
@@ -1751,8 +1753,8 @@ therefore a tool error, not a parent run error, and the parent model
 can try something else.
 
 **Pending approvals.** Chapter 10: `SUBAGENT_PENDING: agent "research"
-ended awaiting approval of N call(s)`. Loud, not propagated, deferred
-to `runtime`.
+ended awaiting approval of N call(s)`. Loud, not propagated by the
+core; `weft/thread/pool` propagates it (ADR 0022 §7).
 
 **Cycles.** Agents are immutable values, so `A` cannot contain `B`
 containing `A` at construction. `ToolSource` (TODO §5.11) can close the

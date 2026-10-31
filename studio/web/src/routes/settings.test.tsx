@@ -141,8 +141,8 @@ describe("the settings page renders every section from the goldens", () => {
         within(section(id)).getByRole("heading", { level: 2, name: title })
       ).toBeTruthy()
     // Studio: versions, pid, the interrupted threshold, ingest.
-    expect(fact("studio", "weft").textContent).toBe("v0.20.2")
-    expect(fact("studio", "panel").textContent).toBe("v0.20.2")
+    expect(fact("studio", "weft").textContent).toBe("v0.20.3")
+    expect(fact("studio", "panel").textContent).toBe("v0.20.3")
     expect(fact("studio", "pid").textContent).toBe("1234")
     expect(fact("studio", "interrupted after").textContent).toContain(
       "30000 ms"

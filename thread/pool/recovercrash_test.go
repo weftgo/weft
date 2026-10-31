@@ -105,7 +105,7 @@ func crashLines(t *testing.T, path string) []crashLine {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []crashLine
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<24)
@@ -325,5 +325,117 @@ func TestRecoverOrphanedDelegatingCallResumesTheChild(t *testing.T) {
 	}
 	if len(s.Pending()) != 0 {
 		t.Errorf("the top still offers %+v", s.Pending())
+	}
+}
+
+// F1 at depth: L1 and L2 both cut mid-run (each through the mirror of
+// its child's request, before its own park), L3 parked. Recover ends
+// the subtree depth first: L3 canceled at its boundary in L2's
+// ledger, L2 settled failed in L1's, L1 failed in the top's.
+func TestRecoverEndsAFailedChildsSubtreeDeep(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gated := []bool{false, false, false, true} // only L3 parks
+	top := parkCrashChain(t, dir, gated)
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l1 := firstChild(t, st, top)
+	l2 := firstChild(t, st, l1)
+	l3 := firstChild(t, st, l2)
+	cutBefore(t, filepath.Join(dir, l2+".jsonl"), after(kind("approval_request")))
+	cutBefore(t, filepath.Join(dir, l1+".jsonl"), kind("approval_request"))
+	cutBefore(t, filepath.Join(dir, top+".jsonl"), kind("approval_request"))
+
+	p := pool.New(4)
+	defer func() { _ = p.Close(ctx) }()
+	lead, ran := crashChain(p, gated, false)
+	s, err := thread.Open(ctx, st, top, lead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	if err := p.Recover(ctx, s); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	want := []struct {
+		session, child string
+		state          pool.State
+	}{{top, l1, pool.Failed}, {l1, l2, pool.Failed}, {l2, l3, pool.Canceled}}
+	for _, w := range want {
+		var rs []pool.Receipt
+		if w.session == top {
+			rs = pool.Receipts(s)
+		} else {
+			rs = pool.Receipts(readOnly(t, st, w.session))
+		}
+		if len(rs) != 1 || rs[0].Child != w.child || rs[0].State != w.state {
+			t.Errorf("%s's receipts = %+v, want %s %s", w.session, rs, w.child, w.state)
+		}
+	}
+	if pend := readOnly(t, st, l3).Pending(); len(pend) != 0 {
+		t.Errorf("L3 still holds %d undecidable request(s)", len(pend))
+	}
+	if len(ran.snapshot()) != 0 {
+		t.Error("the gated call ran")
+	}
+}
+
+// A kill inside Recover's own cascade, between a grandchild's
+// settlement in the middle child's ledger and the denial of its
+// requests there: the next Recover finds the receipt settled and still
+// denies the requests, rather than leave them offered in a session
+// nothing resumes.
+func TestRecoverEndsASubtreeCutMidCascade(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gated := []bool{false, false, false, true}
+	top := parkCrashChain(t, dir, gated)
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l1 := firstChild(t, st, top)
+	l2 := firstChild(t, st, l1)
+	cutBefore(t, filepath.Join(dir, l2+".jsonl"), after(kind("approval_request")))
+	cutBefore(t, filepath.Join(dir, l1+".jsonl"), kind("approval_request"))
+	cutBefore(t, filepath.Join(dir, top+".jsonl"), kind("approval_request"))
+
+	recoverOnce := func() {
+		t.Helper()
+		p := pool.New(4)
+		lead, _ := crashChain(p, gated, false)
+		s, err := thread.Open(ctx, st, top, lead)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Recover(ctx, s); err != nil {
+			t.Fatalf("Recover: %v", err)
+		}
+		_ = p.Close(ctx)
+		_ = s.Close(ctx)
+	}
+	recoverOnce()
+	// The crash image of a kill right after L3's canceled receipt in L2:
+	// L2 through that receipt, L1 and the top before their settlements.
+	cutBefore(t, filepath.Join(dir, l2+".jsonl"), after(func(l crashLine) bool {
+		return l.kind == "pool_receipt" && strings.Contains(l.raw, `"status":"canceled"`)
+	}))
+	cutBefore(t, filepath.Join(dir, l1+".jsonl"), func(l crashLine) bool {
+		return l.kind == "pool_receipt" && strings.Contains(l.raw, `"status":"failed"`)
+	})
+	cutBefore(t, filepath.Join(dir, top+".jsonl"), func(l crashLine) bool {
+		return l.kind == "pool_receipt" && strings.Contains(l.raw, `"status":"failed"`)
+	})
+	if len(readOnlyFresh(t, st, l2).Pending()) == 0 {
+		t.Fatal("the image is not the window: L2 offers nothing")
+	}
+	recoverOnce()
+	if pend := readOnlyFresh(t, st, l2).Pending(); len(pend) != 0 {
+		t.Errorf("L2 still offers %+v", pend)
+	}
+	if rs := pool.Receipts(readOnlyFresh(t, st, l1)); len(rs) != 1 || rs[0].State != pool.Failed {
+		t.Errorf("L1's receipts = %+v", rs)
 	}
 }

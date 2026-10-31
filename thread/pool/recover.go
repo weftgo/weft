@@ -33,7 +33,14 @@ import (
 //     run twice has to be idempotent itself (the playground's
 //     side-effect classes, core.Replay, do not gate a session resume).
 //     The same holds at any depth: a grandchild whose approved call was
-//     running resumes through its parent's recovered delegation.
+//     running resumes through its parent's recovered delegation. A
+//     sync delegation whose delegating run died before its turn ended
+//     — the child parked and mirrored, the parent's park never
+//     recorded — has no delegating call to resolve: nothing parked it
+//     (no turn entry, no boundary; the parent's next run repairs it as
+//     interrupted). The child is reattached as a delegation by no call:
+//     its requests stay offered, a decision resumes it, and its answer
+//     settles the receipt only.
 //   - the child finished its run: the receipt settles from the child's
 //     own ledger — done with its final text, failed, capped or
 //     canceled with its recorded cause — with the child's usage.
@@ -42,6 +49,19 @@ import (
 //     receipt settles failed, saying so. That run is not started
 //     again: what it had done, it had done.
 //   - the child session is gone: the receipt settles failed.
+//
+// A child settled as over that is itself a parent ends its own
+// unsettled delegations first, depth first, as Cancel and Close end
+// them: nothing will resolve their calls in it. A parked sync
+// grandchild is canceled at its boundary — its pending calls denied in
+// its session, its requests in the child denied — and settles canceled
+// in the child's ledger; one whose run is over settles from its file;
+// a parked async one is left parked (D4). Without the agent to reopen
+// one of them, the child's receipt is left unsettled and reported with
+// ErrNoAgent, for a later Recover. A kill inside this cascade is
+// finished by the next Recover: a child is descended into while it
+// holds requests no decision answers too, and a settled delegation's
+// requests still offered in it are denied.
 //
 // A sync delegation's call still parked in the parent is resolved
 // with the settlement, including for receipts that settled but whose
@@ -124,7 +144,7 @@ func (p *Pool) recoverOne(ctx context.Context, parent *thread.Session, rc Receip
 	if parked {
 		return p.reattach(ctx, parent, rc)
 	}
-	if hasUnsettled(entries) {
+	if hasLoose(entries) {
 		// A child that is itself a parent ends its own sync
 		// delegations before it settles, as under Cancel and Close
 		// (ADR 0022 §F): its run is over, nothing will resolve their
@@ -138,21 +158,31 @@ func (p *Pool) recoverOne(ctx context.Context, parent *thread.Session, rc Receip
 	return p.settleFromLedger(ctx, parent, rc, name, state, stop, usage)
 }
 
-// hasUnsettled reports whether a session's entries hold a pool
-// receipt with no settlement.
-func hasUnsettled(entries []thread.Entry) bool {
+// hasLoose reports whether a session's entries hold a delegation that
+// is not finished with: a pool receipt with no settlement, or a
+// mirrored child request no later decision answers (a crash between a
+// settlement and the denial of its requests).
+func hasLoose(entries []thread.Entry) bool {
 	open := map[string]bool{}
+	mirrors := map[[2]string]bool{} // call id, run id
 	for _, e := range entries {
-		if pr, ok := e.(thread.PoolReceiptEntry); ok {
+		switch e := e.(type) {
+		case thread.PoolReceiptEntry:
 			switch {
-			case pr.Receipt == "":
-				open[pr.ID] = true
-			case State(pr.Status).Settled():
-				delete(open, pr.Receipt)
+			case e.Receipt == "":
+				open[e.ID] = true
+			case State(e.Status).Settled():
+				delete(open, e.Receipt)
 			}
+		case thread.ApprovalRequestEntry:
+			if e.Child != "" {
+				mirrors[[2]string{e.CallID, e.RunID}] = true
+			}
+		case thread.ApprovalDecisionEntry:
+			delete(mirrors, [2]string{e.CallID, e.RunID})
 		}
 	}
-	return len(open) > 0
+	return len(open) > 0 || len(mirrors) > 0
 }
 
 // endSubtree ends the delegations of a child of above whose run is
@@ -182,14 +212,22 @@ func (p *Pool) openEnded(ctx context.Context, above *thread.Session, childID str
 }
 
 // endDelegations ends every unsettled delegation of s, a session whose
-// run is over, that no child of this pool is working (endOne).
+// run is over, that no child of this pool is working (endOne). A
+// settled one's requests still offered in s — a crash between its
+// settlement and their denial — are denied.
 func (p *Pool) endDelegations(ctx context.Context, s *thread.Session) error {
 	var errs []error
 	for _, rc := range Receipts(s) {
 		p.mu.Lock()
 		_, live := p.delegates[rc.ID]
 		p.mu.Unlock()
-		if rc.Settled() || live {
+		if live {
+			continue
+		}
+		if rc.Settled() {
+			if err := s.DenyMirrored(ctx, rc.Child, endedReason(rc.State)); err != nil {
+				errs = append(errs, fmt.Errorf("thread/pool: requests of ended child %s: %w", rc.Child, err))
+			}
 			continue
 		}
 		if err := p.endOne(ctx, s, rc); err != nil {
@@ -236,7 +274,7 @@ func (p *Pool) endOne(ctx context.Context, s *thread.Session, rc Receipt) error 
 			return fmt.Errorf("thread/pool: child session %s: %w", rc.Child, err)
 		}
 		state, stop = Canceled, orphanCanceledStop
-	case hasUnsettled(entries):
+	case hasLoose(entries):
 		if err := p.endSubtree(ctx, s, rc.Child); err != nil {
 			return err
 		}

@@ -6,7 +6,8 @@
   2026-10-01 — the amendment at the end replaces the slot rule, the
   depth guard, the nested-approval bridge and `Decide`'s shape, and
   where it disagrees with the text above it, the amendment is the
-  decision
+  decision; amended 2026-10-31 — `Recover` after a kill (the subtree
+  of a child it settles; a delegating call nothing parked), at the end
 - Depends on: ADR 0011 (sessions), ADR 0014 (subagents as tools), ADR
   0021 (approvals), ADR 0019 (steering, for forwarding)
 
@@ -564,3 +565,81 @@ child as the separate session with lineage this ADR decided; its usage
 stays on the receipt and in the parent session's `Usage().Delegated`,
 which Studio now shows beside the parent session's own.
 
+
+## Amendment 2026-10-31 — Recover after a kill: the subtree of a child it settles, and a delegating call nothing parked
+
+The torture tier's kill loop (SIGKILL at random points of a parked
+delegation chain on jsonl and sqlite, then a new process's `Recover`)
+found two crash images §G did not cover. Both are fixed in `Recover`;
+neither changes a model-visible text (§I).
+
+**A child Recover settles ends its own delegations first (F1).** A
+kill while a middle child L1 was mid-run — its sync grandchild L2
+parked and mirrored into L1, L1's own park not yet written — left L1
+with no turn entry. `Recover` settled the top's receipt `failed`
+("no turn was recorded"), as §G says, and stopped there: L1's receipt
+for L2 stayed `running`/`parked` for good, and L2's request was
+offered nowhere (the top denied L1's mirrors with the settlement).
+§F already says what a child that is itself a parent does when it
+ends: it ends its sync delegations first. `Recover` now does the same
+from the files, depth first, for every child it settles as over
+(failed, done, capped, canceled): a parked sync grandchild is canceled
+at its boundary — its pending calls denied in its own session
+(`CancelDelegated`, the reason `Cancel` gives) after its own subtree
+is ended — and settles `canceled` in the child's ledger, its requests
+there denied (`DenyMirrored`); a grandchild whose run is over settles
+from its own file, its subtree ended first; a gone one settles
+`failed`. Nothing is resolved: the child's delegating calls were never
+parked and the child does not run again. A parked **async** grandchild
+is left parked (D4), for a `Recover` of the child. A delegation is
+read as sync when a mirror in the child names it under a Wrapper, or,
+unmirrored, when the child holds no result for its delegating call (an
+async delegation's result is its receipt line). The child is reopened
+under its registered or wrap-named agent to record this; without one
+`Recover` reports `ErrNoAgent` and leaves the child's receipt
+unsettled, so a later `Recover` ends the subtree before settling it.
+The cascade is itself crash-safe: a child is descended into while it
+holds an unsettled receipt *or* a mirrored request no decision answers,
+and a settled receipt's requests still offered there are denied — a
+kill between a grandchild's settlement and that denial is finished by
+the next `Recover`. "`Recover` of the top session does not descend
+into a settled child" (§F) still holds: it descends only into the
+child it is settling.
+
+**A parked child whose delegating turn never landed resumes as a
+delegation by no call (F2).** A kill after the parent's step had
+mirrored the child's park (and written its tool message) but before
+its turn entry left the delegating call with no park record. The
+session's rule (ADR 0021, `danglingCallsLocked`) is that such a call
+is not an approval boundary: nothing parked it, no decision addresses
+it, the next run's input repair answers it. `Recover` nevertheless
+reattached the child *under* that call, so its resume waited for a
+park of the call that could never come (§E's `awaitWrapper`): the
+child's request was offered and decided, the approved call never ran,
+and `Close` waited out its 30 s bound on the resolution. Two options
+were weighed: make a call named by a mirror's Wrapper part of the
+parent's boundary again (so the parent resumes with the child's
+answer), or settle the child loudly. The first contradicts the
+session's rule — the step that delegated was cut off, its sibling
+calls (a gated call that never wrote its request) are repaired, not
+parked, and a boundary rebuilt around one call of an unrecorded step
+would be resumed by a run with no occurrence to name — and the second
+throws away a child that is parked in its own right, with requests a
+person can decide. The rule taken is §J's for a delegating call a
+branch abandoned: **the call is no longer there to resolve, and the
+child's answer stays on its receipt.** When the parent holds no turn
+entry after the receipt's acceptance (the delegating run — one runner
+per session — never ended) `Recover` reattaches the child with no
+wrapper: its requests stay offered on the parent, a decision resumes
+it, the approved call runs, and its answer settles the receipt
+(`done` with its text, `Delegated` billed); no resolution is attempted
+and `Close` does not wait. The parent's model reads the delegating
+call as interrupted (input repair) on its next run, as for any call a
+crash cut off; an application that wants the child's answer reads the
+receipt. A delegation whose turn did land is unchanged: parked under
+the call (the turn listed it pending) or, if the turn ended without
+it, resumed with its answer on the receipt as before.
+
+Tests: `TestRecoverEndsAFailedChildsSubtree`,
+`TestRecoverOrphanedDelegatingCallResumesTheChild` (crash images cut
+from a parked chain's jsonl files, as the kill loop leaves them).

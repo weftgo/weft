@@ -6,6 +6,13 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Fixed
+
+- thread/pool (F1, found by the weft-arena torture tier's kill loop): `Recover` settling a child as over (failed with "no turn was recorded", or finished) now ends that child's own unsettled delegations first, depth first, as `Cancel` and `Close` do — a parked sync grandchild is canceled at its boundary (its pending calls denied in its session) and settles `canceled` in the child's ledger, its requests there denied; a grandchild whose run is over settles from its file. Before, a kill while a middle child was mid-run left its delegation `running`/`parked` for good and the grandchild's approval offered nowhere. A parked async grandchild is left parked (D4); a child whose subtree cannot be reopened (no agent) stays unsettled and is reported with `ErrNoAgent`; a kill inside the cascade (between a grandchild's settlement and the denial of its requests) is finished by the next `Recover`. ADR 0022 amendment 2026-10-31.
+- thread/pool (F2, same): a parked child whose parent's delegating turn never wrote its turn entry (the kill landed between the mirror and the park record) is reattached by `Recover` as a delegation by no call: its request stays offered, a decision resumes it, the approved call runs and its answer settles the receipt. Before, it was reattached under the call, which nothing had parked or ever would: the decision was recorded but the child never resumed, and `Close` stalled for its 30 s bound. The parent's delegating call is answered as interrupted by its next run's input repair, as any call a crash cut off; the child's answer is on the receipt (ADR 0022 §J's rule for an abandoned delegating call).
+
 ## 0.20.2 — 2026-10-27
 
 ### Fixed
